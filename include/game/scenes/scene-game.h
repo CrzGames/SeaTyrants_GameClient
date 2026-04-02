@@ -32,6 +32,7 @@ private:
     RC2D_Image causticTexture;               /**< Caustic texture (bound as additional t2/s2 sampler binding). */
     RC2D_Image foamStreaksTexture;           /**< Foam streak texture (bound as additional t3/s3 sampler binding). */
     RC2D_Image macroWaterTexture;            /**< Macro anti-tiling texture (bound as additional t4/s4 sampler binding). */
+    RC2D_Image depthWaterTexture;            /**< Bathymetry depth texture (bound as additional t5/s5 sampler binding). */
     RC2D_GPUShader* oceanFragmentShader;     /**< Loaded fragment shader. */
     SDL_GPURenderState* oceanRenderState;    /**< Custom GPU render state for ocean pass. */
     SDL_GPUSampler* oceanRepeatSampler;      /**< Repeat sampler used by caustic texture binding. */

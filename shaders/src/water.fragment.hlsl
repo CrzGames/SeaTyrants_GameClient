@@ -20,8 +20,10 @@ Texture2D    u_texture2 : register(t2, space2); // tile-caustic
 SamplerState s2         : register(s2, space2);
 Texture2D    u_texture3 : register(t3, space2); // tile-foam-streaks (alpha)
 SamplerState s3         : register(s3, space2);
-Texture2D    u_texture4 : register(t4, space2); // water-macro
+Texture2D    u_texture4 : register(t4, space2); // water-macro (alpha can hold fallback packed depth)
 SamplerState s4         : register(s4, space2);
+Texture2D    u_texture5 : register(t5, space2); // tile-water-depth (grayscale depth map)
+SamplerState s5         : register(s5, space2);
 
 struct PSInput
 {
@@ -95,6 +97,7 @@ PSOutput main(PSInput input)
     float tileDetail  = tileBase * 1.78;
     float tileCaustic = tileBase * 2.85;
     float tileFoam    = tileBase * 2.70;
+    float tileDepth   = tileBase * 0.66;
     float macroTile   = 0.23;
 
     // Irregular motion field.
@@ -109,7 +112,7 @@ PSOutput main(PSInput input)
     float2 warpHi = float2(w3 - w4, w1 + w2) * (1.60 * ampUv);
     // Filtering tuned to reduce temporal shimmer while keeping visible animation.
     float2 pxBase = invRes * 0.40;
-    float2 pxDetail = invRes * 0.95;
+    float2 pxDetail = invRes * 1.10;
     float2 pxCaustic = invRes * 0.55;
 
     // Macro-based random UV warp (breaks visible tiling lock).
@@ -141,12 +144,12 @@ PSOutput main(PSInput input)
     float2 dUvB = frac(rotate2((uvFlow - warpHi * 1.05) * (tileDetail * 1.37) + float2(0.043 * t, -0.036 * t), -0.95));
     float3 detA = sample4rgb(u_texture1, s1, dUvA, pxDetail * 0.95);
     float3 detB = sample4rgb(u_texture1, s1, dUvB, pxDetail * 1.05);
-    float3 detailTex = lerp(detA, detB, 0.52);
+    float3 detailTex = lerp(detA, detB, 0.50);
     // Compress bright micro-speckles in detail map.
     float detailL = lum(detailTex);
     detailTex *= lerp(1.0, 0.82, saturate((detailL - 0.60) * 2.2));
 
-    float3 waterTex = lerp(baseTex, detailTex, 0.20);
+    float3 waterTex = lerp(baseTex, detailTex, 0.14);
     float waterL = lum(waterTex);
 
     // Macro shade layer.
@@ -165,6 +168,17 @@ PSOutput main(PSInput input)
                                sample4rgb(u_texture4, s4, gUvB, pxBase * 3.2), 0.45));
     float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 6.8 + t * 0.42 + gustNoise * 4.2);
     float gust = smoothstep(0.58, 0.90, gustBands) * (0.35 + 0.65 * gustNoise);
+
+    // Dedicated bathymetry map: dark=shallow, bright=deep.
+    float2 zUvA = frac(rotate2(uvFlow * tileDepth + float2( 0.010 * t, -0.007 * t),  0.18));
+    float2 zUvB = frac(rotate2(uvFlow * (tileDepth * 1.31) + float2(-0.008 * t, 0.009 * t), -0.63));
+    float depthA = sample4gray(u_texture5, s5, zUvA, pxBase * 3.2);
+    float depthB = sample4gray(u_texture5, s5, zUvB, pxBase * 3.8);
+    float depthMap = smoothstep(0.06, 0.96, saturate(depthA * 0.58 + depthB * 0.42));
+    float depthDeep = smoothstep(0.16, 0.92, depthMap);
+    float depthShallow = 1.0 - depthDeep;
+    float shelfBand = smoothstep(0.18, 0.55, depthShallow) * (1.0 - smoothstep(0.58, 0.92, depthShallow));
+    float depthEdge = saturate(length(float2(ddx(depthMap), ddy(depthMap))) * 8.0);
 
     // Caustic layers:
     // add local advection + breathing scale so motion feels less "flat translation".
@@ -195,9 +209,10 @@ PSOutput main(PSInput input)
     float causticSoft = smoothstep(0.45 - causticAA, 0.72 + causticAA, causticRaw);
     float causticLines = smoothstep(0.62 - causticAA, 0.86 + causticAA, causticRaw);
     float causticSpark = smoothstep(0.95 - causticAA, 0.995, cC);
-    float caustic = (causticSoft * 0.30 + causticLines * 0.70 + causticSpark * 0.05) * (0.22 + 0.68 * foamIntensity);
+    float caustic = (causticSoft * 0.42 + causticLines * 0.58 + causticSpark * 0.04) * (0.22 + 0.68 * foamIntensity);
     caustic *= (0.90 + 0.25 * gust);
     caustic *= (0.92 + 0.20 * chop);
+    caustic *= lerp(0.96, 1.18, depthShallow);
 
     // Foam streaks from alpha channel.
     float2 fUvA = frac(rotate2((uvFlow - warp * 0.55) * tileFoam + float2( 0.056 * t, -0.047 * t),  0.27));
@@ -206,7 +221,7 @@ PSOutput main(PSInput input)
     float fB = sample4alpha(u_texture3, s3, fUvB, pxDetail * 1.2);
     float foamRaw = fA * 0.76 + fB * 0.56;
     float foamStreaks = smoothstep(0.60, 0.93, foamRaw);
-    foamStreaks *= (0.08 + 0.35 * causticLines);
+    foamStreaks *= (0.08 + 0.22 * causticLines);
     foamStreaks *= (0.12 + 0.62 * foamIntensity);
     foamStreaks *= (0.92 + 0.22 * gust);
 
@@ -256,12 +271,16 @@ PSOutput main(PSInput input)
         0.18 +
         waterL * 0.52 +
         (waveMix * 0.5 + 0.5) * 0.12 +
-        (macroL - 0.5) * 0.18
+        (macroL - 0.5) * 0.18 +
+        depthDeep * 0.20 -
+        depthShallow * 0.16
     );
 
     float3 oceanBlue = lerp(deepColorBlue, midColorBlue, depthMask);
     oceanBlue = lerp(oceanBlue, lightColorBlue, saturate((waterL - 0.42) * 0.55 + caustic * 0.32));
     oceanBlue = lerp(oceanBlue, lightColorBlue, gust * 0.06);
+    float3 shallowColorBlue = float3(0.110, 0.435, 0.640);
+    oceanBlue = lerp(oceanBlue, shallowColorBlue, saturate(depthShallow * (0.22 + 0.54 * causticSoft)));
     oceanBlue *= macroShade;
 
     float3 skyColor = lerp(float3(0.18, 0.34, 0.55), float3(0.52, 0.72, 0.90), saturate(normalWS.y * 0.5 + 0.5));
@@ -281,8 +300,9 @@ PSOutput main(PSInput input)
 
     // Neutral shading path for non-blue water variants (green/brown/red/amber).
     // This avoids multiplying by a blue tint, which can make warm palettes too dark.
-    float neutralDepthMask = saturate(0.30 + waterL * 0.56 + (macroL - 0.5) * 0.12);
+    float neutralDepthMask = saturate(0.30 + waterL * 0.56 + (macroL - 0.5) * 0.12 + depthDeep * 0.12 - depthShallow * 0.10);
     float neutralGain = lerp(0.90, 1.18, neutralDepthMask) * macroShade;
+    neutralGain *= lerp(1.00, 1.10, depthShallow);
     float3 rgbNeutral = waterTex * neutralGain;
     float3 causticColorNeutral = float3(0.92, 0.96, 1.00);
     rgbNeutral = lerp(rgbNeutral, causticColorNeutral, saturate(caustic * 0.26));
@@ -297,10 +317,15 @@ PSOutput main(PSInput input)
     float crest = smoothstep(0.70, 0.95, (waveMix * 0.5 + 0.5) + (waterL - 0.5) * 0.20);
     float whitecaps = smoothstep(0.36, 0.92, slopeEnergy * (1.05 + 0.55 * waveStrength) + causticLines * 0.18);
     whitecaps *= (0.10 + 0.52 * gust) * (0.40 + 0.60 * foamIntensity) * whitecapBoost;
+    float coastalFoam = shelfBand * (0.45 + 0.55 * depthEdge);
+    coastalFoam *= (0.22 + 0.78 * foamIntensity);
+    coastalFoam *= (0.64 + 0.36 * chop) * (0.65 + 0.35 * causticLines);
+    coastalFoam *= (0.82 + 0.18 * whitecapBoost);
 
     float foam = crest * (0.02 + 0.06 * foamIntensity) + foamStreaks * 0.15;
     foam += chop * 0.035 * foamIntensity;
     foam += whitecaps * 0.20;
+    foam += coastalFoam * 0.16;
     rgb = lerp(rgb, foamColor, saturate(foam));
 
     // Slow broad swell modulation for visible movement without pixel sparkle.

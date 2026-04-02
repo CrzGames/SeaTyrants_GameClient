@@ -77,6 +77,19 @@ def smoothstep(edge0: float, edge1: float, x: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
+def periodic_blur_cross(x: np.ndarray, iterations: int = 1) -> np.ndarray:
+    out = x.astype(np.float32)
+    for _ in range(max(iterations, 0)):
+        out = (
+            out
+            + np.roll(out, 1, axis=0)
+            + np.roll(out, -1, axis=0)
+            + np.roll(out, 1, axis=1)
+            + np.roll(out, -1, axis=1)
+        ) * 0.2
+    return out.astype(np.float32)
+
+
 def remap_rgb_to_palette(
     rgb: np.ndarray,
     deep: np.ndarray,
@@ -330,32 +343,31 @@ def build_water_depth_field(h: int, w: int, rng: np.random.Generator) -> np.ndar
     """
     x, y = make_uv(h, w)
 
-    n_continent = spectral_noise_periodic(h, w, beta=3.0, rng=rng)
-    n_shelf = spectral_noise_periodic(h, w, beta=2.3, rng=rng)
-    n_channel = spectral_noise_periodic(h, w, beta=1.7, rng=rng)
+    n_continent = spectral_noise_periodic(h, w, beta=3.35, rng=rng)
+    n_mid = spectral_noise_periodic(h, w, beta=2.55, rng=rng)
+    n_fine = spectral_noise_periodic(h, w, beta=1.90, rng=rng)
+    warp_u = spectral_noise_periodic(h, w, beta=2.30, rng=rng)
+    warp_v = spectral_noise_periodic(h, w, beta=2.20, rng=rng)
 
-    points = rng.random((42, 2), dtype=np.float32)
-    edge = worley_edge_field(h, w, points)
-    edge = normalize01(edge)
+    u = np.mod(x + (warp_u - 0.5) * 0.075, 1.0).astype(np.float32)
+    v = np.mod(y + (warp_v - 0.5) * 0.075, 1.0).astype(np.float32)
+    ridges = 0.5 + 0.5 * np.sin(2.0 * math.pi * (u * 1.35 + v * 1.12 + (n_fine - 0.5) * 0.22))
 
-    # Near Worley borders = coastal shelves / sand bars.
-    shelf_mask = np.exp(-np.square(edge * 7.8), dtype=np.float32)
-
-    # Long directional channels to avoid isotropic blobs.
-    ridge_a = 0.5 + 0.5 * np.sin(2.0 * math.pi * (x * 2.15 + y * 1.41 + (n_channel - 0.5) * 0.30))
-    ridge_b = 0.5 + 0.5 * np.sin(2.0 * math.pi * (x * -1.87 + y * 2.44 + (n_shelf - 0.5) * 0.24))
-    channels = ridge_a * 0.55 + ridge_b * 0.45
+    basin = smoothstep(0.36, 0.80, n_continent)
+    shelf = smoothstep(0.28, 0.56, n_mid) * (1.0 - smoothstep(0.56, 0.86, n_mid))
 
     depth = (
-        0.18
-        + n_continent * 0.62
-        + n_shelf * 0.26
-        + channels * 0.10
-        - shelf_mask * 0.42
+        0.14
+        + basin * 0.60
+        + n_mid * 0.23
+        + ridges * 0.09
+        - shelf * 0.17
     )
     depth = normalize01(depth)
-    depth = np.power(depth, 1.16)
-    depth = saturate(depth * 0.96 + 0.02)
+    depth = np.power(depth, 1.26)
+    depth = periodic_blur_cross(depth, iterations=5)
+    depth = normalize01(depth)
+    depth = saturate(depth * 0.94 + 0.03)
 
     return depth
 

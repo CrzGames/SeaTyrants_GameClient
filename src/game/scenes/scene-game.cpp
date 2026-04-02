@@ -10,6 +10,7 @@ GameScene::GameScene(void)
       causticTexture{},
       foamStreaksTexture{},
       macroWaterTexture{},
+      depthWaterTexture{},
       oceanFragmentShader(nullptr),
       oceanRenderState(nullptr),
       oceanRepeatSampler(nullptr),
@@ -29,7 +30,7 @@ void GameScene::load(void)
     releaseOceanResources();
     resetOceanUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-brown.png", RC2D_STORAGE_TITLE);
+    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-red.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-red.png");
@@ -40,7 +41,7 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-brown.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-red.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-red.png");
@@ -82,6 +83,17 @@ void GameScene::load(void)
     if (!SDL_SetTextureScaleMode(macroWaterTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for water-macro: %s", SDL_GetError());
+    }
+
+    depthWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-depth.png", RC2D_STORAGE_TITLE);
+    if (depthWaterTexture.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_WARN,
+                 "GameScene: water depth texture missing (assets/images/tile-water-depth.png), using water-macro fallback");
+    }
+    else if (!SDL_SetTextureScaleMode(depthWaterTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-depth: %s", SDL_GetError());
     }
 
     oceanFragmentShader = rc2d_gpu_loadGraphicsShaderFromStorage("water.fragment", RC2D_STORAGE_TITLE);
@@ -166,7 +178,33 @@ void GameScene::load(void)
         return;
     }
 
-    SDL_GPUTextureSamplerBinding samplerBindings[4] = {};
+    SDL_GPUTexture* depthGpuTexture = nullptr;
+    if (depthWaterTexture.sdl_texture != nullptr)
+    {
+        SDL_PropertiesID depthTextureProperties = SDL_GetTextureProperties(depthWaterTexture.sdl_texture);
+        if (!depthTextureProperties)
+        {
+            RC2D_log(RC2D_LOG_WARN,
+                     "GameScene: SDL_GetTextureProperties failed for water depth texture: %s (fallback to water-macro)",
+                     SDL_GetError());
+        }
+        else
+        {
+            depthGpuTexture = static_cast<SDL_GPUTexture*>(
+                SDL_GetPointerProperty(depthTextureProperties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+            if (depthGpuTexture == nullptr)
+            {
+                RC2D_log(RC2D_LOG_WARN, "GameScene: missing GPU texture pointer for water depth texture (fallback to water-macro)");
+            }
+        }
+    }
+
+    if (depthGpuTexture == nullptr)
+    {
+        depthGpuTexture = macroGpuTexture;
+    }
+
+    SDL_GPUTextureSamplerBinding samplerBindings[5] = {};
     samplerBindings[0].texture = detailGpuTexture;
     samplerBindings[0].sampler = oceanRepeatSampler;
     samplerBindings[1].texture = causticGpuTexture;
@@ -175,10 +213,12 @@ void GameScene::load(void)
     samplerBindings[2].sampler = oceanRepeatSampler;
     samplerBindings[3].texture = macroGpuTexture;
     samplerBindings[3].sampler = oceanRepeatSampler;
+    samplerBindings[4].texture = depthGpuTexture;
+    samplerBindings[4].sampler = oceanRepeatSampler;
 
     SDL_GPURenderStateCreateInfo createInfo = {};
     createInfo.fragment_shader = oceanFragmentShader;
-    createInfo.num_sampler_bindings = 4;
+    createInfo.num_sampler_bindings = 5;
     createInfo.sampler_bindings = samplerBindings;
 
     oceanRenderState = SDL_CreateGPURenderState(rc2d_engine_state.renderer, &createInfo);
@@ -188,7 +228,7 @@ void GameScene::load(void)
         return;
     }
 
-    if (!rc2d_gpu_trackGraphicsRenderState("water.fragment", &oceanRenderState, 4, samplerBindings))
+    if (!rc2d_gpu_trackGraphicsRenderState("water.fragment", &oceanRenderState, 5, samplerBindings))
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to track ocean GPURenderState for shader hot-reload");
     }
@@ -320,6 +360,7 @@ void GameScene::releaseOceanResources(void)
     rc2d_graphics_freeImage(&causticTexture);
     rc2d_graphics_freeImage(&foamStreaksTexture);
     rc2d_graphics_freeImage(&macroWaterTexture);
+    rc2d_graphics_freeImage(&depthWaterTexture);
 }
 
 void GameScene::resetOceanUniforms(void)
