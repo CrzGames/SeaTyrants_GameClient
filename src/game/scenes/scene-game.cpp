@@ -239,14 +239,14 @@ void GameScene::resetOceanUniforms(void)
     oceanTimeSeconds = 0.0;
 
     oceanUniforms.params0[0] = 0.0f;   // time
-    oceanUniforms.params0[1] = 0.82f;  // waveStrength
-    oceanUniforms.params0[2] = 14.0f;  // pixelAmplitude
-    oceanUniforms.params0[3] = 2.60f;  // tiling
+    oceanUniforms.params0[1] = 1.00f;  // waveStrength
+    oceanUniforms.params0[2] = 20.0f;  // pixelAmplitude
+    oceanUniforms.params0[3] = 11.0f;  // tiling
 
     oceanUniforms.params1[0] = 1920.0f; // width
     oceanUniforms.params1[1] = 1080.0f; // height
-    oceanUniforms.params1[2] = 0.72f;   // speed
-    oceanUniforms.params1[3] = 0.52f;   // foamIntensity
+    oceanUniforms.params1[2] = 0.60f;   // speed
+    oceanUniforms.params1[3] = 0.82f;   // foamIntensity
 }
 
 bool GameScene::uploadOceanUniforms(void)

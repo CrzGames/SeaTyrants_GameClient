@@ -76,8 +76,8 @@ PSOutput main(PSInput input)
     float2 invRes = 1.0 / resolution;
     float  t = time * max(speed, 0.15);
 
-    // Compress tiling response so large values do not instantly reveal repetition.
-    float tileBase = 0.80 + 0.36 * sqrt(tiling);
+    // Keep true tiling density so 128x128 textures still produce enough detail on fullscreen maps.
+    float tileBase = max(tiling, 0.5);
 
     // Broad wave movement used for UV warping.
     float wf1 = sin((uv.x * 11.0 + uv.y * 4.0) + t * 0.78);
@@ -88,8 +88,8 @@ PSOutput main(PSInput input)
     float ampUv = (pixelAmp / max(resolution.x, resolution.y)) * (0.35 + 0.85 * waveStrength);
     float2 warp = float2(wf1 - wf2, wf3 + wf2) * (0.95 * ampUv);
 
-    // Smaller softening kernel, enough to avoid harsh pixel feel.
-    float2 px = invRes * 0.95;
+    // Light softening only (too much blur makes ocean look flat).
+    float2 px = invRes * 0.35;
 
     // Water texture #1 (tile-water1) layered in two rotated flows.
     float2 w1uvA = frac(rotate2((uv + warp) * tileBase + float2( 0.026 * t,  0.016 * t),  0.22));
@@ -113,39 +113,47 @@ PSOutput main(PSInput input)
     float2 cuvA = frac((uv + warp * 1.9) * (tileBase * 2.10) + float2( 0.103 * t, -0.081 * t));
     float2 cuvB = frac(rotate2((uv - warp * 1.4) * (tileBase * 1.62) + float2(-0.079 * t, 0.098 * t), 0.41));
 
+    float2 cuvC = frac((uv + warp * 2.7) * (tileBase * 3.05) + float2(0.147 * t, -0.133 * t));
+
     float ca = sample4mono(u_texture2, s2, cuvA, px * 1.45);
     float cb = sample4mono(u_texture2, s2, cuvB, px * 1.80);
+    float cc = sample4mono(u_texture2, s2, cuvC, px * 1.10);
 
-    float causticRaw = saturate01(ca * 0.62 + cb * 0.38);
-    float caustic = smoothstep(0.66, 0.92, causticRaw);
-    caustic *= (0.30 + 0.70 * foamIntensity);
+    float causticRaw = saturate01(ca * 0.70 + cb * 0.50);
+    float causticMain = smoothstep(0.60, 0.90, causticRaw);
+    float causticSparkle = smoothstep(0.78, 0.985, cc);
+    float caustic = saturate01(causticMain + causticSparkle * 0.48);
+    caustic *= (0.55 + 0.95 * foamIntensity);
 
     // Seafight-like palette.
     float3 deepColor   = float3(0.020, 0.170, 0.360);
     float3 midColor    = float3(0.070, 0.330, 0.560);
     float3 lightColor  = float3(0.140, 0.490, 0.700);
-    float3 foamColor   = float3(0.820, 0.920, 0.990);
-    float3 glintColor  = float3(0.620, 0.840, 0.980);
+    float3 foamColor   = float3(0.900, 0.965, 1.000);
+    float3 glintColor  = float3(0.840, 0.940, 1.000);
 
-    float depthMask = saturate01(0.27 + waterLuma * 0.50 + (waveMix * 0.5 + 0.5) * 0.23);
+    float waterDetail = saturate01((waterLuma - 0.42) * 1.65 + 0.50);
+    float depthMask = saturate01(0.22 + waterDetail * 0.58 + (waveMix * 0.5 + 0.5) * 0.20);
 
     float3 ocean = lerp(deepColor, midColor, depthMask);
-    ocean = lerp(ocean, lightColor, saturate01((waterLuma - 0.42) * 0.60 + caustic * 0.26));
+    ocean = lerp(ocean, lightColor, saturate01((waterDetail - 0.45) * 0.95 + caustic * 0.40));
 
     // Drive brightness mostly from the texture content to keep organic look.
-    float detailFactor = 0.80 + 0.42 * waterLuma;
+    float detailFactor = 0.74 + 0.62 * waterDetail;
     float3 rgb = ocean * detailFactor;
 
     // Controlled reflective glints.
-    rgb = lerp(rgb, glintColor, caustic * 0.28);
+    rgb = lerp(rgb, glintColor, caustic * 0.48);
 
-    float crest = smoothstep(0.74, 0.96, waveMix * 0.5 + 0.5 + (waterLuma - 0.5) * 0.16);
-    float foam = crest * (0.06 + 0.17 * foamIntensity);
+    float crest = smoothstep(0.72, 0.95, waveMix * 0.5 + 0.5 + (waterDetail - 0.5) * 0.22);
+    float foam = crest * (0.12 + 0.26 * foamIntensity);
     rgb = lerp(rgb, foamColor, foam);
 
-    // Very subtle haze variation (no big cloudy blobs).
-    float haze = 0.5 + 0.5 * sin((uv.x * 2.8 + uv.y * 1.7) + t * 0.08);
-    rgb *= (0.94 + 0.06 * haze);
+    // Extra white streaks to get the classic sea-sparkle feel.
+    float streakField = abs(sin((uv.x * 120.0 + uv.y * 34.0) + t * 1.1));
+    float streakMask = smoothstep(0.955, 0.997, streakField) * causticMain;
+    float whiteSheen = caustic * (0.12 + 0.16 * (waveMix * 0.5 + 0.5)) + streakMask * 0.35;
+    rgb += whiteSheen * float3(0.18, 0.20, 0.22);
 
     rgb = saturate(rgb);
     rgb *= input.v_color.rgb;
