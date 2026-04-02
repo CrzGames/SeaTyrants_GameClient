@@ -30,7 +30,7 @@ void GameScene::load(void)
     releaseOceanResources();
     resetOceanUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-yellow.png", RC2D_STORAGE_TITLE);
+    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-mint.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-red.png");
@@ -41,7 +41,7 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-yellow.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-mint.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-red.png");
