@@ -179,6 +179,9 @@ void MenuScene::unload(void)
  */
 void MenuScene::load(void)
 {
+    // Show mouse cursor for menu interaction.
+    rc2d_mouse_setVisible(true);
+
     // Reset video struct to clean state.
     loginBackgroundVideo = {};
 
