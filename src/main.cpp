@@ -67,11 +67,11 @@ const RC2D_EngineConfig* rc2d_engine_setup(int argc, char* argv[])
     config->callbacks->rc2d_wake_blocking_threads = rc2d_wake_blocking_threads;
     config->networkClientConfig->channelCount = static_cast<uint32_t>(NetworkChannel::COUNT);
     config->logicalPresentationMode = RC2D_LOGICAL_PRESENTATION_OVERSCAN;
-    config->pixelartMode = true;
-    config->appInfo->name = "Aether Royale";
+    config->pixelartMode = false;
+    config->appInfo->name = "SeaTyrants";
     config->appInfo->organization = "Crzgames";
     config->appInfo->version = "1.0.0";
-    config->appInfo->identifier = "com.crzgames.aetherryale";
+    config->appInfo->identifier = "com.crzgames.seatyrants";
 
     RC2D_assert_release(config != NULL, RC2D_LOG_CRITICAL, "RC2D_EngineConfig config is NULL. Cannot setup the engine.");
 

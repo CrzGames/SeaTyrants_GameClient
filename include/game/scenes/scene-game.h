@@ -11,6 +11,43 @@
  * used as a gameplay visual placeholder.
  */
 class GameScene : public Scene {
+private:
+    /**
+     * @brief Uniform block sent to the ocean fragment shader.
+     *
+     * params0 = {time, waveStrength, pixelAmplitude, tiling}
+     * params1 = {width, height, speed, foamIntensity}
+     */
+    struct OceanUniforms {
+        float params0[4];
+        float params1[4];
+    };
+
+    RC2D_Image oceanTexture;                 /**< Base water texture #1 (bound as t0/s0 by SDL_RenderTexture). */
+    RC2D_Image oceanTextureDetail;           /**< Water texture #2 (bound as additional t1/s1 sampler binding). */
+    RC2D_Image causticTexture;               /**< Caustic texture (bound as additional t2/s2 sampler binding). */
+    RC2D_GPUShader* oceanFragmentShader;     /**< Loaded fragment shader. */
+    SDL_GPURenderState* oceanRenderState;    /**< Custom GPU render state for ocean pass. */
+    SDL_GPUSampler* oceanRepeatSampler;      /**< Repeat sampler used by caustic texture binding. */
+    OceanUniforms oceanUniforms;             /**< Runtime uniforms for shader animation. */
+    double oceanTimeSeconds;                 /**< Accumulated ocean time. */
+
+    /**
+     * @brief Release all runtime GPU/texture resources owned by the scene.
+     */
+    void releaseOceanResources(void);
+
+    /**
+     * @brief Reset uniform values to a sane default preset.
+     */
+    void resetOceanUniforms(void);
+
+    /**
+     * @brief Push current uniforms to GPU fragment slot 0.
+     * @return True when upload succeeded.
+     */
+    bool uploadOceanUniforms(void);
+
 public:
     /**
      * @brief Build gameplay scene instance.
