@@ -119,6 +119,13 @@ PSOutput main(PSInput input)
     float2 drift = float2(0.022 * sin(t * 0.37), 0.019 * cos(t * 0.31));
     float2 uvFlow = uv + randomWarp + warp + drift;
 
+    // Add local "chop" so the water does not look laminar/flat when observed up close.
+    float chop1 = abs(sin((uv.x * 21.0 - uv.y * 15.0) + t * 1.85));
+    float chop2 = abs(sin((uv.x * 18.0 + uv.y * 12.0) - t * 1.45));
+    float chop = pow(saturate(chop1 * 0.55 + chop2 * 0.45), 2.0);
+    float2 chopDir = normalize(float2(w1 - w3, w2 + w4) + 1e-5);
+    uvFlow += chopDir * (ampUv * 0.85) * (chop - 0.35);
+
     // Base water layer.
     float2 bUvA = frac(rotate2((uvFlow + warp * 0.55) * tileBase + float2( 0.030 * t,  0.022 * t),  0.22));
     float2 bUvB = frac(rotate2((uvFlow - warp * 0.35) * (tileBase * 1.31) + float2(-0.021 * t, 0.026 * t), -0.71));
@@ -147,6 +154,15 @@ PSOutput main(PSInput input)
     float macroL = lum(lerp(macroA, macroB, 0.5));
     float macroShade = lerp(0.985, 1.015, macroL);
 
+    // Large-scale wind gust field (very subtle), used to break monotony.
+    float2 windDir = normalize(float2(0.86, -0.51));
+    float2 gUvA = frac(uvFlow * 0.085 + windDir * (0.028 * t));
+    float2 gUvB = frac(rotate2(uvFlow * 0.061 + windDir * (-0.019 * t), 0.90));
+    float gustNoise = lum(lerp(sample4rgb(u_texture4, s4, gUvA, pxBase * 2.8),
+                               sample4rgb(u_texture4, s4, gUvB, pxBase * 3.2), 0.45));
+    float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 6.8 + t * 0.42 + gustNoise * 4.2);
+    float gust = smoothstep(0.58, 0.90, gustBands) * (0.35 + 0.65 * gustNoise);
+
     // Caustic layers.
     float2 cUvA = frac((uvFlow + warpHi * 1.2) * tileCaustic + float2( 0.052 * t, -0.039 * t));
     float2 cUvB = frac(rotate2((uvFlow - warpHi * 0.9) * (tileCaustic * 1.23) + float2(-0.043 * t, 0.045 * t), 0.39));
@@ -162,6 +178,8 @@ PSOutput main(PSInput input)
     float causticLines = smoothstep(0.62 - causticAA, 0.86 + causticAA, causticRaw);
     float causticSpark = smoothstep(0.95 - causticAA, 0.995, cC);
     float caustic = (causticSoft * 0.30 + causticLines * 0.70 + causticSpark * 0.05) * (0.22 + 0.68 * foamIntensity);
+    caustic *= (0.90 + 0.25 * gust);
+    caustic *= (0.92 + 0.20 * chop);
 
     // Foam streaks from alpha channel.
     float2 fUvA = frac(rotate2((uvFlow - warp * 0.55) * tileFoam + float2( 0.056 * t, -0.047 * t),  0.27));
@@ -172,6 +190,7 @@ PSOutput main(PSInput input)
     float foamStreaks = smoothstep(0.60, 0.93, foamRaw);
     foamStreaks *= (0.08 + 0.35 * causticLines);
     foamStreaks *= (0.12 + 0.62 * foamIntensity);
+    foamStreaks *= (0.92 + 0.22 * gust);
 
     // Seafight-like palette.
     float3 deepColor  = float3(0.016, 0.125, 0.290);
@@ -189,15 +208,18 @@ PSOutput main(PSInput input)
 
     float3 ocean = lerp(deepColor, midColor, depthMask);
     ocean = lerp(ocean, lightColor, saturate((waterL - 0.42) * 0.55 + caustic * 0.32));
+    ocean = lerp(ocean, lightColor, gust * 0.06);
     ocean *= macroShade;
 
     float3 rgb = waterTex * ocean * (0.86 + 0.32 * waterL);
     float3 causticColor = float3(0.24, 0.64, 0.92);
     rgb = lerp(rgb, causticColor, saturate(caustic * 0.34));
     rgb = lerp(rgb, glintColor, saturate(caustic * 0.10));
+    rgb *= lerp(0.985, 1.025, gust);
 
     float crest = smoothstep(0.70, 0.95, (waveMix * 0.5 + 0.5) + (waterL - 0.5) * 0.20);
     float foam = crest * (0.02 + 0.06 * foamIntensity) + foamStreaks * 0.15;
+    foam += chop * 0.035 * foamIntensity;
     rgb = lerp(rgb, foamColor, saturate(foam));
 
     // Slow broad swell modulation for visible movement without pixel sparkle.
