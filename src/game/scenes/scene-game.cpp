@@ -11,13 +11,20 @@ GameScene::GameScene(void)
       foamStreaksTexture{},
       macroWaterTexture{},
       depthWaterTexture{},
+      fogMaskTexture{},
+      fogNoiseTexture{},
       oceanFragmentShader(nullptr),
+      fogFragmentShader(nullptr),
       oceanRenderState(nullptr),
+      fogRenderState(nullptr),
       oceanRepeatSampler(nullptr),
       oceanUniforms{},
-      oceanTimeSeconds(0.0)
+      fogUniforms{},
+      oceanTimeSeconds(0.0),
+      fogTimeSeconds(0.0)
 {
     resetOceanUniforms();
+    resetFogUniforms();
 }
 
 void GameScene::unload(void)
@@ -29,8 +36,9 @@ void GameScene::load(void)
 {
     releaseOceanResources();
     resetOceanUniforms();
+    resetFogUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-mint.png", RC2D_STORAGE_TITLE);
+    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-sunset.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-red.png");
@@ -41,7 +49,7 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-mint.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-sunset.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-red.png");
@@ -234,15 +242,121 @@ void GameScene::load(void)
     }
 
     uploadOceanUniforms();
+
+    // Fog-of-war overlay setup (optional):
+    // when unavailable, gameplay keeps running with ocean only.
+    bool fogReady = true;
+
+    fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/CloudNoise.png", RC2D_STORAGE_TITLE);
+    if (fogMaskTexture.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: fog mask texture missing (assets/images/CloudNoise.png), fog overlay disabled");
+        fogReady = false;
+    }
+    else
+    {
+        if (!SDL_SetTextureScaleMode(fogMaskTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for fog mask texture: %s", SDL_GetError());
+        }
+        if (!SDL_SetTextureBlendMode(fogMaskTexture.sdl_texture, SDL_BLENDMODE_BLEND))
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set blend mode for fog mask texture: %s", SDL_GetError());
+        }
+    }
+
+    if (fogReady)
+    {
+        fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/CloudNoise.png", RC2D_STORAGE_TITLE);
+        if (fogNoiseTexture.sdl_texture == nullptr)
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: fog noise texture missing (assets/images/CloudNoise.png), fog overlay disabled");
+            fogReady = false;
+        }
+        else if (!SDL_SetTextureScaleMode(fogNoiseTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for fog noise texture: %s", SDL_GetError());
+        }
+    }
+
+    if (fogReady)
+    {
+        fogFragmentShader = rc2d_gpu_loadGraphicsShaderFromStorage("fogofwar.fragment", RC2D_STORAGE_TITLE);
+        if (fogFragmentShader == nullptr)
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: failed to load fogofwar.fragment shader, fog overlay disabled");
+            fogReady = false;
+        }
+    }
+
+    SDL_GPUTexture* fogNoiseGpuTexture = nullptr;
+    if (fogReady)
+    {
+        SDL_PropertiesID fogNoiseTextureProperties = SDL_GetTextureProperties(fogNoiseTexture.sdl_texture);
+        if (!fogNoiseTextureProperties)
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: SDL_GetTextureProperties failed for fog noise texture: %s", SDL_GetError());
+            fogReady = false;
+        }
+        else
+        {
+            fogNoiseGpuTexture = static_cast<SDL_GPUTexture*>(
+                SDL_GetPointerProperty(fogNoiseTextureProperties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+            if (fogNoiseGpuTexture == nullptr)
+            {
+                RC2D_log(RC2D_LOG_WARN, "GameScene: missing GPU texture pointer for fog noise texture");
+                fogReady = false;
+            }
+        }
+    }
+
+    if (fogReady)
+    {
+        SDL_GPUTextureSamplerBinding fogSamplerBindings[1] = {};
+        fogSamplerBindings[0].texture = fogNoiseGpuTexture;
+        fogSamplerBindings[0].sampler = oceanRepeatSampler;
+
+        SDL_GPURenderStateCreateInfo fogCreateInfo = {};
+        fogCreateInfo.fragment_shader = fogFragmentShader;
+        fogCreateInfo.num_sampler_bindings = 1;
+        fogCreateInfo.sampler_bindings = fogSamplerBindings;
+
+        fogRenderState = SDL_CreateGPURenderState(rc2d_engine_state.renderer, &fogCreateInfo);
+        if (fogRenderState == nullptr)
+        {
+            RC2D_log(RC2D_LOG_WARN, "GameScene: SDL_CreateGPURenderState failed for fog overlay: %s", SDL_GetError());
+            fogReady = false;
+        }
+        else
+        {
+            if (!rc2d_gpu_trackGraphicsRenderState("fogofwar.fragment", &fogRenderState, 1, fogSamplerBindings))
+            {
+                RC2D_log(RC2D_LOG_WARN, "GameScene: failed to track fog GPURenderState for shader hot-reload");
+            }
+            uploadFogUniforms();
+        }
+    }
+
+    if (!fogReady)
+    {
+        if (fogRenderState != nullptr)
+        {
+            rc2d_gpu_untrackGraphicsRenderState(&fogRenderState);
+            SDL_DestroyGPURenderState(fogRenderState);
+            fogRenderState = nullptr;
+        }
+        if (fogFragmentShader != nullptr)
+        {
+            SDL_ReleaseGPUShader(rc2d_engine_state.gpu_device, static_cast<SDL_GPUShader*>(fogFragmentShader));
+            fogFragmentShader = nullptr;
+        }
+        rc2d_graphics_freeImage(&fogMaskTexture);
+        rc2d_graphics_freeImage(&fogNoiseTexture);
+    }
 }
 
 void GameScene::update(double dt)
 {
-    if (oceanRenderState == nullptr)
-    {
-        return;
-    }
-
     int outputWidth = 0;
     int outputHeight = 0;
     if (rc2d_engine_state.renderer != nullptr)
@@ -250,12 +364,22 @@ void GameScene::update(double dt)
         SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
     }
 
-    oceanTimeSeconds += dt;
-    oceanUniforms.params0[0] = static_cast<float>(oceanTimeSeconds);
-    oceanUniforms.params1[0] = static_cast<float>(outputWidth);
-    oceanUniforms.params1[1] = static_cast<float>(outputHeight);
+    if (oceanRenderState != nullptr)
+    {
+        oceanTimeSeconds += dt;
+        oceanUniforms.params0[0] = static_cast<float>(oceanTimeSeconds);
+        oceanUniforms.params1[0] = static_cast<float>(outputWidth);
+        oceanUniforms.params1[1] = static_cast<float>(outputHeight);
 
-    uploadOceanUniforms();
+        uploadOceanUniforms();
+    }
+
+    if (fogRenderState != nullptr)
+    {
+        fogTimeSeconds += dt;
+        fogUniforms.params0[0] = static_cast<float>(fogTimeSeconds);
+        uploadFogUniforms();
+    }
 }
 
 void GameScene::draw(void)
@@ -281,6 +405,13 @@ void GameScene::draw(void)
     else
     {
         SDL_RenderTexture(rc2d_engine_state.renderer, oceanTexture.sdl_texture, nullptr, &visibleRect);
+    }
+
+    if (fogRenderState != nullptr && fogMaskTexture.sdl_texture != nullptr)
+    {
+        SDL_SetGPURenderState(rc2d_engine_state.renderer, fogRenderState);
+        SDL_RenderTexture(rc2d_engine_state.renderer, fogMaskTexture.sdl_texture, nullptr, &visibleRect);
+        SDL_SetGPURenderState(rc2d_engine_state.renderer, nullptr);
     }
 
     if (restoreAddressMode)
@@ -336,6 +467,13 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
 
 void GameScene::releaseOceanResources(void)
 {
+    if (fogRenderState != nullptr)
+    {
+        rc2d_gpu_untrackGraphicsRenderState(&fogRenderState);
+        SDL_DestroyGPURenderState(fogRenderState);
+        fogRenderState = nullptr;
+    }
+
     if (oceanRenderState != nullptr)
     {
         rc2d_gpu_untrackGraphicsRenderState(&oceanRenderState);
@@ -355,12 +493,20 @@ void GameScene::releaseOceanResources(void)
         oceanFragmentShader = nullptr;
     }
 
+    if (fogFragmentShader != nullptr)
+    {
+        SDL_ReleaseGPUShader(rc2d_engine_state.gpu_device, static_cast<SDL_GPUShader*>(fogFragmentShader));
+        fogFragmentShader = nullptr;
+    }
+
     rc2d_graphics_freeImage(&oceanTexture);
     rc2d_graphics_freeImage(&oceanTextureDetail);
     rc2d_graphics_freeImage(&causticTexture);
     rc2d_graphics_freeImage(&foamStreaksTexture);
     rc2d_graphics_freeImage(&macroWaterTexture);
     rc2d_graphics_freeImage(&depthWaterTexture);
+    rc2d_graphics_freeImage(&fogMaskTexture);
+    rc2d_graphics_freeImage(&fogNoiseTexture);
 }
 
 void GameScene::resetOceanUniforms(void)
@@ -388,6 +534,27 @@ void GameScene::resetOceanUniforms(void)
     oceanUniforms.params2[3] = 0.68f;
 }
 
+void GameScene::resetFogUniforms(void)
+{
+    fogUniforms = {};
+    fogTimeSeconds = 0.0;
+
+    fogUniforms.params0[0] = 0.0f;   // time
+    fogUniforms.params0[1] = 1.45f;  // noiseScale (CloudNoise preset)
+    fogUniforms.params0[2] = 0.46f;  // driftSpeed (faster cloud motion)
+    fogUniforms.params0[3] = 0.90f;  // fogIntensity
+
+    fogUniforms.params1[0] = 0.54f;  // revealMin
+    fogUniforms.params1[1] = 0.86f;  // revealMax
+    fogUniforms.params1[2] = 0.80f;  // edgeBoost
+    fogUniforms.params1[3] = 1.20f;  // noiseContrast
+
+    fogUniforms.params2[0] = 0.18f;  // tintR (slightly lighter fog)
+    fogUniforms.params2[1] = 0.20f;  // tintG
+    fogUniforms.params2[2] = 0.22f;  // tintB
+    fogUniforms.params2[3] = 0.86f;  // alphaMax
+}
+
 bool GameScene::uploadOceanUniforms(void)
 {
     if (oceanRenderState == nullptr)
@@ -398,6 +565,22 @@ bool GameScene::uploadOceanUniforms(void)
     if (!SDL_SetGPURenderStateFragmentUniforms(oceanRenderState, 0, &oceanUniforms, sizeof(oceanUniforms)))
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
+bool GameScene::uploadFogUniforms(void)
+{
+    if (fogRenderState == nullptr)
+    {
+        return false;
+    }
+
+    if (!SDL_SetGPURenderStateFragmentUniforms(fogRenderState, 0, &fogUniforms, sizeof(fogUniforms)))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: SDL_SetGPURenderStateFragmentUniforms failed for fog: %s", SDL_GetError());
         return false;
     }
 

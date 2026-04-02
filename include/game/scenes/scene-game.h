@@ -7,8 +7,7 @@
 /**
  * @brief Main gameplay scene.
  *
- * This scene contains the ocean shader effect and a simple animated atlas sample
- * used as a gameplay visual placeholder.
+ * This scene contains the ocean shader effect and a fog-of-war overlay pass.
  */
 class GameScene : public Scene {
 private:
@@ -27,17 +26,36 @@ private:
         float params2[4];
     };
 
+    /**
+     * @brief Uniform block sent to the fog-of-war fragment shader.
+     *
+     * params0 = {time, noiseScale, driftSpeed, fogIntensity}
+     * params1 = {revealMin, revealMax, edgeBoost, noiseContrast}
+     * params2 = {tintR, tintG, tintB, alphaMax}
+     */
+    struct FogUniforms {
+        float params0[4];
+        float params1[4];
+        float params2[4];
+    };
+
     RC2D_Image oceanTexture;                 /**< Base water texture #1 (bound as t0/s0 by SDL_RenderTexture). */
     RC2D_Image oceanTextureDetail;           /**< Water texture #2 (bound as additional t1/s1 sampler binding). */
     RC2D_Image causticTexture;               /**< Caustic texture (bound as additional t2/s2 sampler binding). */
     RC2D_Image foamStreaksTexture;           /**< Foam streak texture (bound as additional t3/s3 sampler binding). */
     RC2D_Image macroWaterTexture;            /**< Macro anti-tiling texture (bound as additional t4/s4 sampler binding). */
     RC2D_Image depthWaterTexture;            /**< Bathymetry depth texture (bound as additional t5/s5 sampler binding). */
+    RC2D_Image fogMaskTexture;               /**< Fog visibility mask texture (bound as t0/s0 by SDL_RenderTexture). */
+    RC2D_Image fogNoiseTexture;              /**< Fog noise texture (bound as additional t1/s1 sampler binding). */
     RC2D_GPUShader* oceanFragmentShader;     /**< Loaded fragment shader. */
+    RC2D_GPUShader* fogFragmentShader;       /**< Loaded fragment shader for fog-of-war overlay. */
     SDL_GPURenderState* oceanRenderState;    /**< Custom GPU render state for ocean pass. */
+    SDL_GPURenderState* fogRenderState;      /**< Custom GPU render state for fog-of-war pass. */
     SDL_GPUSampler* oceanRepeatSampler;      /**< Repeat sampler used by caustic texture binding. */
     OceanUniforms oceanUniforms;             /**< Runtime uniforms for shader animation. */
+    FogUniforms fogUniforms;                 /**< Runtime uniforms for fog animation. */
     double oceanTimeSeconds;                 /**< Accumulated ocean time. */
+    double fogTimeSeconds;                   /**< Accumulated fog time. */
 
     /**
      * @brief Release all runtime GPU/texture resources owned by the scene.
@@ -50,10 +68,21 @@ private:
     void resetOceanUniforms(void);
 
     /**
+     * @brief Reset fog uniform values to a sane default preset.
+     */
+    void resetFogUniforms(void);
+
+    /**
      * @brief Push current uniforms to GPU fragment slot 0.
      * @return True when upload succeeded.
      */
     bool uploadOceanUniforms(void);
+
+    /**
+     * @brief Push current fog uniforms to GPU fragment slot 0.
+     * @return True when upload succeeded.
+     */
+    bool uploadFogUniforms(void);
 
 public:
     /**
