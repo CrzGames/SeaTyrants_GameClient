@@ -1,0 +1,182 @@
+plugins {
+     id 'com.android.application'
+}
+
+def ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+def ksAlias = System.getenv("ANDROID_KEYSTORE_ALIAS_NAME")
+def ksKeyPass = System.getenv("ANDROID_KEYSTORE_KEY_PASSWORD")
+
+def buildWithCMake = project.hasProperty('BUILD_WITH_CMAKE');
+
+android {
+    namespace = "com.crzgames.testexe"  
+    compileSdkVersion 36
+    buildToolsVersion "36.1.0"
+    ndkVersion "29.0.14206865"
+    defaultConfig {
+        applicationId "com.crzgames.testexe"
+        minSdkVersion 28
+        targetSdkVersion 36
+        versionCode = System.getenv("ANDROID_VERSION_CODE")?.toInteger() ?: 1
+        versionName (System.getenv("ANDROID_VERSION_NAME") ?: "1.0.0")
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-28", "-DANDROID_STL=c++_static", "-DRC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF"
+                abiFilters 'armeabi-v7a', 'arm64-v8a'
+            }
+        }
+    }
+    signingConfigs {
+        release {
+            if (ksPass && ksAlias && ksKeyPass) {
+                storeFile rootProject.file("../my-release-key.keystore")
+                storePassword ksPass
+                keyAlias ksAlias
+                keyPassword ksKeyPass
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
+            externalNativeBuild {
+                cmake {
+                    arguments "-DRC2D_MEMORY_DEBUG_ENABLED=OFF"
+                }
+            }
+        }
+    }
+    applicationVariants.all { variant ->
+        tasks["merge${variant.name.capitalize()}Assets"]
+            .dependsOn("externalNativeBuild${variant.name.capitalize()}")
+    }
+    if (!project.hasProperty('EXCLUDE_NATIVE_LIBS')) {
+        sourceSets.main {
+            jniLibs.srcDirs = [
+                /**
+                * Répertoires contenant des bibliothèques natives externes (.so)
+                * qui doivent être empaquetées dans l'APK/AAB.
+                *
+                * IMPORTANT :
+                * Chaque bibliothèque doit respecter la structure suivante :
+                *
+                *   <lib_name>/
+                *     ├── armeabi-v7a/
+                *     │     └── lib<name>.so
+                *     ├── arm64-v8a/
+                *     │     └── lib<name>.so
+                *
+                * Exemple concret :
+                *
+                *   ffmpeg/
+                *     ├── armeabi-v7a/libavcodec.so
+                *     ├── armeabi-v7a/libavformat.so
+                *     ├── arm64-v8a/libavcodec.so
+                *     └── arm64-v8a/libavformat.so
+                *
+                * Le nom des sous-dossiers DOIT correspondre exactement aux valeurs
+                * ANDROID_ABI utilisées par Gradle / CMake :
+                *   - armeabi-v7a
+                *   - arm64-v8a
+                */
+                "../../dependencies/Crzgames_Libraries/android/lib/ffmpeg",
+                "../../dependencies/Crzgames_Libraries/android/lib/onnxruntime"
+            ]
+        }
+        externalNativeBuild {
+            cmake {
+                path '../../CMakeLists.txt'
+
+                /**
+                * IMPORTANT :
+                * Cette version DOIT :
+                *
+                * 1) Être >= à la version définie dans le CMakeLists.txt principal :
+                *      cmake_minimum_required(VERSION 3.28.0)
+                *
+                * 2) Correspondre EXACTEMENT à la version de CMake installée via :
+                *      Android Studio → SDK Manager → SDK Tools → CMake
+                *
+                * Si la version ne correspond pas :
+                * - Gradle téléchargera une autre version (ex: 3.22.1)
+                * - Le build échouera si elle est < à cmake_minimum_required
+                *
+                * Toujours garder la cohérence entre :
+                * - android-project/app/build.gradle
+                * - CMakeLists.txt (cmake_minimum_required)
+                * - SDK Manager (version CMake installée)
+                */
+                version '3.30.3'
+            }
+        }
+    }
+    sourceSets {
+        main {
+            /**
+                APK
+                └── assets/
+                    ├── (images, audio, etc.)
+                    └── shaders/
+                        ├── compiled/
+                        └── reflection/
+            */
+            assets {
+                srcDir '../../assets'
+                srcDir "$buildDir/generated/rc2d-shaders"
+                srcDir "$buildDir/generated/rc2d-meta"
+            }
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+}
+
+/**
+ * Tâche personnalisée pour copier les shaders compilés et de réflexion.
+ */
+tasks.register("stageRc2dShaders", Sync) {
+    from("../../shaders/compiled") {
+        into "shaders/compiled"
+    }
+    from("../../shaders/reflection") {
+        into "shaders/reflection"
+    }
+
+    into("$buildDir/generated/rc2d-shaders")
+}
+tasks.named("preBuild").configure {
+    dependsOn("stageRc2dShaders")
+}
+
+/**
+ * Tâche personnalisée pour générer un fichier version.txt contenant la version de l'application.
+ * Ce fichier sera copié à la racine du bundle lors du build.
+ */
+tasks.register("stageRc2dMeta") {
+    doLast {
+        def outDir = file("$buildDir/generated/rc2d-meta")
+        outDir.mkdirs()
+
+        // Priorité : variable d'environnement APP_VERSION_STR
+        def versionStr = System.getenv("APP_VERSION_STR") ?: "1.0.0-staging-commitshashort"
+
+        file("$outDir/version.txt").text = versionStr + "\n"
+
+        println("stageRc2dMeta -> version.txt = ${versionStr}")
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("stageRc2dShaders")
+    dependsOn("stageRc2dMeta")
+}

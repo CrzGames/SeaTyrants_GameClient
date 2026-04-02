@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=@APP_NAME@
+Comment=@APP_GAME_DESCRIPTION@
+Exec=sh -c 'SCRIPT_DIR="$(dirname "$1")"; cd "$SCRIPT_DIR" && exec "./@APP_EXECUTABLE_NAME@"' _ %k
+Path=.
+Icon=app-icon.png
+Terminal=false
+Categories=Game;
