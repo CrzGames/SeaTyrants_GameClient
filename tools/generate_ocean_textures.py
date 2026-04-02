@@ -223,6 +223,14 @@ def write_water_color_variants(out_dir: Path) -> None:
     amber_mid = np.array([0.435, 0.325, 0.108], dtype=np.float32)
     amber_light = np.array([0.680, 0.550, 0.190], dtype=np.float32)
 
+    yellow_deep = np.array([0.230, 0.190, 0.055], dtype=np.float32)
+    yellow_mid = np.array([0.500, 0.430, 0.120], dtype=np.float32)
+    yellow_light = np.array([0.760, 0.700, 0.250], dtype=np.float32)
+
+    orange_deep = np.array([0.240, 0.115, 0.050], dtype=np.float32)
+    orange_mid = np.array([0.520, 0.250, 0.090], dtype=np.float32)
+    orange_light = np.array([0.790, 0.440, 0.170], dtype=np.float32)
+
     red_deep = np.array([0.205, 0.068, 0.068], dtype=np.float32)
     red_mid = np.array([0.435, 0.132, 0.132], dtype=np.float32)
     red_light = np.array([0.670, 0.230, 0.230], dtype=np.float32)
@@ -233,6 +241,10 @@ def write_water_color_variants(out_dir: Path) -> None:
     detail_brown = remap_rgb_to_palette(detail_rgb, brown_deep, brown_mid, brown_light, brightness_target=1.08, saturation=1.00)
     base_amber = remap_rgb_to_palette(base_rgb, amber_deep, amber_mid, amber_light, brightness_target=1.10, saturation=1.04)
     detail_amber = remap_rgb_to_palette(detail_rgb, amber_deep, amber_mid, amber_light, brightness_target=1.10, saturation=1.04)
+    base_yellow = remap_rgb_to_palette(base_rgb, yellow_deep, yellow_mid, yellow_light, brightness_target=1.14, saturation=1.06)
+    detail_yellow = remap_rgb_to_palette(detail_rgb, yellow_deep, yellow_mid, yellow_light, brightness_target=1.14, saturation=1.06)
+    base_orange = remap_rgb_to_palette(base_rgb, orange_deep, orange_mid, orange_light, brightness_target=1.12, saturation=1.05)
+    detail_orange = remap_rgb_to_palette(detail_rgb, orange_deep, orange_mid, orange_light, brightness_target=1.12, saturation=1.05)
     base_red = remap_rgb_to_palette(base_rgb, red_deep, red_mid, red_light, brightness_target=1.10, saturation=0.98)
     detail_red = remap_rgb_to_palette(detail_rgb, red_deep, red_mid, red_light, brightness_target=1.10, saturation=0.98)
 
@@ -242,6 +254,10 @@ def write_water_color_variants(out_dir: Path) -> None:
     save_rgba(out_dir / "tile-water-detail-brown.png", detail_brown[..., 0], detail_brown[..., 1], detail_brown[..., 2], detail_a)
     save_rgba(out_dir / "tile-water-base-amber.png", base_amber[..., 0], base_amber[..., 1], base_amber[..., 2], base_a)
     save_rgba(out_dir / "tile-water-detail-amber.png", detail_amber[..., 0], detail_amber[..., 1], detail_amber[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-yellow.png", base_yellow[..., 0], base_yellow[..., 1], base_yellow[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-yellow.png", detail_yellow[..., 0], detail_yellow[..., 1], detail_yellow[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-orange.png", base_orange[..., 0], base_orange[..., 1], base_orange[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-orange.png", detail_orange[..., 0], detail_orange[..., 1], detail_orange[..., 2], detail_a)
     save_rgba(out_dir / "tile-water-base-red.png", base_red[..., 0], base_red[..., 1], base_red[..., 2], base_a)
     save_rgba(out_dir / "tile-water-detail-red.png", detail_red[..., 0], detail_red[..., 1], detail_red[..., 2], detail_a)
 
@@ -408,7 +424,7 @@ def main() -> int:
     print("[watergen] wrote tile-water-detail.png (512x512)")
 
     write_water_color_variants(out_dir)
-    print("[watergen] wrote tile-water-base/detail variants: GREEN, BROWN, AMBER, RED")
+    print("[watergen] wrote tile-water-base/detail variants: GREEN, BROWN, AMBER, YELLOW, ORANGE, RED")
 
     generate_caustic(out_dir / "tile-caustic.png", rng)
     print("[watergen] wrote tile-caustic.png (512x512)")
