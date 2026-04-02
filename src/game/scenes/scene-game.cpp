@@ -168,6 +168,11 @@ void GameScene::load(void)
         return;
     }
 
+    if (!rc2d_gpu_trackGraphicsRenderState("water.fragment", &oceanRenderState, 4, samplerBindings))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to track ocean GPURenderState for shader hot-reload");
+    }
+
     uploadOceanUniforms();
 }
 
@@ -262,6 +267,7 @@ void GameScene::releaseOceanResources(void)
 {
     if (oceanRenderState != nullptr)
     {
+        rc2d_gpu_untrackGraphicsRenderState(&oceanRenderState);
         SDL_DestroyGPURenderState(oceanRenderState);
         oceanRenderState = nullptr;
     }

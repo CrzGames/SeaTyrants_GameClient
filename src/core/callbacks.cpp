@@ -61,11 +61,11 @@ void rc2d_load(void)
     sceneManager.changeScene("game");
 
     // Mettre en plein écran.
-    rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
+    //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
 
     // Cache le curseur de la souris, pour une meilleure immersion.
     // Le client vas le réafficher dans la scène de menu pour permettre l'interaction avec l'UI.
-    rc2d_mouse_setVisible(false);
+    //rc2d_mouse_setVisible(false);
 
     // À ce stade, l'initialisation applicative est terminée.
     // Le client peut commencer à accepter et traiter son activité normale.
