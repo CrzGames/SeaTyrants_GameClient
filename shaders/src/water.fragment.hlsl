@@ -115,7 +115,8 @@ PSOutput main(PSInput input)
     float2 rwA = sample4rgb(u_texture4, s4, rwUvA, pxBase * 3.0).rg * 2.0 - 1.0;
     float2 rwB = sample4rgb(u_texture4, s4, rwUvB, pxBase * 3.5).rg * 2.0 - 1.0;
     float2 randomWarp = (rwA * 0.6 + rwB * 0.4) * 0.014;
-    float2 drift = float2(0.022 * t, -0.016 * t);
+    // Oscillating drift: avoids a single dominant travel direction across the whole ocean.
+    float2 drift = float2(0.022 * sin(t * 0.37), 0.019 * cos(t * 0.31));
     float2 uvFlow = uv + randomWarp + warp + drift;
 
     // Base water layer.
