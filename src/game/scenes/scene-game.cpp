@@ -35,12 +35,20 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base.png");
         return;
     }
+    if (!SDL_SetTextureScaleMode(oceanTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
+    }
 
     oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail.png");
         return;
+    }
+    if (!SDL_SetTextureScaleMode(oceanTextureDetail.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-detail: %s", SDL_GetError());
     }
 
     causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-caustic.png", RC2D_STORAGE_TITLE);
@@ -49,6 +57,10 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load caustic texture assets/images/tile-caustic.png");
         return;
     }
+    if (!SDL_SetTextureScaleMode(causticTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-caustic: %s", SDL_GetError());
+    }
 
     foamStreaksTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
     if (foamStreaksTexture.sdl_texture == nullptr)
@@ -56,12 +68,20 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load foam streak texture assets/images/tile-foam-streaks.png");
         return;
     }
+    if (!SDL_SetTextureScaleMode(foamStreaksTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-foam-streaks: %s", SDL_GetError());
+    }
 
     macroWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/water-macro.png", RC2D_STORAGE_TITLE);
     if (macroWaterTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load macro water texture assets/images/water-macro.png");
         return;
+    }
+    if (!SDL_SetTextureScaleMode(macroWaterTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for water-macro: %s", SDL_GetError());
     }
 
     oceanFragmentShader = rc2d_gpu_loadGraphicsShaderFromStorage("water.fragment", RC2D_STORAGE_TITLE);
@@ -207,15 +227,26 @@ void GameScene::draw(void)
 
     SDL_FRect visibleRect = rc2d_engine_getVisibleSafeRectRender();
 
+    SDL_TextureAddressMode prevU = SDL_TEXTURE_ADDRESS_AUTO;
+    SDL_TextureAddressMode prevV = SDL_TEXTURE_ADDRESS_AUTO;
+    bool restoreAddressMode = SDL_GetRenderTextureAddressMode(rc2d_engine_state.renderer, &prevU, &prevV);
+    SDL_SetRenderTextureAddressMode(rc2d_engine_state.renderer, SDL_TEXTURE_ADDRESS_WRAP, SDL_TEXTURE_ADDRESS_WRAP);
+
     if (oceanRenderState != nullptr)
     {
         SDL_SetGPURenderState(rc2d_engine_state.renderer, oceanRenderState);
         SDL_RenderTexture(rc2d_engine_state.renderer, oceanTexture.sdl_texture, nullptr, &visibleRect);
         SDL_SetGPURenderState(rc2d_engine_state.renderer, nullptr);
-        return;
+    }
+    else
+    {
+        SDL_RenderTexture(rc2d_engine_state.renderer, oceanTexture.sdl_texture, nullptr, &visibleRect);
     }
 
-    SDL_RenderTexture(rc2d_engine_state.renderer, oceanTexture.sdl_texture, nullptr, &visibleRect);
+    if (restoreAddressMode)
+    {
+        SDL_SetRenderTextureAddressMode(rc2d_engine_state.renderer, prevU, prevV);
+    }
 }
 
 void GameScene::keypressed(
@@ -297,14 +328,14 @@ void GameScene::resetOceanUniforms(void)
     oceanTimeSeconds = 0.0;
 
     oceanUniforms.params0[0] = 0.0f;   // time
-    oceanUniforms.params0[1] = 0.58f;  // waveStrength
-    oceanUniforms.params0[2] = 2.8f;   // pixelAmplitude
-    oceanUniforms.params0[3] = 3.4f;   // tiling
+    oceanUniforms.params0[1] = 0.74f;  // waveStrength
+    oceanUniforms.params0[2] = 3.6f;   // pixelAmplitude
+    oceanUniforms.params0[3] = 2.35f;  // tiling
 
     oceanUniforms.params1[0] = 1920.0f; // width
     oceanUniforms.params1[1] = 1080.0f; // height
-    oceanUniforms.params1[2] = 0.28f;   // speed
-    oceanUniforms.params1[3] = 0.48f;   // foamIntensity
+    oceanUniforms.params1[2] = 0.62f;   // speed
+    oceanUniforms.params1[3] = 0.36f;   // foamIntensity
 }
 
 bool GameScene::uploadOceanUniforms(void)
