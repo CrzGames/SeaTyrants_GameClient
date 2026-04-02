@@ -231,6 +231,46 @@ def write_water_color_variants(out_dir: Path) -> None:
     orange_mid = np.array([0.520, 0.250, 0.090], dtype=np.float32)
     orange_light = np.array([0.790, 0.440, 0.170], dtype=np.float32)
 
+    lime_deep = np.array([0.145, 0.215, 0.055], dtype=np.float32)
+    lime_mid = np.array([0.305, 0.455, 0.115], dtype=np.float32)
+    lime_light = np.array([0.515, 0.705, 0.225], dtype=np.float32)
+
+    teal_deep = np.array([0.030, 0.175, 0.145], dtype=np.float32)
+    teal_mid = np.array([0.070, 0.385, 0.315], dtype=np.float32)
+    teal_light = np.array([0.145, 0.610, 0.515], dtype=np.float32)
+
+    turquoise_deep = np.array([0.040, 0.205, 0.190], dtype=np.float32)
+    turquoise_mid = np.array([0.090, 0.445, 0.415], dtype=np.float32)
+    turquoise_light = np.array([0.180, 0.670, 0.625], dtype=np.float32)
+
+    cyan_deep = np.array([0.050, 0.220, 0.260], dtype=np.float32)
+    cyan_mid = np.array([0.100, 0.450, 0.520], dtype=np.float32)
+    cyan_light = np.array([0.210, 0.680, 0.760], dtype=np.float32)
+
+    jade_deep = np.array([0.045, 0.185, 0.115], dtype=np.float32)
+    jade_mid = np.array([0.090, 0.395, 0.245], dtype=np.float32)
+    jade_light = np.array([0.180, 0.620, 0.405], dtype=np.float32)
+
+    purple_deep = np.array([0.100, 0.060, 0.185], dtype=np.float32)
+    purple_mid = np.array([0.235, 0.125, 0.400], dtype=np.float32)
+    purple_light = np.array([0.420, 0.250, 0.645], dtype=np.float32)
+
+    violet_deep = np.array([0.130, 0.085, 0.225], dtype=np.float32)
+    violet_mid = np.array([0.290, 0.175, 0.465], dtype=np.float32)
+    violet_light = np.array([0.485, 0.320, 0.705], dtype=np.float32)
+
+    magenta_deep = np.array([0.185, 0.055, 0.180], dtype=np.float32)
+    magenta_mid = np.array([0.410, 0.120, 0.395], dtype=np.float32)
+    magenta_light = np.array([0.650, 0.235, 0.620], dtype=np.float32)
+
+    pink_deep = np.array([0.235, 0.105, 0.165], dtype=np.float32)
+    pink_mid = np.array([0.495, 0.220, 0.335], dtype=np.float32)
+    pink_light = np.array([0.740, 0.375, 0.520], dtype=np.float32)
+
+    coral_deep = np.array([0.260, 0.115, 0.095], dtype=np.float32)
+    coral_mid = np.array([0.545, 0.265, 0.205], dtype=np.float32)
+    coral_light = np.array([0.815, 0.455, 0.345], dtype=np.float32)
+
     red_deep = np.array([0.205, 0.068, 0.068], dtype=np.float32)
     red_mid = np.array([0.435, 0.132, 0.132], dtype=np.float32)
     red_light = np.array([0.670, 0.230, 0.230], dtype=np.float32)
@@ -245,6 +285,26 @@ def write_water_color_variants(out_dir: Path) -> None:
     detail_yellow = remap_rgb_to_palette(detail_rgb, yellow_deep, yellow_mid, yellow_light, brightness_target=1.14, saturation=1.06)
     base_orange = remap_rgb_to_palette(base_rgb, orange_deep, orange_mid, orange_light, brightness_target=1.12, saturation=1.05)
     detail_orange = remap_rgb_to_palette(detail_rgb, orange_deep, orange_mid, orange_light, brightness_target=1.12, saturation=1.05)
+    base_lime = remap_rgb_to_palette(base_rgb, lime_deep, lime_mid, lime_light, brightness_target=1.10, saturation=1.06)
+    detail_lime = remap_rgb_to_palette(detail_rgb, lime_deep, lime_mid, lime_light, brightness_target=1.10, saturation=1.06)
+    base_teal = remap_rgb_to_palette(base_rgb, teal_deep, teal_mid, teal_light, brightness_target=1.06, saturation=1.03)
+    detail_teal = remap_rgb_to_palette(detail_rgb, teal_deep, teal_mid, teal_light, brightness_target=1.06, saturation=1.03)
+    base_turquoise = remap_rgb_to_palette(base_rgb, turquoise_deep, turquoise_mid, turquoise_light, brightness_target=1.08, saturation=1.04)
+    detail_turquoise = remap_rgb_to_palette(detail_rgb, turquoise_deep, turquoise_mid, turquoise_light, brightness_target=1.08, saturation=1.04)
+    base_cyan = remap_rgb_to_palette(base_rgb, cyan_deep, cyan_mid, cyan_light, brightness_target=1.09, saturation=1.04)
+    detail_cyan = remap_rgb_to_palette(detail_rgb, cyan_deep, cyan_mid, cyan_light, brightness_target=1.09, saturation=1.04)
+    base_jade = remap_rgb_to_palette(base_rgb, jade_deep, jade_mid, jade_light, brightness_target=1.06, saturation=1.03)
+    detail_jade = remap_rgb_to_palette(detail_rgb, jade_deep, jade_mid, jade_light, brightness_target=1.06, saturation=1.03)
+    base_purple = remap_rgb_to_palette(base_rgb, purple_deep, purple_mid, purple_light, brightness_target=1.07, saturation=1.01)
+    detail_purple = remap_rgb_to_palette(detail_rgb, purple_deep, purple_mid, purple_light, brightness_target=1.07, saturation=1.01)
+    base_violet = remap_rgb_to_palette(base_rgb, violet_deep, violet_mid, violet_light, brightness_target=1.08, saturation=1.02)
+    detail_violet = remap_rgb_to_palette(detail_rgb, violet_deep, violet_mid, violet_light, brightness_target=1.08, saturation=1.02)
+    base_magenta = remap_rgb_to_palette(base_rgb, magenta_deep, magenta_mid, magenta_light, brightness_target=1.08, saturation=1.04)
+    detail_magenta = remap_rgb_to_palette(detail_rgb, magenta_deep, magenta_mid, magenta_light, brightness_target=1.08, saturation=1.04)
+    base_pink = remap_rgb_to_palette(base_rgb, pink_deep, pink_mid, pink_light, brightness_target=1.10, saturation=1.03)
+    detail_pink = remap_rgb_to_palette(detail_rgb, pink_deep, pink_mid, pink_light, brightness_target=1.10, saturation=1.03)
+    base_coral = remap_rgb_to_palette(base_rgb, coral_deep, coral_mid, coral_light, brightness_target=1.11, saturation=1.04)
+    detail_coral = remap_rgb_to_palette(detail_rgb, coral_deep, coral_mid, coral_light, brightness_target=1.11, saturation=1.04)
     base_red = remap_rgb_to_palette(base_rgb, red_deep, red_mid, red_light, brightness_target=1.10, saturation=0.98)
     detail_red = remap_rgb_to_palette(detail_rgb, red_deep, red_mid, red_light, brightness_target=1.10, saturation=0.98)
 
@@ -258,6 +318,26 @@ def write_water_color_variants(out_dir: Path) -> None:
     save_rgba(out_dir / "tile-water-detail-yellow.png", detail_yellow[..., 0], detail_yellow[..., 1], detail_yellow[..., 2], detail_a)
     save_rgba(out_dir / "tile-water-base-orange.png", base_orange[..., 0], base_orange[..., 1], base_orange[..., 2], base_a)
     save_rgba(out_dir / "tile-water-detail-orange.png", detail_orange[..., 0], detail_orange[..., 1], detail_orange[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-lime.png", base_lime[..., 0], base_lime[..., 1], base_lime[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-lime.png", detail_lime[..., 0], detail_lime[..., 1], detail_lime[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-teal.png", base_teal[..., 0], base_teal[..., 1], base_teal[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-teal.png", detail_teal[..., 0], detail_teal[..., 1], detail_teal[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-turquoise.png", base_turquoise[..., 0], base_turquoise[..., 1], base_turquoise[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-turquoise.png", detail_turquoise[..., 0], detail_turquoise[..., 1], detail_turquoise[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-cyan.png", base_cyan[..., 0], base_cyan[..., 1], base_cyan[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-cyan.png", detail_cyan[..., 0], detail_cyan[..., 1], detail_cyan[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-jade.png", base_jade[..., 0], base_jade[..., 1], base_jade[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-jade.png", detail_jade[..., 0], detail_jade[..., 1], detail_jade[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-purple.png", base_purple[..., 0], base_purple[..., 1], base_purple[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-purple.png", detail_purple[..., 0], detail_purple[..., 1], detail_purple[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-violet.png", base_violet[..., 0], base_violet[..., 1], base_violet[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-violet.png", detail_violet[..., 0], detail_violet[..., 1], detail_violet[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-magenta.png", base_magenta[..., 0], base_magenta[..., 1], base_magenta[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-magenta.png", detail_magenta[..., 0], detail_magenta[..., 1], detail_magenta[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-pink.png", base_pink[..., 0], base_pink[..., 1], base_pink[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-pink.png", detail_pink[..., 0], detail_pink[..., 1], detail_pink[..., 2], detail_a)
+    save_rgba(out_dir / "tile-water-base-coral.png", base_coral[..., 0], base_coral[..., 1], base_coral[..., 2], base_a)
+    save_rgba(out_dir / "tile-water-detail-coral.png", detail_coral[..., 0], detail_coral[..., 1], detail_coral[..., 2], detail_a)
     save_rgba(out_dir / "tile-water-base-red.png", base_red[..., 0], base_red[..., 1], base_red[..., 2], base_a)
     save_rgba(out_dir / "tile-water-detail-red.png", detail_red[..., 0], detail_red[..., 1], detail_red[..., 2], detail_a)
 
@@ -408,6 +488,11 @@ def main() -> int:
         default=24041991,
         help="Random seed for deterministic generation",
     )
+    parser.add_argument(
+        "--full-pack",
+        action="store_true",
+        help="Also regenerate caustic/foam/macro/depth textures (default: only base+detail+color variants).",
+    )
     args = parser.parse_args()
 
     out_dir = args.out
@@ -424,19 +509,22 @@ def main() -> int:
     print("[watergen] wrote tile-water-detail.png (512x512)")
 
     write_water_color_variants(out_dir)
-    print("[watergen] wrote tile-water-base/detail variants: GREEN, BROWN, AMBER, YELLOW, ORANGE, RED")
+    print("[watergen] wrote tile-water-base/detail variants: GREEN, BROWN, AMBER, YELLOW, ORANGE, LIME, TEAL, TURQUOISE, CYAN, JADE, PURPLE, VIOLET, MAGENTA, PINK, CORAL, RED")
 
-    generate_caustic(out_dir / "tile-caustic.png", rng)
-    print("[watergen] wrote tile-caustic.png (512x512)")
+    if args.full_pack:
+        generate_caustic(out_dir / "tile-caustic.png", rng)
+        print("[watergen] wrote tile-caustic.png (512x512)")
 
-    generate_foam_streaks(out_dir / "tile-foam-streaks.png", rng)
-    print("[watergen] wrote tile-foam-streaks.png (512x512)")
+        generate_foam_streaks(out_dir / "tile-foam-streaks.png", rng)
+        print("[watergen] wrote tile-foam-streaks.png (512x512)")
 
-    generate_macro(out_dir / "water-macro.png", rng)
-    print("[watergen] wrote water-macro.png (2048x2048)")
+        generate_macro(out_dir / "water-macro.png", rng)
+        print("[watergen] wrote water-macro.png (2048x2048)")
 
-    generate_water_depth(out_dir / "tile-water-depth.png", rng)
-    print("[watergen] wrote tile-water-depth.png (1024x1024)")
+        generate_water_depth(out_dir / "tile-water-depth.png", rng)
+        print("[watergen] wrote tile-water-depth.png (1024x1024)")
+    else:
+        print("[watergen] skipped tile-caustic/tile-foam-streaks/water-macro/tile-water-depth (use --full-pack to regenerate all)")
 
     return 0
 
