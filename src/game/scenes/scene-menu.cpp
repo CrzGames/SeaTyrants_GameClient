@@ -2,12 +2,6 @@
 
 #include "game/scenes/scene-manager.h"
 
-/**
- * @brief Clamp helper for alpha and interpolation values.
- *
- * @param value Input value.
- * @return Value clamped in [0.0, 1.0].
- */
 double MenuScene::clamp01(double value)
 {
     // Clamp lower bound.
@@ -28,9 +22,6 @@ double MenuScene::clamp01(double value)
     return value;
 }
 
-/**
- * @brief Construct menu scene with default state.
- */
 MenuScene::MenuScene(void)
     // Initialize video handle.
     : loginBackgroundVideo{},
@@ -56,11 +47,6 @@ MenuScene::MenuScene(void)
     // Constructor body intentionally empty.
 }
 
-/**
- * @brief Draw black fullscreen overlay with alpha.
- *
- * @param alpha01 Alpha ratio in [0..1].
- */
 void MenuScene::drawFullscreenBlackWithAlpha(double alpha01)
 {
     // Clamp alpha before conversion.
@@ -94,9 +80,6 @@ void MenuScene::drawFullscreenBlackWithAlpha(double alpha01)
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
-/**
- * @brief Switch to gameplay scene.
- */
 void MenuScene::goToGameScene(void)
 {
     // Switch scene if manager is available.
@@ -106,9 +89,6 @@ void MenuScene::goToGameScene(void)
     }
 }
 
-/**
- * @brief Release resources when leaving menu scene.
- */
 void MenuScene::unload(void)
 {
     // Close background video if open.
@@ -174,9 +154,6 @@ void MenuScene::unload(void)
     RC2D_log(RC2D_LOG_INFO, "Menu Scene Unloaded\n");
 }
 
-/**
- * @brief Prepare menu resources when entering scene.
- */
 void MenuScene::load(void)
 {
     // Show mouse cursor for menu interaction.
@@ -321,11 +298,6 @@ void MenuScene::load(void)
     RC2D_log(RC2D_LOG_INFO, "Menu Scene Loaded\n");
 }
 
-/**
- * @brief Update menu state every frame.
- *
- * @param dt Frame delta in seconds.
- */
 void MenuScene::update(double dt)
 {
     // Animate intro fade until transparent.
@@ -386,9 +358,6 @@ void MenuScene::update(double dt)
     }
 }
 
-/**
- * @brief Draw menu background and UI.
- */
 void MenuScene::draw(void)
 {
     // Draw menu video if opened.
@@ -416,9 +385,6 @@ void MenuScene::draw(void)
     }
 }
 
-/**
- * @brief Handle keyboard events in menu.
- */
 void MenuScene::keypressed(
     const char *key,
     SDL_Scancode scancode,
@@ -435,9 +401,6 @@ void MenuScene::keypressed(
     }
 }
 
-/**
- * @brief Handle mouse clicks on menu UI.
- */
 void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     // Only process left click.
@@ -460,8 +423,5 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     else if (rc2d_collision_pointInUIImagePixelPerfect(&buttonLoginUi, x, y))
     {
         RC2D_log(RC2D_LOG_INFO, "Clicked LOGIN button");
-
-        // Start gameplay transition.
-        goToGameScene();
     }
 }

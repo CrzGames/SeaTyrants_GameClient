@@ -28,9 +28,6 @@ double SplashScreenScene::clamp01(double value)
     return value;
 }
 
-/**
- * @brief Construct splash scene with clean state.
- */
 SplashScreenScene::SplashScreenScene(void)
     // Initialize first video handle.
     : splashStudioVideo{},
@@ -42,11 +39,6 @@ SplashScreenScene::SplashScreenScene(void)
     // Constructor body intentionally empty.
 }
 
-/**
- * @brief Draw a fullscreen black overlay with alpha.
- *
- * @param alpha01 Alpha ratio in [0..1].
- */
 void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
 {
     // Clamp alpha before converting to 8-bit.
@@ -80,9 +72,6 @@ void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
-/**
- * @brief End splash sequence and go to menu.
- */
 void SplashScreenScene::finishAndGoToMenu(void)
 {
     // Avoid processing completion twice.
@@ -107,9 +96,6 @@ void SplashScreenScene::finishAndGoToMenu(void)
     }
 }
 
-/**
- * @brief Release resources when leaving splash scene.
- */
 void SplashScreenScene::unload(void)
 {
     // Close first splash video if open.
@@ -125,9 +111,6 @@ void SplashScreenScene::unload(void)
     RC2D_log(RC2D_LOG_INFO, "Splash Screen Scene Unloaded\n");
 }
 
-/**
- * @brief Prepare splash state when entering scene.
- */
 void SplashScreenScene::load(void)
 {
     // Ensure first video starts clean.
@@ -143,11 +126,6 @@ void SplashScreenScene::load(void)
     RC2D_log(RC2D_LOG_INFO, "Splash Screen Scene Loaded\n");
 }
 
-/**
- * @brief Update splash videos and transitions.
- *
- * @param dt Frame delta in seconds.
- */
 void SplashScreenScene::update(double dt)
 {
     // Drive the splash state machine.
@@ -221,9 +199,6 @@ void SplashScreenScene::update(double dt)
     }
 }
 
-/**
- * @brief Draw splash frames and fade effects.
- */
 void SplashScreenScene::draw(void)
 {
     // First splash rendering branch.
@@ -288,9 +263,6 @@ void SplashScreenScene::draw(void)
     }
 }
 
-/**
- * @brief Handle key presses in splash scene.
- */
 void SplashScreenScene::keypressed(
     const char *key,
     SDL_Scancode scancode,
@@ -302,9 +274,6 @@ void SplashScreenScene::keypressed(
 
 }
 
-/**
- * @brief Handle mouse press in splash scene.
- */
 void SplashScreenScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
 

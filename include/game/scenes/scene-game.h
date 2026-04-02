@@ -11,63 +11,6 @@
  * used as a gameplay visual placeholder.
  */
 class GameScene : public Scene {
-private:
-    /**
-     * @brief Uniform layout sent to the ocean fragment shader.
-     *
-     * params0 = {time, strength, pxAmplitude, tiling}
-     * params1 = {width, height, speed, fresnel}
-     */
-    typedef struct OceanUniforms {
-        float params0[4];
-        float params1[4];
-    } OceanUniforms;
-
-    RC2D_Image waterTileImage;     /**< Base water texture used for shader pass. */
-    RC2D_Image causticTileImage;   /**< Optional caustic texture reserved for future use. */
-    RC2D_TP_Atlas elite27Atlas;    /**< TexturePacker atlas used for animated ship sample. */
-
-    RC2D_GPUShader* oceanFragmentShader;  /**< Loaded fragment shader handle. */
-    SDL_GPURenderState* oceanRenderState; /**< SDL GPU render state for ocean pass. */
-    SDL_GPUSampler* oceanRepeatSampler;   /**< REPEAT sampler bound to shader slot. */
-    OceanUniforms oceanUniforms;          /**< Cached uniform values. */
-    double oceanTimeAccum;                /**< Accumulated time for animation. */
-
-    int eliteFrameIndex;            /**< Current frame index in atlas animation. */
-    double eliteFrameAccumulator;   /**< Time accumulator for frame stepping. */
-
-    static constexpr int kElite27FrameCount = 8; /**< Total number of atlas frames. */
-    static constexpr double kElite27FrameDurationSeconds = 0.10; /**< Frame duration in seconds. */
-    inline static constexpr const char* kElite27FrameNames[kElite27FrameCount] = {
-        "1.png",
-        "2.png",
-        "3.png",
-        "4.png",
-        "5.png",
-        "6.png",
-        "7.png",
-        "8.png"
-    }; /**< Ordered atlas frame names. */
-
-    /**
-     * @brief Create shader/sampler/render-state resources for ocean rendering.
-     * @return True on success, false on failure.
-     */
-    bool initializeOceanRenderState(void);
-
-    /**
-     * @brief Destroy shader/sampler/render-state resources.
-     */
-    void destroyOceanRenderState(void);
-
-    /**
-     * @brief Update ocean shader uniforms from time and render output size.
-     * @param outputWidth Current render output width in pixels.
-     * @param outputHeight Current render output height in pixels.
-     * @param dt Delta time in seconds.
-     */
-    void updateOceanUniforms(int outputWidth, int outputHeight, double dt);
-
 public:
     /**
      * @brief Build gameplay scene instance.
