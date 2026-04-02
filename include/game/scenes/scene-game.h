@@ -2,6 +2,8 @@
 
 #include <RC2D/RC2D.h>
 
+#include "game/renderers/fog-of-war-renderer.h"
+#include "game/renderers/ocean-renderer.h"
 #include "game/scenes/scene.h"
 
 /**
@@ -11,86 +13,8 @@
  */
 class GameScene : public Scene {
 private:
-    /**
-     * @brief Uniform block sent to the ocean fragment shader.
-     *
-     * params0 = {time, waveStrength, pixelAmplitude, tiling}
-     * params1 = {width, height, speed, foamIntensity}
-     * params2 = {colorMode, fresnelStrength, sunGlintStrength, whitecapBoost}
-     * colorMode = 0.0 -> blue shading (legacy/current look)
-     * colorMode = 1.0 -> neutral shading (for non-blue water texture variants)
-     */
-    struct OceanUniforms {
-        float params0[4];
-        float params1[4];
-        float params2[4];
-    };
-
-    /**
-     * @brief Uniform block sent to the fog-of-war fragment shader.
-     *
-     * params0 = {time, noiseScale, driftSpeed, fogIntensity}
-     * params1 = {revealMin, revealMax, edgeBoost, noiseContrast}
-     * params2 = {tintR, tintG, tintB, alphaMax}
-     */
-    struct FogUniforms {
-        float params0[4];
-        float params1[4];
-        float params2[4];
-    };
-
-    RC2D_Image oceanTexture;                 /**< Base water texture #1 (bound as t0/s0 by SDL_RenderTexture). */
-    RC2D_Image oceanTextureDetail;           /**< Water texture #2 (bound as additional t1/s1 sampler binding). */
-    RC2D_Image causticTexture;               /**< Caustic texture (bound as additional t2/s2 sampler binding). */
-    RC2D_Image foamStreaksTexture;           /**< Foam streak texture (bound as additional t3/s3 sampler binding). */
-    RC2D_Image macroWaterTexture;            /**< Macro anti-tiling texture (bound as additional t4/s4 sampler binding). */
-    RC2D_Image depthWaterTexture;            /**< Bathymetry depth texture (bound as additional t5/s5 sampler binding). */
-    RC2D_Image fogMaskTexture;               /**< Fog visibility mask texture (bound as t0/s0 by SDL_RenderTexture). */
-    RC2D_Image fogNoiseTexture;              /**< Fog noise texture (bound as additional t1/s1 sampler binding). */
-    RC2D_GPUShader* oceanFragmentShader;     /**< Loaded fragment shader. */
-    RC2D_GPUShader* fogFragmentShader;       /**< Loaded fragment shader for fog-of-war overlay. */
-    SDL_GPURenderState* oceanRenderState;    /**< Custom GPU render state for ocean pass. */
-    SDL_GPURenderState* fogRenderState;      /**< Custom GPU render state for fog-of-war pass. */
-    SDL_GPUSampler* oceanRepeatSampler;      /**< Repeat sampler used by caustic texture binding. */
-    OceanUniforms oceanUniforms;             /**< Runtime uniforms for shader animation. */
-    FogUniforms fogUniforms;                 /**< Runtime uniforms for fog animation. */
-    double oceanTimeSeconds;                 /**< Accumulated ocean time. */
-    double fogTimeSeconds;                   /**< Accumulated fog time. */
-
-    /**
-     * @brief Release all runtime GPU/texture resources owned by the scene.
-     */
-    void releaseOceanResources(void);
-
-    /**
-     * @brief Reset uniform values to a sane default preset.
-     */
-    void resetOceanUniforms(void);
-
-    /**
-     * @brief Reset fog uniform values to a sane default preset.
-     */
-    void resetFogUniforms(void);
-
-    /**
-     * @brief Adapt fog styling from current ocean color mode.
-     *
-     * ocean colorMode = 0.0 (blue legacy) -> lighter clouds
-     * ocean colorMode = 1.0 (neutral/non-blue) -> darker clouds
-     */
-    void syncFogUniformsFromOceanMode(void);
-
-    /**
-     * @brief Push current uniforms to GPU fragment slot 0.
-     * @return True when upload succeeded.
-     */
-    bool uploadOceanUniforms(void);
-
-    /**
-     * @brief Push current fog uniforms to GPU fragment slot 0.
-     * @return True when upload succeeded.
-     */
-    bool uploadFogUniforms(void);
+    OceanRenderer oceanRenderer;         /**< Renderer dédié au shader océan. */
+    FogOfWarRenderer fogOfWarRenderer;   /**< Renderer dédié au shader brouillard de guerre. */
 
 public:
     /**
