@@ -26,6 +26,8 @@ private:
     RC2D_Image oceanTexture;                 /**< Base water texture #1 (bound as t0/s0 by SDL_RenderTexture). */
     RC2D_Image oceanTextureDetail;           /**< Water texture #2 (bound as additional t1/s1 sampler binding). */
     RC2D_Image causticTexture;               /**< Caustic texture (bound as additional t2/s2 sampler binding). */
+    RC2D_Image foamStreaksTexture;           /**< Foam streak texture (bound as additional t3/s3 sampler binding). */
+    RC2D_Image macroWaterTexture;            /**< Macro anti-tiling texture (bound as additional t4/s4 sampler binding). */
     RC2D_GPUShader* oceanFragmentShader;     /**< Loaded fragment shader. */
     SDL_GPURenderState* oceanRenderState;    /**< Custom GPU render state for ocean pass. */
     SDL_GPUSampler* oceanRepeatSampler;      /**< Repeat sampler used by caustic texture binding. */

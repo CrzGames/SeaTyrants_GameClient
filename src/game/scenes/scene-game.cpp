@@ -8,6 +8,8 @@ GameScene::GameScene(void)
     : oceanTexture{},
       oceanTextureDetail{},
       causticTexture{},
+      foamStreaksTexture{},
+      macroWaterTexture{},
       oceanFragmentShader(nullptr),
       oceanRenderState(nullptr),
       oceanRepeatSampler(nullptr),
@@ -27,17 +29,17 @@ void GameScene::load(void)
     releaseOceanResources();
     resetOceanUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water1.png", RC2D_STORAGE_TITLE);
+    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water1.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base.png");
         return;
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water2.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water2.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail.png");
         return;
     }
 
@@ -45,6 +47,20 @@ void GameScene::load(void)
     if (causticTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load caustic texture assets/images/tile-caustic.png");
+        return;
+    }
+
+    foamStreaksTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
+    if (foamStreaksTexture.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load foam streak texture assets/images/tile-foam-streaks.png");
+        return;
+    }
+
+    macroWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/water-macro.png", RC2D_STORAGE_TITLE);
+    if (macroWaterTexture.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load macro water texture assets/images/water-macro.png");
         return;
     }
 
@@ -100,15 +116,49 @@ void GameScene::load(void)
         return;
     }
 
-    SDL_GPUTextureSamplerBinding samplerBindings[2] = {};
+    SDL_PropertiesID foamTextureProperties = SDL_GetTextureProperties(foamStreaksTexture.sdl_texture);
+    if (!foamTextureProperties)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: SDL_GetTextureProperties failed for foam texture: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTexture* foamGpuTexture = static_cast<SDL_GPUTexture*>(
+        SDL_GetPointerProperty(foamTextureProperties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    if (foamGpuTexture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: missing GPU texture pointer for foam texture");
+        return;
+    }
+
+    SDL_PropertiesID macroTextureProperties = SDL_GetTextureProperties(macroWaterTexture.sdl_texture);
+    if (!macroTextureProperties)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: SDL_GetTextureProperties failed for macro water texture: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTexture* macroGpuTexture = static_cast<SDL_GPUTexture*>(
+        SDL_GetPointerProperty(macroTextureProperties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    if (macroGpuTexture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: missing GPU texture pointer for macro water texture");
+        return;
+    }
+
+    SDL_GPUTextureSamplerBinding samplerBindings[4] = {};
     samplerBindings[0].texture = detailGpuTexture;
     samplerBindings[0].sampler = oceanRepeatSampler;
     samplerBindings[1].texture = causticGpuTexture;
     samplerBindings[1].sampler = oceanRepeatSampler;
+    samplerBindings[2].texture = foamGpuTexture;
+    samplerBindings[2].sampler = oceanRepeatSampler;
+    samplerBindings[3].texture = macroGpuTexture;
+    samplerBindings[3].sampler = oceanRepeatSampler;
 
     SDL_GPURenderStateCreateInfo createInfo = {};
     createInfo.fragment_shader = oceanFragmentShader;
-    createInfo.num_sampler_bindings = 2;
+    createInfo.num_sampler_bindings = 4;
     createInfo.sampler_bindings = samplerBindings;
 
     oceanRenderState = SDL_CreateGPURenderState(rc2d_engine_state.renderer, &createInfo);
@@ -231,6 +281,8 @@ void GameScene::releaseOceanResources(void)
     rc2d_graphics_freeImage(&oceanTexture);
     rc2d_graphics_freeImage(&oceanTextureDetail);
     rc2d_graphics_freeImage(&causticTexture);
+    rc2d_graphics_freeImage(&foamStreaksTexture);
+    rc2d_graphics_freeImage(&macroWaterTexture);
 }
 
 void GameScene::resetOceanUniforms(void)
@@ -239,14 +291,14 @@ void GameScene::resetOceanUniforms(void)
     oceanTimeSeconds = 0.0;
 
     oceanUniforms.params0[0] = 0.0f;   // time
-    oceanUniforms.params0[1] = 1.00f;  // waveStrength
-    oceanUniforms.params0[2] = 20.0f;  // pixelAmplitude
-    oceanUniforms.params0[3] = 11.0f;  // tiling
+    oceanUniforms.params0[1] = 0.58f;  // waveStrength
+    oceanUniforms.params0[2] = 2.8f;   // pixelAmplitude
+    oceanUniforms.params0[3] = 3.4f;   // tiling
 
     oceanUniforms.params1[0] = 1920.0f; // width
     oceanUniforms.params1[1] = 1080.0f; // height
-    oceanUniforms.params1[2] = 0.60f;   // speed
-    oceanUniforms.params1[3] = 0.82f;   // foamIntensity
+    oceanUniforms.params1[2] = 0.28f;   // speed
+    oceanUniforms.params1[3] = 0.48f;   // foamIntensity
 }
 
 bool GameScene::uploadOceanUniforms(void)
