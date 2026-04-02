@@ -1,0 +1,54 @@
+# Documentation Deliver : https://docs.fastlane.tools/actions/deliver/
+# Documentation Pilot : https://docs.fastlane.tools/actions/pilot/
+# Documentation App Store Connect API : https://docs.fastlane.tools/app-store-connect-api/
+
+# Utilisation :
+# TestFlight : fastlane submit_for_review to_testflight:true
+# AppStore : fastlane submit_for_review to_testflight:false ou fastlane submit_for_review
+# Doit être executer depuis le répertoire platform/ios/
+
+lane :submit_for_review do |options|
+  api_key = app_store_connect_api_key(
+    key_id: ENV["APPLE_APPSTORECONNECT_API_KEY_ID"],
+    issuer_id: ENV["APPLE_APPSTORECONNECT_API_ISSUER_ID"],
+    key_content: ENV["APPLE_APPSTORECONNECT_API_KEY_P8_BASE64"],
+    is_key_content_base64: true,
+    duration: 1200,
+    in_house: false
+  )
+
+  if options[:to_testflight]
+    # Soumettre une version pour examen pour les testeurs externes sur TestFlight
+    # Soumettre une version sans besoin de révision pour les testeurs internes sur TestFlight
+    # Pilot est une action Fastlane qui permet de gérer les versions de TestFlight
+    pilot(
+      api_key: api_key,                               # Clé API App Store Connect
+      team_id: ENV["APPLE_TEAM_ID"],                  # Identifiant de l'équipe
+      app_identifier: ENV["APP_IOSMACOS_IDENTIFIER"], # Identifier de l'application
+      skip_waiting_for_build_processing: false,       # Attendre la fin du traitement du build
+      distribute_external: true,                      # Distribuer à des testeurs externes
+      groups: ["beta", "qa"],                         # Noms des groupes externes et internes de testeurs
+      reject_build_waiting_for_review: true,          # Annule les builds en attente de révision (testeurs externes)
+      wait_processing_timeout_duration: 900,          # Durée d'attente maximale pour le traitement du build (15 minutes)
+      distribute_only: false,                         # Distribuer une build précédemment téléchargée
+      app_platform: "ios",                            # Plateforme de l'application
+      notify_external_testers: true,                  # Notifier les testeurs externes
+      changelog: "New beta version."                  # Description de la version (testeurs externes)
+    )
+  else
+    # Soumettre une version pour examen sur l'App Store
+    # Deliver est une action Fastlane qui permet de gérer les versions de l'App Store
+    deliver(
+      api_key: api_key,                               # Clé API App Store Connect
+      team_id: ENV["APPLE_TEAM_ID"],                  # Identifiant de l'équipe
+      app_identifier: ENV["APP_IOSMACOS_IDENTIFIER"], # Identifier de l'application
+      skip_metadata: true,                            # Ignorer la mise à jour des métadonnées
+      skip_screenshots: true,                         # Ignorer la mise à jour des captures d'écran
+      skip_app_version_update: true,                  # Ignorer la mise à jour de la version de l'application
+      submit_for_review: true,                        # Soumettre pour examen
+      automatic_release: false,                       # Ne pas publier automatiquement la version après l'approbation
+      platform: "ios",                                # Plateforme de l'application
+      reject_if_possible: true                        # Rejette la version précédemment soumise si elle est dans un état où cela est possible
+    )
+  end
+end
