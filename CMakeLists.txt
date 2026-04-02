@@ -23,6 +23,21 @@ project(rc2d-game-template
 )
 
 # ============================================================
+# Language Standards
+# ============================================================
+# C   : RC2D est écrit en C99.
+#
+# CXX : requis uniquement pour :
+#       • Steamworks SDK si RC2D_STEAMWORKS_SDK_ENABLED=ON
+#         → compile src/RC2D/RC2D_steamworks.cpp (SDK Steam en C++)
+#       • Le projet d’exemple (sources en C++)
+# ============================================================
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ============================================================
 # Build Options RC2D (Feature toggles)
 # ============================================================
 # Toutes les options RC2D_* qui permettent d'activer/désactiver
@@ -40,7 +55,7 @@ set(RC2D_MEMORY_DEBUG_ENABLED ON CACHE BOOL "")          # CONSEILLE: Pour la pr
 set(RC2D_DATA_MODULE_ENABLED ON CACHE BOOL "")
 set(RC2D_NET_MODULE_ENABLED ON CACHE BOOL "")
 set(RC2D_VIDEO_MODULE_ENABLED ON CACHE BOOL "")
-set(RC2D_ONNX_MODULE_ENABLED ON CACHE BOOL "")
+set(RC2D_ONNX_MODULE_ENABLED OFF CACHE BOOL "")
 set(RC2D_ASSERT_LEVEL 3 CACHE STRING "")
 set(RC2D_BUILDING_SHARED OFF CACHE BOOL "")
 
