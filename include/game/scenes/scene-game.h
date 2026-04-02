@@ -17,7 +17,7 @@ private:
      *
      * params0 = {time, waveStrength, pixelAmplitude, tiling}
      * params1 = {width, height, speed, foamIntensity}
-     * params2 = {colorMode, reserved, reserved, reserved}
+     * params2 = {colorMode, fresnelStrength, sunGlintStrength, whitecapBoost}
      * colorMode = 0.0 -> blue shading (legacy/current look)
      * colorMode = 1.0 -> neutral shading (for non-blue water texture variants)
      */

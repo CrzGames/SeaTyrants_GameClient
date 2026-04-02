@@ -29,10 +29,10 @@ void GameScene::load(void)
     releaseOceanResources();
     resetOceanUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base.png", RC2D_STORAGE_TITLE);
+    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-brown.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-green.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-red.png");
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -40,10 +40,10 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-brown.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-green.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-red.png");
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTextureDetail.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -337,9 +337,14 @@ void GameScene::resetOceanUniforms(void)
     oceanUniforms.params1[2] = 0.62f;   // speed
     oceanUniforms.params1[3] = 0.36f;   // foamIntensity
 
-    // colorMode: 0.0 = blue shading (exact current look), 1.0 = neutral shading.
-    // Keep 0.0f by default to preserve the established ocean look.
-    oceanUniforms.params2[0] = 0.0f;
+    // params2.x colorMode: 0.0 = blue shading, 1.0 = neutral shading.
+    oceanUniforms.params2[0] = 1.0f;
+    // params2.y fresnelStrength: stronger angle-dependent reflection.
+    oceanUniforms.params2[1] = 0.88f;
+    // params2.z sunGlintStrength: specular sun highlights on wave crests.
+    oceanUniforms.params2[2] = 0.74f;
+    // params2.w whitecapBoost: additional foam from steep/windy wave slopes.
+    oceanUniforms.params2[3] = 0.68f;
 }
 
 bool GameScene::uploadOceanUniforms(void)

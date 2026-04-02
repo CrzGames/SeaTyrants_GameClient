@@ -4,7 +4,8 @@ cbuffer Context : register(b0, space3)
     float4 params0;
     // params1: x=width, y=height, z=speed, w=foamIntensity
     float4 params1;
-    // params2: x=colorMode (0=blue legacy, 1=neutral), yzw reserved
+    // params2: x=colorMode (0=blue legacy, 1=neutral),
+    //          y=fresnelStrength, z=sunGlintStrength, w=whitecapBoost
     float4 params2;
 };
 
@@ -209,6 +210,37 @@ PSOutput main(PSInput input)
     foamStreaks *= (0.12 + 0.62 * foamIntensity);
     foamStreaks *= (0.92 + 0.22 * gust);
 
+    // Pseudo surface normal from wave field + micro variation
+    // to produce angle-dependent fresnel/specular response.
+    float slopeWaveX = (w1 - w2) * 0.58 + (w3 - w4) * 0.42;
+    float slopeWaveY = (w2 + w3) * 0.52 + (w1 - w4) * 0.48;
+    float slopeMicroX = ddx(waterL) * 20.0;
+    float slopeMicroY = ddy(waterL) * 20.0;
+    float slopeScale = 0.22 + waveStrength * 0.72 + chop * 0.35;
+    float2 slope = (float2(slopeWaveX, slopeWaveY) + float2(slopeMicroX, slopeMicroY)) * slopeScale;
+    float slopeEnergy = saturate(length(slope) * 0.42);
+
+    float3 normalWS = normalize(float3(-slope.x, -slope.y, 1.0));
+    float3 viewDir = normalize(float3(0.0, -0.26, 0.97));
+    float3 sunDir  = normalize(float3(0.34, -0.48, 0.81));
+    float3 halfDir = normalize(viewDir + sunDir);
+
+    float nDotV = saturate(dot(normalWS, viewDir));
+    float nDotL = saturate(dot(normalWS, sunDir));
+    float nDotH = saturate(dot(normalWS, halfDir));
+
+    float rough = saturate(0.22 + (1.0 - chop) * 0.42 + (1.0 - gust) * 0.18);
+    float specTight = pow(nDotH, lerp(320.0, 88.0, rough));
+    float specWide  = pow(nDotH, lerp(88.0, 24.0, rough));
+    float specular = nDotL * (specTight * (0.24 + 0.76 * chop) + specWide * 0.11);
+
+    float fresnel = 0.020 + (1.0 - 0.020) * pow(1.0 - nDotV, 5.0);
+    fresnel = saturate(fresnel + slopeEnergy * 0.06);
+
+    float2 sparkleUv = frac(rotate2(uvFlow * 1.81 + float2(0.113 * t, -0.087 * t), 0.37));
+    float sparkleNoise = sample4gray(u_texture4, s4, sparkleUv, pxBase * 0.95);
+    float sparkleMask = smoothstep(0.62, 0.96, sparkleNoise + causticSpark * 0.35);
+
     // Blue legacy palette (kept for the default look).
     float3 deepColorBlue  = float3(0.016, 0.125, 0.290);
     float3 midColorBlue   = float3(0.030, 0.240, 0.470);
@@ -216,6 +248,9 @@ PSOutput main(PSInput input)
     float3 glintColor = float3(0.820, 0.920, 1.000);
     float3 foamColor  = float3(0.900, 0.965, 1.000);
     float neutralColorMode = saturate(params2.x);
+    float fresnelStrength  = max(params2.y, 0.0);
+    float sunGlintStrength = max(params2.z, 0.0);
+    float whitecapBoost    = max(params2.w, 0.0);
 
     float depthMask = saturate(
         0.18 +
@@ -229,11 +264,20 @@ PSOutput main(PSInput input)
     oceanBlue = lerp(oceanBlue, lightColorBlue, gust * 0.06);
     oceanBlue *= macroShade;
 
+    float3 skyColor = lerp(float3(0.18, 0.34, 0.55), float3(0.52, 0.72, 0.90), saturate(normalWS.y * 0.5 + 0.5));
+    float3 sunColor = float3(1.000, 0.930, 0.780);
+    float fresnelBlend = fresnel * (0.44 + 0.56 * causticSoft);
+    float glintTerm = specular * sparkleMask;
+    float subsurface = pow(saturate(1.0 - nDotL), 1.85) * (0.16 + 0.44 * (1.0 - depthMask)) * (0.22 + 0.55 * waveStrength);
+
     float3 rgbBlue = waterTex * oceanBlue * (0.86 + 0.32 * waterL);
     float3 causticColorBlue = float3(0.24, 0.64, 0.92);
     rgbBlue = lerp(rgbBlue, causticColorBlue, saturate(caustic * 0.34));
     rgbBlue = lerp(rgbBlue, glintColor, saturate(caustic * 0.10));
-    rgbBlue *= lerp(0.985, 1.025, gust);
+    rgbBlue = lerp(rgbBlue, skyColor, saturate(fresnelBlend * (0.16 * fresnelStrength)));
+    rgbBlue += sunColor * glintTerm * (0.22 * sunGlintStrength);
+    rgbBlue += float3(0.016, 0.130, 0.170) * subsurface;
+    rgbBlue *= lerp(0.985, 1.030, gust);
 
     // Neutral shading path for non-blue water variants (green/brown/red/amber).
     // This avoids multiplying by a blue tint, which can make warm palettes too dark.
@@ -243,13 +287,20 @@ PSOutput main(PSInput input)
     float3 causticColorNeutral = float3(0.92, 0.96, 1.00);
     rgbNeutral = lerp(rgbNeutral, causticColorNeutral, saturate(caustic * 0.26));
     rgbNeutral = lerp(rgbNeutral, glintColor, saturate(caustic * 0.08));
-    rgbNeutral *= lerp(0.990, 1.030, gust);
+    rgbNeutral = lerp(rgbNeutral, skyColor, saturate(fresnelBlend * (0.11 * fresnelStrength)));
+    rgbNeutral += sunColor * glintTerm * (0.17 * sunGlintStrength);
+    rgbNeutral += float3(0.055, 0.085, 0.100) * (subsurface * 0.85);
+    rgbNeutral *= lerp(0.990, 1.034, gust);
 
     float3 rgb = lerp(rgbBlue, rgbNeutral, neutralColorMode);
 
     float crest = smoothstep(0.70, 0.95, (waveMix * 0.5 + 0.5) + (waterL - 0.5) * 0.20);
+    float whitecaps = smoothstep(0.36, 0.92, slopeEnergy * (1.05 + 0.55 * waveStrength) + causticLines * 0.18);
+    whitecaps *= (0.10 + 0.52 * gust) * (0.40 + 0.60 * foamIntensity) * whitecapBoost;
+
     float foam = crest * (0.02 + 0.06 * foamIntensity) + foamStreaks * 0.15;
     foam += chop * 0.035 * foamIntensity;
+    foam += whitecaps * 0.20;
     rgb = lerp(rgb, foamColor, saturate(foam));
 
     // Slow broad swell modulation for visible movement without pixel sparkle.
