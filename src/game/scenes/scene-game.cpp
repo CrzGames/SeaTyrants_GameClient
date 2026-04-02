@@ -32,7 +32,7 @@ void GameScene::load(void)
     oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base.png", RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-green.png");
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -43,7 +43,7 @@ void GameScene::load(void)
     oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail.png", RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-green.png");
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTextureDetail.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -336,6 +336,10 @@ void GameScene::resetOceanUniforms(void)
     oceanUniforms.params1[1] = 1080.0f; // height
     oceanUniforms.params1[2] = 0.62f;   // speed
     oceanUniforms.params1[3] = 0.36f;   // foamIntensity
+
+    // colorMode: 0.0 = blue shading (exact current look), 1.0 = neutral shading.
+    // Keep 0.0f by default to preserve the established ocean look.
+    oceanUniforms.params2[0] = 0.0f;
 }
 
 bool GameScene::uploadOceanUniforms(void)

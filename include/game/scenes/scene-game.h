@@ -17,10 +17,14 @@ private:
      *
      * params0 = {time, waveStrength, pixelAmplitude, tiling}
      * params1 = {width, height, speed, foamIntensity}
+     * params2 = {colorMode, reserved, reserved, reserved}
+     * colorMode = 0.0 -> blue shading (legacy/current look)
+     * colorMode = 1.0 -> neutral shading (for non-blue water texture variants)
      */
     struct OceanUniforms {
         float params0[4];
         float params1[4];
+        float params2[4];
     };
 
     RC2D_Image oceanTexture;                 /**< Base water texture #1 (bound as t0/s0 by SDL_RenderTexture). */

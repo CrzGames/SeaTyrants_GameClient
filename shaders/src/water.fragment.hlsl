@@ -4,6 +4,8 @@ cbuffer Context : register(b0, space3)
     float4 params0;
     // params1: x=width, y=height, z=speed, w=foamIntensity
     float4 params1;
+    // params2: x=colorMode (0=blue legacy, 1=neutral), yzw reserved
+    float4 params2;
 };
 
 // Auto-bound by SDL_RenderTexture (tile-water-base).
@@ -163,10 +165,25 @@ PSOutput main(PSInput input)
     float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 6.8 + t * 0.42 + gustNoise * 4.2);
     float gust = smoothstep(0.58, 0.90, gustBands) * (0.35 + 0.65 * gustNoise);
 
-    // Caustic layers.
-    float2 cUvA = frac((uvFlow + warpHi * 1.2) * tileCaustic + float2( 0.052 * t, -0.039 * t));
-    float2 cUvB = frac(rotate2((uvFlow - warpHi * 0.9) * (tileCaustic * 1.23) + float2(-0.043 * t, 0.045 * t), 0.39));
-    float2 cUvC = frac((uvFlow + warpHi * 1.7) * (tileCaustic * 1.59) + float2( 0.068 * t, -0.059 * t));
+    // Caustic layers:
+    // add local advection + breathing scale so motion feels less "flat translation".
+    float2 cPhaseUvA = frac(rotate2(uvFlow * 0.078 + float2( 0.006 * t, -0.004 * t),  0.41));
+    float2 cPhaseUvB = frac(rotate2(uvFlow * 0.061 + float2(-0.005 * t,  0.005 * t), -0.73));
+    float2 cPhaseA = sample4rgb(u_texture4, s4, cPhaseUvA, pxBase * 2.8).rg * 2.0 - 1.0;
+    float2 cPhaseB = sample4rgb(u_texture4, s4, cPhaseUvB, pxBase * 3.2).rg * 2.0 - 1.0;
+    float2 cPhase = cPhaseA * 0.58 + cPhaseB * 0.42;
+    float2 cPhaseCross = float2(cPhase.y, -cPhase.x);
+
+    float causticBreath = 0.88 + 0.12 * sin(t * 0.84 + dot(cPhase, float2(1.65, -1.25)));
+    float2 cParallax = (cPhase * 0.010 + cPhaseCross * 0.006) * (0.75 + 0.25 * causticBreath);
+
+    float2 cDriftA = float2( 0.052 * t, -0.039 * t) + cPhase * (0.020 * sin(t * 0.51));
+    float2 cDriftB = float2(-0.043 * t,  0.045 * t) + cPhaseCross * (0.018 * cos(t * 0.47));
+    float2 cDriftC = float2( 0.068 * t, -0.059 * t) + (cPhaseA - cPhaseB) * (0.016 * sin(t * 0.59));
+
+    float2 cUvA = frac((uvFlow + warpHi * 1.2 + cParallax) * (tileCaustic * (0.985 + 0.035 * causticBreath)) + cDriftA);
+    float2 cUvB = frac(rotate2((uvFlow - warpHi * 0.9 - cParallax) * (tileCaustic * 1.23 * (1.015 - 0.030 * causticBreath)) + cDriftB, 0.39));
+    float2 cUvC = frac((uvFlow + warpHi * 1.7 + cParallax * 1.25) * (tileCaustic * 1.59 * (0.995 + 0.025 * causticBreath)) + cDriftC);
 
     float cA = sample4gray(u_texture2, s2, cUvA, pxCaustic * 1.05);
     float cB = sample4gray(u_texture2, s2, cUvB, pxCaustic * 1.20);
@@ -192,12 +209,13 @@ PSOutput main(PSInput input)
     foamStreaks *= (0.12 + 0.62 * foamIntensity);
     foamStreaks *= (0.92 + 0.22 * gust);
 
-    // Seafight-like palette.
-    float3 deepColor  = float3(0.016, 0.125, 0.290);
-    float3 midColor   = float3(0.030, 0.240, 0.470);
-    float3 lightColor = float3(0.070, 0.355, 0.595);
+    // Blue legacy palette (kept for the default look).
+    float3 deepColorBlue  = float3(0.016, 0.125, 0.290);
+    float3 midColorBlue   = float3(0.030, 0.240, 0.470);
+    float3 lightColorBlue = float3(0.070, 0.355, 0.595);
     float3 glintColor = float3(0.820, 0.920, 1.000);
     float3 foamColor  = float3(0.900, 0.965, 1.000);
+    float neutralColorMode = saturate(params2.x);
 
     float depthMask = saturate(
         0.18 +
@@ -206,16 +224,28 @@ PSOutput main(PSInput input)
         (macroL - 0.5) * 0.18
     );
 
-    float3 ocean = lerp(deepColor, midColor, depthMask);
-    ocean = lerp(ocean, lightColor, saturate((waterL - 0.42) * 0.55 + caustic * 0.32));
-    ocean = lerp(ocean, lightColor, gust * 0.06);
-    ocean *= macroShade;
+    float3 oceanBlue = lerp(deepColorBlue, midColorBlue, depthMask);
+    oceanBlue = lerp(oceanBlue, lightColorBlue, saturate((waterL - 0.42) * 0.55 + caustic * 0.32));
+    oceanBlue = lerp(oceanBlue, lightColorBlue, gust * 0.06);
+    oceanBlue *= macroShade;
 
-    float3 rgb = waterTex * ocean * (0.86 + 0.32 * waterL);
-    float3 causticColor = float3(0.24, 0.64, 0.92);
-    rgb = lerp(rgb, causticColor, saturate(caustic * 0.34));
-    rgb = lerp(rgb, glintColor, saturate(caustic * 0.10));
-    rgb *= lerp(0.985, 1.025, gust);
+    float3 rgbBlue = waterTex * oceanBlue * (0.86 + 0.32 * waterL);
+    float3 causticColorBlue = float3(0.24, 0.64, 0.92);
+    rgbBlue = lerp(rgbBlue, causticColorBlue, saturate(caustic * 0.34));
+    rgbBlue = lerp(rgbBlue, glintColor, saturate(caustic * 0.10));
+    rgbBlue *= lerp(0.985, 1.025, gust);
+
+    // Neutral shading path for non-blue water variants (green/brown/red/amber).
+    // This avoids multiplying by a blue tint, which can make warm palettes too dark.
+    float neutralDepthMask = saturate(0.30 + waterL * 0.56 + (macroL - 0.5) * 0.12);
+    float neutralGain = lerp(0.90, 1.18, neutralDepthMask) * macroShade;
+    float3 rgbNeutral = waterTex * neutralGain;
+    float3 causticColorNeutral = float3(0.92, 0.96, 1.00);
+    rgbNeutral = lerp(rgbNeutral, causticColorNeutral, saturate(caustic * 0.26));
+    rgbNeutral = lerp(rgbNeutral, glintColor, saturate(caustic * 0.08));
+    rgbNeutral *= lerp(0.990, 1.030, gust);
+
+    float3 rgb = lerp(rgbBlue, rgbNeutral, neutralColorMode);
 
     float crest = smoothstep(0.70, 0.95, (waveMix * 0.5 + 0.5) + (waterL - 0.5) * 0.20);
     float foam = crest * (0.02 + 0.06 * foamIntensity) + foamStreaks * 0.15;
