@@ -1,0 +1,39 @@
+# Ignore build files
+.idea
+.vs
+.vscode
+.DS_Store
+/site/
+/dist/
+nul
+
+# Build project windows/macos/linux/steamrt4/ios/android
+build
+
+# librc2d android project
+**/local.properties
+**/.gradle/
+**/app/build/
+**/app/.cxx/
+
+# Dependency directories
+/dependencies/
+
+# Compiled object files
+docker-build-output-steamrt4/
+
+# Ignore shader tools, reflection and compiled shaders
+/shaders/tools/
+/shaders/compiled/
+/shaders/reflection/
+
+# For project Windows
+platforms/windows/resource.rc
+
+# Game Project Templates
+android-project/app/src/main/assets/
+icons/outputs
+
+# AppImage tools
+appimagetool-x86_64.AppImage
+appimagetool-aarch64.AppImage

@@ -1,0 +1,2 @@
+- TODO 1 :
+Modifier les TestExe, com.crzgames.testexe, UUID..etc pour : com.crzgames.rc2dgametemplate (notamment pour iOS/macOS les metadata dans CMakeLists.txt), les secrets dans les CI/CD notamment pour certificat/profil de provisionning..etc

@@ -1,0 +1,100 @@
+# =============================================================================
+# RC2D – SteamRT4 Docker Build Environment
+# =============================================================================
+#
+# Ce fichier permet de compiler RC2D en static + le projet d'exemple dans l’image officielle
+# Steam Linux Runtime 4.0 (SteamRT4 SDK) pour les architectures x64 et arm64.
+#
+# Objectif :
+# - Garantir un environnement identique à celui de Steam (glibc, toolchain, runtime...)
+# - Produire des builds compatibles Steam Deck / Steam Linux
+# - Vérifier automatiquement les dépendances partagées via `ldd` à la fin du build
+#
+# -----------------------------------------------------------------------------
+# Utilisation :
+# -----------------------------------------------------------------------------
+#   docker compose run --rm rc2d-builder-x64
+#   docker compose run --rm rc2d-builder-arm64
+#
+# Les artefacts sont écrits dans :
+#   docker-build-output-steamrt4/
+#
+# =============================================================================
+services:
+  rc2d-builder-x64:
+    container_name: rc2d_steamrt4_x64
+    image: registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:4.0.20260119.200228
+    working_dir: /build
+    volumes:
+      - ./:/build:rw
+      - ./docker-build-output-steamrt4/x64/Release:/build/build/steamrt4/x64/Release:rw
+      - ./docker-build-output-steamrt4/x64/Debug:/build/build/steamrt4/x64/Debug:rw
+    command: >
+      bash -lc "
+        set -euo pipefail
+
+        apt-get update
+        apt-get install -y patchelf binutils dos2unix
+
+        # Fix CRLF -> LF (Windows) to avoid: '/bin/bash\r': required file not found
+        dos2unix ./build-scripts/generate-project/steamrt4-x64.sh
+
+        chmod +x ./build-scripts/generate-project/steamrt4-x64.sh
+        ./build-scripts/generate-project/steamrt4-x64.sh
+
+        EXE=build/steamrt4/x64/Release/rc2d_example
+        test -f \"$$EXE\"
+
+        echo '== file (x64) =='
+        file \"$$EXE\"
+
+        echo '== ldd (x64) =='
+        LDD_OUT=$$(ldd \"$$EXE\" || true)
+        echo \"$$LDD_OUT\"
+
+        if echo \"$$LDD_OUT\" | grep -q 'not found'; then
+          echo '[ERROR] Missing shared libraries detected (ldd: not found)'
+          exit 1
+        fi
+
+        echo '[SUCCESS] steamrt4-x64 binary dependencies OK'
+      "
+
+  rc2d-builder-arm64:
+    container_name: rc2d_steamrt4_arm64
+    image: registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk/arm64:4.0.20260119.200228
+    working_dir: /build
+    volumes:
+      - ./:/build:rw
+      - ./docker-build-output-steamrt4/arm64/Release:/build/build/steamrt4/arm64/Release:rw
+      - ./docker-build-output-steamrt4/arm64/Debug:/build/build/steamrt4/arm64/Debug:rw
+    command: >
+      bash -lc "
+        set -euo pipefail
+
+        apt-get update
+        apt-get install -y patchelf binutils dos2unix
+
+        # Fix CRLF -> LF (Windows) to avoid: '/bin/bash\r': required file not found
+        dos2unix ./build-scripts/generate-project/steamrt4-arm64.sh
+
+        chmod +x ./build-scripts/generate-project/steamrt4-arm64.sh
+        ./build-scripts/generate-project/steamrt4-arm64.sh
+
+        EXE=build/steamrt4/arm64/Release/rc2d_example
+        test -f \"$$EXE\"
+
+        echo '== file (arm64) =='
+        file \"$$EXE\"
+
+        echo '== ldd (arm64) =='
+        LDD_OUT=$$(ldd \"$$EXE\" || true)
+        echo \"$$LDD_OUT\"
+
+        if echo \"$$LDD_OUT\" | grep -q 'not found'; then
+          echo '[ERROR] Missing shared libraries detected (ldd: not found)'
+          exit 1
+        fi
+
+        echo '[SUCCESS] steamrt4-arm64 binary dependencies OK'
+      "

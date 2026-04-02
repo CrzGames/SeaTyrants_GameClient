@@ -1,0 +1,879 @@
+name: Generate Executable and Deploy Bucket S3 (staging)
+
+on:
+  push:
+    branches:
+      - alpha
+      - beta
+      - staging
+  workflow_dispatch:
+
+env:
+  ANDROID_NDK_VERSION: "29.0.14206865"
+  ANDROID_PLATFORM_VERSION: "android-36"
+  ANDROID_BUILD_TOOLS_VERSION: "36.1.0"
+  ANDROID_CMAKE_VERSION: "3.30.3"
+  ANDROID_CMDLINE_TOOLS_VERSION: "20.0"
+  JAVA_DISTRIBUTION: "temurin"
+  JAVA_VERSION: "17"
+  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  ANDROID_KEYSTORE_ALIAS_NAME: ${{ secrets.ANDROID_KEYSTORE_ALIAS_NAME }}
+  ANDROID_KEYSTORE_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
+
+  XCODE_VERSION: "26.3.0"
+
+  # TODO: A modifier pour chaque nouvelle application pour : TestExe
+  # Cela sert pour le CMakelists.txt et pour la CI/CD S3
+  # Dois être le nom de la target CMake
+  APP_NAME: rc2d-game-template
+  # TODO: A modifier pour chaque nouvelle application iOS / macOS pour : com.crzgames.*
+  # Cela sert pour le CMakelists.txt
+  APP_IOSMACOS_IDENTIFIER: com.crzgames.testexe
+  # Cela sert pour le CMakelists.txt
+  APP_COMPANY_NAME: CrzGames
+  # TODO: A modifier pour chaque nouvelle application
+  # Cela sert pour le CMakelists.txt
+  APP_GAME_DESCRIPTION: MyGame - MMORPG
+  # Cela sert pour le CMakelists.txt
+  APP_LEGAL_COPYRIGHT: Copyright 2026 CrzGames
+  # Cela sert pour le CMakelists.txt
+  APP_IOSMACOS_DEVELOPMENT_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  # TODO: A modifier pour chaque nouvelle application iOS pour : secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_NAME
+  # Cela sert pour le CMakelists.txt
+  APP_IOS_PROVISIONING_PROFILE_NAME: ${{ secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_NAME }}
+  # TODO: A modifier pour chaque nouvelle application iOS pour : secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_UUID
+  # Cela sert pour le CMakelists.txt
+  APP_IOS_PROVISIONING_PROFILE_UUID: ${{ secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_UUID }}
+  # Cela sert pour le CMakelists.txt
+  APP_IOS_CODE_SIGN_IDENTITY: "Apple Distribution: Corentin Recanzone (U3D28WJ8DV)"
+  # Cela sert pour le CMakelists.txt
+  APP_MACOS_CODE_SIGN_IDENTITY: "Developer ID Application: Corentin Recanzone (U3D28WJ8DV)"
+
+  ###### IOS ######
+  # Profil de provisionnement Apple au format : .mobileprovision (iOS) ou .provisionprofile (macOS) encodé en base64
+  # TODO: A modifier pour chaque nouvelle application iOS pour : secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_BASE64
+  IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_NAMEAPPLICATION_BASE64: ${{ secrets.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_TESTEXE_BASE64 }}
+  # Mot de passe spécifique à l'application pour l'identifiant Apple, nécessaire pour l'upload sur App Store Connect via altool ou Fastlane
+  APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APPLICATION_SPECIFIC_PASSWORD }}
+  # Variables pour l'API App Store Connect, nécessaires pour l'upload sur App Store Connect via Fastlane (recommandé)
+  APPLE_APPSTORECONNECT_API_KEY_ID: ${{ secrets.APPLE_APPSTORECONNECT_API_KEY_ID }}
+  APPLE_APPSTORECONNECT_API_ISSUER_ID: ${{ secrets.APPLE_APPSTORECONNECT_API_ISSUER_ID }}
+  APPLE_APPSTORECONNECT_API_KEY_P8_BASE64: ${{ secrets.APPLE_APPSTORECONNECT_API_KEY_P8_BASE64 }}
+  
+  ###### iOS / macOS - Commun ######
+  # Certificat Apple au format p12 encodé en base64 
+  IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_BASE64: ${{ secrets.IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_BASE64 }}
+  # Mot de passe du certificat p12
+  IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_PASSWORD: ${{ secrets.IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_PASSWORD }}
+  # Un nouveau trousseau sera créé sur le coureur, de sorte que le mot de passe du nouveau trousseau peut être n'importe quelle nouvelle chaîne aléatoire
+  KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+  # Identifiant (Email) du compte développeur Apple
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  # Identifiant de l'équipe Apple (Team ID) associé au compte développeur Apple, nécessaire pour l'upload sur App Store Connect via altool ou Fastlane
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  ###### macOS ######
+  # Certificat Apple au format p12 encodé en base64
+  MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_BASE64: ${{ secrets.MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_BASE64 }}
+  # Mot de passe du certificat p12
+  MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_PASSWORD: ${{ secrets.MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_PASSWORD }}
+
+  # Variables d'environnement pour le déploiement sur OVH S3, utilisées pour l'étape de déploiement avec AWS CLI (sync)
+  # Même si c'est écrit "AWS_", ce sont en réalité les identifiants d'accès pour le bucket OVH S3, car OVH S3 est compatible avec l'API AWS S3
+  AWS_ACCESS_KEY_ID: ${{ secrets.AETHERROYALE_S3_BUCKET_OVH_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AETHERROYALE_S3_BUCKET_OVH_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: ${{ secrets.AETHERROYALE_S3_BUCKET_OVH_REGION }}
+  OVH_S3_ENDPOINT: ${{ secrets.AETHERROYALE_S3_BUCKET_OVH_ENDPOINT }}
+  OVH_S3_BUCKET: ${{ secrets.AETHERROYALE_S3_BUCKET_OVH_NAME }}
+
+jobs:
+  build_game_and_sign:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - { runner: ubuntu-latest,    platform: steamrt4, arch: x64, container: "registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk:4.0.20260119.200228" }
+        - { runner: ubuntu-24.04-arm, platform: steamrt4, arch: arm64,  container: "registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk/arm64:4.0.20260119.200228" }
+        - { runner: windows-2025,     platform: windows,  arch: x64 }
+        - { runner: windows-11-arm,   platform: windows,  arch: arm64 }
+        - { runner: ubuntu-22.04,     platform: linux,    arch: x64 }
+        - { runner: ubuntu-22.04-arm, platform: linux,    arch: arm64 }
+        - { runner: ubuntu-latest,    platform: android,  arch: "armeabi-v7a,arm64-v8a" }
+        - { runner: macos-26,         platform: macos,    arch: arm64, sdk: macosx } 
+        - { runner: macos-26,         platform: ios,      arch: arm64, sdk: iphoneos }
+    name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}-${{ matrix.config.sdk }}
+    runs-on: ${{ matrix.config.runner }}
+    container: ${{ matrix.config.platform == 'steamrt4' && matrix.config.container || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Get dependencies with CMake - All platforms
+        run: cmake -P cmake/setup_dependencies.cmake
+
+      - name: Compute APP_VERSION_NUMERIC / APP_VERSION_STR / APP_VERSION (compat) and export variables - All platforms
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ============================================================
+          # 1) Lire la version SemVer stricte depuis version.txt
+          # ============================================================
+          VERSION_BASE="$(cat version.txt 2>/dev/null || true)"
+          VERSION_BASE="$(echo "$VERSION_BASE" | tr -d '[:space:]')"
+
+          # fallback sécurisé
+          if [[ -z "$VERSION_BASE" ]]; then
+            VERSION_BASE="1.0.0"
+          fi
+
+          # validation SemVer strict (major.minor.patch)
+          if ! [[ "$VERSION_BASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version.txt doit contenir un SemVer strict: major.minor.patch (ex: 1.2.3). Got: '$VERSION_BASE'"
+            exit 1
+          fi
+
+          # ============================================================
+          # 2) Générer branch + sha court et SANITIZE (important)
+          # ============================================================
+          COMMIT_SHA_SHORT="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+
+          # remplace tout ce qui n'est pas safe par '-'
+          # (évite '/' ':' espaces etc.)
+          BRANCH_SAFE="$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g')"
+
+          # ============================================================
+          # 3) Construire les deux versions
+          # ============================================================
+          APP_VERSION_NUMERIC="$VERSION_BASE"
+          APP_VERSION_STR="${VERSION_BASE}-${BRANCH_SAFE}-${COMMIT_SHA_SHORT}"
+
+          # Apple: on ne veut PAS de suffixe dans CFBundleShortVersionString
+          # => on garde APP_VERSION_NUMERIC pour macos/ios, mais on exporte quand même APP_VERSION_STR
+          # (utile pour nommage d'artefacts / S3 / logs si tu veux)
+          if [[ "${{ matrix.config.platform }}" == "macos" || "${{ matrix.config.platform }}" == "ios" ]]; then
+            APP_VERSION_EFFECTIVE="$APP_VERSION_NUMERIC"
+          else
+            APP_VERSION_EFFECTIVE="$APP_VERSION_STR"
+          fi
+
+          # ============================================================
+          # 4) Export pour les steps suivants + logs
+          # ============================================================
+          {
+            echo "APP_VERSION_NUMERIC=$APP_VERSION_NUMERIC"
+            echo "APP_VERSION_STR=$APP_VERSION_STR"
+            # si tu avais du code existant qui utilise APP_VERSION, on le garde pour compat
+            echo "APP_VERSION=$APP_VERSION_EFFECTIVE"
+            echo "VERSION_BASE=$VERSION_BASE"
+            echo "COMMIT_SHA_SHORT=$COMMIT_SHA_SHORT"
+            echo "BRANCH_SAFE=$BRANCH_SAFE"
+          } >> "$GITHUB_ENV"
+
+          echo "APP_VERSION_NUMERIC: $APP_VERSION_NUMERIC"
+          echo "APP_VERSION_STR:     $APP_VERSION_STR"
+          echo "APP_VERSION (compat): $APP_VERSION_EFFECTIVE"
+
+      - name: Install Metal Toolchain for Shaders compilation - macOS / iOS
+        if: matrix.config.platform == 'ios' || matrix.config.platform == 'macos'
+        run: xcodebuild -downloadComponent MetalToolchain
+          
+      - name: Set variables environment for versionCode and versionName - Android
+        if: matrix.config.platform == 'android'
+        run: |
+          # Génère le versionCode en divisant le timestamp UNIX par 100 pour avoir un nombre plus petit
+          # Ne doit pas dépasser 2100000000 (versionCode max pour Android)
+          # Cela signifie que vous pourriez techniquement produire un nouveau build toutes les 1 minute et 40 secondes 
+          # sans que deux builds consécutifs n'aient le même versionCode.
+          TIMESTAMP=$(date +%s)
+          VERSION_CODE=$(($TIMESTAMP / 100))
+          echo "ANDROID_VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV 
+          echo "ANDROID_VERSION_NAME=$APP_VERSION" >> $GITHUB_ENV
+
+      - name: Set variables environment for CFBundleShortVersionString and CFBundleVersion - macOS / iOS
+        if: matrix.config.platform == 'macos' || matrix.config.platform == 'ios'
+        run: |
+          # Génère le CFBundleVersion en utilisant le timestamp UNIX pour avoir un nombre toujours croissant
+          TIMESTAMP=$(date +%s)
+          echo "APP_IOSMACOS_BUILD_VERSION=$TIMESTAMP" >> $GITHUB_ENV
+
+      - name: Save version in variables.env - Linux x64 (for Windows / Linux / Android / SteamRT4)
+        # On execute cette étape que sur 1 Linux parce que c'est la même version pour Windows, Linux, Android et SteamRT4
+        if: matrix.config.platform == 'linux' && matrix.config.arch == 'x64'
+        run: |
+          echo "APP_VERSION=$APP_VERSION" > variables.env
+          echo "APP_VERSION_STR=$APP_VERSION_STR" >> variables.env
+
+      - name: Upload version in Artifacts - Linux x64 (for Windows / Linux / Android / SteamRT4)
+        # On execute cette étape que sur 1 Linux parce que c'est la même version pour Windows, Linux, Android et SteamRT4
+        if: matrix.config.platform == 'linux' && matrix.config.arch == 'x64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: variables
+          path: variables.env
+
+      - name: Save version and identifier in variables-apple.env - macOS / iOS
+        # On execute cette étape que sur macOS parce que c'est la même version pour macOS et iOS
+        if: matrix.config.platform == 'macos'
+        run: |
+          echo "APP_VERSION=$APP_VERSION" > variables-apple.env
+          echo "APP_VERSION_STR=$APP_VERSION_STR" >> variables-apple.env
+          echo "APP_IOSMACOS_IDENTIFIER=$APP_IOSMACOS_IDENTIFIER" >> variables-apple.env
+
+      - name: Upload version and identifier in Artifacts - macOS / iOS
+        # On execute cette étape que sur macOS parce que c'est la même version pour macOS et iOS
+        if: matrix.config.platform == 'macos'
+        uses: actions/upload-artifact@v6
+        with:
+          name: variables-apple
+          path: variables-apple.env
+
+      - name: Install dependencies for AppImage - Linux
+        if: matrix.config.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
+      - name: Install patchelf - Linux / SteamRT4
+        if: matrix.config.platform == 'linux' || matrix.config.platform == 'steamrt4'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+
+      - name: Install dev dependencies (for SDL3) - Linux / SteamRT4
+        if: matrix.config.platform == 'linux' || matrix.config.platform == 'steamrt4'
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential git make \
+          pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
+          libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+          libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+          libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+          libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev \
+          libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev
+          
+      - name: Setup Java JDK LTS - Android
+        if: matrix.config.platform == 'android'
+        uses: actions/setup-java@v5
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK (Platform + Build Tools + NDK + CMake + CLI) - Android
+        if: matrix.config.platform == 'android'
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: >
+            platform-tools
+            platforms;${{ env.ANDROID_PLATFORM_VERSION }}
+            build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}
+            ndk;${{ env.ANDROID_NDK_VERSION }}
+            cmake;${{ env.ANDROID_CMAKE_VERSION }}
+            cmdline-tools;${{ env.ANDROID_CMDLINE_TOOLS_VERSION }}
+          
+      - name: Decode Keystore and create file .keystore for Sign APK/AAB after - Android
+        if: matrix.config.platform == 'android'
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > my-release-key.keystore
+
+      - name: Generate APK / AAB and Sign - Android 
+        if: matrix.config.platform == 'android'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
+          ./gradlew bundleRelease
+        working-directory: android-project
+        env:
+          ANDROID_VERSION_CODE: ${{ env.ANDROID_VERSION_CODE }}
+          ANDROID_VERSION_NAME: ${{ env.ANDROID_VERSION_NAME }}
+
+      - name: Inspect APK - Android
+        if: matrix.config.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="android-project/app/build/outputs/apk/release/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "❌ app-release.apk not found"
+            exit 1
+          fi
+
+          echo "✅ Inspecting $APK"
+          unzip -l "$APK"
+
+      - name: Organize the build for Artificats - Android
+        if: matrix.config.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/apk android/aab
+
+          APP_NAME_SAFE="$(echo "${APP_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g')"
+
+          mv android-project/app/build/outputs/apk/release/app-release.apk "android/apk/${APP_NAME_SAFE}.apk"
+          mv android-project/app/build/outputs/bundle/release/app-release.aab "android/aab/${APP_NAME_SAFE}.aab"
+          
+      - name: Install the Apple Certificate and Provisioning Profile (Apple Distribution) - AppStore / TestFlight - iOS
+        if: matrix.config.platform == 'ios'
+        run: |
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # import certificate and provisioning profile from secrets
+          echo -n "${{ env.IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_BASE64 }}" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "${{ env.IOS_APPLE_PROVISIONING_PROFILE_APPLEDISTRIBUTION_NAMEAPPLICATION_BASE64 }}" | base64 --decode -o $PP_PATH
+
+          # create temporary keychain
+          security create-keychain -p "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+
+          # import certificate to keychain
+          security import $CERTIFICATE_PATH -P "${{ env.IOSMACOS_APPLE_CERTIFICATE_APPLEDISTRIBUTION_P12_PASSWORD }}" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # apply provisioning profile
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+      - name: Install the Apple Certificate (Developer ID Application) - Not Mac AppStore - macOS
+        if: matrix.config.platform == 'macos'
+        run: |
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # import certificate
+          echo -n "${{ env.MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_BASE64 }}" | base64 --decode -o $CERTIFICATE_PATH
+
+          # create temporary keychain
+          security create-keychain -p "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+
+          # import certificate to keychain
+          security import $CERTIFICATE_PATH -P "${{ env.MACOS_APPLE_CERTIFICATE_DEVELOPERIDAPPLICATION_P12_PASSWORD }}" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "${{ env.KEYCHAIN_PASSWORD }}" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Setup Xcode and Setup Command Line Tools - macOS / iOS
+        if: matrix.config.platform == 'ios' || matrix.config.platform == 'macos'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Determine SDK Path and set SDKROOT - macOS / iOS
+        if: matrix.config.platform == 'macos' || matrix.config.platform == 'ios'
+        run: |
+          sdk="${{ matrix.config.sdk }}"
+          SDKROOT=$(xcrun --sdk "$sdk" --show-sdk-path)
+          SDKVERSION=$(xcrun --sdk "$sdk" --show-sdk-version)
+          echo "SDKROOT=$SDKROOT" >> $GITHUB_ENV
+          echo "Using SDK: $sdk"
+          echo "SDK Path: $SDKROOT"
+          echo "SDK Version: $SDKVERSION"
+        shell: bash
+      
+      - name: Configure project with CMake and Run build - iOS (iphoneos)
+        if: matrix.config.platform == 'ios'
+        uses: threeal/cmake-action@v2.1.0
+        with:
+          build-dir: build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          generator: Xcode
+          options: CMAKE_SYSTEM_NAME=iOS GAME_BUILD_APPLE_CODE_SIGNING=ON RC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF RC2D_MEMORY_DEBUG_ENABLED=OFF GAME_ENV=staging
+
+      - name: Run build with CMake - iOS (iphoneos)
+        if: matrix.config.platform == 'ios'
+        run: cmake --build build-${{ matrix.config.platform }}-${{ matrix.config.arch }} --config Release
+
+      - name: Verify the signature - iOS (iphoneos)
+        if: matrix.config.platform == 'ios'
+        run: codesign --verify --deep --verify --verbose=4 build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release-iphoneos/*.app
+
+      - name: Create .ipa package for AppStore - iOS (iphoneos)
+        if: matrix.config.platform == 'ios'
+        run: |
+          # Create Payload directory and move .app into it
+          mkdir Payload
+          cp -a build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release-iphoneos/*.app Payload/
+ 
+          # Recuperer le nom du fichier .app pour avoir le même nom pour le .ipa, puis zip le Payload dans un .ipa
+          APP_NAME=$(basename Payload/*.app .app)
+          zip -ry $APP_NAME.ipa Payload/
+
+          # Move .ipa to build directory
+          mv $APP_NAME.ipa build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release-iphoneos/
+
+      - name: Validate app with altool - iOS (iphoneos)
+        if: matrix.config.platform == 'ios'
+        run: |
+          xcrun altool --validate-app --file build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release-iphoneos/*.ipa --type ios --username ${{ env.APPLE_ID }} --password ${{ env.APPLE_APPLICATION_SPECIFIC_PASSWORD }}
+
+      - name: Configure project with CMake - Windows (x64/arm64)
+        if: matrix.config.platform == 'windows'
+        uses: threeal/cmake-action@v2.1.0
+        with:
+          build-dir: build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          generator: Visual Studio 17 2022
+          options: RC2D_ARCH=${{ matrix.config.arch }} RC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF RC2D_MEMORY_DEBUG_ENABLED=OFF GAME_ENV=staging
+          c-compiler: cl
+          cxx-compiler: cl
+          args: -A ${{ matrix.config.arch }}
+
+      - name: Run build with CMake - Windows (x64/arm64)
+        if: matrix.config.platform == 'windows'
+        run: cmake --build build-${{ matrix.config.platform }}-${{ matrix.config.arch }} --config Release
+
+      # TODO: Il faut racheter un certificat de signature de code pour pouvoir signer les builds Windows (x64 et arm64) avec AzureSignTool
+      #- name: Sign files with AzureSignTool - Windows (x64/arm64)
+      #  if: matrix.config.platform == 'windows'
+      #  uses: CrzGames/azure-signtool-action@v1.1.0
+      #  with:
+      #    azure-key-vault-url: 'https://signmycodecertificates.vault.azure.net'
+      #    azure-key-vault-client-id: ${{ secrets.AZURE_KEY_VAULT_APP_CLIENT_ID }}
+      #    azure-key-vault-client-secret: ${{ secrets.AZURE_KEY_VAULT_APP_CLIENT_SECRET }}
+      #    azure-key-vault-tenant-id: ${{ secrets.AZURE_KEY_VAULT_TENANT_ID }}
+      #    azure-key-vault-certificate: 'CorentinRecanzone'
+      #    timestamp-rfc3161: 'http://timestamp.digicert.com'
+      #    timestamp-digest: 'sha512'
+      #    file-digest: 'sha512'
+      #    files: 'build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.dll build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.exe'
+      #    recursive: true
+
+      - name: Configure project with CMake and Run build - Linux (x64/arm64)
+        if: matrix.config.platform == 'linux'
+        uses: threeal/cmake-action@v2.1.0
+        with:
+          run-build: true
+          build-dir: build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          generator: Unix Makefiles
+          c-compiler: gcc
+          cxx-compiler: g++
+          options: CMAKE_BUILD_TYPE=Release RC2D_ARCH=${{ matrix.config.arch }} RC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF RC2D_MEMORY_DEBUG_ENABLED=OFF GAME_ENV=staging
+
+      - name: CMake Install for generate AppImage - Linux (x64/arm64)
+        if: matrix.config.platform == 'linux'
+        run: cmake --install build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+
+      - name: Configure project with CMake and Run build - SteamRT4 (x64/arm64)
+        if: matrix.config.platform == 'steamrt4'
+        uses: threeal/cmake-action@v2.1.0
+        with:
+          run-build: true
+          build-dir: build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          generator: Unix Makefiles
+          c-compiler: gcc
+          cxx-compiler: g++
+          options: CMAKE_BUILD_TYPE=Release RC2D_ARCH=${{ matrix.config.arch }} RC2D_PLATFORM=STEAMRT4 RC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF RC2D_MEMORY_DEBUG_ENABLED=OFF GAME_ENV=staging
+
+      - name: Bundle runtime (SteamRT4) - only executable + .so + assets + shaders
+        if: matrix.config.platform == 'steamrt4'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUILD_DIR="build-${{ matrix.config.platform }}-${{ matrix.config.arch }}"
+          OUT="bundle-${{ matrix.config.platform }}-${{ matrix.config.arch }}"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+
+          # 1) Binaire(s) depuis le build dir (mono-config => pas de Release/)
+          # Copie tous les exécutables (perm -111) sauf libs et CMakeFiles.
+          find "$BUILD_DIR" -type f -perm -111 \
+            -not -path "*/CMakeFiles/*" \
+            -not -name "*.so" -not -name "*.so.*" \
+            -exec cp -a {} "$OUT/" \;
+
+          # 2) Data
+          cp -a assets "$OUT/"
+
+          # 3) Shaders: copier puis ne garder que compiled + reflection
+          cp -a shaders "$OUT/"
+          if [ -d "$OUT/shaders" ]; then
+            find "$OUT/shaders" -mindepth 1 -maxdepth 1 \
+              -not -name "compiled" \
+              -not -name "reflection" \
+              -exec rm -rf {} +
+          fi
+
+          # 4) Libs: copie tous les .so / .so.* depuis la racine (comme ton dossier local)
+          find . -maxdepth 1 -type f \( -name "*.so" -o -name "*.so.*" \) \
+            -exec cp -a {} "$OUT/" \;
+
+          # (optionnel) Libs aussi depuis le build dir au cas où
+          find "$BUILD_DIR" -type f \( -name "*.so" -o -name "*.so.*" \) \
+            -exec cp -a {} "$OUT/" \;
+
+          # 5) Supprimer tous les fichiers .awk du bundle
+          find "$OUT" -type f -name "*.awk" -delete
+
+          # 6) Copier le fichier version.txt à la racine du bundle
+          cp -a "$BUILD_DIR/version.txt" "$OUT/"
+
+          echo "=== Bundle content ==="
+          find "$OUT" -maxdepth 3 -print
+
+      - name: Configure project with CMake - macOS (arm64)
+        if: matrix.config.platform == 'macos'
+        uses: threeal/cmake-action@v2.1.0
+        with:
+          build-dir: build-${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          generator: Xcode
+          c-compiler: clang
+          cxx-compiler: clang++
+          options: CMAKE_SYSTEM_NAME=Darwin GAME_BUILD_APPLE_CODE_SIGNING=ON CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO RC2D_GPU_SHADER_HOT_RELOAD_ENABLED=OFF RC2D_MEMORY_DEBUG_ENABLED=OFF GAME_ENV=staging
+          
+      - name: Run build with CMake - macOS (arm64)
+        if: matrix.config.platform == 'macos'
+        run: cmake --build build-${{ matrix.config.platform }}-${{ matrix.config.arch }} --config Release
+
+      - name: Verify the signature - macOS
+        if: matrix.config.platform == 'macos'
+        run: codesign --verify --deep --verify --verbose=4 build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app
+        
+      - name: Store credentials for notarization - macOS
+        if: matrix.config.platform == 'macos'
+        run: |
+          xcrun notarytool store-credentials login \
+          --apple-id "${{ env.APPLE_ID }}" \
+          --team-id "${{ env.APPLE_TEAM_ID }}" \
+          --password "${{ env.APPLE_APPLICATION_SPECIFIC_PASSWORD }}"
+
+      - name: Create zip for notarization - macOS
+        if: matrix.config.platform == 'macos'
+        run: zip -r --symlinks build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/MyApp.zip build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app
+
+      - name: Submit app for notarization + print log if invalid - macOS
+        if: matrix.config.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP_PATH="build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/MyApp.zip"
+
+          echo "Submitting notarization for: $ZIP_PATH"
+          OUT="$(xcrun notarytool submit "$ZIP_PATH" --wait --keychain-profile login --output-format json)"
+          echo "$OUT"
+
+          ID="$(echo "$OUT" | python -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+          STATUS="$(echo "$OUT" | python -c 'import sys,json; print(json.load(sys.stdin)["status"])')"
+
+          echo "Notary submission id: $ID"
+          echo "Notary status: $STATUS"
+
+          if [[ "$STATUS" != "Accepted" ]]; then
+            echo "❌ Notarization failed -> fetching log..."
+            xcrun notarytool log "$ID" --keychain-profile login || true
+            exit 1
+          fi
+
+          echo "✅ Notarization accepted"
+
+      - name: Staple the notarization ticket - macOS
+        if: matrix.config.platform == 'macos'
+        run: xcrun stapler staple build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app
+
+      - name: Verify the signature and notarization - macOS
+        if: matrix.config.platform == 'macos'
+        run: spctl --assess --verbose=2 --type exec build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app
+        
+      - name: Zip the bundle .app for Artificat - macOS
+        if: matrix.config.platform == 'macos'
+        # OBLIGATOIRE de faire ça sinon quand ont l'envoie dans les artifacts sans le zip avec le flag --symlinks
+        # GitHub Actions ne prend pas en compte les symlinks et le .app ne fonctionne pas (error is ambiguous)
+        run: |
+          # Recuperer le nom du fichier .app pour avoir le même nom pour le .zip
+          APP_NAME=$(basename build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app .app)
+          # Supprimer l'ancien zip
+          rm -f build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.zip
+          # Créer un dossier macos et copier le .app dedans
+          mkdir macos
+          cp -a build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*.app macos/
+          # Zip le bundle .app
+          zip -r --symlinks macos/$APP_NAME.zip macos/*.app
+          # Supprimer le bundle .app
+          rm -rf macos/*.app
+
+      - name: Archive executable artifacts - Android
+        if: matrix.config.platform == 'android'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}
+          retention-days: 1
+          path: android
+
+      - name: Archive executable artifacts - iOS
+        if: matrix.config.platform == 'ios'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          retention-days: 1
+          path: |
+            build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release-iphoneos/*.ipa
+
+      - name: Archive executable artifacts - macOS
+        if: matrix.config.platform == 'macos'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          retention-days: 1
+          path: macos/*.zip
+
+      - name: Archive executable artifacts - Linux
+        if: matrix.config.platform == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          retention-days: 1
+          path: |
+            build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/*.AppImage
+
+      - name: Archive executable artifacts - SteamRT4
+        if: matrix.config.platform == 'steamrt4'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          retention-days: 1
+          path: |
+            bundle-${{ matrix.config.platform }}-${{ matrix.config.arch }}/
+
+      - name: Archive executable artifacts - Windows
+        if: matrix.config.platform == 'windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.config.platform }}-${{ matrix.config.arch }}
+          retention-days: 1
+          path: |
+            build-${{ matrix.config.platform }}-${{ matrix.config.arch }}/Release/*
+
+  deploy_executable_s3:
+    needs: build_game_and_sign
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+          - platform: macos-26
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+
+      - name: Read version from artifact variables.env - Windows / Linux / Android / SteamRT4
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          source variables/variables.env
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+          echo "APP_VERSION_STR=$APP_VERSION_STR" >> $GITHUB_ENV
+    
+      - name: Read version and identifier from artifact variables-apple.env - iOS (iphoneos)
+        # On'as besoin de ces variables pour l'étape de fastlane via le script Fastfile
+        if: matrix.platform == 'macos-26'
+        run: |
+          source variables-apple/variables-apple.env
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+          echo "APP_VERSION_STR=$APP_VERSION_STR" >> $GITHUB_ENV
+          echo "APP_IOSMACOS_IDENTIFIER=$APP_IOSMACOS_IDENTIFIER" >> $GITHUB_ENV
+
+      - name: Install Fastlane via Homebrew - iOS (iphoneos)
+        if: matrix.platform == 'macos-26'
+        run: brew install fastlane
+
+      #- name: Deploy IPA to TestFlight (groups beta/qa) - iOS (iphoneos)
+      #  if: matrix.platform == 'macos-26'
+      #  run: |
+      #    mv ios-arm64/*.ipa platforms/ios/
+      #    IPA_PATH=$(ls platforms/ios/*.ipa | head -n 1)
+      #    if [ -z "$IPA_PATH" ]; then
+      #      echo "No IPA file found in platforms/ios/"
+      #      exit 1
+      #    fi
+      #    
+      #    cd platforms/ios
+      #    fastlane submit_for_review to_testflight:true
+          
+      #- name: Deploy AAB to Play Store (tests internes) - Android
+      #  if: matrix.platform == 'ubuntu-latest'
+      #  uses: r0adkll/upload-google-play@v1
+      #  with:
+      #    serviceAccountJsonPlainText: ${{ secrets.ANDROID_GOOGLE_CLOUD_PLATEFORM_SERVICE_JSON_BASE64 }}
+      #    packageName: "com.crzgames.testexe"
+      #    whatsNewDirectory: "android-project/distribution/whatsnew"
+      #    status: "completed" # Or completed/inProgress/halted/draft
+      #    releaseFiles: "android/aab/*.aab"
+      #    # Doc (track) : https://developers.google.com/android-publisher/tracks?hl=fr#adding_and_modifying_apks
+      #    # Production : production
+      #    # Tests ouverts : beta
+      #    # Tests internes : qa
+      #    track: "qa" # Or beta/qa/production
+
+      #- name: Deploy AAB to Play Store (tests ouverts) - Android
+      #  if: matrix.platform == 'ubuntu-latest'
+      #  uses: r0adkll/upload-google-play@v1
+      #  with:
+      #    serviceAccountJsonPlainText: ${{ secrets.ANDROID_GOOGLE_CLOUD_PLATEFORM_SERVICE_JSON_BASE64 }}
+      #    packageName: "com.crzgames.testexe"
+      #    whatsNewDirectory: "android-project/distribution/whatsnew"
+      #    status: "completed" # Or completed/inProgress/halted/draft
+      #    releaseFiles: "android/aab/*.aab"
+      #    # Doc (track) : https://developers.google.com/android-publisher/tracks?hl=fr#adding_and_modifying_apks
+      #    # Production : production
+      #    # Tests ouverts : beta
+      #    # Tests internes : qa
+      #    track: "beta" # Or beta/qa/production
+
+      - name: Organize Artificats for Windows / Linux / SteamRT4 / macOS / iOS
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          mkdir -p windows/x64
+          mkdir -p windows/arm64
+          mkdir -p linux/x64
+          mkdir -p linux/arm64
+          mkdir -p macos/arm64
+          mkdir -p ios/arm64-iphoneos
+          mkdir -p steamrt4/x64
+          mkdir -p steamrt4/arm64
+          mv windows-x64/* windows/x64/
+          mv windows-arm64/* windows/arm64/
+          mv linux-x64/*.AppImage linux/x64/
+          mv linux-arm64/*.AppImage linux/arm64/
+          mv steamrt4-x64/* steamrt4/x64/
+          mv steamrt4-arm64/* steamrt4/arm64/
+          mv macos-arm64/*.zip macos/arm64/
+          mv ios-arm64/*.ipa ios/arm64-iphoneos/
+
+      - name: Create distributable zips for OVH S3 - Windows / Linux / SteamRT4 / macOS / iOS / Android
+        if: matrix.platform == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SUFFIX="${APP_VERSION_STR}"
+
+          APP_NAME_SAFE="$(echo "${APP_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g')"
+
+          mkdir -p dist
+          DIST_DIR="$(pwd)/dist"
+
+          zip_dir () {
+            local src="$1"
+            local out_name="$2"
+            ( cd "$src" && zip -ry --symlinks "${DIST_DIR}/${out_name}" . )
+          }
+          zip_dir_with_root () {
+            local src="$1"
+            local out_name="$2"
+            local root="$3"
+
+            rm -rf ".tmp-pack"
+            mkdir -p ".tmp-pack/$root"
+            cp -a "$src"/. ".tmp-pack/$root/"
+
+            ( cd ".tmp-pack" && zip -ry --symlinks "${DIST_DIR}/${out_name}" "$root" )
+            rm -rf ".tmp-pack"
+          }
+
+          # Windows
+          if [ -d "windows/x64" ]; then
+            ZIP_NAME="${APP_NAME_SAFE}-windows-x64-${SUFFIX}.zip"
+            ROOT="${APP_NAME_SAFE}"
+            zip_dir_with_root "windows/x64" "$ZIP_NAME" "$ROOT"
+          fi
+
+          if [ -d "windows/arm64" ]; then
+            ZIP_NAME="${APP_NAME_SAFE}-windows-arm64-${SUFFIX}.zip"
+            ROOT="${APP_NAME_SAFE}"
+            zip_dir_with_root "windows/arm64" "$ZIP_NAME" "$ROOT"
+          fi
+
+          # Linux
+          if [ -d "linux/x64" ]; then
+            zip_dir "linux/x64" "${APP_NAME_SAFE}-linux-x64-${SUFFIX}.zip"
+          fi
+          if [ -d "linux/arm64" ]; then
+            zip_dir "linux/arm64" "${APP_NAME_SAFE}-linux-arm64-${SUFFIX}.zip"
+          fi
+
+          # SteamRT4
+          if [ -d "steamrt4/x64" ]; then
+            ZIP_NAME="${APP_NAME_SAFE}-steamrt4-x64-${SUFFIX}.zip"
+            ROOT="${APP_NAME_SAFE}"
+            zip_dir_with_root "steamrt4/x64" "$ZIP_NAME" "$ROOT"
+          fi
+
+          if [ -d "steamrt4/arm64" ]; then
+            ZIP_NAME="${APP_NAME_SAFE}-steamrt4-arm64-${SUFFIX}.zip"
+            ROOT="${APP_NAME_SAFE}"
+            zip_dir_with_root "steamrt4/arm64" "$ZIP_NAME" "$ROOT"
+          fi
+
+          # macOS : reconstruire un zip qui contient uniquement le .app à la racine
+          if ls macos/arm64/*.zip >/dev/null 2>&1; then
+            rm -rf tmp-macos
+            mkdir -p tmp-macos
+
+            MAC_ZIP="$(ls macos/arm64/*.zip | head -n 1)"
+            unzip -q "$MAC_ZIP" -d tmp-macos
+
+            # trouver le .app (où qu'il soit dans le zip)
+            APP_PATH="$(find tmp-macos -maxdepth 4 -type d -name '*.app' | head -n 1)"
+            if [ -z "${APP_PATH:-}" ]; then
+              echo "No .app found inside $MAC_ZIP"
+              exit 1
+            fi
+
+            rm -f "dist/${APP_NAME_SAFE}-macos-arm64-${SUFFIX}.zip"
+            ( cd "$(dirname "$APP_PATH")" && zip -qry --symlinks "${DIST_DIR}/${APP_NAME_SAFE}-macos-arm64-${SUFFIX}.zip" "$(basename "$APP_PATH")" )
+
+            rm -rf tmp-macos
+          fi
+
+          # iOS : zip sans arch
+          if ls ios/arm64-iphoneos/*.ipa >/dev/null 2>&1; then
+            rm -rf tmp-ios
+            mkdir -p tmp-ios
+            cp -a ios/arm64-iphoneos/*.ipa tmp-ios/
+            ( cd tmp-ios && zip -ry --symlinks "${DIST_DIR}/${APP_NAME_SAFE}-ios-${SUFFIX}.zip" . )
+            rm -rf tmp-ios
+          fi
+
+          # Android : zip sans arch (si artifact android présent)
+          if [ -d "android" ]; then
+            zip_dir "android" "${APP_NAME_SAFE}-android-${SUFFIX}.zip"
+          fi
+
+          echo "=== dist ==="
+          ls -lah dist
+
+      - name: Install AWS CLI for deploy on OVH S3
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          python -m pip install --upgrade pip
+          pip install awscli
+
+      # Deploie sur un bucket S3 les fichiers du jeu
+      # Pour chaque plateforme (Windows, Linux, macOS, SteamRT4, Android, IOS)
+      - name: Upload zips to OVH S3 (Games binaries) - Windows / Linux / SteamRT4 / macOS / iOS / Android
+        if: matrix.platform == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_NAME_SAFE="$(echo "${APP_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g')"
+
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          BRANCH_SAFE="$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g')"
+
+          aws --endpoint-url "$OVH_S3_ENDPOINT" s3 sync \
+            "dist/" "s3://$OVH_S3_BUCKET/gameclient-${APP_NAME_SAFE}/binaries/${BRANCH_SAFE}/${APP_VERSION_STR}/" \
+            --delete
