@@ -73,6 +73,14 @@ private:
     void resetFogUniforms(void);
 
     /**
+     * @brief Adapt fog styling from current ocean color mode.
+     *
+     * ocean colorMode = 0.0 (blue legacy) -> lighter clouds
+     * ocean colorMode = 1.0 (neutral/non-blue) -> darker clouds
+     */
+    void syncFogUniformsFromOceanMode(void);
+
+    /**
      * @brief Push current uniforms to GPU fragment slot 0.
      * @return True when upload succeeded.
      */

@@ -38,10 +38,13 @@ void GameScene::load(void)
     resetOceanUniforms();
     resetFogUniforms();
 
-    oceanTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-base-sunset.png", RC2D_STORAGE_TITLE);
+    const char* oceanBaseTexturePath = "assets/images/tile-water-base-blue.png";
+    const char* oceanDetailTexturePath = "assets/images/tile-water-detail-blue.png";
+
+    oceanTexture = rc2d_graphics_loadImageFromStorage(oceanBaseTexturePath, RC2D_STORAGE_TITLE);
     if (oceanTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture assets/images/tile-water-base-red.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean texture %s", oceanBaseTexturePath);
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -49,16 +52,22 @@ void GameScene::load(void)
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-base: %s", SDL_GetError());
     }
 
-    oceanTextureDetail = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-detail-sunset.png", RC2D_STORAGE_TITLE);
+    oceanTextureDetail = rc2d_graphics_loadImageFromStorage(oceanDetailTexturePath, RC2D_STORAGE_TITLE);
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture assets/images/tile-water-detail-red.png");
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: failed to load ocean detail texture %s", oceanDetailTexturePath);
         return;
     }
     if (!SDL_SetTextureScaleMode(oceanTextureDetail.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: failed to set scale mode for tile-water-detail: %s", SDL_GetError());
     }
+
+    // Auto switch shader mode from selected base texture:
+    // default tile-water-base.png keeps legacy blue shading, variants use neutral mode.
+    const bool useBlueLegacyMode = (SDL_strcmp(oceanBaseTexturePath, "assets/images/tile-water-base-blue.png") == 0);
+    oceanUniforms.params2[0] = useBlueLegacyMode ? 0.0f : 1.0f;
+    syncFogUniformsFromOceanMode();
 
     causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-caustic.png", RC2D_STORAGE_TITLE);
     if (causticTexture.sdl_texture == nullptr)
@@ -378,6 +387,7 @@ void GameScene::update(double dt)
     {
         fogTimeSeconds += dt;
         fogUniforms.params0[0] = static_cast<float>(fogTimeSeconds);
+        syncFogUniformsFromOceanMode();
         uploadFogUniforms();
     }
 }
@@ -525,7 +535,7 @@ void GameScene::resetOceanUniforms(void)
     oceanUniforms.params1[3] = 0.36f;   // foamIntensity
 
     // params2.x colorMode: 0.0 = blue shading, 1.0 = neutral shading.
-    oceanUniforms.params2[0] = 1.0f;
+    oceanUniforms.params2[0] = 0.00f;
     // params2.y fresnelStrength: stronger angle-dependent reflection.
     oceanUniforms.params2[1] = 0.88f;
     // params2.z sunGlintStrength: specular sun highlights on wave crests.
@@ -553,6 +563,32 @@ void GameScene::resetFogUniforms(void)
     fogUniforms.params2[1] = 0.20f;  // tintG
     fogUniforms.params2[2] = 0.22f;  // tintB
     fogUniforms.params2[3] = 0.86f;  // alphaMax
+
+    syncFogUniformsFromOceanMode();
+}
+
+void GameScene::syncFogUniformsFromOceanMode(void)
+{
+    float neutralMode = oceanUniforms.params2[0];
+    if (neutralMode < 0.0f)
+    {
+        neutralMode = 0.0f;
+    }
+    else if (neutralMode > 1.0f)
+    {
+        neutralMode = 1.0f;
+    }
+
+    // 0.0 (blue legacy): keep lighter clouds.
+    // 1.0 (neutral/non-blue): darken clouds so bright palettes stay contrasted.
+    fogUniforms.params0[3] = 0.90f + (0.06f * neutralMode); // fogIntensity
+    fogUniforms.params1[2] = 0.80f + (0.10f * neutralMode); // edgeBoost
+    fogUniforms.params1[3] = 1.20f + (0.10f * neutralMode); // noiseContrast
+
+    fogUniforms.params2[0] = 0.18f - (0.07f * neutralMode); // tintR
+    fogUniforms.params2[1] = 0.20f - (0.08f * neutralMode); // tintG
+    fogUniforms.params2[2] = 0.22f - (0.09f * neutralMode); // tintB
+    fogUniforms.params2[3] = 0.86f + (0.08f * neutralMode); // alphaMax
 }
 
 bool GameScene::uploadOceanUniforms(void)
