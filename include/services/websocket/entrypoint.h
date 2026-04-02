@@ -1,0 +1,3 @@
+#pragma once
+
+void ClientWebSocket_WaitAndProcessOneSimulationMessage_And_RunWebSocketLogic(void);

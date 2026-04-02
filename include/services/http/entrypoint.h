@@ -1,0 +1,3 @@
+#pragma once
+
+void ClientHttp_WaitAndProcessOneSimulationMessage_And_RunHttpLogic(void);
