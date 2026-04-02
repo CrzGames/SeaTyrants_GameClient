@@ -7,7 +7,8 @@ Outputs (in assets/images by default):
 - tile-water-detail.png    (512x512, RGBA)
 - tile-caustic.png         (512x512, RGBA, grayscale in RGB)
 - tile-foam-streaks.png    (512x512, RGBA, alpha carries streak mask)
-- water-macro.png          (2048x2048, RGBA, soft macro variation)
+- water-macro.png          (2048x2048, RGBA, soft macro variation + packed depth in alpha)
+- tile-water-depth.png     (1024x1024, RGBA, grayscale depth: dark=shallow, bright=deep)
 """
 
 from __future__ import annotations
@@ -313,7 +314,56 @@ def generate_macro(path: Path, rng: np.random.Generator) -> None:
     macro = normalize01(big * 0.70 + mid * 0.20 + drift * 0.10)
     macro = 0.34 + macro * 0.36
 
-    save_rgba(path, macro, macro, macro, np.ones_like(macro, dtype=np.float32))
+    # Pack a large-scale pseudo-bathymetry map in alpha so the shader can
+    # drive coastal tinting/foam without requiring an extra sampler binding.
+    depth_alpha = build_water_depth_field(h, w, rng)
+    depth_alpha = saturate(depth_alpha * 0.92 + 0.04)
+
+    save_rgba(path, macro, macro, macro, depth_alpha)
+
+
+def build_water_depth_field(h: int, w: int, rng: np.random.Generator) -> np.ndarray:
+    """
+    Tileable pseudo-bathymetry map.
+    dark  -> shallow water / coastal shelf
+    bright -> deep ocean
+    """
+    x, y = make_uv(h, w)
+
+    n_continent = spectral_noise_periodic(h, w, beta=3.0, rng=rng)
+    n_shelf = spectral_noise_periodic(h, w, beta=2.3, rng=rng)
+    n_channel = spectral_noise_periodic(h, w, beta=1.7, rng=rng)
+
+    points = rng.random((42, 2), dtype=np.float32)
+    edge = worley_edge_field(h, w, points)
+    edge = normalize01(edge)
+
+    # Near Worley borders = coastal shelves / sand bars.
+    shelf_mask = np.exp(-np.square(edge * 7.8), dtype=np.float32)
+
+    # Long directional channels to avoid isotropic blobs.
+    ridge_a = 0.5 + 0.5 * np.sin(2.0 * math.pi * (x * 2.15 + y * 1.41 + (n_channel - 0.5) * 0.30))
+    ridge_b = 0.5 + 0.5 * np.sin(2.0 * math.pi * (x * -1.87 + y * 2.44 + (n_shelf - 0.5) * 0.24))
+    channels = ridge_a * 0.55 + ridge_b * 0.45
+
+    depth = (
+        0.18
+        + n_continent * 0.62
+        + n_shelf * 0.26
+        + channels * 0.10
+        - shelf_mask * 0.42
+    )
+    depth = normalize01(depth)
+    depth = np.power(depth, 1.16)
+    depth = saturate(depth * 0.96 + 0.02)
+
+    return depth
+
+
+def generate_water_depth(path: Path, rng: np.random.Generator) -> None:
+    h = w = 1024
+    depth = build_water_depth_field(h, w, rng)
+    save_rgba(path, depth, depth, depth, np.ones_like(depth, dtype=np.float32))
 
 
 def main() -> int:
@@ -356,6 +406,9 @@ def main() -> int:
 
     generate_macro(out_dir / "water-macro.png", rng)
     print("[watergen] wrote water-macro.png (2048x2048)")
+
+    generate_water_depth(out_dir / "tile-water-depth.png", rng)
+    print("[watergen] wrote tile-water-depth.png (1024x1024)")
 
     return 0
 
