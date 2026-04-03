@@ -16,8 +16,7 @@ private:
     int hpCurrent;                 /**< HP actuels du joueur. */
     int hpMax;                     /**< HP max du joueur. */
     float moveSpeedTilesPerSecond; /**< Vitesse logique en tuiles/s. */
-
-    Ship ship; /**< Navire actuellement equipe. */
+    Ship ship;                     /**< Navire actuellement equipe. */
 
 public:
     /**
