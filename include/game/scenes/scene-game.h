@@ -1,7 +1,6 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
-
 #include "game/shaders/fog-of-war-shader.h"
 #include "game/shaders/ocean-shader.h"
 #include "game/scenes/scene.h"

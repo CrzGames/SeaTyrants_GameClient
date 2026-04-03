@@ -1,7 +1,6 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
-
 #include "game/scenes/scene.h"
 
 /**

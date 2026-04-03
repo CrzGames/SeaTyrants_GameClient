@@ -1,5 +1,6 @@
 #include "game/scenes/scene-game.h"
 
+#include "game/game_screen.h"
 #include "game/scenes/scene-manager.h"
 
 GameScene::Shaders::Shaders(void)
@@ -100,11 +101,8 @@ void GameScene::draw(void)
         return;
     }
 
-    // Recupere la zone visible securisee de la scene.
-    SDL_FRect visibleRect = rc2d_engine_getVisibleSafeRectRender();
-
     // Delegate le dessin des shaders au sous-module.
-    shaders.draw(visibleRect);
+    shaders.draw(gameScreen.rect);
 }
 
 void GameScene::keypressed(

@@ -1,5 +1,6 @@
 #include "game/scenes/scene-splashscreen.h"
 
+#include "game/game_screen.h"
 #include "game/scenes/scene-manager.h"
 
 /**
@@ -50,8 +51,8 @@ void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
         return;
     }
 
-    // Read visible safe rectangle from RC2D.
-    SDL_FRect rect = rc2d_engine_getVisibleSafeRectRender();
+    // Read visible safe rectangle from shared game screen wrapper.
+    SDL_FRect rect = gameScreen.rect;
 
     // Guard against invalid render area.
     if (rect.w <= 0.0f || rect.h <= 0.0f)
