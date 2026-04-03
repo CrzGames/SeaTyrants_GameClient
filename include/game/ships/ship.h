@@ -33,8 +33,8 @@ public:
         float scaleY;              /**< Echelle de rendu Y. */
         float drawOffsetX;         /**< Decalage rendu X en pixels. */
         float drawOffsetY;         /**< Decalage rendu Y en pixels. */
-        float drawAnchorX;         /**< Pivot normalise X [0..1] dans le sprite. */
-        float drawAnchorY;         /**< Pivot normalise Y [0..1] dans le sprite. */
+        float drawAnchorX;         /**< Anchor normalise X [0..1] dans le sprite. */
+        float drawAnchorY;         /**< Anchor normalise Y [0..1] dans le sprite. */
     };
 
 private:
@@ -163,6 +163,23 @@ private:
      */
     void drawSpriteCentered(const RC2D_Image& sprite, float centerX, float centerY) const;
 
+    /**
+     * @brief Charge l'ancre de rendu depuis le fichier JSON du dossier navire.
+     *
+     * Formats supportes:
+     * - racine: { "anchorX": ..., "anchorY": ... }
+     * - bloc default: { "default": { "anchorX": ..., "anchorY": ... } }
+     * - bloc default en pixels: { "default": { "anchorPixelX": ..., "anchorPixelY": ... } }
+     * - bloc frames["1.png"] ou frames["1"] avec anchorX/anchorY ou anchorPixelX/anchorPixelY.
+     *
+     * - ship_anchor.json
+     *
+     * @param folderPath Dossier atlas du navire.
+     * @param storageKind Storage RC2D (TITLE/USER).
+     * @return True si une ancre a ete chargee depuis le JSON.
+     */
+    bool loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind storageKind);
+
 public:
     /**
      * @brief Constructeur du navire.
@@ -179,6 +196,11 @@ public:
      * @param folderPath Chemin du dossier atlas navire.
      * @param storageKind Storage RC2D (TITLE/USER).
      * @return True si tous les sprites sont charges.
+     *
+     * Note:
+     * Cette methode essaye aussi de lire la configuration JSON d'ancre
+     * pour surcharger l'ancre de rendu. En cas d'absence/erreur, l'ancre par
+     * defaut reste active.
      */
     bool loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storageKind);
 
@@ -232,9 +254,9 @@ public:
     void setDrawOffset(float offsetX, float offsetY);
 
     /**
-     * @brief Definit le pivot normalise de rendu dans le sprite.
-     * @param anchorX Pivot X normalise [0..1].
-     * @param anchorY Pivot Y normalise [0..1].
+     * @brief Definit l'anchor normalise de rendu dans le sprite.
+     * @param anchorX Anchor X normalise [0..1].
+     * @param anchorY Anchor Y normalise [0..1].
      */
     void setDrawAnchor(float anchorX, float anchorY);
 

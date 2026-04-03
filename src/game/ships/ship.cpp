@@ -1,4 +1,4 @@
-#include "game/ships/ship.h"
+ï»¿#include "game/ships/ship.h"
 
 #include <algorithm>
 #include <cmath>
@@ -6,10 +6,10 @@
 #include <limits>
 #include <set>
 
-namespace {
+#include <cJSON.h>
 
 /**
- * @brief Convertit des coordonnées tile iso vers le repère Sea-like (row/col).
+ * @brief Convertit des coordonnÃ©es tile iso vers le repÃ¨re Sea-like (row/col).
  */
 bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
 {
@@ -41,7 +41,7 @@ bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
 }
 
 /**
- * @brief Convertit le repère Sea-like (row/col) vers des coordonnées tile iso.
+ * @brief Convertit le repÃ¨re Sea-like (row/col) vers des coordonnÃ©es tile iso.
  */
 bool seaRowColToTile(int row, int col, int& outTileX, int& outTileY)
 {
@@ -59,8 +59,6 @@ bool seaRowColToTile(int row, int col, int& outTileX, int& outTileY)
     outTileY = sumY / 2;
     return true;
 }
-
-} // namespace
 
 int Ship::directionToIndex(DiagonalDirection direction)
 {
@@ -151,7 +149,7 @@ float Ship::aStarHeuristic(int fromTileX, int fromTileY, int toTileX, int toTile
         return std::sqrt((dr * dr) + (dc * dc));
     }
 
-    // Fallback sûr si conversion Sea-like impossible.
+    // Fallback sÃ»r si conversion Sea-like impossible.
     const float dx = static_cast<float>(fromTileX - toTileX);
     const float dy = static_cast<float>(fromTileY - toTileY);
     return std::sqrt((dx * dx) + (dy * dy));
@@ -284,7 +282,7 @@ bool Ship::buildPathAStar(
         startCol,
         startIndex});
 
-    // Voisinage 4 du repère Sea-like (parité de row).
+    // Voisinage 4 du repÃ¨re Sea-like (paritÃ© de row).
     constexpr int kNeighborCount = 4;
     const int oddRowDr[kNeighborCount] = {-1, 1, 1, -1};
     const int oddRowDc[kNeighborCount] = {0, 0, -1, -1};
@@ -535,11 +533,11 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
     RC2D_Quad quad = {};
     quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
 
-    const float pivotX = spriteW * config.drawAnchorX;
-    const float pivotY = spriteH * config.drawAnchorY;
+    const float anchorPixelX = spriteW * config.drawAnchorX;
+    const float anchorPixelY = spriteH * config.drawAnchorY;
 
-    const float drawX = (centerX + config.drawOffsetX) - (pivotX * config.scaleX);
-    const float drawY = (centerY + config.drawOffsetY) - (pivotY * config.scaleY);
+    const float drawX = (centerX + config.drawOffsetX) - (anchorPixelX * config.scaleX);
+    const float drawY = (centerY + config.drawOffsetY) - (anchorPixelY * config.scaleY);
 
     rc2d_graphics_drawQuad(
         (RC2D_Image*)&sprite,
@@ -555,6 +553,160 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
         false);
 }
 
+bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind storageKind)
+{
+    if (folderPath == nullptr || folderPath[0] == '\0')
+    {
+        return false;
+    }
+
+    char jsonPath[640] = {0};
+    void* bytes = nullptr;
+    Uint64 len = 0;
+    bool readOk = false;
+
+    std::snprintf(jsonPath, sizeof(jsonPath), "%s/%s", folderPath, "ship_anchor.json");
+
+    if (storageKind == RC2D_STORAGE_TITLE)
+    {
+        readOk = rc2d_storage_titleReadFile(jsonPath, &bytes, &len);
+    }
+    else if (storageKind == RC2D_STORAGE_USER)
+    {
+        readOk = rc2d_storage_userReadFile(jsonPath, &bytes, &len);
+    }
+
+    if (!readOk || bytes == nullptr || len == 0)
+    {
+        return false;
+    }
+
+    cJSON* root = cJSON_ParseWithLength(static_cast<const char*>(bytes), static_cast<size_t>(len));
+    RC2D_free(bytes);
+    bytes = nullptr;
+    if (root == nullptr)
+    {
+        return false;
+    }
+
+    auto setAnchorIfValid = [this](float anchorX, float anchorY) -> bool {
+        if (!std::isfinite(anchorX) || !std::isfinite(anchorY))
+        {
+            return false;
+        }
+
+        setDrawAnchor(anchorX, anchorY);
+        return true;
+    };
+
+    auto getSprite0Size = [this](float& outW, float& outH) -> bool {
+        if (sprites[0].sdl_texture == nullptr)
+        {
+            return false;
+        }
+
+        outW = static_cast<float>(sprites[0].sdl_texture->w);
+        outH = static_cast<float>(sprites[0].sdl_texture->h);
+        return (outW > 0.0f && outH > 0.0f);
+    };
+
+    auto setAnchorFromPixels = [&](float anchorPixelX, float anchorPixelY) -> bool {
+        float w = 0.0f;
+        float h = 0.0f;
+        if (!getSprite0Size(w, h))
+        {
+            return false;
+        }
+
+        return setAnchorIfValid(anchorPixelX / w, anchorPixelY / h);
+    };
+
+    bool loaded = false;
+
+    const cJSON* rootAnchorX = cJSON_GetObjectItemCaseSensitive(root, "anchorX");
+    const cJSON* rootAnchorY = cJSON_GetObjectItemCaseSensitive(root, "anchorY");
+    if (cJSON_IsNumber(rootAnchorX) && cJSON_IsNumber(rootAnchorY))
+    {
+        loaded = setAnchorIfValid(
+            static_cast<float>(rootAnchorX->valuedouble),
+            static_cast<float>(rootAnchorY->valuedouble));
+    }
+
+    const cJSON* defaultObj = cJSON_GetObjectItemCaseSensitive(root, "default");
+    if (!loaded && cJSON_IsObject(defaultObj))
+    {
+        const cJSON* jAnchorX = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorX");
+        const cJSON* jAnchorY = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorY");
+        if (cJSON_IsNumber(jAnchorX) && cJSON_IsNumber(jAnchorY))
+        {
+            loaded = setAnchorIfValid(
+                static_cast<float>(jAnchorX->valuedouble),
+                static_cast<float>(jAnchorY->valuedouble));
+        }
+
+        if (!loaded)
+        {
+            const cJSON* jAnchorPixelX = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorPixelX");
+            const cJSON* jAnchorPixelY = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorPixelY");
+
+            if (cJSON_IsNumber(jAnchorPixelX) && cJSON_IsNumber(jAnchorPixelY))
+            {
+                loaded = setAnchorFromPixels(
+                    static_cast<float>(jAnchorPixelX->valuedouble),
+                    static_cast<float>(jAnchorPixelY->valuedouble));
+            }
+        }
+    }
+
+    const cJSON* framesObj = cJSON_GetObjectItemCaseSensitive(root, "frames");
+    if (!loaded && cJSON_IsObject(framesObj))
+    {
+        const cJSON* frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, "1.png");
+        if (!cJSON_IsObject(frameObj))
+        {
+            frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, "1");
+        }
+
+        if (cJSON_IsObject(frameObj))
+        {
+            const cJSON* jAnchorX = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorX");
+            const cJSON* jAnchorY = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorY");
+            if (cJSON_IsNumber(jAnchorX) && cJSON_IsNumber(jAnchorY))
+            {
+                loaded = setAnchorIfValid(
+                    static_cast<float>(jAnchorX->valuedouble),
+                    static_cast<float>(jAnchorY->valuedouble));
+            }
+
+            if (!loaded)
+            {
+                const cJSON* jAnchorPixelX = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorPixelX");
+                const cJSON* jAnchorPixelY = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorPixelY");
+
+                if (cJSON_IsNumber(jAnchorPixelX) && cJSON_IsNumber(jAnchorPixelY))
+                {
+                    loaded = setAnchorFromPixels(
+                        static_cast<float>(jAnchorPixelX->valuedouble),
+                        static_cast<float>(jAnchorPixelY->valuedouble));
+                }
+            }
+        }
+    }
+
+    cJSON_Delete(root);
+
+    if (loaded)
+    {
+        RC2D_log(
+            RC2D_LOG_INFO,
+            "Ship: ancre chargee depuis '%s' => anchor=(%.4f, %.4f)",
+            jsonPath,
+            config.drawAnchorX,
+            config.drawAnchorY);
+    }
+
+    return loaded;
+}
 Ship::Ship(void)
     : sprites{},
       spritesLoaded(false),
@@ -602,11 +754,18 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
             return false;
         }
     }
+    if (!loadDrawAnchorFromJson(folderPath, storageKind))
+    {
+        RC2D_log(
+            RC2D_LOG_INFO,
+            "Ship: fichier JSON d'ancre absent/invalide, ancre par defaut conservee => anchor=(%.4f, %.4f)",
+            config.drawAnchorX,
+            config.drawAnchorY);
+    }
 
     spritesLoaded = true;
     return true;
 }
-
 void Ship::unloadSprites(void)
 {
     for (size_t i = 0; i < sprites.size(); ++i)
@@ -853,3 +1012,4 @@ void Ship::draw(const Map& map) const
     const SDL_FPoint center = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
     drawSpriteCentered(sprite, center.x, center.y);
 }
+
