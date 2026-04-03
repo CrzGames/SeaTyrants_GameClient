@@ -2,6 +2,9 @@
 
 #include "game/game_screen.h"
 
+static RC2D_UIImage minimapUI = {0};
+static RC2D_UIImage buttonCenterMapUI = {0};
+
 GameScene::Shaders::Shaders(void)
     : oceanShader{},
       fogOfWarShader{},
@@ -79,6 +82,30 @@ void GameScene::load(void)
     // Charge les shaders avant tout autre élément de gameplay.
     shaders.load();
 
+    /* =========================
+    MINIMAP — HAUT DROIT
+    ========================= */
+    minimapUI.image       = rc2d_graphics_loadImageFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
+    minimapUI.imageData   = rc2d_graphics_loadImageDataFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
+    minimapUI.anchor      = RC2D_UI_ANCHOR_TOP_RIGHT;           // coin haut-droit
+    minimapUI.margin_mode = RC2D_UI_MARGIN_PERCENT;             // marges en %
+    minimapUI.margin_x    = 0.01f;                              // ~2% depuis la droite
+    minimapUI.margin_y    = 0.01f;                              // ~2% depuis le haut
+    minimapUI.visible     = true;
+    minimapUI.hittable    = true;
+
+    /* =========================
+    BOUTON CENTRER LA CARTE — BAS CENTRE
+    ========================= */
+    buttonCenterMapUI.image       = rc2d_graphics_loadImageFromStorage("assets/images/button-centermap-ingame.png", RC2D_STORAGE_TITLE);
+    buttonCenterMapUI.imageData   = rc2d_graphics_loadImageDataFromStorage("assets/images/button-centermap-ingame.png", RC2D_STORAGE_TITLE);
+    buttonCenterMapUI.anchor      = RC2D_UI_ANCHOR_BOTTOM_CENTER;
+    buttonCenterMapUI.margin_mode = RC2D_UI_MARGIN_PERCENT;
+    buttonCenterMapUI.margin_x    = 0.0f;
+    buttonCenterMapUI.margin_y    = 0.25f; 
+    buttonCenterMapUI.visible     = true;
+    buttonCenterMapUI.hittable    = true;
+
     /**
      * A SUPPRIMER, EN ATTENDANT.
     */
@@ -116,6 +143,9 @@ void GameScene::draw(void)
     shaders.draw(gameScreen.rect);
     clickMarker.draw(map);
     player.draw(map);
+    // Dessiner les éléments UI par-dessus
+    rc2d_ui_drawImage(&minimapUI);
+    rc2d_ui_drawImage(&buttonCenterMapUI);
 }
 
 void GameScene::keypressed(
