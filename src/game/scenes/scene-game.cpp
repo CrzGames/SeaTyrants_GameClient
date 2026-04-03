@@ -8,7 +8,7 @@ GameScene::Shaders::Shaders(void)
       // Initialise le module shader fog of war.
       fogOfWarShader{},
       // Initialise la couleur ocean par defaut.
-      oceanColor(OceanShader::WaterColor::CORAL)
+      oceanColor(OceanShader::WaterColor::BLUE)
 {
     // Le constructeur du sous-module ne fait pas d'allocation lourde.
 }

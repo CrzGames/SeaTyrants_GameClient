@@ -14,7 +14,7 @@ Texture2D    u_texture0 : register(t0, space2);
 SamplerState s0         : register(s0, space2);
 
 // Additional sampler from SDL_GPURenderState:
-// fog noise texture (for example assets/images/CloudNoise.png).
+// fog noise texture (for example assets/images/cloud-noise.png).
 Texture2D    u_texture1 : register(t1, space2);
 SamplerState s1         : register(s1, space2);
 

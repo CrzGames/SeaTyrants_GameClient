@@ -225,12 +225,12 @@ bool FogOfWarShader::load(void)
     resetUniforms();
 
     // Charge la texture masque du fog.
-    fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/CloudNoise.png", RC2D_STORAGE_TITLE);
+    fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du masque.
     if (fogMaskTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: masque absent (assets/images/CloudNoise.png)");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: masque absent (assets/images/shaders/fogofwar/cloud-noise.png)");
         unload();
         return false;
     }
@@ -248,12 +248,12 @@ bool FogOfWarShader::load(void)
     }
 
     // Charge la texture noise secondaire.
-    fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/CloudNoise.png", RC2D_STORAGE_TITLE);
+    fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du noise.
     if (fogNoiseTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: noise absent (assets/images/CloudNoise.png)");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: noise absent (assets/images/shaders/fogofwar/cloud-noise.png)");
         unload();
         return false;
     }

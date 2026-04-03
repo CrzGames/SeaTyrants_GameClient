@@ -243,15 +243,10 @@ bool OceanShader::load(WaterColor color)
 
     // Construit le chemin base avec le format impose tile-water-base-color.png.
     char requestedBaseTexturePath[256] = {};
-    SDL_snprintf(requestedBaseTexturePath, sizeof(requestedBaseTexturePath), "assets/images/tile-water-base-%s.png", colorToSuffix(color));
+    SDL_snprintf(requestedBaseTexturePath, sizeof(requestedBaseTexturePath), "assets/images/shaders/ocean/tile-water-base-%s.png", colorToSuffix(color));
     // Construit le chemin detail avec le format impose tile-water-detail-color.png.
     char requestedDetailTexturePath[256] = {};
-    SDL_snprintf(requestedDetailTexturePath, sizeof(requestedDetailTexturePath), "assets/images/tile-water-detail-%s.png", colorToSuffix(color));
-
-    // Definis le fallback base legacy sans suffixe.
-    const char* fallbackBaseTexturePath = "assets/images/tile-water-base.png";
-    // Definis le fallback detail legacy sans suffixe.
-    const char* fallbackDetailTexturePath = "assets/images/tile-water-detail.png";
+    SDL_snprintf(requestedDetailTexturePath, sizeof(requestedDetailTexturePath), "assets/images/shaders/ocean/tile-water-detail-%s.png", colorToSuffix(color));
 
     // Conserve le chemin base reellement utilise.
     const char* loadedBaseTexturePath = requestedBaseTexturePath;
@@ -260,13 +255,6 @@ bool OceanShader::load(WaterColor color)
 
     // Charge la texture base demandee.
     oceanTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
-    // Gere le fallback si la texture base est manquante.
-    if (oceanTexture.sdl_texture == nullptr)
-    {
-        RC2D_log(RC2D_LOG_WARN, "OceanShader: base %s absente, fallback sur %s", loadedBaseTexturePath, fallbackBaseTexturePath);
-        loadedBaseTexturePath = fallbackBaseTexturePath;
-        oceanTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
-    }
     // Stoppe le chargement si la texture base reste absente.
     if (oceanTexture.sdl_texture == nullptr)
     {
@@ -282,13 +270,6 @@ bool OceanShader::load(WaterColor color)
 
     // Charge la texture detail demandee.
     oceanTextureDetail = rc2d_graphics_loadImageFromStorage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
-    // Gere le fallback si la texture detail est manquante.
-    if (oceanTextureDetail.sdl_texture == nullptr)
-    {
-        RC2D_log(RC2D_LOG_WARN, "OceanShader: detail %s absent, fallback sur %s", loadedDetailTexturePath, fallbackDetailTexturePath);
-        loadedDetailTexturePath = fallbackDetailTexturePath;
-        oceanTextureDetail = rc2d_graphics_loadImageFromStorage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
-    }
     // Stoppe le chargement si la texture detail reste absente.
     if (oceanTextureDetail.sdl_texture == nullptr)
     {
@@ -307,11 +288,11 @@ bool OceanShader::load(WaterColor color)
     oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
 
     // Charge la texture caustiques.
-    causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-caustic.png", RC2D_STORAGE_TITLE);
+    causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite des caustiques.
     if (causticTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/tile-caustic.png");
+        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/shaders/ocean/tile-caustic.png");
         unload();
         return false;
     }
@@ -322,11 +303,11 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture d'ecume.
-    foamStreaksTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
+    foamStreaksTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite de l'ecume.
     if (foamStreaksTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/tile-foam-streaks.png");
+        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/shaders/ocean/tile-foam-streaks.png");
         unload();
         return false;
     }
@@ -337,11 +318,11 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture macro.
-    macroWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/water-macro.png", RC2D_STORAGE_TITLE);
+    macroWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/water-macro.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite de la macro texture.
     if (macroWaterTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/water-macro.png");
+        RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger assets/images/shaders/ocean/water-macro.png");
         unload();
         return false;
     }
@@ -352,7 +333,7 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture depth dediee.
-    depthWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/tile-water-depth.png", RC2D_STORAGE_TITLE);
+    depthWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-water-depth.png", RC2D_STORAGE_TITLE);
     // Active le filtrage lineaire de la depth map si presente.
     if (depthWaterTexture.sdl_texture != nullptr)
     {
