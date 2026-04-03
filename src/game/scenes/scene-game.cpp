@@ -59,7 +59,7 @@ void GameScene::Shaders::draw(const SDL_FRect& visibleRect)
     oceanShader.draw(visibleRect);
 
     // Dessine ensuite le pass fog au-dessus.
-    fogOfWarShader.draw(visibleRect);
+    //fogOfWarShader.draw(visibleRect);
 }
 
 bool GameScene::Shaders::isReady(void) const
@@ -70,39 +70,113 @@ bool GameScene::Shaders::isReady(void) const
 
 GameScene::GameScene(void)
     // Initialise le sous-module qui regroupe les shaders de la scene.
-    : shaders{}
+    : shaders{},
+      map{},
+      playerShip{},
+      playerShipOccupiedTile{0, 0},
+      playerShipTileInitialized(false),
+      playerShipObjectId(1)
 {
-    // Le constructeur de scene ne fait pas d'allocation lourde.
+    // Parametres de base type SeaFight (tuile 48x32).
+    map.setTileSize(48.0f, 32.0f);
+
+    // Taille de grille de dev (facile a ajuster ensuite).
+    map.setMapSize(64, 64);
+
+    // Couleurs debug lisibles sur l'ocean.
+    map.setDebugFillColors(
+        RC2D_Color{0, 194, 255, 130},
+        RC2D_Color{0, 166, 236, 130});
+    map.setDebugLineColor(RC2D_Color{0, 110, 175, 220});
+
+    // Reglages de base du navire joueur.
+    // Calibrage proche Sea Bandits/SeaFight (deplacement par steps diagonaux).
+    playerShip.setSpeedTilesPerSecond(3.00f);
+    playerShip.setCardinalSwapIntervalSeconds(0.20f);
+    playerShip.setDrawScale(1.0f, 1.0f);
+    playerShip.setDrawOffset(0.0f, 0.0f);
 }
 
 void GameScene::unload(void)
 {
     // Delegate la liberation des shaders au sous-module.
     shaders.unload();
+
+    // Libere l'atlas du navire.
+    playerShip.unloadSprites();
+
+    // Nettoie l'occupation logique des tiles.
+    map.clearAllTileObjects();
+    playerShipTileInitialized = false;
 }
 
 void GameScene::load(void)
 {
     // Delegate le chargement des shaders au sous-module.
     shaders.load();
+
+    // Charge l'atlas du navire joueur.
+    if (!playerShip.loadSpritesFromFolder("assets/atlas/elite21", RC2D_STORAGE_TITLE))
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement sprites navire elite21");
+    }
+
+    // Spawn navire au centre logique de la map.
+    const int spawnTileX = map.getWidthTiles() / 2;
+    const int spawnTileY = map.getHeightTiles() / 2;
+
+    playerShip.setPositionTileInt(spawnTileX, spawnTileY);
+    playerShipOccupiedTile = SDL_Point{spawnTileX, spawnTileY};
+    playerShipTileInitialized = true;
+
+    map.clearAllTileObjects();
+    map.setTileObject(spawnTileX, spawnTileY, playerShipObjectId);
 }
 
 void GameScene::update(double dt)
 {
     // Delegate la mise a jour des shaders au sous-module.
     shaders.update(dt);
+
+    // Recentre la map sur l'ecran de jeu logique.
+    map.centerOnRect(gameScreen.rect);
+
+    // Met a jour le deplacement du navire.
+    playerShip.update(dt, map);
+
+    // Synchronise l'occupation logique de tile du navire.
+    SDL_FPoint shipTileFloat = playerShip.getPositionTile();
+    SDL_Point shipTile = map.roundTile(shipTileFloat.x, shipTileFloat.y);
+    shipTile = map.clampTile(shipTile.x, shipTile.y);
+
+    if (!playerShipTileInitialized)
+    {
+        map.setTileObject(shipTile.x, shipTile.y, playerShipObjectId);
+        playerShipOccupiedTile = shipTile;
+        playerShipTileInitialized = true;
+    }
+    else if (playerShipOccupiedTile.x != shipTile.x || playerShipOccupiedTile.y != shipTile.y)
+    {
+        map.clearTileObject(playerShipOccupiedTile.x, playerShipOccupiedTile.y);
+        map.setTileObject(shipTile.x, shipTile.y, playerShipObjectId);
+        playerShipOccupiedTile = shipTile;
+    }
 }
 
 void GameScene::draw(void)
 {
-    // Stoppe le rendu si le sous-module shaders n'est pas pret.
-    if (!shaders.isReady())
+    // Dessine les shaders uniquement s'ils sont prets.
+    if (shaders.isReady())
     {
-        return;
+        // Delegate le dessin des shaders au sous-module.
+        shaders.draw(gameScreen.rect);
     }
 
-    // Delegate le dessin des shaders au sous-module.
-    shaders.draw(gameScreen.rect);
+    // Dessine ensuite la grille isometrique de debug.
+    //map.drawDebug();
+
+    // Dessine le navire joueur centre sur sa tile.
+    playerShip.draw(map);
 }
 
 void GameScene::keypressed(
@@ -134,14 +208,23 @@ void GameScene::keypressed(
 
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
-    // Marque la variable comme utilisee intentionnellement.
-    (void)x;
+    // Ne gere que le click gauche.
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return;
+    }
 
-    // Marque la variable comme utilisee intentionnellement.
-    (void)y;
+    // Convertit le click ecran en coordonnee tile.
+    SDL_Point tile = map.screenToTileNearest(x, y);
 
-    // Marque la variable comme utilisee intentionnellement.
-    (void)button;
+    // Ignore si la tile est hors map.
+    if (!map.isInside(tile.x, tile.y))
+    {
+        return;
+    }
+
+    // Defini la nouvelle destination du navire.
+    playerShip.setTargetTile(map, tile.x, tile.y);
 
     // Marque la variable comme utilisee intentionnellement.
     (void)clicks;

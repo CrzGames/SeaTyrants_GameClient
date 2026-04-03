@@ -1,6 +1,8 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
+#include "game/map/map.h"
+#include "game/ships/ship.h"
 #include "game/shaders/fog-of-war-shader.h"
 #include "game/shaders/ocean-shader.h"
 #include "game/scenes/scene.h"
@@ -58,6 +60,12 @@ private:
     };
 
     Shaders shaders;   /**< Grouped gameplay shader module. */
+    Map map;           /**< Isometric debug map (SeaFight-style grid). */
+    Ship playerShip;   /**< Navire joueur deplacement click-to-move. */
+
+    SDL_Point playerShipOccupiedTile;   /**< Tile logique occupee par le navire. */
+    bool playerShipTileInitialized;     /**< True quand la tile occupee est initialisee. */
+    int playerShipObjectId;             /**< Identifiant logique de l'objet navire dans la map. */
 
 public:
     /**
