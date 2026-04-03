@@ -5,7 +5,7 @@
 Player::Player(void)
     : hpCurrent(100),
       hpMax(100),
-      moveSpeedTilesPerSecond(3.0f),
+      moveSpeedTilesPerSecond(4.0f),
       ship{}
 {
     ship.setSpeedTilesPerSecond(moveSpeedTilesPerSecond);
