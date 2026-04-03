@@ -1,8 +1,8 @@
-#include "game/renderers/fog-of-war-renderer.h"
+#include "game/shaders/fog-of-war-shader.h"
 
 #include <RC2D/RC2D_internal.h>
 
-FogOfWarRenderer::FogOfWarRenderer(void)
+FogOfWarShader::FogOfWarShader(void)
     // Initialise la texture masque.
     : fogMaskTexture{},
       // Initialise la texture noise.
@@ -22,7 +22,7 @@ FogOfWarRenderer::FogOfWarRenderer(void)
     resetUniforms();
 }
 
-void FogOfWarRenderer::unload(void)
+void FogOfWarShader::unload(void)
 {
     // Détruit le render state si présent.
     if (fogRenderState != nullptr)
@@ -64,7 +64,7 @@ void FogOfWarRenderer::unload(void)
     rc2d_graphics_freeImage(&fogNoiseTexture);
 }
 
-void FogOfWarRenderer::resetUniforms(void)
+void FogOfWarShader::resetUniforms(void)
 {
     // Réinitialise la mémoire des uniforms.
     fogUniforms = {};
@@ -109,7 +109,7 @@ void FogOfWarRenderer::resetUniforms(void)
     fogUniforms.params2[3] = 0.86f;
 }
 
-void FogOfWarRenderer::syncFromOceanColorMode(float oceanColorMode)
+void FogOfWarShader::syncFromOceanColorMode(float oceanColorMode)
 {
     // Copie locale du mode couleur océan.
     float mode = oceanColorMode;
@@ -148,7 +148,7 @@ void FogOfWarRenderer::syncFromOceanColorMode(float oceanColorMode)
     fogUniforms.params2[3] = 0.86f + (0.08f * mode);
 }
 
-bool FogOfWarRenderer::uploadUniforms(void)
+bool FogOfWarShader::uploadUniforms(void)
 {
     // Vérifie que le render state existe.
     if (fogRenderState == nullptr)
@@ -160,7 +160,7 @@ bool FogOfWarRenderer::uploadUniforms(void)
     if (!SDL_SetGPURenderStateFragmentUniforms(fogRenderState, 0, &fogUniforms, sizeof(fogUniforms)))
     {
         // Journalise l'erreur SDL.
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
 
         // Signale un échec d'upload.
         return false;
@@ -170,7 +170,7 @@ bool FogOfWarRenderer::uploadUniforms(void)
     return true;
 }
 
-bool FogOfWarRenderer::resolveGpuTexture(const RC2D_Image& image, const char* label, SDL_GPUTexture** outGpuTexture) const
+bool FogOfWarShader::resolveGpuTexture(const RC2D_Image& image, const char* label, SDL_GPUTexture** outGpuTexture) const
 {
     // Vérifie le pointeur de sortie.
     if (outGpuTexture == nullptr)
@@ -184,7 +184,7 @@ bool FogOfWarRenderer::resolveGpuTexture(const RC2D_Image& image, const char* la
     // Vérifie que la texture SDL existe.
     if (image.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: texture absente pour %s", label);
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: texture absente pour %s", label);
         return false;
     }
 
@@ -194,7 +194,7 @@ bool FogOfWarRenderer::resolveGpuTexture(const RC2D_Image& image, const char* la
     // Vérifie que les propriétés ont été trouvées.
     if (!textureProperties)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: SDL_GetTextureProperties failed for %s: %s", label, SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_GetTextureProperties failed for %s: %s", label, SDL_GetError());
         return false;
     }
 
@@ -205,7 +205,7 @@ bool FogOfWarRenderer::resolveGpuTexture(const RC2D_Image& image, const char* la
     // Vérifie que le pointeur GPU est valide.
     if (gpuTexture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: pointeur GPU texture manquant pour %s", label);
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: pointeur GPU texture manquant pour %s", label);
         return false;
     }
 
@@ -216,7 +216,7 @@ bool FogOfWarRenderer::resolveGpuTexture(const RC2D_Image& image, const char* la
     return true;
 }
 
-bool FogOfWarRenderer::load(void)
+bool FogOfWarShader::load(void)
 {
     // Libère un éventuel état précédent.
     unload();
@@ -230,7 +230,7 @@ bool FogOfWarRenderer::load(void)
     // Vérifie la disponibilité du masque.
     if (fogMaskTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: masque absent (assets/images/CloudNoise.png)");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: masque absent (assets/images/CloudNoise.png)");
         unload();
         return false;
     }
@@ -238,13 +238,13 @@ bool FogOfWarRenderer::load(void)
     // Active le filtrage linéaire du masque.
     if (!SDL_SetTextureScaleMode(fogMaskTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: echec SDL_SetTextureScaleMode mask: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureScaleMode mask: %s", SDL_GetError());
     }
 
     // Active le blend alpha du masque.
     if (!SDL_SetTextureBlendMode(fogMaskTexture.sdl_texture, SDL_BLENDMODE_BLEND))
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: echec SDL_SetTextureBlendMode mask: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureBlendMode mask: %s", SDL_GetError());
     }
 
     // Charge la texture noise secondaire.
@@ -253,7 +253,7 @@ bool FogOfWarRenderer::load(void)
     // Vérifie la disponibilité du noise.
     if (fogNoiseTexture.sdl_texture == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: noise absent (assets/images/CloudNoise.png)");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: noise absent (assets/images/CloudNoise.png)");
         unload();
         return false;
     }
@@ -261,7 +261,7 @@ bool FogOfWarRenderer::load(void)
     // Active le filtrage linéaire du noise.
     if (!SDL_SetTextureScaleMode(fogNoiseTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: echec SDL_SetTextureScaleMode noise: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureScaleMode noise: %s", SDL_GetError());
     }
 
     // Charge le shader fog.
@@ -270,7 +270,7 @@ bool FogOfWarRenderer::load(void)
     // Stoppe le chargement si le shader est absent.
     if (fogFragmentShader == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: impossible de charger fogofwar.fragment");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: impossible de charger fogofwar.fragment");
         unload();
         return false;
     }
@@ -302,7 +302,7 @@ bool FogOfWarRenderer::load(void)
     // Stoppe le chargement si le sampler n'est pas créé.
     if (fogRepeatSampler == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: SDL_CreateGPUSampler failed: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_CreateGPUSampler failed: %s", SDL_GetError());
         unload();
         return false;
     }
@@ -344,7 +344,7 @@ bool FogOfWarRenderer::load(void)
     // Stoppe le chargement si le render state est invalide.
     if (fogRenderState == nullptr)
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: SDL_CreateGPURenderState failed: %s", SDL_GetError());
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_CreateGPURenderState failed: %s", SDL_GetError());
         unload();
         return false;
     }
@@ -352,7 +352,7 @@ bool FogOfWarRenderer::load(void)
     // Enregistre le state pour le hot-reload shader.
     if (!rc2d_gpu_trackGraphicsRenderState("fogofwar.fragment", &fogRenderState, 1, fogSamplerBindings))
     {
-        RC2D_log(RC2D_LOG_WARN, "FogOfWarRenderer: echec tracking GPURenderState pour hot-reload");
+        RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec tracking GPURenderState pour hot-reload");
     }
 
     // Upload les uniforms initiaux.
@@ -362,7 +362,7 @@ bool FogOfWarRenderer::load(void)
     return true;
 }
 
-void FogOfWarRenderer::update(double dt, float oceanColorMode)
+void FogOfWarShader::update(double dt, float oceanColorMode)
 {
     // Ignore l'update si le renderer n'est pas prêt.
     if (!isReady())
@@ -383,7 +383,7 @@ void FogOfWarRenderer::update(double dt, float oceanColorMode)
     uploadUniforms();
 }
 
-void FogOfWarRenderer::draw(const SDL_FRect& visibleRect)
+void FogOfWarShader::draw(const SDL_FRect& visibleRect)
 {
     // Ignore le draw si le renderer n'est pas prêt.
     if (!isReady())
@@ -407,7 +407,7 @@ void FogOfWarRenderer::draw(const SDL_FRect& visibleRect)
     SDL_SetGPURenderState(rc2d_engine_state.renderer, nullptr);
 }
 
-bool FogOfWarRenderer::isReady(void) const
+bool FogOfWarShader::isReady(void) const
 {
     // Vérifie la présence de la texture masque.
     const bool hasMaskTexture = (fogMaskTexture.sdl_texture != nullptr);

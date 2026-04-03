@@ -3,15 +3,15 @@
 #include <RC2D/RC2D.h>
 
 /**
- * @brief Renderer dédié au shader de brouillard de guerre.
+ * @brief Module dedie au shader de brouillard de guerre.
  *
  * Cette classe encapsule la texture de masque, la texture de noise,
  * le shader fog, les uniforms, et le cycle GPU complet.
  */
-class FogOfWarRenderer {
+class FogOfWarShader {
 private:
     /**
-     * @brief Bloc d'uniforms envoyé au fragment shader fog.
+     * @brief Bloc d'uniforms envoye au fragment shader fog.
      *
      * params0 = {time, noiseScale, driftSpeed, fogIntensity}
      * params1 = {revealMin, revealMax, edgeBoost, noiseContrast}
@@ -25,59 +25,59 @@ private:
 
     RC2D_Image fogMaskTexture;            /**< Texture masque visible (t0/s0 via SDL_RenderTexture). */
     RC2D_Image fogNoiseTexture;           /**< Texture noise additionnelle (t1/s1). */
-    RC2D_GPUShader* fogFragmentShader;    /**< Shader fragment fog chargé. */
+    RC2D_GPUShader* fogFragmentShader;    /**< Shader fragment fog charge. */
     SDL_GPURenderState* fogRenderState;   /**< Render state GPU du pass fog. */
     SDL_GPUSampler* fogRepeatSampler;     /**< Sampler repeat pour le noise fog. */
     FogUniforms fogUniforms;              /**< Valeurs runtime des uniforms fog. */
-    double fogTimeSeconds;                /**< Temps cumulé pour animer le fog. */
+    double fogTimeSeconds;                /**< Temps cumule pour animer le fog. */
 
     /**
-     * @brief Réinitialise les uniforms fog à un preset.
+     * @brief Reinitialise les uniforms fog a un preset.
      */
     void resetUniforms(void);
 
     /**
-     * @brief Adapte les uniforms fog selon le mode couleur de l'océan.
+     * @brief Adapte les uniforms fog selon le mode couleur de l'ocean.
      * @param oceanColorMode 0.0 bleu legacy, 1.0 neutral/non-bleu.
      */
     void syncFromOceanColorMode(float oceanColorMode);
 
     /**
      * @brief Upload les uniforms fog sur le slot fragment 0.
-     * @return True si la mise à jour a réussi.
+     * @return True si la mise a jour a reussi.
      */
     bool uploadUniforms(void);
 
     /**
-     * @brief Récupère le pointeur GPU texture SDL depuis une texture 2D RC2D.
+     * @brief Recupere le pointeur GPU texture SDL depuis une texture 2D RC2D.
      * @param image Image RC2D contenant la texture SDL.
-     * @param label Libellé log pour diagnostiquer les erreurs.
+     * @param label Libelle log pour diagnostiquer les erreurs.
      * @param outGpuTexture Sortie: texture GPU SDL.
-     * @return True si le pointeur GPU a été trouvé.
+     * @return True si le pointeur GPU a ete trouve.
      */
     bool resolveGpuTexture(const RC2D_Image& image, const char* label, SDL_GPUTexture** outGpuTexture) const;
 
 public:
     /**
-     * @brief Construit un renderer fog vide.
+     * @brief Construit un module shader fog vide.
      */
-    FogOfWarRenderer(void);
+    FogOfWarShader(void);
 
     /**
-     * @brief Libère toutes les ressources du renderer fog.
+     * @brief Libere toutes les ressources du module shader fog.
      */
     void unload(void);
 
     /**
-     * @brief Charge les ressources fog et crée le render state.
-     * @return True si le renderer est prêt à dessiner.
+     * @brief Charge les ressources fog et cree le render state.
+     * @return True si le module est pret a dessiner.
      */
     bool load(void);
 
     /**
-     * @brief Met à jour le temps et les uniforms fog.
+     * @brief Met a jour le temps et les uniforms fog.
      * @param dt Delta time en secondes.
-     * @param oceanColorMode Mode couleur océan pour ajuster le contraste du fog.
+     * @param oceanColorMode Mode couleur ocean pour ajuster le contraste du fog.
      */
     void update(double dt, float oceanColorMode);
 
@@ -88,7 +88,7 @@ public:
     void draw(const SDL_FRect& visibleRect);
 
     /**
-     * @brief Indique si le renderer fog est prêt.
+     * @brief Indique si le module fog est pret.
      * @return True si les ressources critiques sont valides.
      */
     bool isReady(void) const;

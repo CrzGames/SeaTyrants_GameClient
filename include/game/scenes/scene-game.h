@@ -2,8 +2,8 @@
 
 #include <RC2D/RC2D.h>
 
-#include "game/renderers/fog-of-war-renderer.h"
-#include "game/renderers/ocean-renderer.h"
+#include "game/shaders/fog-of-war-shader.h"
+#include "game/shaders/ocean-shader.h"
 #include "game/scenes/scene.h"
 
 /**
@@ -13,8 +13,8 @@
  */
 class GameScene : public Scene {
 private:
-    OceanRenderer oceanRenderer;         /**< Renderer dédié au shader océan. */
-    FogOfWarRenderer fogOfWarRenderer;   /**< Renderer dédié au shader brouillard de guerre. */
+    OceanShader oceanShader;         /**< Module shader dédié à l'océan. */
+    FogOfWarShader fogOfWarShader;   /**< Module shader dédié au brouillard de guerre. */
 
 public:
     /**

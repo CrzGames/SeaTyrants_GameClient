@@ -4,9 +4,9 @@
 
 GameScene::GameScene(void)
     // Initialise le renderer océan.
-    : oceanRenderer{},
+    : oceanShader{},
       // Initialise le renderer brouillard de guerre.
-      fogOfWarRenderer{}
+      fogOfWarShader{}
 {
     // Le constructeur ne fait pas d'allocation lourde.
 }
@@ -14,22 +14,19 @@ GameScene::GameScene(void)
 void GameScene::unload(void)
 {
     // Libère toutes les ressources GPU de l'océan.
-    oceanRenderer.unload();
+    oceanShader.unload();
 
     // Libère toutes les ressources GPU du brouillard de guerre.
-    fogOfWarRenderer.unload();
+    fogOfWarShader.unload();
 }
 
 void GameScene::load(void)
 {
-    // Définit la texture de base utilisée pour l'océan.
-    const char* oceanBaseTexturePath = "assets/images/tile-water-base-blue.png";
+    // Sélectionne la couleur d'océan chargée dans cette scène.
+    const OceanShader::WaterColor oceanColor = OceanShader::WaterColor::RED;
 
-    // Définit la texture de détail utilisée pour l'océan.
-    const char* oceanDetailTexturePath = "assets/images/tile-water-detail-blue.png";
-
-    // Charge le renderer océan avec les textures demandées.
-    const bool oceanLoaded = oceanRenderer.load(oceanBaseTexturePath, oceanDetailTexturePath);
+    // Charge le shader océan avec la couleur choisie.
+    const bool oceanLoaded = oceanShader.load(oceanColor);
 
     // Journalise une erreur si le renderer océan ne se charge pas.
     if (!oceanLoaded)
@@ -38,7 +35,7 @@ void GameScene::load(void)
     }
 
     // Charge le renderer de brouillard de guerre.
-    const bool fogLoaded = fogOfWarRenderer.load();
+    const bool fogLoaded = fogOfWarShader.load();
 
     // Journalise un avertissement si le renderer fog est indisponible.
     if (!fogLoaded)
@@ -50,16 +47,16 @@ void GameScene::load(void)
 void GameScene::update(double dt)
 {
     // Met à jour l'animation et les uniforms de l'océan.
-    oceanRenderer.update(dt);
+    oceanShader.update(dt);
 
     // Met à jour l'animation du fog en se basant sur le mode couleur océan.
-    fogOfWarRenderer.update(dt, oceanRenderer.getColorMode());
+    fogOfWarShader.update(dt, oceanShader.getColorMode());
 }
 
 void GameScene::draw(void)
 {
     // Stoppe le rendu si l'océan n'a pas été chargé.
-    if (!oceanRenderer.isReady())
+    if (!oceanShader.isReady())
     {
         return;
     }
@@ -68,10 +65,10 @@ void GameScene::draw(void)
     SDL_FRect visibleRect = rc2d_engine_getVisibleSafeRectRender();
 
     // Dessine d'abord l'océan.
-    oceanRenderer.draw(visibleRect);
+    oceanShader.draw(visibleRect);
 
     // Dessine ensuite le fog au-dessus de l'océan.
-    fogOfWarRenderer.draw(visibleRect);
+    fogOfWarShader.draw(visibleRect);
 }
 
 void GameScene::keypressed(
@@ -82,59 +79,10 @@ void GameScene::keypressed(
     bool isrepeat,
     SDL_KeyboardID keyboardID)
 {
-    // Marque la variable comme utilisée intentionnellement.
-    (void)key;
 
-    // Marque la variable comme utilisée intentionnellement.
-    (void)scancode;
-
-    // Marque la variable comme utilisée intentionnellement.
-    (void)mod;
-
-    // Marque la variable comme utilisée intentionnellement.
-    (void)keyboardID;
-
-    // Ignore les répétitions automatiques clavier.
-    if (isrepeat)
-    {
-        return;
-    }
-
-    // Retourne au menu principal.
-    if (keycode == SDLK_M && sceneManager != nullptr)
-    {
-        sceneManager->changeScene("menu");
-        return;
-    }
-
-    // Ouvre la scène éditeur de carte.
-    if (keycode == SDLK_E && sceneManager != nullptr)
-    {
-        sceneManager->changeScene("editormap");
-        return;
-    }
-
-    // Quitte le jeu avec la touche Echap.
-    if (keycode == SDLK_ESCAPE)
-    {
-        rc2d_event_quit();
-    }
 }
 
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
-    // Marque la variable comme utilisée intentionnellement.
-    (void)x;
 
-    // Marque la variable comme utilisée intentionnellement.
-    (void)y;
-
-    // Marque la variable comme utilisée intentionnellement.
-    (void)button;
-
-    // Marque la variable comme utilisée intentionnellement.
-    (void)clicks;
-
-    // Marque la variable comme utilisée intentionnellement.
-    (void)mouseID;
 }
