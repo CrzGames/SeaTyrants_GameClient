@@ -109,7 +109,7 @@ void GameScene::load(void)
     /**
      * A SUPPRIMER, EN ATTENDANT.
     */
-    if (!player.loadShip("assets/atlas/elite27", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/atlas/elite20", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite21");
     }
