@@ -1,25 +1,25 @@
 #include "game/ships/ship.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cmath>
+#include <cstdio>
 #include <limits>
-#include <queue>
 #include <set>
 
 namespace {
 
+/**
+ * @brief Convertit des coordonnées tile iso vers le repère Sea-like (row/col).
+ */
 bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
 {
-    // Conversion coordonnees "diamant" (tileX,tileY) vers grille Sea Bandits (row,col).
-    const int s = tileX + tileY;       // = row - 1
-    const int n = tileX - tileY;       // = 2*col (+1 si row pair)
+    const int s = tileX + tileY;
+    const int n = tileX - tileY;
     const int row = s + 1;
 
     int col = 0;
     if ((row & 1) == 0)
     {
-        // row pair: n doit etre impair.
         if ((n & 1) == 0)
         {
             return false;
@@ -28,7 +28,6 @@ bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
     }
     else
     {
-        // row impair: n doit etre pair.
         if ((n & 1) != 0)
         {
             return false;
@@ -41,9 +40,11 @@ bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
     return true;
 }
 
+/**
+ * @brief Convertit le repère Sea-like (row/col) vers des coordonnées tile iso.
+ */
 bool seaRowColToTile(int row, int col, int& outTileX, int& outTileY)
 {
-    // Inverse de tileToSeaRowCol.
     const int s = row - 1;
     const int n = (2 * col) + (((row & 1) == 0) ? 1 : 0);
 
@@ -68,42 +69,38 @@ int Ship::directionToIndex(DiagonalDirection direction)
 
 int Ship::spriteIndexForDirection(DiagonalDirection direction) const
 {
-    const int directionIndex = directionToIndex(direction);
-    if (directionIndex < 0 || directionIndex >= 4)
+    const int dirIndex = directionToIndex(direction);
+    if (dirIndex < 0 || dirIndex >= 4)
     {
         return -1;
     }
 
-    // full: 1..4 => indices 0..3, low: 5..8 => indices 4..7
-    if (healthVisual == HealthVisual::LOW)
-    {
-        return 4 + directionIndex;
-    }
-    return directionIndex;
+    // FULL: 1..4 => index 0..3, LOW: 5..8 => index 4..7
+    return (healthVisual == HealthVisual::LOW) ? (4 + dirIndex) : dirIndex;
 }
 
-const RC2D_Image* Ship::getCurrentSprite(void) const
+int Ship::getCurrentSpriteIndex(void) const
 {
-    if (!areSpritesLoaded())
+    if (!spritesLoaded)
     {
-        return nullptr;
+        return -1;
     }
 
-    const DiagonalDirection activeDirection =
+    const DiagonalDirection visualDirection =
         (directionUsesPair && directionToggle) ? directionB : directionA;
 
-    const int spriteIndex = spriteIndexForDirection(activeDirection);
+    const int spriteIndex = spriteIndexForDirection(visualDirection);
     if (spriteIndex < 0 || spriteIndex >= static_cast<int>(sprites.size()))
     {
-        return nullptr;
+        return -1;
     }
 
     if (sprites[static_cast<size_t>(spriteIndex)].sdl_texture == nullptr)
     {
-        return nullptr;
+        return -1;
     }
 
-    return &sprites[static_cast<size_t>(spriteIndex)];
+    return spriteIndex;
 }
 
 Ship::MoveDirection Ship::quantizeScreenDirection(float deltaScreenX, float deltaScreenY)
@@ -114,15 +111,11 @@ Ship::MoveDirection Ship::quantizeScreenDirection(float deltaScreenX, float delt
         return MoveDirection::NONE;
     }
 
-    // atan2 dans le repere ecran (Y positif vers le bas).
     const float angle = std::atan2(deltaScreenY, deltaScreenX);
     constexpr float kPi = 3.14159265358979323846f;
-    constexpr float kStep = kPi / 4.0f; // 45 deg
+    constexpr float kStep = kPi / 4.0f;
 
-    // Octant le plus proche.
     int octant = static_cast<int>(std::floor((angle + (kStep * 0.5f)) / kStep));
-
-    // Normalise en [0..7].
     octant %= 8;
     if (octant < 0)
     {
@@ -139,56 +132,17 @@ Ship::MoveDirection Ship::quantizeScreenDirection(float deltaScreenX, float delt
         case 5: return MoveDirection::UP_LEFT;
         case 6: return MoveDirection::UP;
         case 7: return MoveDirection::UP_RIGHT;
-        default: break;
+        default: return MoveDirection::NONE;
     }
-
-    return MoveDirection::NONE;
 }
 
-SDL_FPoint Ship::directionUnitScreen(MoveDirection direction)
+float Ship::aStarHeuristic(int fromTileX, int fromTileY, int toTileX, int toTileY)
 {
-    SDL_FPoint v = {0.0f, 0.0f};
+    int fromRow = 0;
+    int fromCol = 0;
+    int toRow = 0;
+    int toCol = 0;
 
-    switch (direction)
-    {
-        case MoveDirection::RIGHT:      v = { 1.0f,  0.0f}; break;
-        case MoveDirection::DOWN_RIGHT: v = { 1.0f,  1.0f}; break;
-        case MoveDirection::DOWN:       v = { 0.0f,  1.0f}; break;
-        case MoveDirection::DOWN_LEFT:  v = {-1.0f,  1.0f}; break;
-        case MoveDirection::LEFT:       v = {-1.0f,  0.0f}; break;
-        case MoveDirection::UP_LEFT:    v = {-1.0f, -1.0f}; break;
-        case MoveDirection::UP:         v = { 0.0f, -1.0f}; break;
-        case MoveDirection::UP_RIGHT:   v = { 1.0f, -1.0f}; break;
-        case MoveDirection::NONE:
-        default:                        v = { 0.0f,  0.0f}; break;
-    }
-
-    const float lenSq = (v.x * v.x) + (v.y * v.y);
-    if (lenSq > 0.0f)
-    {
-        const float invLen = 1.0f / std::sqrt(lenSq);
-        v.x *= invLen;
-        v.y *= invLen;
-    }
-
-    return v;
-}
-
-float Ship::aStarStepCost(const Map& map, int deltaTileX, int deltaTileY)
-{
-    (void)map;
-    (void)deltaTileX;
-    (void)deltaTileY;
-    // Sea Bandits: cout uniforme par step.
-    return 1.0f;
-}
-
-float Ship::aStarHeuristic(const Map& map, int fromTileX, int fromTileY, int toTileX, int toTileY)
-{
-    (void)map;
-
-    int fromRow = 0, fromCol = 0;
-    int toRow = 0, toCol = 0;
     if (tileToSeaRowCol(fromTileX, fromTileY, fromRow, fromCol) &&
         tileToSeaRowCol(toTileX, toTileY, toRow, toCol))
     {
@@ -197,7 +151,7 @@ float Ship::aStarHeuristic(const Map& map, int fromTileX, int fromTileY, int toT
         return std::sqrt((dr * dr) + (dc * dc));
     }
 
-    // Fallback robuste.
+    // Fallback sûr si conversion Sea-like impossible.
     const float dx = static_cast<float>(fromTileX - toTileX);
     const float dy = static_cast<float>(fromTileY - toTileY);
     return std::sqrt((dx * dx) + (dy * dy));
@@ -221,8 +175,7 @@ bool Ship::isWalkableForPath(
         return true;
     }
 
-    // -1 = vide, sinon occupe.
-    return map.getTileObject(tileX, tileY) < 0;
+    return !map.isTileBlocked(tileX, tileY);
 }
 
 bool Ship::buildPathAStar(
@@ -289,14 +242,17 @@ bool Ship::buildPathAStar(
             {
                 return a.f < b.f;
             }
+
             if (a.row != b.row)
             {
                 return a.row < b.row;
             }
+
             if (a.col != b.col)
             {
                 return a.col < b.col;
             }
+
             return a.index < b.index;
         }
     };
@@ -305,10 +261,12 @@ bool Ship::buildPathAStar(
     std::vector<NodeState> states(
         static_cast<size_t>(total),
         NodeState{inf, inf, -1, false, MoveDirection::NONE});
-    std::set<OpenEntry, OpenCompare> open;
+
+    std::set<OpenEntry, OpenCompare> openSet;
 
     const int startIndex = indexOf(startTile.x, startTile.y);
     const int goalIndex = indexOf(goalTile.x, goalTile.y);
+
     int startRow = 0;
     int startCol = 0;
     if (!tileToSeaRowCol(startTile.x, startTile.y, startRow, startCol))
@@ -318,14 +276,15 @@ bool Ship::buildPathAStar(
 
     states[static_cast<size_t>(startIndex)].g = 0.0f;
     states[static_cast<size_t>(startIndex)].f =
-        aStarHeuristic(map, startTile.x, startTile.y, goalTile.x, goalTile.y);
-    open.insert(OpenEntry{
+        aStarHeuristic(startTile.x, startTile.y, goalTile.x, goalTile.y);
+
+    openSet.insert(OpenEntry{
         states[static_cast<size_t>(startIndex)].f,
         startRow,
         startCol,
         startIndex});
 
-    // Sea Bandits-style: voisinage 4 selon la parite de row.
+    // Voisinage 4 du repère Sea-like (parité de row).
     constexpr int kNeighborCount = 4;
     const int oddRowDr[kNeighborCount] = {-1, 1, 1, -1};
     const int oddRowDc[kNeighborCount] = {0, 0, -1, -1};
@@ -334,10 +293,10 @@ bool Ship::buildPathAStar(
 
     bool found = false;
 
-    while (!open.empty())
+    while (!openSet.empty())
     {
-        const OpenEntry current = *open.begin();
-        open.erase(open.begin());
+        const OpenEntry current = *openSet.begin();
+        openSet.erase(openSet.begin());
 
         if (states[static_cast<size_t>(current.index)].closed)
         {
@@ -351,6 +310,7 @@ bool Ship::buildPathAStar(
         }
 
         states[static_cast<size_t>(current.index)].closed = true;
+
         const SDL_Point currentTile = pointOf(current.index);
 
         int currentRow = 0;
@@ -385,9 +345,7 @@ bool Ship::buildPathAStar(
                 continue;
             }
 
-            const float stepCost = aStarStepCost(map, nextX - currentTile.x, nextY - currentTile.y);
-            const float tentativeG = states[static_cast<size_t>(current.index)].g + stepCost;
-
+            const float tentativeG = states[static_cast<size_t>(current.index)].g + 1.0f;
             if (tentativeG >= states[static_cast<size_t>(nextIndex)].g)
             {
                 continue;
@@ -396,14 +354,15 @@ bool Ship::buildPathAStar(
             states[static_cast<size_t>(nextIndex)].parent = current.index;
             states[static_cast<size_t>(nextIndex)].g = tentativeG;
             states[static_cast<size_t>(nextIndex)].f =
-                tentativeG + aStarHeuristic(map, nextX, nextY, goalTile.x, goalTile.y);
+                tentativeG + aStarHeuristic(nextX, nextY, goalTile.x, goalTile.y);
+
             const SDL_FPoint currentCenter = map.tileToScreenCenter(currentTile.x, currentTile.y);
             const SDL_FPoint nextCenter = map.tileToScreenCenter(nextX, nextY);
             states[static_cast<size_t>(nextIndex)].dirFromParent = quantizeScreenDirection(
                 nextCenter.x - currentCenter.x,
                 nextCenter.y - currentCenter.y);
 
-            open.insert(OpenEntry{
+            openSet.insert(OpenEntry{
                 states[static_cast<size_t>(nextIndex)].f,
                 nextRow,
                 nextCol,
@@ -428,6 +387,7 @@ bool Ship::buildPathAStar(
 
         outPath.push_back(pointOf(walk));
         outDirections.push_back(states[static_cast<size_t>(walk)].dirFromParent);
+
         walk = states[static_cast<size_t>(walk)].parent;
         if (walk < 0)
         {
@@ -442,10 +402,8 @@ bool Ship::buildPathAStar(
     return true;
 }
 
-void Ship::updateDirection(double dt, MoveDirection direction)
+void Ship::updateDirection(MoveDirection direction)
 {
-    (void)dt;
-
     if (direction == MoveDirection::NONE)
     {
         return;
@@ -454,11 +412,11 @@ void Ship::updateDirection(double dt, MoveDirection direction)
     const DiagonalDirection currentVisualDirection =
         (directionUsesPair && directionToggle) ? directionB : directionA;
 
-    auto selectPairStart = [currentVisualDirection](
-                               DiagonalDirection pairA,
-                               DiagonalDirection pairB,
-                               DiagonalDirection& outA,
-                               DiagonalDirection& outB) {
+    auto keepNaturalPairStart = [currentVisualDirection](
+                                    DiagonalDirection pairA,
+                                    DiagonalDirection pairB,
+                                    DiagonalDirection& outA,
+                                    DiagonalDirection& outB) {
         if (currentVisualDirection == pairA)
         {
             outA = pairA;
@@ -484,8 +442,7 @@ void Ship::updateDirection(double dt, MoveDirection direction)
     switch (direction)
     {
         case MoveDirection::RIGHT:
-            // Vers la droite: haut droite <-> bas droite
-            selectPairStart(
+            keepNaturalPairStart(
                 DiagonalDirection::UP_RIGHT,
                 DiagonalDirection::DOWN_RIGHT,
                 nextA,
@@ -494,8 +451,7 @@ void Ship::updateDirection(double dt, MoveDirection direction)
             break;
 
         case MoveDirection::LEFT:
-            // Vers la gauche: haut gauche <-> bas gauche
-            selectPairStart(
+            keepNaturalPairStart(
                 DiagonalDirection::UP_LEFT,
                 DiagonalDirection::DOWN_LEFT,
                 nextA,
@@ -504,8 +460,7 @@ void Ship::updateDirection(double dt, MoveDirection direction)
             break;
 
         case MoveDirection::DOWN:
-            // Vers le bas: bas gauche <-> bas droite
-            selectPairStart(
+            keepNaturalPairStart(
                 DiagonalDirection::DOWN_LEFT,
                 DiagonalDirection::DOWN_RIGHT,
                 nextA,
@@ -514,8 +469,7 @@ void Ship::updateDirection(double dt, MoveDirection direction)
             break;
 
         case MoveDirection::UP:
-            // Vers le haut: haut gauche <-> haut droite
-            selectPairStart(
+            keepNaturalPairStart(
                 DiagonalDirection::UP_LEFT,
                 DiagonalDirection::UP_RIGHT,
                 nextA,
@@ -552,99 +506,19 @@ void Ship::updateDirection(double dt, MoveDirection direction)
             return;
     }
 
-    const bool pairChanged =
-        (directionUsesPair != nextUsesPair) || directionA != nextA || directionB != nextB;
+    const bool visualPairChanged =
+        (directionUsesPair != nextUsesPair) ||
+        (directionA != nextA) ||
+        (directionB != nextB);
 
     directionUsesPair = nextUsesPair;
     directionA = nextA;
     directionB = nextB;
     moveDirection = direction;
 
-    if (pairChanged)
+    if (visualPairChanged)
     {
         directionToggle = false;
-        directionTimerSeconds = 0.0;
-    }
-
-    if (!directionUsesPair)
-    {
-        // Diagonale pure: pas d'alternance.
-        return;
-    }
-}
-
-bool Ship::hasLineOfSightTiles(
-    const Map& map,
-    const SDL_Point& fromTile,
-    const SDL_Point& toTile,
-    const SDL_Point& startTile,
-    const SDL_Point& goalTile) const
-{
-    const int dx = toTile.x - fromTile.x;
-    const int dy = toTile.y - fromTile.y;
-    const int steps = (std::max)(std::abs(dx), std::abs(dy));
-
-    if (steps <= 0)
-    {
-        return true;
-    }
-
-    const float stepX = static_cast<float>(dx) / static_cast<float>(steps);
-    const float stepY = static_cast<float>(dy) / static_cast<float>(steps);
-
-    float x = static_cast<float>(fromTile.x);
-    float y = static_cast<float>(fromTile.y);
-
-    for (int i = 1; i <= steps; ++i)
-    {
-        x += stepX;
-        y += stepY;
-
-        const SDL_Point tile = map.roundTile(x, y);
-        if (!isWalkableForPath(map, tile.x, tile.y, startTile, goalTile))
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-void Ship::simplifyPath(
-    const Map& map,
-    const SDL_Point& startTile,
-    const SDL_Point& goalTile,
-    const std::vector<SDL_Point>& rawPath,
-    std::vector<SDL_Point>& outPath) const
-{
-    outPath.clear();
-    if (rawPath.empty())
-    {
-        return;
-    }
-
-    SDL_Point anchor = startTile;
-    size_t i = 0;
-
-    while (i < rawPath.size())
-    {
-        size_t best = i;
-
-        for (size_t j = i; j < rawPath.size(); ++j)
-        {
-            if (hasLineOfSightTiles(map, anchor, rawPath[j], startTile, goalTile))
-            {
-                best = j;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        outPath.push_back(rawPath[best]);
-        anchor = rawPath[best];
-        i = best + 1;
     }
 }
 
@@ -655,14 +529,17 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
         return;
     }
 
-    const float width = static_cast<float>(sprite.sdl_texture->w);
-    const float height = static_cast<float>(sprite.sdl_texture->h);
+    const float spriteW = static_cast<float>(sprite.sdl_texture->w);
+    const float spriteH = static_cast<float>(sprite.sdl_texture->h);
 
     RC2D_Quad quad = {};
-    quad.src = SDL_FRect{0.0f, 0.0f, width, height};
+    quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
 
-    const float drawX = centerX - ((width * config.scaleX) * 0.5f);
-    const float drawY = centerY - ((height * config.scaleY) * 0.5f);
+    const float pivotX = spriteW * config.drawAnchorX;
+    const float pivotY = spriteH * config.drawAnchorY;
+
+    const float drawX = (centerX + config.drawOffsetX) - (pivotX * config.scaleX);
+    const float drawY = (centerY + config.drawOffsetY) - (pivotY * config.scaleY);
 
     rc2d_graphics_drawQuad(
         (RC2D_Image*)&sprite,
@@ -681,7 +558,7 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
 Ship::Ship(void)
     : sprites{},
       spritesLoaded(false),
-      config{2.75f, 0.20f, 1.0f, 1.0f, 0.0f, 0.0f},
+      config{3.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.5088f, 0.6346f},
       healthVisual(HealthVisual::FULL),
       tilePosition{0.0f, 0.0f},
       tileTarget{0.0f, 0.0f},
@@ -691,7 +568,6 @@ Ship::Ship(void)
       moving(false),
       directionUsesPair(false),
       directionToggle(false),
-      directionTimerSeconds(0.0),
       moveDirection(MoveDirection::NONE),
       directionA(DiagonalDirection::DOWN_RIGHT),
       directionB(DiagonalDirection::DOWN_RIGHT)
@@ -716,8 +592,7 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
     for (size_t i = 0; i < sprites.size(); ++i)
     {
         char path[512] = {0};
-        const int index1 = static_cast<int>(i) + 1;
-        std::snprintf(path, sizeof(path), "%s/%d.png", folderPath, index1);
+        std::snprintf(path, sizeof(path), "%s/%d.png", folderPath, static_cast<int>(i) + 1);
 
         sprites[i] = rc2d_graphics_loadImageFromStorage(path, storageKind);
         if (sprites[i].sdl_texture == nullptr)
@@ -741,6 +616,7 @@ void Ship::unloadSprites(void)
             rc2d_graphics_freeImage(&sprites[i]);
         }
     }
+
     spritesLoaded = false;
 }
 
@@ -767,12 +643,9 @@ void Ship::setSpeedTilesPerSecond(float speed)
     }
 }
 
-void Ship::setCardinalSwapIntervalSeconds(float intervalSeconds)
+float Ship::getSpeedTilesPerSecond(void) const
 {
-    if (intervalSeconds > 0.0f)
-    {
-        config.cardinalSwapIntervalSeconds = intervalSeconds;
-    }
+    return config.speedTilesPerSecond;
 }
 
 void Ship::setDrawScale(float scaleX, float scaleY)
@@ -792,10 +665,20 @@ void Ship::setDrawOffset(float offsetX, float offsetY)
     config.drawOffsetY = offsetY;
 }
 
+void Ship::setDrawAnchor(float anchorX, float anchorY)
+{
+    anchorX = std::clamp(anchorX, 0.0f, 1.0f);
+    anchorY = std::clamp(anchorY, 0.0f, 1.0f);
+
+    config.drawAnchorX = anchorX;
+    config.drawAnchorY = anchorY;
+}
+
 void Ship::setPositionTile(float tileX, float tileY)
 {
     tilePosition.x = tileX;
     tilePosition.y = tileY;
+
     tileTarget = tilePosition;
     pathTiles.clear();
     pathDirections.clear();
@@ -814,10 +697,11 @@ SDL_FPoint Ship::getPositionTile(void) const
     return tilePosition;
 }
 
-void Ship::setTargetTile(const Map& map, int tileX, int tileY)
+void Ship::moveToTile(const Map& map, int tileX, int tileY)
 {
     const SDL_Point startRaw = map.roundTile(tilePosition.x, tilePosition.y);
     const SDL_Point startTile = map.clampTile(startRaw.x, startRaw.y);
+
     const SDL_Point goalRaw = SDL_Point{tileX, tileY};
     const SDL_Point goalTile = map.clampTile(goalRaw.x, goalRaw.y);
 
@@ -840,7 +724,6 @@ void Ship::setTargetTile(const Map& map, int tileX, int tileY)
         return;
     }
 
-    // SeaBandits-style: sans chemin A*, on ne force pas de deplacement direct.
     moving = false;
 }
 
@@ -875,11 +758,10 @@ void Ship::update(double dt, const Map& map)
     const float deltaScreenY = targetScreen.y - currentScreen.y;
     const float distSq = (deltaScreenX * deltaScreenX) + (deltaScreenY * deltaScreenY);
 
-    auto completeCurrentSubSegment = [&]() {
+    auto completeCurrentSegment = [&]() {
         tilePosition = waypointTile;
 
-        // SeaBandits-style: alternance uniquement au changement de sous-segment,
-        // jamais via un timer temps-reel.
+        // Alternance sprite uniquement au passage d'un waypoint (style Sea-like).
         if (pathIndex < pathTiles.size() && directionUsesPair)
         {
             directionToggle = !directionToggle;
@@ -901,59 +783,33 @@ void Ship::update(double dt, const Map& map)
 
     if (distSq <= 0.0001f)
     {
-        completeCurrentSubSegment();
+        completeCurrentSegment();
         return;
-    }
-
-    const float dist = std::sqrt(distSq);
-
-    // Direction visuelle verrouillee sur le segment de path courant
-    // (comportement plus proche Sea Bandits / SeaFight).
-    SDL_FPoint segmentFromTile = tilePosition;
-    if (pathIndex > 0 && (pathIndex - 1) < pathTiles.size())
-    {
-        segmentFromTile.x = static_cast<float>(pathTiles[pathIndex - 1].x);
-        segmentFromTile.y = static_cast<float>(pathTiles[pathIndex - 1].y);
-    }
-    else
-    {
-        const SDL_Point rounded = map.roundTile(tilePosition.x, tilePosition.y);
-        segmentFromTile.x = static_cast<float>(rounded.x);
-        segmentFromTile.y = static_cast<float>(rounded.y);
     }
 
     MoveDirection snappedDirection = MoveDirection::NONE;
     if (pathIndex < pathDirections.size())
     {
-        // Direction derivee du path A* (equivalent dir stockee dans SeaBandits).
         snappedDirection = pathDirections[pathIndex];
     }
 
     if (snappedDirection == MoveDirection::NONE)
     {
-        const SDL_FPoint segmentFromScreen =
-            map.tileToScreenCenterFloat(segmentFromTile.x, segmentFromTile.y);
-        const SDL_FPoint segmentToScreen =
-            map.tileToScreenCenterFloat(waypointTile.x, waypointTile.y);
-
-        snappedDirection = quantizeScreenDirection(
-            segmentToScreen.x - segmentFromScreen.x,
-            segmentToScreen.y - segmentFromScreen.y);
+        snappedDirection = quantizeScreenDirection(deltaScreenX, deltaScreenY);
     }
-    updateDirection(dt, snappedDirection);
 
+    updateDirection(snappedDirection);
+
+    const float dist = std::sqrt(distSq);
     const float speedPixelsPerSecond = config.speedTilesPerSecond * map.getTileWidth();
     const float stepPixels = speedPixelsPerSecond * static_cast<float>(dt);
 
     if (stepPixels >= dist)
     {
-        completeCurrentSubSegment();
+        completeCurrentSegment();
         return;
     }
 
-    // Important: mouvement sur la vraie direction vers le waypoint.
-    // Ne pas utiliser un vecteur quantifie (45deg), sinon on cree des micro-erreurs
-    // angulaires et des changements visuels parasites sur les sprites.
     const float moveScreenX = (deltaScreenX / dist) * stepPixels;
     const float moveScreenY = (deltaScreenY / dist) * stepPixels;
 
@@ -964,38 +820,36 @@ void Ship::update(double dt, const Map& map)
         return;
     }
 
-    // Inverse de la projection iso:
-    // screenX = (tileX - tileY) * halfTileW
-    // screenY = (tileX + tileY) * halfTileH
     const float tileDeltaX = ((moveScreenX / halfTileW) + (moveScreenY / halfTileH)) * 0.5f;
     const float tileDeltaY = ((moveScreenY / halfTileH) - (moveScreenX / halfTileW)) * 0.5f;
 
     tilePosition.x += tileDeltaX;
     tilePosition.y += tileDeltaY;
 
-    // Garde-fou: si on arrive tres pres du waypoint, on snap.
     const SDL_FPoint newScreen = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
-    const float remainingX = targetScreen.x - newScreen.x;
-    const float remainingY = targetScreen.y - newScreen.y;
-    const float remainingDistSq = (remainingX * remainingX) + (remainingY * remainingY);
-    if (remainingDistSq <= 4.0f) // ~2px
+    const float remainX = targetScreen.x - newScreen.x;
+    const float remainY = targetScreen.y - newScreen.y;
+    const float remainDistSq = (remainX * remainX) + (remainY * remainY);
+    if (remainDistSq <= 4.0f)
     {
-        completeCurrentSubSegment();
+        completeCurrentSegment();
     }
 }
 
 void Ship::draw(const Map& map) const
 {
-    const RC2D_Image* sprite = getCurrentSprite();
-    if (sprite == nullptr)
+    const int spriteIndex = getCurrentSpriteIndex();
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(sprites.size()))
+    {
+        return;
+    }
+
+    const RC2D_Image& sprite = sprites[static_cast<size_t>(spriteIndex)];
+    if (sprite.sdl_texture == nullptr)
     {
         return;
     }
 
     const SDL_FPoint center = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
-
-    drawSpriteCentered(
-        *sprite,
-        center.x + config.drawOffsetX,
-        center.y + config.drawOffsetY);
+    drawSpriteCentered(sprite, center.x, center.y);
 }

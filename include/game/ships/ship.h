@@ -8,129 +8,139 @@
 #include "game/map/map.h"
 
 /**
- * @brief Navire isometrique base sur sprites individuels (1.png..8.png).
+ * @brief Navire isometrique base sur 8 sprites (1.png..8.png).
  *
- * Le navire supporte:
- * - chargement direct des 8 sprites dans un dossier;
- * - deplacement en coordonnees tile (float) avec cible;
- * - choix de sprite selon direction;
- * - alternance de sprites sur les axes (haut/bas/gauche/droite);
- * - affichage full HP / low HP.
+ * Regles visuelles:
+ * - diagonales pures: 1 sprite fixe;
+ * - axes cardinaux: alternance de 2 sprites a chaque sous-segment du path.
  */
 class Ship {
 public:
     /**
-     * @brief Etat visuel de vie du navire.
+     * @brief Etat visuel de coque (full HP ou low HP).
      */
     enum class HealthVisual {
-        FULL = 0,  /**< Apparence pleine vie. */
-        LOW = 1    /**< Apparence faible vie. */
+        FULL = 0,
+        LOW = 1
     };
 
     /**
-     * @brief Directions diagonales disponibles dans l'atlas.
-     */
-    enum class DiagonalDirection {
-        DOWN_LEFT = 0,   /**< Bas gauche. */
-        UP_RIGHT = 1,    /**< Haut droite. */
-        UP_LEFT = 2,     /**< Haut gauche. */
-        DOWN_RIGHT = 3   /**< Bas droite. */
-    };
-
-    /**
-     * @brief Parametres de mouvement/affichage.
+     * @brief Configuration runtime du navire.
      */
     struct Config {
-        float speedTilesPerSecond;          /**< Vitesse en tiles par seconde. */
-        float cardinalSwapIntervalSeconds;  /**< Intervalle d'alternance sur axes. */
-        float scaleX;                       /**< Scale horizontal de rendu. */
-        float scaleY;                       /**< Scale vertical de rendu. */
-        float drawOffsetX;                  /**< Decalage final en pixels X. */
-        float drawOffsetY;                  /**< Decalage final en pixels Y. */
+        float speedTilesPerSecond; /**< Vitesse de deplacement en tuiles/s. */
+        float scaleX;              /**< Echelle de rendu X. */
+        float scaleY;              /**< Echelle de rendu Y. */
+        float drawOffsetX;         /**< Decalage rendu X en pixels. */
+        float drawOffsetY;         /**< Decalage rendu Y en pixels. */
+        float drawAnchorX;         /**< Pivot normalise X [0..1] dans le sprite. */
+        float drawAnchorY;         /**< Pivot normalise Y [0..1] dans le sprite. */
     };
 
 private:
     /**
-     * @brief Directions de deplacement quantifiees (repere ecran).
+     * @brief Directions diagonales disponibles dans les sprites.
      */
-    enum class MoveDirection {
-        NONE = 0,    /**< Aucun mouvement. */
-        RIGHT = 1,   /**< Vers la droite ecran. */
-        DOWN_RIGHT,  /**< Diagonale bas droite ecran. */
-        DOWN,        /**< Vers le bas ecran. */
-        DOWN_LEFT,   /**< Diagonale bas gauche ecran. */
-        LEFT,        /**< Vers la gauche ecran. */
-        UP_LEFT,     /**< Diagonale haut gauche ecran. */
-        UP,          /**< Vers le haut ecran. */
-        UP_RIGHT     /**< Diagonale haut droite ecran. */
+    enum class DiagonalDirection {
+        DOWN_LEFT = 0,
+        UP_RIGHT = 1,
+        UP_LEFT = 2,
+        DOWN_RIGHT = 3
     };
 
-    std::array<RC2D_Image, 8> sprites;  /**< Sprites 1..8 (1-based dans les fichiers). */
-    bool spritesLoaded;                 /**< True si sprites charges. */
-    Config config;                      /**< Parametres runtime du navire. */
+    /**
+     * @brief Directions de mouvement quantifiees en repere ecran.
+     */
+    enum class MoveDirection {
+        NONE = 0,
+        RIGHT,
+        DOWN_RIGHT,
+        DOWN,
+        DOWN_LEFT,
+        LEFT,
+        UP_LEFT,
+        UP,
+        UP_RIGHT
+    };
 
-    HealthVisual healthVisual;  /**< Etat visuel de vie. */
+    std::array<RC2D_Image, 8> sprites; /**< Sprites 1..8 charges en memoire. */
+    bool spritesLoaded;                 /**< True si les sprites sont charges. */
 
-    SDL_FPoint tilePosition;  /**< Position courante (tile flottante). */
-    SDL_FPoint tileTarget;    /**< Position cible (tile flottante). */
-    std::vector<SDL_Point> pathTiles;  /**< Chemin A* (sans la tile de depart). */
-    std::vector<MoveDirection> pathDirections;  /**< Direction visuelle par segment de path. */
-    size_t pathIndex;                  /**< Index du prochain waypoint. */
+    Config config;             /**< Parametres de deplacement/rendu. */
+    HealthVisual healthVisual; /**< Etat visuel de coque. */
 
-    bool moving;  /**< True si le navire se deplace vers sa cible. */
+    SDL_FPoint tilePosition; /**< Position courante en coordonnees tuile flottantes. */
+    SDL_FPoint tileTarget;   /**< Cible courante en coordonnees tuile flottantes. */
 
-    bool directionUsesPair;        /**< True si alternance active (axes). */
-    bool directionToggle;          /**< Toggle courant entre directionA/B. */
-    double directionTimerSeconds;  /**< Timer interne d'alternance. */
-    MoveDirection moveDirection;   /**< Direction quantifiee courante. */
+    std::vector<SDL_Point> pathTiles;          /**< Waypoints du path courant. */
+    std::vector<MoveDirection> pathDirections; /**< Direction visuelle par waypoint. */
+    size_t pathIndex;                          /**< Index du waypoint courant. */
 
-    DiagonalDirection directionA;  /**< Direction principale courante. */
-    DiagonalDirection directionB;  /**< Direction secondaire (alternance). */
+    bool moving;                 /**< True si un deplacement est actif. */
+    bool directionUsesPair;      /**< True si la direction utilise une alternance A/B. */
+    bool directionToggle;        /**< Bascule d'alternance entre A et B. */
+    MoveDirection moveDirection; /**< Direction quantifiee courante. */
+
+    DiagonalDirection directionA; /**< Direction visuelle principale. */
+    DiagonalDirection directionB; /**< Direction visuelle secondaire. */
 
     /**
      * @brief Convertit une direction diagonale en index [0..3].
+     * @param direction Direction diagonale.
+     * @return Index direction [0..3].
      */
     static int directionToIndex(DiagonalDirection direction);
 
     /**
-     * @brief Retourne l'index de sprite [0..7] selon direction + etat de vie.
+     * @brief Retourne l'index sprite [0..7] selon direction + etat de vie.
+     * @param direction Direction diagonale demandee.
+     * @return Index sprite [0..7], ou -1 si invalide.
      */
     int spriteIndexForDirection(DiagonalDirection direction) const;
 
     /**
-     * @brief Retourne le sprite actuellement actif.
+     * @brief Retourne l'index sprite actuellement actif.
+     * @return Index sprite [0..7], ou -1 si indisponible.
      */
-    const RC2D_Image* getCurrentSprite(void) const;
+    int getCurrentSpriteIndex(void) const;
 
     /**
-     * @brief Quantifie un vecteur ecran en 8 directions (SeaFight style).
+     * @brief Quantifie un vecteur ecran en 8 directions.
+     * @param deltaScreenX Delta ecran X.
+     * @param deltaScreenY Delta ecran Y.
+     * @return Direction quantifiee.
      */
     static MoveDirection quantizeScreenDirection(float deltaScreenX, float deltaScreenY);
 
     /**
-     * @brief Retourne le vecteur unitaire ecran d'une direction quantifiee.
+     * @brief Heuristique A* pour le repere Sea-like.
+     * @param fromTileX Tuile depart X.
+     * @param fromTileY Tuile depart Y.
+     * @param toTileX Tuile cible X.
+     * @param toTileY Tuile cible Y.
+     * @return Cout heuristique.
      */
-    static SDL_FPoint directionUnitScreen(MoveDirection direction);
+    static float aStarHeuristic(int fromTileX, int fromTileY, int toTileX, int toTileY);
 
     /**
-     * @brief Cout d'un pas A* (8 directions) en distance ecran.
-     */
-    static float aStarStepCost(const Map& map, int deltaTileX, int deltaTileY);
-
-    /**
-     * @brief Heuristique A* (distance ecran euclidienne).
-     */
-    static float aStarHeuristic(const Map& map, int fromTileX, int fromTileY, int toTileX, int toTileY);
-
-    /**
-     * @brief Teste si une tile est traversable pour le pathfinding.
+     * @brief Teste si une tuile est traversable pour le pathfinding.
+     * @param map Map de navigation.
+     * @param tileX Tuile testee X.
+     * @param tileY Tuile testee Y.
+     * @param startTile Tuile depart.
+     * @param goalTile Tuile cible.
+     * @return True si traversable.
      */
     bool isWalkableForPath(const Map& map, int tileX, int tileY, const SDL_Point& startTile, const SDL_Point& goalTile) const;
 
     /**
-     * @brief Construit un chemin A* de start vers goal.
-     *
-     * Le chemin retourne les waypoints sans la tile de depart.
+     * @brief Construit un path A* (voisinage Sea-like).
+     * @param map Map de navigation.
+     * @param startTile Tuile depart.
+     * @param goalTile Tuile cible.
+     * @param outPath Path de sortie (sans tuile depart).
+     * @param outDirections Direction visuelle de sortie par segment.
+     * @return True si un path valide a ete trouve.
      */
     bool buildPathAStar(
         const Map& map,
@@ -140,121 +150,144 @@ private:
         std::vector<MoveDirection>& outDirections) const;
 
     /**
-     * @brief Met a jour la direction visuelle selon la direction quantifiee.
+     * @brief Met a jour la direction visuelle du navire.
+     * @param direction Direction quantifiee a appliquer.
      */
-    void updateDirection(double dt, MoveDirection direction);
-
-    /**
-     * @brief Teste si la ligne entre 2 tiles est traversable.
-     */
-    bool hasLineOfSightTiles(const Map& map, const SDL_Point& fromTile, const SDL_Point& toTile, const SDL_Point& startTile, const SDL_Point& goalTile) const;
-
-    /**
-     * @brief Simplifie un chemin brut A* par line-of-sight.
-     */
-    void simplifyPath(const Map& map, const SDL_Point& startTile, const SDL_Point& goalTile, const std::vector<SDL_Point>& rawPath, std::vector<SDL_Point>& outPath) const;
+    void updateDirection(MoveDirection direction);
 
     /**
      * @brief Dessine un sprite centre sur un point ecran.
+     * @param sprite Sprite a dessiner.
+     * @param centerX Centre ecran X.
+     * @param centerY Centre ecran Y.
      */
     void drawSpriteCentered(const RC2D_Image& sprite, float centerX, float centerY) const;
 
 public:
     /**
-     * @brief Construit un navire avec mappings 1..8 par defaut.
+     * @brief Constructeur du navire.
      */
     Ship(void);
 
     /**
-     * @brief Libere les ressources du navire.
+     * @brief Destructeur du navire.
      */
     ~Ship(void);
 
     /**
      * @brief Charge les sprites 1.png..8.png depuis un dossier.
-     * @param folderPath Dossier contenant les PNG.
-     * @param storageKind Storage RC2D.
-     * @return True si charge.
+     * @param folderPath Chemin du dossier atlas navire.
+     * @param storageKind Storage RC2D (TITLE/USER).
+     * @return True si tous les sprites sont charges.
      */
     bool loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storageKind);
 
     /**
-     * @brief Decharge les sprites si presents.
+     * @brief Decharge les sprites du navire.
      */
     void unloadSprites(void);
 
     /**
-     * @brief Indique si les sprites sont disponibles.
+     * @brief Retourne l'etat de chargement des sprites.
+     * @return True si les sprites sont charges.
      */
     bool areSpritesLoaded(void) const;
 
     /**
-     * @brief Choisit le visuel full/low HP.
+     * @brief Definit l'apparence de vie du navire.
+     * @param health Etat visuel FULL ou LOW.
      */
     void setHealthVisual(HealthVisual health);
 
     /**
-     * @brief Retourne l'etat de vie visuel courant.
+     * @brief Retourne l'apparence de vie courante.
+     * @return Etat visuel FULL ou LOW.
      */
     HealthVisual getHealthVisual(void) const;
 
     /**
-     * @brief Regle la vitesse de deplacement (tiles/s).
+     * @brief Definit la vitesse de deplacement en tuiles/s.
+     * @param speed Vitesse en tuiles/s.
      */
     void setSpeedTilesPerSecond(float speed);
 
     /**
-     * @brief Regle l'intervalle d'alternance sur axes.
+     * @brief Retourne la vitesse de deplacement en tuiles/s.
+     * @return Vitesse en tuiles/s.
      */
-    void setCardinalSwapIntervalSeconds(float intervalSeconds);
+    float getSpeedTilesPerSecond(void) const;
 
     /**
-     * @brief Regle l'echelle de rendu.
+     * @brief Definit l'echelle de rendu du navire.
+     * @param scaleX Echelle X.
+     * @param scaleY Echelle Y.
      */
     void setDrawScale(float scaleX, float scaleY);
 
     /**
-     * @brief Regle un decalage final de rendu en pixels.
+     * @brief Definit un decalage final de rendu.
+     * @param offsetX Decalage X en pixels.
+     * @param offsetY Decalage Y en pixels.
      */
     void setDrawOffset(float offsetX, float offsetY);
 
     /**
-     * @brief Fixe la position courante en coordonnees tile flottantes.
+     * @brief Definit le pivot normalise de rendu dans le sprite.
+     * @param anchorX Pivot X normalise [0..1].
+     * @param anchorY Pivot Y normalise [0..1].
+     */
+    void setDrawAnchor(float anchorX, float anchorY);
+
+    /**
+     * @brief Force la position du navire en tuile flottante.
+     * @param tileX Coordonnee tuile X flottante.
+     * @param tileY Coordonnee tuile Y flottante.
      */
     void setPositionTile(float tileX, float tileY);
 
     /**
-     * @brief Fixe la position courante en coordonnees tile entieres.
+     * @brief Force la position du navire en tuile entiere.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
      */
     void setPositionTileInt(int tileX, int tileY);
 
     /**
-     * @brief Retourne la position tile courante.
+     * @brief Retourne la position courante du navire.
+     * @return Position en coordonnees tuile flottantes.
      */
     SDL_FPoint getPositionTile(void) const;
 
     /**
-     * @brief Defini la cible de deplacement.
+     * @brief Lance un deplacement vers une tuile cible.
+     * @param map Map de navigation.
+     * @param tileX Tuile cible X.
+     * @param tileY Tuile cible Y.
      */
-    void setTargetTile(const Map& map, int tileX, int tileY);
+    void moveToTile(const Map& map, int tileX, int tileY);
 
     /**
-     * @brief Retourne la cible courante.
+     * @brief Retourne la cible courante du navire.
+     * @return Cible en coordonnees tuile flottantes.
      */
     SDL_FPoint getTargetTile(void) const;
 
     /**
      * @brief Indique si le navire est en mouvement.
+     * @return True si un deplacement est actif.
      */
     bool isMoving(void) const;
 
     /**
-     * @brief Met a jour le mouvement et la direction visuelle.
+     * @brief Met a jour le deplacement du navire.
+     * @param dt Delta time en secondes.
+     * @param map Map de navigation.
      */
     void update(double dt, const Map& map);
 
     /**
-     * @brief Dessine le navire a sa position tile actuelle.
+     * @brief Dessine le navire a sa position courante.
+     * @param map Map utilisee pour la projection ecran.
      */
     void draw(const Map& map) const;
 };

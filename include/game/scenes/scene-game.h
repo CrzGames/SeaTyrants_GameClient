@@ -1,117 +1,116 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
+
+#include "game/entities/player.h"
 #include "game/map/map.h"
-#include "game/ships/ship.h"
+#include "game/scenes/scene.h"
 #include "game/shaders/fog-of-war-shader.h"
 #include "game/shaders/ocean-shader.h"
-#include "game/scenes/scene.h"
+#include "game/ui/tile-click-marker.h"
 
 /**
- * @brief Main gameplay scene.
+ * @brief Scene principale gameplay.
  *
- * This scene contains the ocean shader effect and a fog-of-war overlay pass.
+ * Cette scene orchestre:
+ * - les shaders ocean/fog;
+ * - la map isometrique;
+ * - l'entite joueur locale;
+ * - le feedback visuel des clics sur tuiles.
  */
 class GameScene : public Scene {
 private:
     /**
-     * @brief Internal shader module for the gameplay scene.
-     *
-     * This helper centralizes ocean + fog shader lifecycle so GameScene methods
-     * stay compact and only call high-level module functions.
+     * @brief Sous-module shaders pour garder GameScene compacte.
      */
     struct Shaders {
-        OceanShader oceanShader;                 /**< Ocean shader module. */
-        FogOfWarShader fogOfWarShader;           /**< Fog-of-war shader module. */
-        OceanShader::WaterColor oceanColor;      /**< Selected ocean color. */
+        OceanShader oceanShader;            /**< Shader ocean. */
+        FogOfWarShader fogOfWarShader;      /**< Shader fog-of-war. */
+        OceanShader::WaterColor oceanColor; /**< Couleur ocean active. */
 
         /**
-         * @brief Build shader submodule.
+         * @brief Constructeur du sous-module shaders.
          */
         Shaders(void);
 
         /**
-         * @brief Load all scene shaders.
+         * @brief Charge les shaders de la scene.
          */
         void load(void);
 
         /**
-         * @brief Unload all scene shaders.
+         * @brief Decharge les shaders de la scene.
          */
         void unload(void);
 
         /**
-         * @brief Update all scene shaders.
-         * @param dt Delta time in seconds.
+         * @brief Met a jour les shaders.
+         * @param dt Delta time en secondes.
          */
         void update(double dt);
 
         /**
-         * @brief Draw all scene shaders.
-         * @param visibleRect Visible output rectangle.
+         * @brief Dessine les shaders.
+         * @param visibleRect Rectangle visible de rendu.
          */
         void draw(const SDL_FRect& visibleRect);
-
-        /**
-         * @brief Check whether scene shaders are ready.
-         * @return True when ocean pass is ready.
-         */
-        bool isReady(void) const;
     };
 
-    Shaders shaders;   /**< Grouped gameplay shader module. */
-    Map map;           /**< Isometric debug map (SeaFight-style grid). */
-    Ship playerShip;   /**< Navire joueur deplacement click-to-move. */
+    Shaders shaders;             /**< Module shaders de la scene. */
+    Map map;                     /**< Map de gameplay. */
+    Player player;               /**< Joueur local. */
+    TileClickMarker clickMarker; /**< Marqueur de clic sur tuile. */
 
-    SDL_Point playerShipOccupiedTile;   /**< Tile logique occupee par le navire. */
-    bool playerShipTileInitialized;     /**< True quand la tile occupee est initialisee. */
-    int playerShipObjectId;             /**< Identifiant logique de l'objet navire dans la map. */
+    /**
+     * @brief Configure la base gameplay (map + joueur).
+     */
+    void configureGameplay(void);
 
 public:
     /**
-     * @brief Build gameplay scene instance.
+     * @brief Constructeur de la scene gameplay.
      */
     GameScene(void);
 
     /**
-     * @brief Release gameplay resources when leaving scene.
+     * @brief Decharge les ressources de la scene.
      */
     void unload(void) override;
 
     /**
-     * @brief Prepare gameplay resources when entering scene.
+     * @brief Charge les ressources de la scene.
      */
     void load(void) override;
 
     /**
-     * @brief Update gameplay logic and visuals.
-     * @param dt Delta time in seconds.
+     * @brief Met a jour la logique gameplay.
+     * @param dt Delta time en secondes.
      */
     void update(double dt) override;
 
     /**
-     * @brief Render ocean effect and animated atlas sprite.
+     * @brief Dessine la scene gameplay.
      */
     void draw(void) override;
 
     /**
-     * @brief Handle keyboard interactions in gameplay scene.
-     * @param key Text key representation from RC2D/SDL.
-     * @param scancode Physical keyboard scancode.
-     * @param keycode Logical keyboard keycode.
-     * @param mod Keyboard modifiers.
-     * @param isrepeat True when event is a key repeat.
-     * @param keyboardID SDL keyboard device id.
+     * @brief Callback clavier de la scene gameplay.
+     * @param key Representation texte de la touche.
+     * @param scancode Scancode physique SDL.
+     * @param keycode Keycode logique SDL.
+     * @param mod Modificateurs clavier SDL.
+     * @param isrepeat True si repetition clavier.
+     * @param keyboardID Identifiant clavier SDL.
      */
     void keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID) override;
 
     /**
-     * @brief Handle mouse presses in gameplay scene.
-     * @param x Mouse x position in render space.
-     * @param y Mouse y position in render space.
-     * @param button Mouse button identifier.
-     * @param clicks Number of clicks.
-     * @param mouseID SDL mouse device id.
+     * @brief Callback clic souris de la scene gameplay.
+     * @param x Position ecran X du clic.
+     * @param y Position ecran Y du clic.
+     * @param button Bouton souris RC2D.
+     * @param clicks Nombre de clics.
+     * @param mouseID Identifiant souris SDL.
      */
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) override;
 };

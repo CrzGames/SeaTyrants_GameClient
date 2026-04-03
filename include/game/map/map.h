@@ -5,51 +5,39 @@
 #include <RC2D/RC2D.h>
 
 /**
- * @brief Grille isometrique de base pour une map type SeaFight.
+ * @brief Representation logique d'une map isometrique.
  *
- * Le module gere:
- * - la taille de la map en nombre de tuiles;
- * - la taille d'une tuile (48x32 par defaut);
+ * Cette classe gere:
+ * - les dimensions de la grille en tuiles;
+ * - la taille des tuiles isometriques;
  * - l'origine ecran de la grille;
- * - les conversions tile<->screen;
- * - un rendu debug isometrique (checker + contours).
+ * - les conversions tile <-> ecran;
+ * - une couche collision statique (tuile bloquee / traversable).
  */
 class Map {
 private:
-    int widthTiles;   /**< Nombre de tuiles sur l'axe X de la grille. */
-    int heightTiles;  /**< Nombre de tuiles sur l'axe Y de la grille. */
+    int widthTiles;   /**< Nombre de tuiles sur l'axe X. */
+    int heightTiles;  /**< Nombre de tuiles sur l'axe Y. */
 
-    float tileWidth;   /**< Largeur d'une tuile isometrique (diamant). */
-    float tileHeight;  /**< Hauteur d'une tuile isometrique (diamant). */
+    float tileWidth;   /**< Largeur d'une tuile isometrique. */
+    float tileHeight;  /**< Hauteur d'une tuile isometrique. */
 
     float originX;  /**< Origine ecran X de la tuile (0,0). */
     float originY;  /**< Origine ecran Y de la tuile (0,0). */
 
-    bool debugFillEnabled;   /**< Active le remplissage checker des tuiles. */
-    bool debugLinesEnabled;  /**< Active les contours des tuiles. */
-
-    RC2D_Color debugFillColorA;  /**< Couleur checker A. */
-    RC2D_Color debugFillColorB;  /**< Couleur checker B. */
-    RC2D_Color debugLineColor;   /**< Couleur des contours. */
-
-    std::vector<int> tileObjects;  /**< Objet place par tile (-1 = vide). */
+    std::vector<Uint8> blockedTiles; /**< 0 = traversable, 1 = bloquee. */
 
     /**
-     * @brief Convertit une coordonnee tile en index 1D.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return Index lineaire.
+     * @brief Convertit une tuile en index lineaire du tableau interne.
+     * @param tileX Coordonnee tuile sur X.
+     * @param tileY Coordonnee tuile sur Y.
+     * @return Index lineaire dans blockedTiles.
      */
     int tileIndex(int tileX, int tileY) const;
 
 public:
     /**
-     * @brief Construit une map isometrique.
-     *
-     * Defaults:
-     * - map: 64x64 tuiles
-     * - tuile: 48x32
-     * - origine: (0,0)
+     * @brief Construit une map par defaut (64x64, tuiles 48x32).
      */
     Map(void);
 
@@ -60,174 +48,142 @@ public:
 
     /**
      * @brief Definit le nombre de tuiles de la map.
-     * @param width Nombre de tuiles en X.
-     * @param height Nombre de tuiles en Y.
+     * @param width Nombre de tuiles sur X.
+     * @param height Nombre de tuiles sur Y.
      */
     void setMapSize(int width, int height);
 
     /**
      * @brief Definit la taille d'une tuile isometrique.
-     * @param width Largeur tuile.
-     * @param height Hauteur tuile.
+     * @param width Largeur d'une tuile en pixels.
+     * @param height Hauteur d'une tuile en pixels.
      */
     void setTileSize(float width, float height);
 
     /**
-     * @brief Definit l'origine ecran de la tuile (0,0).
+     * @brief Definit l'origine ecran de la map.
      * @param x Origine ecran X.
      * @param y Origine ecran Y.
      */
     void setOrigin(float x, float y);
 
     /**
-     * @brief Centre la map dans un rectangle ecran.
-     * @param rect Rectangle cible.
+     * @brief Centre la map dans un rectangle de rendu.
+     * @param rect Rectangle cible en coordonnees ecran.
      */
     void centerOnRect(const SDL_FRect& rect);
 
     /**
-     * @brief Active/desactive le remplissage checker debug.
-     * @param enabled True pour activer.
-     */
-    void setDebugFillEnabled(bool enabled);
-
-    /**
-     * @brief Active/desactive les contours debug.
-     * @param enabled True pour activer.
-     */
-    void setDebugLinesEnabled(bool enabled);
-
-    /**
-     * @brief Definit les couleurs debug de remplissage checker.
-     * @param colorA Couleur pour (x+y) pair.
-     * @param colorB Couleur pour (x+y) impair.
-     */
-    void setDebugFillColors(const RC2D_Color& colorA, const RC2D_Color& colorB);
-
-    /**
-     * @brief Definit la couleur debug des contours.
-     * @param color Couleur de ligne.
-     */
-    void setDebugLineColor(const RC2D_Color& color);
-
-    /**
-     * @brief Convertit des coordonnees tile (entieres) en centre ecran.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return Position ecran (centre de la tuile).
+     * @brief Convertit une tuile entiere vers son centre ecran.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
+     * @return Position ecran du centre de la tuile.
      */
     SDL_FPoint tileToScreenCenter(int tileX, int tileY) const;
 
     /**
-     * @brief Convertit des coordonnees tile flottantes en centre ecran.
-     * @param tileX Coord tile X flottante.
-     * @param tileY Coord tile Y flottante.
-     * @return Position ecran (centre de la tuile).
+     * @brief Convertit une tuile flottante vers son centre ecran.
+     * @param tileX Coordonnee tuile X flottante.
+     * @param tileY Coordonnee tuile Y flottante.
+     * @return Position ecran du centre correspondant.
      */
     SDL_FPoint tileToScreenCenterFloat(float tileX, float tileY) const;
 
     /**
-     * @brief Convertit une position ecran en coordonnees tile flottantes.
-     * @param screenX Position ecran X.
-     * @param screenY Position ecran Y.
-     * @return Coordonnees tile flottantes (x,y).
+     * @brief Convertit une position ecran vers une position tuile flottante.
+     * @param screenX Coordonnee ecran X.
+     * @param screenY Coordonnee ecran Y.
+     * @return Coordonnees tuile flottantes.
      */
     SDL_FPoint screenToTile(float screenX, float screenY) const;
 
     /**
-     * @brief Convertit une position ecran en tile arrondie au plus proche.
-     * @param screenX Position ecran X.
-     * @param screenY Position ecran Y.
-     * @return Coordonnees tile entieres.
+     * @brief Convertit une position ecran vers la tuile la plus proche.
+     * @param screenX Coordonnee ecran X.
+     * @param screenY Coordonnee ecran Y.
+     * @return Coordonnees tuile entieres arrondies.
      */
     SDL_Point screenToTileNearest(float screenX, float screenY) const;
 
     /**
-     * @brief Arrondit des coordonnees tile flottantes au plus proche.
-     * @param tileX Coord tile X flottante.
-     * @param tileY Coord tile Y flottante.
-     * @return Coordonnees tile entieres.
+     * @brief Arrondit des coordonnees tuile flottantes.
+     * @param tileX Coordonnee tuile X flottante.
+     * @param tileY Coordonnee tuile Y flottante.
+     * @return Coordonnees tuile entieres.
      */
     SDL_Point roundTile(float tileX, float tileY) const;
 
     /**
-     * @brief Clamp des coordonnees tile dans les limites de la map.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return Coordonnees tile clamp.
+     * @brief Clamp une tuile dans les limites de la map.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
+     * @return Coordonnees tuile valides dans la map.
      */
     SDL_Point clampTile(int tileX, int tileY) const;
 
     /**
-     * @brief Teste si une tile est dans la map.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return True si la tile est valide.
+     * @brief Indique si une tuile est dans la map.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
+     * @return True si la tuile est dans [0..width) x [0..height).
      */
     bool isInside(int tileX, int tileY) const;
 
     /**
-     * @brief Place un objet logique dans une tile.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @param objectId Id de l'objet (>=0).
-     * @return True si la tile est valide.
+     * @brief Definit l'etat collision d'une tuile.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
+     * @param blocked True pour bloquer la tuile, false pour la rendre traversable.
+     * @return True si la tuile est valide.
      */
-    bool setTileObject(int tileX, int tileY, int objectId);
+    bool setTileBlocked(int tileX, int tileY, bool blocked);
 
     /**
-     * @brief Vide l'objet d'une tile.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return True si la tile est valide.
+     * @brief Retourne l'etat collision d'une tuile.
+     * @param tileX Coordonnee tuile X.
+     * @param tileY Coordonnee tuile Y.
+     * @return True si la tuile est bloquee (ou invalide).
      */
-    bool clearTileObject(int tileX, int tileY);
+    bool isTileBlocked(int tileX, int tileY) const;
 
     /**
-     * @brief Recupere l'objet d'une tile.
-     * @param tileX Coord tile X.
-     * @param tileY Coord tile Y.
-     * @return Id de l'objet ou -1 si vide/invalide.
+     * @brief Reinitialise toutes les tuiles en traversable.
      */
-    int getTileObject(int tileX, int tileY) const;
+    void clearBlockedTiles(void);
 
     /**
-     * @brief Vide tous les objets de la grille.
-     */
-    void clearAllTileObjects(void);
-
-    /**
-     * @brief Dessine la map en mode debug (checker + contours).
-     */
-    void drawDebug(void) const;
-
-    /**
-     * @brief Retourne la largeur de la map (tuiles).
+     * @brief Retourne la largeur de map en tuiles.
+     * @return Largeur en tuiles.
      */
     int getWidthTiles(void) const;
 
     /**
-     * @brief Retourne la hauteur de la map (tuiles).
+     * @brief Retourne la hauteur de map en tuiles.
+     * @return Hauteur en tuiles.
      */
     int getHeightTiles(void) const;
 
     /**
      * @brief Retourne la largeur d'une tuile.
+     * @return Largeur en pixels.
      */
     float getTileWidth(void) const;
 
     /**
      * @brief Retourne la hauteur d'une tuile.
+     * @return Hauteur en pixels.
      */
     float getTileHeight(void) const;
 
     /**
-     * @brief Retourne l'origine X.
+     * @brief Retourne l'origine ecran X.
+     * @return Origine X.
      */
     float getOriginX(void) const;
 
     /**
-     * @brief Retourne l'origine Y.
+     * @brief Retourne l'origine ecran Y.
+     * @return Origine Y.
      */
     float getOriginY(void) const;
 };
