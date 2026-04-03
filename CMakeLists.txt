@@ -246,7 +246,7 @@ set(CRZGAMES_LIBRARIES_PATH "${DEPENDENCIES_PATH}/Crzgames_RC2D/dependencies/Crz
 # Récupère automatiquement tous les fichiers sources .cpp de manière récursive 
 # dans "src/" pour les compiler dans la target de l’exécutable.
 # ============================================================
-file(GLOB_RECURSE SOURCES 
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/src/*.cpp"
 )
 
@@ -256,7 +256,7 @@ file(GLOB_RECURSE SOURCES
 # Récupère automatiquement tous les fichiers d’en-tête .h de manière récursive 
 # dans "include/" pour les inclure dans la target de l’exécutable.
 # ============================================================
-file(GLOB_RECURSE HEADERS 
+file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/include/*.h"
 )
 
