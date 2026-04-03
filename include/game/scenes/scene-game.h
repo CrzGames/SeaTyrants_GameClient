@@ -13,8 +13,52 @@
  */
 class GameScene : public Scene {
 private:
-    OceanShader oceanShader;         /**< Module shader dédié à l'océan. */
-    FogOfWarShader fogOfWarShader;   /**< Module shader dédié au brouillard de guerre. */
+    /**
+     * @brief Internal shader module for the gameplay scene.
+     *
+     * This helper centralizes ocean + fog shader lifecycle so GameScene methods
+     * stay compact and only call high-level module functions.
+     */
+    struct Shaders {
+        OceanShader oceanShader;                 /**< Ocean shader module. */
+        FogOfWarShader fogOfWarShader;           /**< Fog-of-war shader module. */
+        OceanShader::WaterColor oceanColor;      /**< Selected ocean color. */
+
+        /**
+         * @brief Build shader submodule.
+         */
+        Shaders(void);
+
+        /**
+         * @brief Load all scene shaders.
+         */
+        void load(void);
+
+        /**
+         * @brief Unload all scene shaders.
+         */
+        void unload(void);
+
+        /**
+         * @brief Update all scene shaders.
+         * @param dt Delta time in seconds.
+         */
+        void update(double dt);
+
+        /**
+         * @brief Draw all scene shaders.
+         * @param visibleRect Visible output rectangle.
+         */
+        void draw(const SDL_FRect& visibleRect);
+
+        /**
+         * @brief Check whether scene shaders are ready.
+         * @return True when ocean pass is ready.
+         */
+        bool isReady(void) const;
+    };
+
+    Shaders shaders;   /**< Grouped gameplay shader module. */
 
 public:
     /**

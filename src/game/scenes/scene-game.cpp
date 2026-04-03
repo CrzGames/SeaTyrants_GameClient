@@ -2,73 +2,109 @@
 
 #include "game/scenes/scene-manager.h"
 
-GameScene::GameScene(void)
-    // Initialise le renderer océan.
+GameScene::Shaders::Shaders(void)
+    // Initialise le module shader ocean.
     : oceanShader{},
-      // Initialise le renderer brouillard de guerre.
-      fogOfWarShader{}
+      // Initialise le module shader fog of war.
+      fogOfWarShader{},
+      // Initialise la couleur ocean par defaut.
+      oceanColor(OceanShader::WaterColor::CORAL)
 {
-    // Le constructeur ne fait pas d'allocation lourde.
+    // Le constructeur du sous-module ne fait pas d'allocation lourde.
+}
+
+void GameScene::Shaders::load(void)
+{
+    // Charge le shader ocean avec la couleur active.
+    const bool oceanLoaded = oceanShader.load(oceanColor);
+
+    // Journalise une erreur si le shader ocean ne se charge pas.
+    if (!oceanLoaded)
+    {
+        RC2D_log(RC2D_LOG_ERROR, "GameScene::Shaders: impossible de charger le shader ocean");
+    }
+
+    // Charge le shader fog of war.
+    const bool fogLoaded = fogOfWarShader.load();
+
+    // Journalise un avertissement si le shader fog ne se charge pas.
+    if (!fogLoaded)
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene::Shaders: impossible de charger le shader fog of war");
+    }
+}
+
+void GameScene::Shaders::unload(void)
+{
+    // Libere toutes les ressources GPU du shader ocean.
+    oceanShader.unload();
+
+    // Libere toutes les ressources GPU du shader fog of war.
+    fogOfWarShader.unload();
+}
+
+void GameScene::Shaders::update(double dt)
+{
+    // Met a jour l'animation et les uniforms du shader ocean.
+    oceanShader.update(dt);
+
+    // Met a jour le shader fog avec le mode couleur courant de l'ocean.
+    fogOfWarShader.update(dt, oceanShader.getColorMode());
+}
+
+void GameScene::Shaders::draw(const SDL_FRect& visibleRect)
+{
+    // Dessine le pass ocean.
+    oceanShader.draw(visibleRect);
+
+    // Dessine ensuite le pass fog au-dessus.
+    fogOfWarShader.draw(visibleRect);
+}
+
+bool GameScene::Shaders::isReady(void) const
+{
+    // Retourne vrai si le pass principal ocean est pret.
+    return oceanShader.isReady();
+}
+
+GameScene::GameScene(void)
+    // Initialise le sous-module qui regroupe les shaders de la scene.
+    : shaders{}
+{
+    // Le constructeur de scene ne fait pas d'allocation lourde.
 }
 
 void GameScene::unload(void)
 {
-    // Libère toutes les ressources GPU de l'océan.
-    oceanShader.unload();
-
-    // Libère toutes les ressources GPU du brouillard de guerre.
-    fogOfWarShader.unload();
+    // Delegate la liberation des shaders au sous-module.
+    shaders.unload();
 }
 
 void GameScene::load(void)
 {
-    // Sélectionne la couleur d'océan chargée dans cette scène.
-    const OceanShader::WaterColor oceanColor = OceanShader::WaterColor::RED;
-
-    // Charge le shader océan avec la couleur choisie.
-    const bool oceanLoaded = oceanShader.load(oceanColor);
-
-    // Journalise une erreur si le renderer océan ne se charge pas.
-    if (!oceanLoaded)
-    {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: impossible de charger le renderer ocean");
-    }
-
-    // Charge le renderer de brouillard de guerre.
-    const bool fogLoaded = fogOfWarShader.load();
-
-    // Journalise un avertissement si le renderer fog est indisponible.
-    if (!fogLoaded)
-    {
-        RC2D_log(RC2D_LOG_WARN, "GameScene: impossible de charger le renderer fog of war");
-    }
+    // Delegate le chargement des shaders au sous-module.
+    shaders.load();
 }
 
 void GameScene::update(double dt)
 {
-    // Met à jour l'animation et les uniforms de l'océan.
-    oceanShader.update(dt);
-
-    // Met à jour l'animation du fog en se basant sur le mode couleur océan.
-    fogOfWarShader.update(dt, oceanShader.getColorMode());
+    // Delegate la mise a jour des shaders au sous-module.
+    shaders.update(dt);
 }
 
 void GameScene::draw(void)
 {
-    // Stoppe le rendu si l'océan n'a pas été chargé.
-    if (!oceanShader.isReady())
+    // Stoppe le rendu si le sous-module shaders n'est pas pret.
+    if (!shaders.isReady())
     {
         return;
     }
 
-    // Récupère la zone visible sécurisée de la scène.
+    // Recupere la zone visible securisee de la scene.
     SDL_FRect visibleRect = rc2d_engine_getVisibleSafeRectRender();
 
-    // Dessine d'abord l'océan.
-    oceanShader.draw(visibleRect);
-
-    // Dessine ensuite le fog au-dessus de l'océan.
-    fogOfWarShader.draw(visibleRect);
+    // Delegate le dessin des shaders au sous-module.
+    shaders.draw(visibleRect);
 }
 
 void GameScene::keypressed(
@@ -79,10 +115,39 @@ void GameScene::keypressed(
     bool isrepeat,
     SDL_KeyboardID keyboardID)
 {
+    // Marque la variable comme utilisee intentionnellement.
+    (void)key;
 
+    // Marque la variable comme utilisee intentionnellement.
+    (void)scancode;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)keycode;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)mod;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)isrepeat;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)keyboardID;
 }
 
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
+    // Marque la variable comme utilisee intentionnellement.
+    (void)x;
 
+    // Marque la variable comme utilisee intentionnellement.
+    (void)y;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)button;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)clicks;
+
+    // Marque la variable comme utilisee intentionnellement.
+    (void)mouseID;
 }
