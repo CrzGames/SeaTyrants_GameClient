@@ -116,7 +116,7 @@ void GameScene::load(void)
     buttonCenterMapUI.hittable    = true;
 
     // A remplacer plus tard par le navire reel du joueur.
-    if (!player.loadShip("assets/atlas/elite24", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/atlas/redcosar_lvl1", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite10");
     }

@@ -177,9 +177,9 @@ void OceanShader::resetUniforms(void)
     // Initialise la force globale du sillage.
     oceanUniforms.params3[1] = 0.75f;
     // Initialise la largeur du sillage en pixels ecran.
-    oceanUniforms.params3[2] = 15.0f;
+    oceanUniforms.params3[2] = 12.0f;
     // Initialise la longueur du sillage en pixels ecran.
-    oceanUniforms.params3[3] = 48.0f;
+    oceanUniforms.params3[3] = 35.0f;
 }
 
 bool OceanShader::uploadUniforms(void)

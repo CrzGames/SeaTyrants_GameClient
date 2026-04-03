@@ -7,7 +7,7 @@ OceanWakeSystem::OceanWakeSystem(void)
     : wakeStamps{},
       trackers{},
       wakeStampSpacingPx(8.0f),
-      wakeLifetimeSeconds(2.0f)
+      wakeLifetimeSeconds(1.6f)
 {
 }
 
