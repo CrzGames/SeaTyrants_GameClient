@@ -8,6 +8,7 @@ static SimulationToHttpQueue g_simToHttpQueue;
 static HttpToSimulationQueue g_httpToSimQueue;
 static SimulationToWebSocketQueue g_simToWsQueue;
 static WebSocketToSimulationQueue g_wsToSimQueue;
+static OceanWakeSystem g_oceanWakeSystem;
 
 GameState& GetGameState()
 {
@@ -47,4 +48,9 @@ WebSocketToSimulationQueue& GetWebSocketToSimulationQueue()
 SimulationToWebSocketQueue& GetSimulationToWebSocketQueue()
 {
     return g_simToWsQueue;
+}
+
+OceanWakeSystem& GetOceanWakeSystem()
+{
+    return g_oceanWakeSystem;
 }

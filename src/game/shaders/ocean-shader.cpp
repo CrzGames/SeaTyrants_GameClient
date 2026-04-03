@@ -1,5 +1,8 @@
 #include "game/shaders/ocean-shader.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <RC2D/RC2D_internal.h>
 
 const char* OceanShader::colorToSuffix(WaterColor color)
@@ -168,6 +171,15 @@ void OceanShader::resetUniforms(void)
     oceanUniforms.params2[2] = 0.74f;
     // Initialise le boost whitecaps.
     oceanUniforms.params2[3] = 0.68f;
+
+    // Initialise le nombre de points de sillage.
+    oceanUniforms.params3[0] = 0.0f;
+    // Initialise la force globale du sillage.
+    oceanUniforms.params3[1] = 0.75f;
+    // Initialise la largeur du sillage en pixels ecran.
+    oceanUniforms.params3[2] = 15.0f;
+    // Initialise la longueur du sillage en pixels ecran.
+    oceanUniforms.params3[3] = 48.0f;
 }
 
 bool OceanShader::uploadUniforms(void)
@@ -576,4 +588,86 @@ float OceanShader::getColorMode(void) const
 {
     // Retourne la valeur courante de colorMode.
     return oceanUniforms.params2[0];
+}
+
+void OceanShader::setWakePoints(const std::vector<WakePoint>& points)
+{
+    int wakeCount = static_cast<int>(points.size());
+    if (wakeCount > MAX_WAKE_POINTS)
+    {
+        wakeCount = MAX_WAKE_POINTS;
+    }
+
+    oceanUniforms.params3[0] = static_cast<float>(wakeCount);
+
+    for (int i = 0; i < wakeCount; ++i)
+    {
+        const WakePoint& p = points[static_cast<size_t>(i)];
+
+        const float uvX = std::clamp(p.uvX, -0.25f, 1.25f);
+        const float uvY = std::clamp(p.uvY, -0.25f, 1.25f);
+        const float intensity = std::clamp(p.intensity, 0.0f, 3.0f);
+        const float age01 = std::clamp(p.age01, 0.0f, 1.0f);
+
+        float dirX = p.dirX;
+        float dirY = p.dirY;
+        const float dirLen = std::sqrt((dirX * dirX) + (dirY * dirY));
+        if (dirLen > 0.0001f)
+        {
+            dirX /= dirLen;
+            dirY /= dirLen;
+        }
+        else
+        {
+            dirX = 1.0f;
+            dirY = 0.0f;
+        }
+
+        oceanUniforms.wakePoints[i][0] = uvX;
+        oceanUniforms.wakePoints[i][1] = uvY;
+        oceanUniforms.wakePoints[i][2] = dirX;
+        oceanUniforms.wakePoints[i][3] = dirY;
+
+        oceanUniforms.wakeMeta[i][0] = intensity;
+        oceanUniforms.wakeMeta[i][1] = age01;
+        oceanUniforms.wakeMeta[i][2] = 0.0f;
+        oceanUniforms.wakeMeta[i][3] = 0.0f;
+    }
+
+    for (int i = wakeCount; i < MAX_WAKE_POINTS; ++i)
+    {
+        oceanUniforms.wakePoints[i][0] = 0.0f;
+        oceanUniforms.wakePoints[i][1] = 0.0f;
+        oceanUniforms.wakePoints[i][2] = 0.0f;
+        oceanUniforms.wakePoints[i][3] = 0.0f;
+
+        oceanUniforms.wakeMeta[i][0] = 0.0f;
+        oceanUniforms.wakeMeta[i][1] = 1.0f;
+        oceanUniforms.wakeMeta[i][2] = 0.0f;
+        oceanUniforms.wakeMeta[i][3] = 0.0f;
+    }
+
+    // Pousse immediatement les nouveaux points au GPU.
+    uploadUniforms();
+}
+
+void OceanShader::clearWakePoints(void)
+{
+    oceanUniforms.params3[0] = 0.0f;
+
+    for (int i = 0; i < MAX_WAKE_POINTS; ++i)
+    {
+        oceanUniforms.wakePoints[i][0] = 0.0f;
+        oceanUniforms.wakePoints[i][1] = 0.0f;
+        oceanUniforms.wakePoints[i][2] = 0.0f;
+        oceanUniforms.wakePoints[i][3] = 0.0f;
+
+        oceanUniforms.wakeMeta[i][0] = 0.0f;
+        oceanUniforms.wakeMeta[i][1] = 1.0f;
+        oceanUniforms.wakeMeta[i][2] = 0.0f;
+        oceanUniforms.wakeMeta[i][3] = 0.0f;
+    }
+
+    // Pousse immediatement l'etat vide au GPU.
+    uploadUniforms();
 }

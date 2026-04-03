@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include <RC2D/RC2D.h>
 
 /**
@@ -10,6 +12,28 @@
  */
 class OceanShader {
 public:
+    /**
+     * @brief Nombre maximum de points de sillage envoyes au shader ocean.
+     */
+    static constexpr int MAX_WAKE_POINTS = 64;
+
+    /**
+     * @brief Point de sillage pre-calcule cote CPU.
+     *
+     * uvX/uvY sont en UV ecran [0..1] dans le visibleRect ocean.
+     * dirX/dirY est la direction de deplacement en espace ecran (normalisee).
+     * intensity controle la force visuelle du point.
+     * age01 est l'age normalise [0..1] (0 = recent, 1 = ancien).
+     */
+    struct WakePoint {
+        float uvX;
+        float uvY;
+        float dirX;
+        float dirY;
+        float intensity;
+        float age01;
+    };
+
     /**
      * @brief Liste complete des couleurs supportees pour l'ocean.
      */
@@ -50,11 +74,15 @@ private:
      * params0 = {time, waveStrength, pixelAmplitude, tiling}
      * params1 = {width, height, speed, foamIntensity}
      * params2 = {colorMode, fresnelStrength, sunGlintStrength, whitecapBoost}
+     * params3 = {wakeCount, wakeStrength, wakeWidthPx, wakeLengthPx}
      */
     struct OceanUniforms {
         float params0[4];
         float params1[4];
         float params2[4];
+        float params3[4];
+        float wakePoints[MAX_WAKE_POINTS][4]; /**< x=uvX, y=uvY, z=dirX, w=dirY */
+        float wakeMeta[MAX_WAKE_POINTS][4];   /**< x=intensity, y=age01, z/w reserves */
     };
 
     RC2D_Image oceanTexture;               /**< Texture base de l'ocean (t0/s0 via SDL_RenderTexture). */
@@ -137,4 +165,15 @@ public:
      * @return 0.0 pour bleu legacy, 1.0 pour mode neutral.
      */
     float getColorMode(void) const;
+
+    /**
+     * @brief Definit les points de sillage visibles pour le frame courant.
+     * @param points Tableau de points de sillage.
+     */
+    void setWakePoints(const std::vector<WakePoint>& points);
+
+    /**
+     * @brief Vide les points de sillage envoyes au shader.
+     */
+    void clearWakePoints(void);
 };

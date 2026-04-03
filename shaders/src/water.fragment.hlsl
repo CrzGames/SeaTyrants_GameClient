@@ -7,7 +7,15 @@ cbuffer Context : register(b0, space3)
     // params2: x=colorMode (0=blue legacy, 1=neutral),
     //          y=fresnelStrength, z=sunGlintStrength, w=whitecapBoost
     float4 params2;
+    // params3: x=wakeCount, y=wakeStrength, z=wakeWidthPx, w=wakeLengthPx
+    float4 params3;
+    // wakePoints[i]: x=uvX, y=uvY, z=dirX, w=dirY
+    float4 wakePoints[64];
+    // wakeMeta[i]: x=intensity, y=age01, z/w=reserved
+    float4 wakeMeta[64];
 };
+
+static const int MAX_WAKE_POINTS = 64;
 
 // Auto-bound by SDL_RenderTexture (tile-water-base).
 Texture2D    u_texture0 : register(t0, space2);
@@ -73,6 +81,49 @@ float sample4alpha(Texture2D tex, SamplerState smp, float2 uv, float2 px)
     float c = tex.Sample(smp, frac(uv + float2(-px.x,  px.y))).a;
     float d = tex.Sample(smp, frac(uv + float2( px.x,  px.y))).a;
     return (a + b + c + d) * 0.25;
+}
+
+float wakeShape(float2 uv,
+                float2 resolution,
+                float2 wakeUv,
+                float2 wakeDir,
+                float wakeWidthPx,
+                float wakeLengthPx)
+{
+    float aspect = resolution.x / max(resolution.y, 1.0);
+
+    float2 delta = uv - wakeUv;
+    delta.x *= aspect;
+
+    float2 dir = wakeDir;
+    dir.x *= aspect;
+    float dirLen = length(dir);
+    dir = (dirLen > 0.0001) ? (dir / dirLen) : float2(1.0, 0.0);
+
+    float2 sideDir = float2(-dir.y, dir.x);
+
+    float alongBack = dot(delta, -dir);
+    float side = dot(delta, sideDir);
+
+    float wakeWidth = max(wakeWidthPx / max(resolution.y, 1.0), 0.0012);
+    float wakeLength = max(wakeLengthPx / max(resolution.y, 1.0), wakeWidth * 3.0);
+
+    float alongStart = smoothstep(0.0, wakeLength * 0.18, alongBack);
+    float alongEnd = 1.0 - smoothstep(wakeLength * 0.95, wakeLength * 1.65, alongBack);
+    float alongMask = saturate(alongStart * alongEnd);
+
+    float lateral = saturate(1.0 - (abs(side) / (wakeWidth * 2.4)));
+    lateral *= lateral;
+
+    // Creuse legerement le centre pour un rendu "double traines".
+    float centerCut = smoothstep(wakeWidth * 0.14, wakeWidth * 0.78, abs(side));
+    float twinWake = lateral * centerCut;
+
+    float inner = saturate(1.0 - (abs(side) / (wakeWidth * 0.92)));
+    float innerAlong = 1.0 - smoothstep(wakeLength * 0.22, wakeLength * 0.78, alongBack);
+    float nearShip = inner * innerAlong;
+
+    return saturate(alongMask * (twinWake * 0.80 + nearShip * 0.20));
 }
 
 PSOutput main(PSInput input)
@@ -326,7 +377,45 @@ PSOutput main(PSInput input)
     foam += chop * 0.035 * foamIntensity;
     foam += whitecaps * 0.20;
     foam += coastalFoam * 0.16;
+
+    // Sillage dynamique de navires (points injectes CPU -> shader).
+    int wakeCount = clamp((int)round(params3.x), 0, MAX_WAKE_POINTS);
+    float wakeStrength = saturate(params3.y);
+    float wakeWidthPx = max(params3.z, 1.0);
+    float wakeLengthPx = max(params3.w, 4.0);
+
+    float wakeAccum = 0.0;
+    [loop]
+    for (int i = 0; i < MAX_WAKE_POINTS; ++i)
+    {
+        if (i >= wakeCount)
+        {
+            break;
+        }
+
+        float intensity = saturate(wakeMeta[i].x);
+        float age01 = saturate(wakeMeta[i].y);
+        float ageFade = 1.0 - age01;
+        ageFade *= ageFade;
+
+        float w = wakeShape(
+            uv,
+            resolution,
+            wakePoints[i].xy,
+            wakePoints[i].zw,
+            wakeWidthPx,
+            wakeLengthPx);
+
+        wakeAccum += w * intensity * ageFade;
+    }
+
+    wakeAccum = saturate(wakeAccum * wakeStrength);
+    float wakeFoam = wakeAccum * (0.45 + 0.55 * foamIntensity);
+    float wakeGlint = wakeAccum * (0.10 + 0.10 * sunGlintStrength);
+
+    foam += wakeFoam * 0.36;
     rgb = lerp(rgb, foamColor, saturate(foam));
+    rgb += glintColor * wakeGlint;
 
     // Slow broad swell modulation for visible movement without pixel sparkle.
     float swell = 0.5 + 0.5 * sin((uvFlow.x * 2.3 + uvFlow.y * 1.7) + t * 0.55);

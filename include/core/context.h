@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/state.h"
+#include "game/systems/ocean_wake_system.h"
 #include "network/state.h"
 #include "core/threading/queues/http_to_simulation.h"
 #include "core/threading/queues/websocket_to_simulation.h"
@@ -32,3 +33,4 @@ WebSocketToSimulationQueue& GetWebSocketToSimulationQueue();
 
 // Accès global à la queue de communication de la simulation vers le thread WebSocket
 SimulationToWebSocketQueue& GetSimulationToWebSocketQueue();
+OceanWakeSystem& GetOceanWakeSystem();

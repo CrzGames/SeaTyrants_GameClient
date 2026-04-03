@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <vector>
 
 #include <RC2D/RC2D.h>
@@ -65,6 +66,7 @@ private:
 
     std::array<RC2D_Image, 8> sprites; /**< Sprites 1..8 charges en memoire. */
     bool spritesLoaded;                 /**< True si les sprites sont charges. */
+    uint64_t runtimeShipId;             /**< Identifiant runtime unique pour le sillage ocean. */
 
     Config config;             /**< Parametres de deplacement/rendu. */
     HealthVisual healthVisual; /**< Etat visuel de coque. */

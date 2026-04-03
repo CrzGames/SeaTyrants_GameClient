@@ -8,6 +8,13 @@
 
 #include <cJSON.h>
 
+#include "core/context.h"
+
+#include <atomic>
+
+// Générateur d'ID runtime pour les navires.
+std::atomic<uint64_t> g_nextRuntimeShipId{1u};
+
 /**
  * @brief Convertit des coordonnées tile iso vers le repère Sea-like (row/col).
  */
@@ -710,6 +717,7 @@ bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind stora
 Ship::Ship(void)
     : sprites{},
       spritesLoaded(false),
+      runtimeShipId(g_nextRuntimeShipId.fetch_add(1u)),
       config{3.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.5088f, 0.6346f},
       healthVisual(HealthVisual::FULL),
       tilePosition{0.0f, 0.0f},
@@ -898,6 +906,8 @@ bool Ship::isMoving(void) const
 
 void Ship::update(double dt, const Map& map)
 {
+    GetOceanWakeSystem().submitShipSample(runtimeShipId, map, tilePosition, moving);
+
     if (!moving)
     {
         return;
@@ -1012,4 +1022,3 @@ void Ship::draw(const Map& map) const
     const SDL_FPoint center = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
     drawSpriteCentered(sprite, center.x, center.y);
 }
-
