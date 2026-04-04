@@ -1,6 +1,6 @@
 #include "game/scenes/scene-menu.h"
 
-#include "game/game_screen.h"
+#include "core/context.h"
 #include "game/scenes/scene-manager.h"
 
 double MenuScene::clamp01(double value)
@@ -60,7 +60,7 @@ void MenuScene::drawFullscreenBlackWithAlpha(double alpha01)
     }
 
     // Read visible safe rectangle from shared game screen wrapper.
-    SDL_FRect rect = gameScreen.rect;
+    SDL_FRect rect = GetGameScreen().rect;
 
     // Guard invalid rectangle.
     if (rect.w <= 0.0f || rect.h <= 0.0f)
@@ -93,63 +93,63 @@ void MenuScene::goToGameScene(void)
 void MenuScene::unload(void)
 {
     // Close background video if open.
-    rc2d_video_close(&loginBackgroundVideo);
+    rc2d_video_close(&this->loginBackgroundVideo);
 
     // Reset opening-attempt flag.
-    loginBackgroundOpenAttempted = false;
+    this->loginBackgroundOpenAttempted = false;
 
     // Free logo texture.
-    rc2d_graphics_freeImage(&logoUi.image);
+    rc2d_graphics_freeImage(&this->logoUi.image);
 
     // Free logo CPU image data.
-    rc2d_graphics_freeImageData(&logoUi.imageData);
+    rc2d_graphics_freeImageData(&this->logoUi.imageData);
 
     // Free email texture.
-    rc2d_graphics_freeImage(&inputEmailUi.image);
+    rc2d_graphics_freeImage(&this->inputEmailUi.image);
 
     // Free email CPU image data.
-    rc2d_graphics_freeImageData(&inputEmailUi.imageData);
+    rc2d_graphics_freeImageData(&this->inputEmailUi.imageData);
 
     // Free password texture.
-    rc2d_graphics_freeImage(&inputPasswordUi.image);
+    rc2d_graphics_freeImage(&this->inputPasswordUi.image);
 
     // Free password CPU image data.
-    rc2d_graphics_freeImageData(&inputPasswordUi.imageData);
+    rc2d_graphics_freeImageData(&this->inputPasswordUi.imageData);
 
     // Free login button texture.
-    rc2d_graphics_freeImage(&buttonLoginUi.image);
+    rc2d_graphics_freeImage(&this->buttonLoginUi.image);
 
     // Free login button CPU image data.
-    rc2d_graphics_freeImageData(&buttonLoginUi.imageData);
+    rc2d_graphics_freeImageData(&this->buttonLoginUi.imageData);
 
     // Stop and destroy active track.
-    if (menuTrack != nullptr)
+    if (this->menuTrack != nullptr)
     {
         // Stop playback first.
-        rc2d_track_stop(menuTrack);
+        rc2d_track_stop(this->menuTrack);
 
         // Destroy track resource.
-        rc2d_track_destroy(menuTrack);
+        rc2d_track_destroy(this->menuTrack);
 
         // Clear pointer after destroy.
-        menuTrack = nullptr;
+        this->menuTrack = nullptr;
     }
 
     // Destroy loaded audio resource.
-    if (menuMusic != nullptr)
+    if (this->menuMusic != nullptr)
     {
         // Free audio asset.
-        rc2d_audio_destroy(menuMusic);
+        rc2d_audio_destroy(this->menuMusic);
 
         // Clear pointer after free.
-        menuMusic = nullptr;
+        this->menuMusic = nullptr;
     }
 
     // Reset playback flag.
-    menuMusicStarted = false;
+    this->menuMusicStarted = false;
 
     // Reset intro fade.
-    loginFadeAlpha = 1.0f;
+    this->loginFadeAlpha = 1.0f;
 
     // Log lifecycle transition.
     RC2D_log(RC2D_LOG_INFO, "Menu Scene Unloaded\n");
@@ -161,118 +161,118 @@ void MenuScene::load(void)
     rc2d_mouse_setVisible(true);
 
     // Reset video struct to clean state.
-    loginBackgroundVideo = {};
+    this->loginBackgroundVideo = {};
 
     // Reset open-attempt guard.
-    loginBackgroundOpenAttempted = false;
+    this->loginBackgroundOpenAttempted = false;
 
     // Reset intro fade.
-    loginFadeAlpha = 1.0f;
+    this->loginFadeAlpha = 1.0f;
 
     // Mark music as not started.
-    menuMusicStarted = false;
+    this->menuMusicStarted = false;
 
     // Load logo texture.
-    logoUi.image = rc2d_graphics_loadImageFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
+    this->logoUi.image = rc2d_graphics_loadImageFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
 
     // Load logo CPU data for potential pixel collision.
-    logoUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
+    this->logoUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
 
     // Anchor logo at top center.
-    logoUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
+    this->logoUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
 
     // Use percentage margins.
-    logoUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
+    this->logoUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
 
     // No horizontal offset.
-    logoUi.margin_x = 0.0f;
+    this->logoUi.margin_x = 0.0f;
 
     // Small top margin.
-    logoUi.margin_y = 0.005f;
+    this->logoUi.margin_y = 0.005f;
 
     // Keep logo visible.
-    logoUi.visible = true;
+    this->logoUi.visible = true;
 
     // Logo is not interactable.
-    logoUi.hittable = false;
+    this->logoUi.hittable = false;
 
     // Load email texture.
-    inputEmailUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
+    this->inputEmailUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
 
     // Load email CPU data.
-    inputEmailUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
+    this->inputEmailUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
 
     // Anchor email at top center.
-    inputEmailUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
+    this->inputEmailUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
 
     // Use percentage margins.
-    inputEmailUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
+    this->inputEmailUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
 
     // No horizontal offset.
-    inputEmailUi.margin_x = 0.0f;
+    this->inputEmailUi.margin_x = 0.0f;
 
     // Vertical position for email field.
-    inputEmailUi.margin_y = 0.45f;
+    this->inputEmailUi.margin_y = 0.45f;
 
     // Keep email field visible.
-    inputEmailUi.visible = true;
+    this->inputEmailUi.visible = true;
 
     // Enable interactions for email field.
-    inputEmailUi.hittable = true;
+    this->inputEmailUi.hittable = true;
 
     // Load password texture.
-    inputPasswordUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
+    this->inputPasswordUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
 
     // Load password CPU data.
-    inputPasswordUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
+    this->inputPasswordUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
 
     // Anchor password at top center.
-    inputPasswordUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
+    this->inputPasswordUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
 
     // Use percentage margins.
-    inputPasswordUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
+    this->inputPasswordUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
 
     // No horizontal offset.
-    inputPasswordUi.margin_x = 0.0f;
+    this->inputPasswordUi.margin_x = 0.0f;
 
     // Vertical position for password field.
-    inputPasswordUi.margin_y = 0.55f;
+    this->inputPasswordUi.margin_y = 0.55f;
 
     // Keep password field visible.
-    inputPasswordUi.visible = true;
+    this->inputPasswordUi.visible = true;
 
     // Enable interactions for password field.
-    inputPasswordUi.hittable = true;
+    this->inputPasswordUi.hittable = true;
 
     // Load login button texture.
-    buttonLoginUi.image = rc2d_graphics_loadImageFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
+    this->buttonLoginUi.image = rc2d_graphics_loadImageFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
 
     // Load login button CPU data.
-    buttonLoginUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
+    this->buttonLoginUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
 
     // Anchor button at top center.
-    buttonLoginUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
+    this->buttonLoginUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
 
     // Use percentage margins.
-    buttonLoginUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
+    this->buttonLoginUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
 
     // No horizontal offset.
-    buttonLoginUi.margin_x = 0.0f;
+    this->buttonLoginUi.margin_x = 0.0f;
 
     // Vertical position for button.
-    buttonLoginUi.margin_y = 0.65f;
+    this->buttonLoginUi.margin_y = 0.65f;
 
     // Keep button visible.
-    buttonLoginUi.visible = true;
+    this->buttonLoginUi.visible = true;
 
     // Enable button hit-testing.
-    buttonLoginUi.hittable = true;
+    this->buttonLoginUi.hittable = true;
 
     // Load menu music audio.
-    menuMusic = rc2d_audio_loadAudioFromStorage("assets/sounds/sound_menu.opus", RC2D_STORAGE_TITLE, true);
+    this->menuMusic = rc2d_audio_loadAudioFromStorage("assets/sounds/sound_menu.opus", RC2D_STORAGE_TITLE, true);
 
     // Handle audio load failure.
-    if (menuMusic == nullptr)
+    if (this->menuMusic == nullptr)
     {
         // Log load issue.
         RC2D_log(RC2D_LOG_WARN, "Failed to load menu music: %s", SDL_GetError());
@@ -280,15 +280,15 @@ void MenuScene::load(void)
     else
     {
         // Create track for music playback.
-        menuTrack = rc2d_track_create();
+        this->menuTrack = rc2d_track_create();
 
         // Handle track creation failure.
-        if (menuTrack == nullptr)
+        if (this->menuTrack == nullptr)
         {
             // Log track creation issue.
             RC2D_log(RC2D_LOG_WARN, "Failed to create menu track: %s", SDL_GetError());
         }
-        else if (!rc2d_track_setAudio(menuTrack, menuMusic))
+        else if (!rc2d_track_setAudio(this->menuTrack, this->menuMusic))
         {
             // Log track binding issue.
             RC2D_log(RC2D_LOG_WARN, "Failed to set menu track audio: %s", SDL_GetError());
@@ -302,23 +302,23 @@ void MenuScene::load(void)
 void MenuScene::update(double dt)
 {
     // Animate intro fade until transparent.
-    if (loginFadeAlpha > 0.0f)
+    if (this->loginFadeAlpha > 0.0f)
     {
         // Subtract fade speed scaled by dt.
-        loginFadeAlpha -= static_cast<float>(kLoginFadeSpeed * dt);
+        this->loginFadeAlpha -= static_cast<float>(kLoginFadeSpeed * dt);
 
         // Clamp at zero.
-        if (loginFadeAlpha < 0.0f)
+        if (this->loginFadeAlpha < 0.0f)
         {
-            loginFadeAlpha = 0.0f;
+            this->loginFadeAlpha = 0.0f;
         }
     }
 
     // Start menu music once.
-    if (!menuMusicStarted && menuTrack != nullptr && menuMusic != nullptr)
+    if (!this->menuMusicStarted && this->menuTrack != nullptr && this->menuMusic != nullptr)
     {
         // Request looped playback.
-        if (!rc2d_track_play(menuTrack, -1))
+        if (!rc2d_track_play(this->menuTrack, -1))
         {
             // Log playback issue.
             RC2D_log(RC2D_LOG_WARN, "Failed to play menu music: %s", SDL_GetError());
@@ -326,19 +326,19 @@ void MenuScene::update(double dt)
         else
         {
             // Mark as started to avoid replay spam.
-            menuMusicStarted = true;
+            this->menuMusicStarted = true;
         }
     }
 
     // Try opening menu background video once.
-    if (loginBackgroundVideo.format_ctx == nullptr && !loginBackgroundOpenAttempted)
+    if (this->loginBackgroundVideo.format_ctx == nullptr && !this->loginBackgroundOpenAttempted)
     {
         // Mark attempt to avoid retry loops.
-        loginBackgroundOpenAttempted = true;
+        this->loginBackgroundOpenAttempted = true;
 
         // Open menu background video.
         if (rc2d_video_openFromStorage(
-                &loginBackgroundVideo,
+                &this->loginBackgroundVideo,
                 "assets/videos/background-menu.mp4",
                 RC2D_STORAGE_TITLE) != 0)
         {
@@ -348,41 +348,41 @@ void MenuScene::update(double dt)
         else
         {
             // Loop the menu background.
-            rc2d_video_setLoop(&loginBackgroundVideo, 1);
+            rc2d_video_setLoop(&this->loginBackgroundVideo, 1);
         }
     }
 
     // Decode and advance background video when available.
-    if (loginBackgroundVideo.format_ctx != nullptr)
+    if (this->loginBackgroundVideo.format_ctx != nullptr)
     {
-        rc2d_video_update(&loginBackgroundVideo, dt);
+        rc2d_video_update(&this->loginBackgroundVideo, dt);
     }
 }
 
 void MenuScene::draw(void)
 {
     // Draw menu video if opened.
-    if (loginBackgroundVideo.format_ctx != nullptr)
+    if (this->loginBackgroundVideo.format_ctx != nullptr)
     {
-        rc2d_video_draw(&loginBackgroundVideo);
+        rc2d_video_draw(&this->loginBackgroundVideo);
     }
 
     // Draw logo widget.
-    rc2d_ui_drawImage(&logoUi);
+    rc2d_ui_drawImage(&this->logoUi);
 
     // Draw email widget.
-    rc2d_ui_drawImage(&inputEmailUi);
+    rc2d_ui_drawImage(&this->inputEmailUi);
 
     // Draw password widget.
-    rc2d_ui_drawImage(&inputPasswordUi);
+    rc2d_ui_drawImage(&this->inputPasswordUi);
 
     // Draw login button widget.
-    rc2d_ui_drawImage(&buttonLoginUi);
+    rc2d_ui_drawImage(&this->buttonLoginUi);
 
     // Draw intro fade if still active.
-    if (loginFadeAlpha > 0.0f)
+    if (this->loginFadeAlpha > 0.0f)
     {
-        drawFullscreenBlackWithAlpha(loginFadeAlpha);
+        this->drawFullscreenBlackWithAlpha(this->loginFadeAlpha);
     }
 }
 
@@ -397,7 +397,7 @@ void MenuScene::keypressed(
     // Enter starts game.
     if (keycode == SDLK_RETURN || keycode == SDLK_KP_ENTER)
     {
-        goToGameScene();
+        this->goToGameScene();
         return;
     }
 }
@@ -411,17 +411,17 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     }
 
     // Check email box hit.
-    if (rc2d_collision_pointInUIImagePixelPerfect(&inputEmailUi, x, y))
+    if (rc2d_collision_pointInUIImagePixelPerfect(&this->inputEmailUi, x, y))
     {
         RC2D_log(RC2D_LOG_INFO, "Clicked EMAIL input box");
     }
     // Check password box hit.
-    else if (rc2d_collision_pointInUIImagePixelPerfect(&inputPasswordUi, x, y))
+    else if (rc2d_collision_pointInUIImagePixelPerfect(&this->inputPasswordUi, x, y))
     {
         RC2D_log(RC2D_LOG_INFO, "Clicked PASSWORD input box");
     }
     // Check login button hit.
-    else if (rc2d_collision_pointInUIImagePixelPerfect(&buttonLoginUi, x, y))
+    else if (rc2d_collision_pointInUIImagePixelPerfect(&this->buttonLoginUi, x, y))
     {
         RC2D_log(RC2D_LOG_INFO, "Clicked LOGIN button");
     }

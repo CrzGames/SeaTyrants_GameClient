@@ -20,63 +20,74 @@ TileClickMarker::~TileClickMarker(void)
 
 void TileClickMarker::show(int tileX, int tileY)
 {
-    tile.x = tileX;
-    tile.y = tileY;
-    elapsedSeconds = 0.0;
-    visible = true;
+    // Memorise la tuile cible et redemarre l'animation.
+    this->tile.x = tileX;
+    this->tile.y = tileY;
+    this->elapsedSeconds = 0.0;
+    this->visible = true;
 }
 
 void TileClickMarker::hide(void)
 {
-    visible = false;
-    elapsedSeconds = 0.0;
+    // Cache immediatement le marqueur et remet son timer a zero.
+    this->visible = false;
+    this->elapsedSeconds = 0.0;
 }
 
 void TileClickMarker::update(double dt)
 {
-    if (!visible)
+    // Si le marqueur est inactif, aucun calcul n'est necessaire.
+    if (!this->visible)
     {
         return;
     }
 
-    elapsedSeconds += dt;
-    if (elapsedSeconds >= durationSeconds)
+    // Auto-expiration apres la duree configuree.
+    this->elapsedSeconds += dt;
+    if (this->elapsedSeconds >= this->durationSeconds)
     {
-        visible = false;
+        this->visible = false;
     }
 }
 
 void TileClickMarker::draw(const Map& map) const
 {
-    if (!visible)
+    // On dessine uniquement pendant la fenetre de visibilite.
+    if (!this->visible)
     {
         return;
     }
 
-    const SDL_FPoint center = map.tileToScreenCenter(tile.x, tile.y);
+    // Conversion tuile -> centre ecran pour positionner le losange.
+    const SDL_FPoint center = map.tileToScreenCenter(this->tile.x, this->tile.y);
 
+    // Pulsation sinusoidale autour d'une echelle 1.0.
     const float pulse =
-        1.0f + (pulseAmplitude * std::sin(static_cast<float>(elapsedSeconds) * pulseSpeed));
+        1.0f + (this->pulseAmplitude * std::sin(static_cast<float>(this->elapsedSeconds) * this->pulseSpeed));
 
+    // Le marqueur suit les proportions de la tuile map.
     const float markerW = map.getTileWidth() * pulse;
     const float markerH = map.getTileHeight() * pulse;
 
-    rc2d_graphics_setColor(fillColor);
+    // Pass 1: remplissage translucide.
+    rc2d_graphics_setColor(this->fillColor);
     rc2d_graphics_drawTileIsometric("fill", center.x, center.y, markerW, markerH);
 
-    rc2d_graphics_setColor(lineColor);
+    // Pass 2: contour lisible.
+    rc2d_graphics_setColor(this->lineColor);
     rc2d_graphics_drawTileIsometric("line", center.x, center.y, markerW, markerH);
 }
 
 void TileClickMarker::setDurationSeconds(double value)
 {
+    // Garde-fou: duree strictement positive.
     if (value > 0.0)
     {
-        durationSeconds = value;
+        this->durationSeconds = value;
     }
 }
 
 bool TileClickMarker::isVisible(void) const
 {
-    return visible;
+    return this->visible;
 }

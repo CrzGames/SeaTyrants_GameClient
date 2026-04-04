@@ -3,122 +3,145 @@
 #include <algorithm>
 
 Player::Player(void)
-    : hpCurrent(100),
-      hpMax(100),
-      moveSpeedTilesPerSecond(4.0f),
+    : hpCurrent(0),
+      hpMax(0),
+      moveSpeedTilesPerSecond(0.0f),
       ship{}
 {
-    ship.setSpeedTilesPerSecond(moveSpeedTilesPerSecond);
 }
 
 Player::~Player(void)
 {
-    unloadShip();
+}
+
+void Player::load(void)
+{
+    // Valeurs runtime de base du joueur au chargement de scene.
+    this->hpCurrent = 100;
+    this->hpMax = 100;
+    this->moveSpeedTilesPerSecond = 4.0f;
+
+    // La vitesse logique du joueur est propagee au navire.
+    this->ship.setSpeedTilesPerSecond(this->moveSpeedTilesPerSecond);
+}
+
+void Player::unload(void)
+{
+    this->unloadShip();
 }
 
 bool Player::loadShip(const char* folderPath, RC2D_StorageKind storageKind)
 {
-    return ship.loadSpritesFromFolder(folderPath, storageKind);
+    // Delegation directe au composant Ship (atlas + validation).
+    return this->ship.loadSpritesFromFolder(folderPath, storageKind);
 }
 
 void Player::unloadShip(void)
 {
-    ship.unloadSprites();
+    this->ship.unloadSprites();
 }
 
 void Player::spawnOnTile(const Map& map, int tileX, int tileY)
 {
+    // Clamp pour garantir un spawn legal meme si l'appelant donne
+    // une tuile hors des bornes.
     const SDL_Point clamped = map.clampTile(tileX, tileY);
-    ship.setPositionTileInt(clamped.x, clamped.y);
+    this->ship.setPositionTileInt(clamped.x, clamped.y);
 }
 
 void Player::moveToTile(const Map& map, int tileX, int tileY)
 {
-    ship.moveToTile(map, tileX, tileY);
+    // Le pathfinding est gere dans Ship::moveToTile.
+    this->ship.moveToTile(map, tileX, tileY);
 }
 
 void Player::update(double dt, const Map& map)
 {
-    ship.update(dt, map);
+    // Le joueur n'a pas de logique complexe ici:
+    // la simulation de mouvement est concentree dans Ship.
+    this->ship.update(dt, map);
 }
 
 void Player::draw(const Map& map) const
 {
-    ship.draw(map);
+    this->ship.draw(map);
 }
 
 bool Player::isMoving(void) const
 {
-    return ship.isMoving();
+    return this->ship.isMoving();
 }
 
 SDL_FPoint Player::getTilePosition(void) const
 {
-    return ship.getPositionTile();
+    return this->ship.getPositionTile();
 }
 
 SDL_FPoint Player::getTargetTile(void) const
 {
-    return ship.getTargetTile();
+    return this->ship.getTargetTile();
 }
 
 Ship& Player::getShip(void)
 {
-    return ship;
+    return this->ship;
 }
 
 const Ship& Player::getShip(void) const
 {
-    return ship;
+    return this->ship;
 }
 
 void Player::setMoveSpeedTilesPerSecond(float speed)
 {
+    // On ignore les vitesses non positives pour eviter un etat incoherent.
     if (speed <= 0.0f)
     {
         return;
     }
 
-    moveSpeedTilesPerSecond = speed;
-    ship.setSpeedTilesPerSecond(speed);
+    this->moveSpeedTilesPerSecond = speed;
+    this->ship.setSpeedTilesPerSecond(speed);
 }
 
 float Player::getMoveSpeedTilesPerSecond(void) const
 {
-    return moveSpeedTilesPerSecond;
+    return this->moveSpeedTilesPerSecond;
 }
 
 void Player::setHpMax(int value)
 {
+    // On force un minimum de 1 HP max pour eviter un personnage "mort ne".
     if (value < 1)
     {
         value = 1;
     }
 
-    hpMax = value;
+    this->hpMax = value;
 
-    if (hpCurrent > hpMax)
+    if (this->hpCurrent > this->hpMax)
     {
-        hpCurrent = hpMax;
+        this->hpCurrent = this->hpMax;
     }
 }
 
 void Player::setHpCurrent(int value)
 {
-    hpCurrent = std::clamp(value, 0, hpMax);
+    // Clamp des HP courants dans [0, hpMax].
+    this->hpCurrent = std::clamp(value, 0, this->hpMax);
 }
 
 int Player::getHpCurrent(void) const
 {
-    return hpCurrent;
+    return this->hpCurrent;
 }
 
 int Player::getHpMax(void) const
 {
-    return hpMax;
+    return this->hpMax;
 }
 
 bool Player::isAlive(void) const
 {
-    return hpCurrent > 0;
+    return this->hpCurrent > 0;
 }

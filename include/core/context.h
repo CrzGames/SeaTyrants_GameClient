@@ -1,36 +1,86 @@
 #pragma once
 
-#include "game/state.h"
-#include "game/systems/ocean_wake_system.h"
-#include "network/state.h"
 #include "core/threading/queues/http_to_simulation.h"
-#include "core/threading/queues/websocket_to_simulation.h"
 #include "core/threading/queues/network_incoming_to_simulation.h"
 #include "core/threading/queues/simulation_to_http.h"
-#include "core/threading/queues/simulation_to_websocket.h"
 #include "core/threading/queues/simulation_to_network_outgoing.h"
+#include "core/threading/queues/simulation_to_websocket.h"
+#include "core/threading/queues/websocket_to_simulation.h"
+#include "game/game_screen.h"
+#include "game/map/map.h"
+#include "game/shaders/fog-of-war-shader.h"
+#include "game/shaders/ocean-shader.h"
+#include "game/state.h"
+#include "network/state.h"
 
-// Accès global au game state
+/**
+ * @brief Acces global au game state.
+ * @return Reference mutable vers l'etat gameplay.
+ */
 GameState& GetGameState();
 
-// Accès global au network state
+/**
+ * @brief Acces global au game screen.
+ * @return Reference mutable vers la zone de rendu gameplay.
+ */
+GameScreen& GetGameScreen();
+
+/**
+ * @brief Acces global au network state.
+ * @return Reference mutable vers l'etat reseau.
+ */
 NetworkState& GetNetworkState();
 
-// Accès global aux queues de communication du réseau IN vers le thread simulation
+/**
+ * @brief Acces global a la queue reseau IN -> simulation.
+ * @return Reference mutable vers la queue.
+ */
 NetworkINToSimulationQueue& GetNetworkINToSimulationQueue();
 
-// Accès global à la queue de communication de la simulation vers le thread réseau
+/**
+ * @brief Acces global a la queue simulation -> reseau OUT.
+ * @return Reference mutable vers la queue.
+ */
 SimulationToNetworkOUTQueue& GetSimulationToNetworkOUTQueue();
 
-// Accès global à la queue de communication de la simulation vers le thread HTTP
+/**
+ * @brief Acces global a la queue simulation -> HTTP.
+ * @return Reference mutable vers la queue.
+ */
 SimulationToHttpQueue& GetSimulationToHttpQueue();
 
-// Accès global à la queue de communication du thread HTTP vers le thread simulation
+/**
+ * @brief Acces global a la queue HTTP -> simulation.
+ * @return Reference mutable vers la queue.
+ */
 HttpToSimulationQueue& GetHttpToSimulationQueue();
 
-// Accès global à la queue de communication du thread WebSocket vers le thread simulation
+/**
+ * @brief Acces global a la queue WebSocket -> simulation.
+ * @return Reference mutable vers la queue.
+ */
 WebSocketToSimulationQueue& GetWebSocketToSimulationQueue();
 
-// Accès global à la queue de communication de la simulation vers le thread WebSocket
+/**
+ * @brief Acces global a la queue simulation -> WebSocket.
+ * @return Reference mutable vers la queue.
+ */
 SimulationToWebSocketQueue& GetSimulationToWebSocketQueue();
-OceanWakeSystem& GetOceanWakeSystem();
+
+/**
+ * @brief Acces global a la map active.
+ * @return Reference mutable vers la map.
+ */
+Map& GetCurrentMap();
+
+/**
+ * @brief Acces global au shader ocean.
+ * @return Reference mutable vers l'instance globale.
+ */
+OceanShader& GetOceanShader();
+
+/**
+ * @brief Acces global au shader fog-of-war.
+ * @return Reference mutable vers l'instance globale.
+ */
+FogOfWarShader& GetFogOfWarShader();

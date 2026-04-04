@@ -2,7 +2,6 @@
 
 #include "core/context.h"
 #include "crypto/kx.h"
-#include "game/game_screen.h"
 #include "game/scenes/scene-editormap.h"
 #include "game/scenes/scene-game.h"
 #include "game/scenes/scene-manager.h"
@@ -18,7 +17,6 @@
 #include "simulation/entrypoint.h"
 
 SceneManager sceneManager;
-GameScreen gameScreen;
 
 void rc2d_unload(void)
 {
@@ -95,7 +93,7 @@ void rc2d_load(void)
 
 void rc2d_update(double dt)
 {
-    gameScreen.update(dt);  
+    GetGameScreen().update(dt);
     sceneManager.update(dt);
 }
 

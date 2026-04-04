@@ -20,10 +20,16 @@ std::atomic<uint64_t> g_nextRuntimeShipId{1u};
  */
 bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
 {
+    // Changement de base pour travailler sur la grille "Sea-like":
+    // - s = x + y (diagonales montantes)
+    // - n = x - y (diagonales descendantes)
     const int s = tileX + tileY;
     const int n = tileX - tileY;
     const int row = s + 1;
 
+    // La parite de row impose la parite de n.
+    // Si elle ne correspond pas, le point ne tombe pas sur une case valide
+    // du repere Sea-like.
     int col = 0;
     if ((row & 1) == 0)
     {
@@ -52,9 +58,11 @@ bool tileToSeaRowCol(int tileX, int tileY, int& outRow, int& outCol)
  */
 bool seaRowColToTile(int row, int col, int& outTileX, int& outTileY)
 {
+    // Transformation inverse du repere Sea-like vers la grille iso.
     const int s = row - 1;
     const int n = (2 * col) + (((row & 1) == 0) ? 1 : 0);
 
+    // On verifie que la conversion redonne des entiers exacts.
     const int sumX = s + n;
     const int sumY = s - n;
     if ((sumX & 1) != 0 || (sumY & 1) != 0)
@@ -81,26 +89,26 @@ int Ship::spriteIndexForDirection(DiagonalDirection direction) const
     }
 
     // FULL: 1..4 => index 0..3, LOW: 5..8 => index 4..7
-    return (healthVisual == HealthVisual::LOW) ? (4 + dirIndex) : dirIndex;
+    return (this->healthVisual == HealthVisual::LOW) ? (4 + dirIndex) : dirIndex;
 }
 
 int Ship::getCurrentSpriteIndex(void) const
 {
-    if (!spritesLoaded)
+    if (!this->spritesLoaded)
     {
         return -1;
     }
 
     const DiagonalDirection visualDirection =
-        (directionUsesPair && directionToggle) ? directionB : directionA;
+        (this->directionUsesPair && this->directionToggle) ? this->directionB : this->directionA;
 
-    const int spriteIndex = spriteIndexForDirection(visualDirection);
-    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(sprites.size()))
+    const int spriteIndex = this->spriteIndexForDirection(visualDirection);
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
     {
         return -1;
     }
 
-    if (sprites[static_cast<size_t>(spriteIndex)].sdl_texture == nullptr)
+    if (this->sprites[static_cast<size_t>(spriteIndex)].sdl_texture == nullptr)
     {
         return -1;
     }
@@ -110,6 +118,8 @@ int Ship::getCurrentSpriteIndex(void) const
 
 Ship::MoveDirection Ship::quantizeScreenDirection(float deltaScreenX, float deltaScreenY)
 {
+    // Quantification en 8 directions:
+    // on convertit le vecteur en angle, puis on choisit l'octant le plus proche.
     constexpr float kEpsilon = 0.0001f;
     if (std::fabs(deltaScreenX) <= kEpsilon && std::fabs(deltaScreenY) <= kEpsilon)
     {
@@ -143,6 +153,8 @@ Ship::MoveDirection Ship::quantizeScreenDirection(float deltaScreenX, float delt
 
 float Ship::aStarHeuristic(int fromTileX, int fromTileY, int toTileX, int toTileY)
 {
+    // Heuristique principale: distance euclidienne dans le repere Sea-like.
+    // Ce repere colle mieux au voisinage utilise pour le pathfinding.
     int fromRow = 0;
     int fromCol = 0;
     int toRow = 0;
@@ -169,6 +181,10 @@ bool Ship::isWalkableForPath(
     const SDL_Point& startTile,
     const SDL_Point& goalTile) const
 {
+    // Regle de traversabilite:
+    // - hors map: interdit
+    // - start/goal: toujours autorises
+    // - sinon: selon couche collision map
     if (!map.isInside(tileX, tileY))
     {
         return false;
@@ -190,6 +206,9 @@ bool Ship::buildPathAStar(
     std::vector<SDL_Point>& outPath,
     std::vector<MoveDirection>& outDirections) const
 {
+    // Fonction coeur de navigation:
+    // construit un chemin start -> goal en A* puis reconstruit
+    // la liste des tuiles et des directions visuelles associees.
     outPath.clear();
     outDirections.clear();
 
@@ -224,6 +243,8 @@ bool Ship::buildPathAStar(
     };
 
     struct NodeState {
+        // g = cout depuis le depart
+        // f = g + heuristique
         float g;
         float f;
         int parent;
@@ -300,6 +321,7 @@ bool Ship::buildPathAStar(
 
     while (!openSet.empty())
     {
+        // 1) Prend le noeud ouvert au plus petit score f.
         const OpenEntry current = *openSet.begin();
         openSet.erase(openSet.begin());
 
@@ -310,6 +332,7 @@ bool Ship::buildPathAStar(
 
         if (current.index == goalIndex)
         {
+            // 2) Goal atteint: on pourra reconstruire le chemin.
             found = true;
             break;
         }
@@ -329,6 +352,7 @@ bool Ship::buildPathAStar(
 
         for (int i = 0; i < kNeighborCount; ++i)
         {
+            // 3) Expansion des 4 voisins selon la parite de ligne.
             const int nextRow = currentRow + (evenRow ? evenRowDr[i] : oddRowDr[i]);
             const int nextCol = currentCol + (evenRow ? evenRowDc[i] : oddRowDc[i]);
 
@@ -339,7 +363,7 @@ bool Ship::buildPathAStar(
                 continue;
             }
 
-            if (!isWalkableForPath(map, nextX, nextY, startTile, goalTile))
+            if (!this->isWalkableForPath(map, nextX, nextY, startTile, goalTile))
             {
                 continue;
             }
@@ -353,6 +377,7 @@ bool Ship::buildPathAStar(
             const float tentativeG = states[static_cast<size_t>(current.index)].g + 1.0f;
             if (tentativeG >= states[static_cast<size_t>(nextIndex)].g)
             {
+                // Ce chemin n'ameliorera pas le meilleur cout connu.
                 continue;
             }
 
@@ -361,6 +386,7 @@ bool Ship::buildPathAStar(
             states[static_cast<size_t>(nextIndex)].f =
                 tentativeG + aStarHeuristic(nextX, nextY, goalTile.x, goalTile.y);
 
+            // Direction visuelle du segment courant, utilisee pour l'animation.
             const SDL_FPoint currentCenter = map.tileToScreenCenter(currentTile.x, currentTile.y);
             const SDL_FPoint nextCenter = map.tileToScreenCenter(nextX, nextY);
             states[static_cast<size_t>(nextIndex)].dirFromParent = quantizeScreenDirection(
@@ -380,6 +406,7 @@ bool Ship::buildPathAStar(
         return false;
     }
 
+    // Reconstruction du chemin en remontant les parents depuis goal.
     int walk = goalIndex;
     while (walk != startIndex)
     {
@@ -409,13 +436,17 @@ bool Ship::buildPathAStar(
 
 void Ship::updateDirection(MoveDirection direction)
 {
+    // Cette fonction convertit une direction de mouvement quantifiee
+    // en direction(s) visuelles de sprite.
+    // Sur les axes cardinaux, on alterne entre 2 diagonales
+    // pour obtenir un rendu plus naturel.
     if (direction == MoveDirection::NONE)
     {
         return;
     }
 
     const DiagonalDirection currentVisualDirection =
-        (directionUsesPair && directionToggle) ? directionB : directionA;
+        (this->directionUsesPair && this->directionToggle) ? this->directionB : this->directionA;
 
     auto keepNaturalPairStart = [currentVisualDirection](
                                     DiagonalDirection pairA,
@@ -440,9 +471,9 @@ void Ship::updateDirection(MoveDirection direction)
         outB = pairB;
     };
 
-    DiagonalDirection nextA = directionA;
-    DiagonalDirection nextB = directionB;
-    bool nextUsesPair = directionUsesPair;
+    DiagonalDirection nextA = this->directionA;
+    DiagonalDirection nextB = this->directionB;
+    bool nextUsesPair = this->directionUsesPair;
 
     switch (direction)
     {
@@ -512,18 +543,18 @@ void Ship::updateDirection(MoveDirection direction)
     }
 
     const bool visualPairChanged =
-        (directionUsesPair != nextUsesPair) ||
-        (directionA != nextA) ||
-        (directionB != nextB);
+        (this->directionUsesPair != nextUsesPair) ||
+        (this->directionA != nextA) ||
+        (this->directionB != nextB);
 
-    directionUsesPair = nextUsesPair;
-    directionA = nextA;
-    directionB = nextB;
-    moveDirection = direction;
+    this->directionUsesPair = nextUsesPair;
+    this->directionA = nextA;
+    this->directionB = nextB;
+    this->moveDirection = direction;
 
     if (visualPairChanged)
     {
-        directionToggle = false;
+        this->directionToggle = false;
     }
 }
 
@@ -540,11 +571,15 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
     RC2D_Quad quad = {};
     quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
 
-    const float anchorPixelX = spriteW * config.drawAnchorX;
-    const float anchorPixelY = spriteH * config.drawAnchorY;
+    const float anchorPixelX = spriteW * this->config.drawAnchorX;
+    const float anchorPixelY = spriteH * this->config.drawAnchorY;
 
-    const float drawX = (centerX + config.drawOffsetX) - (anchorPixelX * config.scaleX);
-    const float drawY = (centerY + config.drawOffsetY) - (anchorPixelY * config.scaleY);
+    // Position finale:
+    // - on part du centre logique
+    // - on applique offset de tuning
+    // - on retire l'ancre (apres scale) pour placer le sprite correctement.
+    const float drawX = (centerX + this->config.drawOffsetX) - (anchorPixelX * this->config.scaleX);
+    const float drawY = (centerY + this->config.drawOffsetY) - (anchorPixelY * this->config.scaleY);
 
     rc2d_graphics_drawQuad(
         (RC2D_Image*)&sprite,
@@ -552,8 +587,8 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
         drawX,
         drawY,
         0.0,
-        config.scaleX,
-        config.scaleY,
+        this->config.scaleX,
+        this->config.scaleY,
         -1.0f,
         -1.0f,
         false,
@@ -562,6 +597,9 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
 
 bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind storageKind)
 {
+    // Chargement d'ancre tolerant:
+    // ordre de recherche = racine -> default -> frames["1.png"]/["1"].
+    // Si rien n'est exploitable, on garde simplement l'ancre par defaut.
     if (folderPath == nullptr || folderPath[0] == '\0')
     {
         return false;
@@ -602,18 +640,18 @@ bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind stora
             return false;
         }
 
-        setDrawAnchor(anchorX, anchorY);
+        this->setDrawAnchor(anchorX, anchorY);
         return true;
     };
 
     auto getSprite0Size = [this](float& outW, float& outH) -> bool {
-        if (sprites[0].sdl_texture == nullptr)
+        if (this->sprites[0].sdl_texture == nullptr)
         {
             return false;
         }
 
-        outW = static_cast<float>(sprites[0].sdl_texture->w);
-        outH = static_cast<float>(sprites[0].sdl_texture->h);
+        outW = static_cast<float>(this->sprites[0].sdl_texture->w);
+        outH = static_cast<float>(this->sprites[0].sdl_texture->h);
         return (outW > 0.0f && outH > 0.0f);
     };
 
@@ -708,8 +746,8 @@ bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind stora
             RC2D_LOG_INFO,
             "Ship: ancre chargee depuis '%s' => anchor=(%.4f, %.4f)",
             jsonPath,
-            config.drawAnchorX,
-            config.drawAnchorY);
+            this->config.drawAnchorX,
+            this->config.drawAnchorY);
     }
 
     return loaded;
@@ -732,6 +770,8 @@ Ship::Ship(void)
       directionA(DiagonalDirection::DOWN_RIGHT),
       directionB(DiagonalDirection::DOWN_RIGHT)
 {
+    // Les valeurs par defaut permettent un navire immediatement exploitable,
+    // meme avant chargement d'un JSON d'ancre.
 }
 
 Ship::~Ship(void)
@@ -747,72 +787,77 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
         return false;
     }
 
+    // Nettoyage prealable: si on recharge un atlas, on repart proprement.
     unloadSprites();
 
-    for (size_t i = 0; i < sprites.size(); ++i)
+    // On exige 8 sprites (1.png ... 8.png) pour couvrir les 4 directions
+    // en version FULL et LOW.
+    for (size_t i = 0; i < this->sprites.size(); ++i)
     {
         char path[512] = {0};
         std::snprintf(path, sizeof(path), "%s/%d.png", folderPath, static_cast<int>(i) + 1);
 
-        sprites[i] = rc2d_graphics_loadImageFromStorage(path, storageKind);
-        if (sprites[i].sdl_texture == nullptr)
+        this->sprites[i] = rc2d_graphics_loadImageFromStorage(path, storageKind);
+        if (this->sprites[i].sdl_texture == nullptr)
         {
             RC2D_log(RC2D_LOG_ERROR, "Ship: impossible de charger le sprite '%s'", path);
             unloadSprites();
             return false;
         }
     }
-    if (!loadDrawAnchorFromJson(folderPath, storageKind))
+
+    // Optionnel: surcharge de l'ancre via ship_anchor.json.
+    if (!this->loadDrawAnchorFromJson(folderPath, storageKind))
     {
         RC2D_log(
             RC2D_LOG_INFO,
             "Ship: fichier JSON d'ancre absent/invalide, ancre par defaut conservee => anchor=(%.4f, %.4f)",
-            config.drawAnchorX,
-            config.drawAnchorY);
+            this->config.drawAnchorX,
+            this->config.drawAnchorY);
     }
 
-    spritesLoaded = true;
+    this->spritesLoaded = true;
     return true;
 }
 void Ship::unloadSprites(void)
 {
-    for (size_t i = 0; i < sprites.size(); ++i)
+    for (size_t i = 0; i < this->sprites.size(); ++i)
     {
-        if (sprites[i].sdl_texture != nullptr)
+        if (this->sprites[i].sdl_texture != nullptr)
         {
-            rc2d_graphics_freeImage(&sprites[i]);
+            rc2d_graphics_freeImage(&this->sprites[i]);
         }
     }
 
-    spritesLoaded = false;
+    this->spritesLoaded = false;
 }
 
 bool Ship::areSpritesLoaded(void) const
 {
-    return spritesLoaded;
+    return this->spritesLoaded;
 }
 
 void Ship::setHealthVisual(HealthVisual health)
 {
-    healthVisual = health;
+    this->healthVisual = health;
 }
 
 Ship::HealthVisual Ship::getHealthVisual(void) const
 {
-    return healthVisual;
+    return this->healthVisual;
 }
 
 void Ship::setSpeedTilesPerSecond(float speed)
 {
     if (speed > 0.0f)
     {
-        config.speedTilesPerSecond = speed;
+        this->config.speedTilesPerSecond = speed;
     }
 }
 
 float Ship::getSpeedTilesPerSecond(void) const
 {
-    return config.speedTilesPerSecond;
+    return this->config.speedTilesPerSecond;
 }
 
 void Ship::setDrawScale(float scaleX, float scaleY)
@@ -822,14 +867,14 @@ void Ship::setDrawScale(float scaleX, float scaleY)
         return;
     }
 
-    config.scaleX = scaleX;
-    config.scaleY = scaleY;
+    this->config.scaleX = scaleX;
+    this->config.scaleY = scaleY;
 }
 
 void Ship::setDrawOffset(float offsetX, float offsetY)
 {
-    config.drawOffsetX = offsetX;
-    config.drawOffsetY = offsetY;
+    this->config.drawOffsetX = offsetX;
+    this->config.drawOffsetY = offsetY;
 }
 
 void Ship::setDrawAnchor(float anchorX, float anchorY)
@@ -837,144 +882,156 @@ void Ship::setDrawAnchor(float anchorX, float anchorY)
     anchorX = std::clamp(anchorX, 0.0f, 1.0f);
     anchorY = std::clamp(anchorY, 0.0f, 1.0f);
 
-    config.drawAnchorX = anchorX;
-    config.drawAnchorY = anchorY;
+    this->config.drawAnchorX = anchorX;
+    this->config.drawAnchorY = anchorY;
 }
 
 void Ship::setPositionTile(float tileX, float tileY)
 {
-    tilePosition.x = tileX;
-    tilePosition.y = tileY;
+    // Position forcee:
+    // on annule tout mouvement/path en cours pour eviter un etat mixte.
+    this->tilePosition.x = tileX;
+    this->tilePosition.y = tileY;
 
-    tileTarget = tilePosition;
-    pathTiles.clear();
-    pathDirections.clear();
-    pathIndex = 0;
-    moving = false;
-    moveDirection = MoveDirection::NONE;
+    this->tileTarget = this->tilePosition;
+    this->pathTiles.clear();
+    this->pathDirections.clear();
+    this->pathIndex = 0;
+    this->moving = false;
+    this->moveDirection = MoveDirection::NONE;
 }
 
 void Ship::setPositionTileInt(int tileX, int tileY)
 {
-    setPositionTile(static_cast<float>(tileX), static_cast<float>(tileY));
+    this->setPositionTile(static_cast<float>(tileX), static_cast<float>(tileY));
 }
 
 SDL_FPoint Ship::getPositionTile(void) const
 {
-    return tilePosition;
+    return this->tilePosition;
 }
 
 void Ship::moveToTile(const Map& map, int tileX, int tileY)
 {
-    const SDL_Point startRaw = map.roundTile(tilePosition.x, tilePosition.y);
+    // Prepare un nouveau trajet complet vers la cible:
+    // - normalise start/goal dans la map
+    // - reconstruit path + directions
+    // - active/desactive moving selon resultat.
+    const SDL_Point startRaw = map.roundTile(this->tilePosition.x, this->tilePosition.y);
     const SDL_Point startTile = map.clampTile(startRaw.x, startRaw.y);
 
     const SDL_Point goalRaw = SDL_Point{tileX, tileY};
     const SDL_Point goalTile = map.clampTile(goalRaw.x, goalRaw.y);
 
-    tileTarget.x = static_cast<float>(goalTile.x);
-    tileTarget.y = static_cast<float>(goalTile.y);
+    this->tileTarget.x = static_cast<float>(goalTile.x);
+    this->tileTarget.y = static_cast<float>(goalTile.y);
 
-    pathTiles.clear();
-    pathDirections.clear();
-    pathIndex = 0;
+    this->pathTiles.clear();
+    this->pathDirections.clear();
+    this->pathIndex = 0;
 
     if (startTile.x == goalTile.x && startTile.y == goalTile.y)
     {
-        moving = false;
+        this->moving = false;
         return;
     }
 
-    if (buildPathAStar(map, startTile, goalTile, pathTiles, pathDirections) && !pathTiles.empty())
+    if (this->buildPathAStar(map, startTile, goalTile, this->pathTiles, this->pathDirections) && !this->pathTiles.empty())
     {
-        moving = true;
+        this->moving = true;
         return;
     }
 
-    moving = false;
+    this->moving = false;
 }
 
 SDL_FPoint Ship::getTargetTile(void) const
 {
-    return tileTarget;
+    return this->tileTarget;
 }
 
 bool Ship::isMoving(void) const
 {
-    return moving;
+    return this->moving;
 }
 
 void Ship::update(double dt, const Map& map)
 {
-    GetOceanWakeSystem().submitShipSample(runtimeShipId, map, tilePosition, moving);
+    // Etape 0: le sillage ocean est alimente a chaque frame.
+    GetOceanShader().submitWakeSample(this->runtimeShipId, map, this->tilePosition, this->moving);
 
-    if (!moving)
+    if (!this->moving)
     {
         return;
     }
 
-    SDL_FPoint waypointTile = tileTarget;
-    if (pathIndex < pathTiles.size())
+    SDL_FPoint waypointTile = this->tileTarget;
+    if (this->pathIndex < this->pathTiles.size())
     {
-        waypointTile.x = static_cast<float>(pathTiles[pathIndex].x);
-        waypointTile.y = static_cast<float>(pathTiles[pathIndex].y);
+        waypointTile.x = static_cast<float>(this->pathTiles[this->pathIndex].x);
+        waypointTile.y = static_cast<float>(this->pathTiles[this->pathIndex].y);
     }
 
-    const SDL_FPoint currentScreen = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
+    const SDL_FPoint currentScreen = map.tileToScreenCenterFloat(this->tilePosition.x, this->tilePosition.y);
     const SDL_FPoint targetScreen = map.tileToScreenCenterFloat(waypointTile.x, waypointTile.y);
 
     const float deltaScreenX = targetScreen.x - currentScreen.x;
     const float deltaScreenY = targetScreen.y - currentScreen.y;
     const float distSq = (deltaScreenX * deltaScreenX) + (deltaScreenY * deltaScreenY);
 
+    // Helper local:
+    // valide le waypoint courant puis avance vers le suivant.
     auto completeCurrentSegment = [&]() {
-        tilePosition = waypointTile;
+        this->tilePosition = waypointTile;
 
         // Alternance sprite uniquement au passage d'un waypoint (style Sea-like).
-        if (pathIndex < pathTiles.size() && directionUsesPair)
+        if (this->pathIndex < this->pathTiles.size() && this->directionUsesPair)
         {
-            directionToggle = !directionToggle;
+            this->directionToggle = !this->directionToggle;
         }
 
-        if (pathIndex < pathTiles.size())
+        if (this->pathIndex < this->pathTiles.size())
         {
-            ++pathIndex;
-            if (pathIndex >= pathTiles.size())
+            ++this->pathIndex;
+            if (this->pathIndex >= this->pathTiles.size())
             {
-                moving = false;
+                this->moving = false;
             }
         }
         else
         {
-            moving = false;
+            this->moving = false;
         }
     };
 
     if (distSq <= 0.0001f)
     {
+        // Le navire est deja sur le waypoint (ou tres proche).
         completeCurrentSegment();
         return;
     }
 
     MoveDirection snappedDirection = MoveDirection::NONE;
-    if (pathIndex < pathDirections.size())
+    if (this->pathIndex < this->pathDirections.size())
     {
-        snappedDirection = pathDirections[pathIndex];
+        snappedDirection = this->pathDirections[this->pathIndex];
     }
 
     if (snappedDirection == MoveDirection::NONE)
     {
+        // Fallback si aucune direction precalculee disponible.
         snappedDirection = quantizeScreenDirection(deltaScreenX, deltaScreenY);
     }
 
-    updateDirection(snappedDirection);
+    this->updateDirection(snappedDirection);
 
     const float dist = std::sqrt(distSq);
-    const float speedPixelsPerSecond = config.speedTilesPerSecond * map.getTileWidth();
+    const float speedPixelsPerSecond = this->config.speedTilesPerSecond * map.getTileWidth();
     const float stepPixels = speedPixelsPerSecond * static_cast<float>(dt);
 
     if (stepPixels >= dist)
     {
+        // Pas complet possible ce tick: on "snap" proprement sur le waypoint.
         completeCurrentSegment();
         return;
     }
@@ -992,10 +1049,11 @@ void Ship::update(double dt, const Map& map)
     const float tileDeltaX = ((moveScreenX / halfTileW) + (moveScreenY / halfTileH)) * 0.5f;
     const float tileDeltaY = ((moveScreenY / halfTileH) - (moveScreenX / halfTileW)) * 0.5f;
 
-    tilePosition.x += tileDeltaX;
-    tilePosition.y += tileDeltaY;
+    // Conversion du deplacement ecran en delta tuile iso.
+    this->tilePosition.x += tileDeltaX;
+    this->tilePosition.y += tileDeltaY;
 
-    const SDL_FPoint newScreen = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
+    const SDL_FPoint newScreen = map.tileToScreenCenterFloat(this->tilePosition.x, this->tilePosition.y);
     const float remainX = targetScreen.x - newScreen.x;
     const float remainY = targetScreen.y - newScreen.y;
     const float remainDistSq = (remainX * remainX) + (remainY * remainY);
@@ -1007,18 +1065,19 @@ void Ship::update(double dt, const Map& map)
 
 void Ship::draw(const Map& map) const
 {
-    const int spriteIndex = getCurrentSpriteIndex();
-    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(sprites.size()))
+    // Dessin defensif: on sort si un prerequis visuel manque.
+    const int spriteIndex = this->getCurrentSpriteIndex();
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
     {
         return;
     }
 
-    const RC2D_Image& sprite = sprites[static_cast<size_t>(spriteIndex)];
+    const RC2D_Image& sprite = this->sprites[static_cast<size_t>(spriteIndex)];
     if (sprite.sdl_texture == nullptr)
     {
         return;
     }
 
-    const SDL_FPoint center = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
-    drawSpriteCentered(sprite, center.x, center.y);
+    const SDL_FPoint center = map.tileToScreenCenterFloat(this->tilePosition.x, this->tilePosition.y);
+    this->drawSpriteCentered(sprite, center.x, center.y);
 }

@@ -1,6 +1,6 @@
 #include "game/scenes/scene-splashscreen.h"
 
-#include "game/game_screen.h"
+#include "core/context.h"
 #include "game/scenes/scene-manager.h"
 
 /**
@@ -52,7 +52,7 @@ void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
     }
 
     // Read visible safe rectangle from shared game screen wrapper.
-    SDL_FRect rect = gameScreen.rect;
+    SDL_FRect rect = GetGameScreen().rect;
 
     // Guard against invalid render area.
     if (rect.w <= 0.0f || rect.h <= 0.0f)
@@ -76,19 +76,19 @@ void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
 void SplashScreenScene::finishAndGoToMenu(void)
 {
     // Avoid processing completion twice.
-    if (splashState == SPLASH_DONE)
+    if (this->splashState == SPLASH_DONE)
     {
         return;
     }
 
     // Close first video resource.
-    rc2d_video_close(&splashStudioVideo);
+    rc2d_video_close(&this->splashStudioVideo);
 
     // Close second video resource.
-    rc2d_video_close(&splashGameVideo);
+    rc2d_video_close(&this->splashGameVideo);
 
     // Mark sequence as done.
-    splashState = SPLASH_DONE;
+    this->splashState = SPLASH_DONE;
 
     // Switch to menu scene if manager is valid.
     if (sceneManager != nullptr)
@@ -100,13 +100,13 @@ void SplashScreenScene::finishAndGoToMenu(void)
 void SplashScreenScene::unload(void)
 {
     // Close first splash video if open.
-    rc2d_video_close(&splashStudioVideo);
+    rc2d_video_close(&this->splashStudioVideo);
 
     // Close second splash video if open.
-    rc2d_video_close(&splashGameVideo);
+    rc2d_video_close(&this->splashGameVideo);
 
     // Reset state machine for next entry.
-    splashState = SPLASH_STUDIO;
+    this->splashState = SPLASH_STUDIO;
 
     // Log lifecycle transition.
     RC2D_log(RC2D_LOG_INFO, "Splash Screen Scene Unloaded\n");
@@ -115,13 +115,13 @@ void SplashScreenScene::unload(void)
 void SplashScreenScene::load(void)
 {
     // Ensure first video starts clean.
-    rc2d_video_close(&splashStudioVideo);
+    rc2d_video_close(&this->splashStudioVideo);
 
     // Ensure second video starts clean.
-    rc2d_video_close(&splashGameVideo);
+    rc2d_video_close(&this->splashGameVideo);
 
     // Restart from first splash.
-    splashState = SPLASH_STUDIO;
+    this->splashState = SPLASH_STUDIO;
 
     // Log lifecycle transition.
     RC2D_log(RC2D_LOG_INFO, "Splash Screen Scene Loaded\n");
@@ -130,34 +130,34 @@ void SplashScreenScene::load(void)
 void SplashScreenScene::update(double dt)
 {
     // Drive the splash state machine.
-    switch (splashState)
+    switch (this->splashState)
     {
         case SPLASH_STUDIO:
         {
             // Open first splash lazily for platform safety.
-            if (splashStudioVideo.format_ctx == nullptr)
+            if (this->splashStudioVideo.format_ctx == nullptr)
             {
                 // Try to open studio video.
                 if (rc2d_video_openFromStorage(
-                        &splashStudioVideo,
+                        &this->splashStudioVideo,
                         "assets/videos/splashscreen-studio-1080p.mp4",
                         RC2D_STORAGE_TITLE) != 0)
                 {
                     // Skip to game splash if first video fails.
                     RC2D_log(RC2D_LOG_WARN, "Failed to open studio splash video, skipping.");
-                    splashState = SPLASH_GAME;
+                    this->splashState = SPLASH_GAME;
                     return;
                 }
             }
 
             // Decode and advance first video.
-            if (rc2d_video_update(&splashStudioVideo, dt) <= 0)
+            if (rc2d_video_update(&this->splashStudioVideo, dt) <= 0)
             {
                 // Close first video when finished.
-                rc2d_video_close(&splashStudioVideo);
+                rc2d_video_close(&this->splashStudioVideo);
 
                 // Move to second splash.
-                splashState = SPLASH_GAME;
+                this->splashState = SPLASH_GAME;
             }
 
             // End first state block.
@@ -167,26 +167,26 @@ void SplashScreenScene::update(double dt)
         case SPLASH_GAME:
         {
             // Open second splash lazily.
-            if (splashGameVideo.format_ctx == nullptr)
+            if (this->splashGameVideo.format_ctx == nullptr)
             {
                 // Try to open game splash.
                 if (rc2d_video_openFromStorage(
-                        &splashGameVideo,
+                        &this->splashGameVideo,
                         "assets/videos/splashscreen-seatyrants-1080p.mp4",
                         RC2D_STORAGE_TITLE) != 0)
                 {
                     // Fail safe: continue to menu.
                     RC2D_log(RC2D_LOG_WARN, "Failed to open game splash video, skipping.");
-                    finishAndGoToMenu();
+                    this->finishAndGoToMenu();
                     return;
                 }
             }
 
             // Decode and advance second video.
-            if (rc2d_video_update(&splashGameVideo, dt) <= 0)
+            if (rc2d_video_update(&this->splashGameVideo, dt) <= 0)
             {
                 // End splash sequence when second video finishes.
-                finishAndGoToMenu();
+                this->finishAndGoToMenu();
             }
 
             // End second state block.
@@ -203,19 +203,19 @@ void SplashScreenScene::update(double dt)
 void SplashScreenScene::draw(void)
 {
     // First splash rendering branch.
-    if (splashState == SPLASH_STUDIO)
+    if (this->splashState == SPLASH_STUDIO)
     {
         // Ensure first video exists before drawing.
-        if (splashStudioVideo.format_ctx != nullptr)
+        if (this->splashStudioVideo.format_ctx != nullptr)
         {
             // Draw current first splash frame.
-            rc2d_video_draw(&splashStudioVideo);
+            rc2d_video_draw(&this->splashStudioVideo);
 
             // Query total duration to compute fade-out near the end.
-            const double total = rc2d_video_totalSeconds(&splashStudioVideo);
+            const double total = rc2d_video_totalSeconds(&this->splashStudioVideo);
 
             // Query current playback position.
-            const double now = rc2d_video_currentSeconds(&splashStudioVideo);
+            const double now = rc2d_video_currentSeconds(&this->splashStudioVideo);
 
             // Use fade only if total duration is known.
             if (total > 0.0)
@@ -230,7 +230,7 @@ void SplashScreenScene::draw(void)
                     const double alpha = 1.0 - (remaining / kFadeSeconds);
 
                     // Draw fade overlay.
-                    drawFullscreenBlackWithAlpha(alpha);
+                    this->drawFullscreenBlackWithAlpha(alpha);
                 }
             }
         }
@@ -240,16 +240,16 @@ void SplashScreenScene::draw(void)
     }
 
     // Second splash rendering branch.
-    if (splashState == SPLASH_GAME)
+    if (this->splashState == SPLASH_GAME)
     {
         // Ensure second video exists before drawing.
-        if (splashGameVideo.format_ctx != nullptr)
+        if (this->splashGameVideo.format_ctx != nullptr)
         {
             // Draw current second splash frame.
-            rc2d_video_draw(&splashGameVideo);
+            rc2d_video_draw(&this->splashGameVideo);
 
             // Read current playback position.
-            const double now = rc2d_video_currentSeconds(&splashGameVideo);
+            const double now = rc2d_video_currentSeconds(&this->splashGameVideo);
 
             // Fade-in from black at video start.
             if (now < kFadeSeconds)
@@ -258,7 +258,7 @@ void SplashScreenScene::draw(void)
                 const double alpha = 1.0 - (now / kFadeSeconds);
 
                 // Draw fade overlay.
-                drawFullscreenBlackWithAlpha(alpha);
+                this->drawFullscreenBlackWithAlpha(alpha);
             }
         }
     }

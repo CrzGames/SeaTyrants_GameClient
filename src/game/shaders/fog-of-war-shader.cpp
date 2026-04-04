@@ -24,89 +24,90 @@ FogOfWarShader::FogOfWarShader(void)
 
 void FogOfWarShader::unload(void)
 {
+    // Nettoyage complet des ressources GPU/CPU du module fog.
     // Détruit le render state si présent.
-    if (fogRenderState != nullptr)
+    if (this->fogRenderState != nullptr)
     {
         // Désinscrit le state du système hot-reload.
-        rc2d_gpu_untrackGraphicsRenderState(&fogRenderState);
+        rc2d_gpu_untrackGraphicsRenderState(&this->fogRenderState);
 
         // Détruit l'objet GPU render state.
-        SDL_DestroyGPURenderState(fogRenderState);
+        SDL_DestroyGPURenderState(this->fogRenderState);
 
         // Annule le pointeur local.
-        fogRenderState = nullptr;
+        this->fogRenderState = nullptr;
     }
 
     // Libère le sampler repeat si présent.
-    if (fogRepeatSampler != nullptr)
+    if (this->fogRepeatSampler != nullptr)
     {
         // Relâche la ressource sampler côté device.
-        SDL_ReleaseGPUSampler(rc2d_engine_state.gpu_device, fogRepeatSampler);
+        SDL_ReleaseGPUSampler(rc2d_engine_state.gpu_device, this->fogRepeatSampler);
 
         // Annule le pointeur local.
-        fogRepeatSampler = nullptr;
+        this->fogRepeatSampler = nullptr;
     }
 
     // Libère le shader fragment si présent.
-    if (fogFragmentShader != nullptr)
+    if (this->fogFragmentShader != nullptr)
     {
         // Relâche le shader GPU côté device.
-        SDL_ReleaseGPUShader(rc2d_engine_state.gpu_device, static_cast<SDL_GPUShader*>(fogFragmentShader));
+        SDL_ReleaseGPUShader(rc2d_engine_state.gpu_device, static_cast<SDL_GPUShader*>(this->fogFragmentShader));
 
         // Annule le pointeur local.
-        fogFragmentShader = nullptr;
+        this->fogFragmentShader = nullptr;
     }
 
     // Libère la texture masque.
-    rc2d_graphics_freeImage(&fogMaskTexture);
+    rc2d_graphics_freeImage(&this->fogMaskTexture);
 
     // Libère la texture noise.
-    rc2d_graphics_freeImage(&fogNoiseTexture);
+    rc2d_graphics_freeImage(&this->fogNoiseTexture);
 }
 
 void FogOfWarShader::resetUniforms(void)
 {
     // Réinitialise la mémoire des uniforms.
-    fogUniforms = {};
+    this->fogUniforms = {};
 
     // Réinitialise le temps d'animation.
-    fogTimeSeconds = 0.0;
+    this->fogTimeSeconds = 0.0;
 
     // Initialise le temps shader.
-    fogUniforms.params0[0] = 0.0f;
+    this->fogUniforms.params0[0] = 0.0f;
 
     // Initialise l'échelle du noise.
-    fogUniforms.params0[1] = 1.45f;
+    this->fogUniforms.params0[1] = 1.45f;
 
     // Initialise la vitesse de dérive.
-    fogUniforms.params0[2] = 0.46f;
+    this->fogUniforms.params0[2] = 0.46f;
 
     // Initialise l'intensité globale du fog.
-    fogUniforms.params0[3] = 0.90f;
+    this->fogUniforms.params0[3] = 0.90f;
 
     // Initialise le seuil bas de visibilité.
-    fogUniforms.params1[0] = 0.54f;
+    this->fogUniforms.params1[0] = 0.54f;
 
     // Initialise le seuil haut de visibilité.
-    fogUniforms.params1[1] = 0.86f;
+    this->fogUniforms.params1[1] = 0.86f;
 
     // Initialise le renfort de bord.
-    fogUniforms.params1[2] = 0.80f;
+    this->fogUniforms.params1[2] = 0.80f;
 
     // Initialise le contraste du noise.
-    fogUniforms.params1[3] = 1.20f;
+    this->fogUniforms.params1[3] = 1.20f;
 
     // Initialise la teinte rouge.
-    fogUniforms.params2[0] = 0.18f;
+    this->fogUniforms.params2[0] = 0.18f;
 
     // Initialise la teinte verte.
-    fogUniforms.params2[1] = 0.20f;
+    this->fogUniforms.params2[1] = 0.20f;
 
     // Initialise la teinte bleue.
-    fogUniforms.params2[2] = 0.22f;
+    this->fogUniforms.params2[2] = 0.22f;
 
     // Initialise l'alpha maximum.
-    fogUniforms.params2[3] = 0.86f;
+    this->fogUniforms.params2[3] = 0.86f;
 }
 
 void FogOfWarShader::syncFromOceanColorMode(float oceanColorMode)
@@ -127,37 +128,37 @@ void FogOfWarShader::syncFromOceanColorMode(float oceanColorMode)
     }
 
     // Ajuste l'intensité globale selon le mode océan.
-    fogUniforms.params0[3] = 0.90f + (0.06f * mode);
+    this->fogUniforms.params0[3] = 0.90f + (0.06f * mode);
 
     // Ajuste le renfort de bord selon le mode océan.
-    fogUniforms.params1[2] = 0.80f + (0.10f * mode);
+    this->fogUniforms.params1[2] = 0.80f + (0.10f * mode);
 
     // Ajuste le contraste du noise selon le mode océan.
-    fogUniforms.params1[3] = 1.20f + (0.10f * mode);
+    this->fogUniforms.params1[3] = 1.20f + (0.10f * mode);
 
     // Assombrit la composante rouge pour les palettes non bleues.
-    fogUniforms.params2[0] = 0.18f - (0.07f * mode);
+    this->fogUniforms.params2[0] = 0.18f - (0.07f * mode);
 
     // Assombrit la composante verte pour les palettes non bleues.
-    fogUniforms.params2[1] = 0.20f - (0.08f * mode);
+    this->fogUniforms.params2[1] = 0.20f - (0.08f * mode);
 
     // Assombrit la composante bleue pour les palettes non bleues.
-    fogUniforms.params2[2] = 0.22f - (0.09f * mode);
+    this->fogUniforms.params2[2] = 0.22f - (0.09f * mode);
 
     // Augmente légèrement l'alpha max pour renforcer le contraste.
-    fogUniforms.params2[3] = 0.86f + (0.08f * mode);
+    this->fogUniforms.params2[3] = 0.86f + (0.08f * mode);
 }
 
 bool FogOfWarShader::uploadUniforms(void)
 {
     // Vérifie que le render state existe.
-    if (fogRenderState == nullptr)
+    if (this->fogRenderState == nullptr)
     {
         return false;
     }
 
     // Envoie le bloc uniforms dans le slot fragment 0.
-    if (!SDL_SetGPURenderStateFragmentUniforms(fogRenderState, 0, &fogUniforms, sizeof(fogUniforms)))
+    if (!SDL_SetGPURenderStateFragmentUniforms(this->fogRenderState, 0, &this->fogUniforms, sizeof(this->fogUniforms)))
     {
         // Journalise l'erreur SDL.
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
@@ -218,17 +219,22 @@ bool FogOfWarShader::resolveGpuTexture(const RC2D_Image& image, const char* labe
 
 bool FogOfWarShader::load(void)
 {
+    // Pipeline de chargement fog:
+    // - textures
+    // - shader + sampler
+    // - bindings additionnels
+    // - render state + upload uniforms
     // Libère un éventuel état précédent.
     unload();
 
     // Réinitialise les uniforms avant un nouveau chargement.
-    resetUniforms();
+    this->resetUniforms();
 
     // Charge la texture masque du fog.
-    fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
+    this->fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du masque.
-    if (fogMaskTexture.sdl_texture == nullptr)
+    if (this->fogMaskTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: masque absent (assets/images/shaders/fogofwar/cloud-noise.png)");
         unload();
@@ -236,22 +242,22 @@ bool FogOfWarShader::load(void)
     }
 
     // Active le filtrage linéaire du masque.
-    if (!SDL_SetTextureScaleMode(fogMaskTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    if (!SDL_SetTextureScaleMode(this->fogMaskTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureScaleMode mask: %s", SDL_GetError());
     }
 
     // Active le blend alpha du masque.
-    if (!SDL_SetTextureBlendMode(fogMaskTexture.sdl_texture, SDL_BLENDMODE_BLEND))
+    if (!SDL_SetTextureBlendMode(this->fogMaskTexture.sdl_texture, SDL_BLENDMODE_BLEND))
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureBlendMode mask: %s", SDL_GetError());
     }
 
     // Charge la texture noise secondaire.
-    fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
+    this->fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du noise.
-    if (fogNoiseTexture.sdl_texture == nullptr)
+    if (this->fogNoiseTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: noise absent (assets/images/shaders/fogofwar/cloud-noise.png)");
         unload();
@@ -259,16 +265,16 @@ bool FogOfWarShader::load(void)
     }
 
     // Active le filtrage linéaire du noise.
-    if (!SDL_SetTextureScaleMode(fogNoiseTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+    if (!SDL_SetTextureScaleMode(this->fogNoiseTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec SDL_SetTextureScaleMode noise: %s", SDL_GetError());
     }
 
     // Charge le shader fog.
-    fogFragmentShader = rc2d_gpu_loadGraphicsShaderFromStorage("fogofwar.fragment", RC2D_STORAGE_TITLE);
+    this->fogFragmentShader = rc2d_gpu_loadGraphicsShaderFromStorage("fogofwar.fragment", RC2D_STORAGE_TITLE);
 
     // Stoppe le chargement si le shader est absent.
-    if (fogFragmentShader == nullptr)
+    if (this->fogFragmentShader == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: impossible de charger fogofwar.fragment");
         unload();
@@ -297,10 +303,10 @@ bool FogOfWarShader::load(void)
     samplerCreateInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
 
     // Crée le sampler GPU repeat du fog.
-    fogRepeatSampler = SDL_CreateGPUSampler(rc2d_engine_state.gpu_device, &samplerCreateInfo);
+    this->fogRepeatSampler = SDL_CreateGPUSampler(rc2d_engine_state.gpu_device, &samplerCreateInfo);
 
     // Stoppe le chargement si le sampler n'est pas créé.
-    if (fogRepeatSampler == nullptr)
+    if (this->fogRepeatSampler == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_CreateGPUSampler failed: %s", SDL_GetError());
         unload();
@@ -311,7 +317,7 @@ bool FogOfWarShader::load(void)
     SDL_GPUTexture* fogNoiseGpuTexture = nullptr;
 
     // Résout le pointeur GPU du noise.
-    if (!resolveGpuTexture(fogNoiseTexture, "fog noise texture", &fogNoiseGpuTexture))
+    if (!this->resolveGpuTexture(this->fogNoiseTexture, "fog noise texture", &fogNoiseGpuTexture))
     {
         unload();
         return false;
@@ -324,13 +330,13 @@ bool FogOfWarShader::load(void)
     fogSamplerBindings[0].texture = fogNoiseGpuTexture;
 
     // Lie le sampler repeat au noise.
-    fogSamplerBindings[0].sampler = fogRepeatSampler;
+    fogSamplerBindings[0].sampler = this->fogRepeatSampler;
 
     // Prépare la structure de création du render state.
     SDL_GPURenderStateCreateInfo fogCreateInfo = {};
 
     // Renseigne le shader fragment fog.
-    fogCreateInfo.fragment_shader = fogFragmentShader;
+    fogCreateInfo.fragment_shader = this->fogFragmentShader;
 
     // Renseigne le nombre de bindings additionnels.
     fogCreateInfo.num_sampler_bindings = 1;
@@ -339,10 +345,10 @@ bool FogOfWarShader::load(void)
     fogCreateInfo.sampler_bindings = fogSamplerBindings;
 
     // Crée le render state GPU du fog.
-    fogRenderState = SDL_CreateGPURenderState(rc2d_engine_state.renderer, &fogCreateInfo);
+    this->fogRenderState = SDL_CreateGPURenderState(rc2d_engine_state.renderer, &fogCreateInfo);
 
     // Stoppe le chargement si le render state est invalide.
-    if (fogRenderState == nullptr)
+    if (this->fogRenderState == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: SDL_CreateGPURenderState failed: %s", SDL_GetError());
         unload();
@@ -350,13 +356,13 @@ bool FogOfWarShader::load(void)
     }
 
     // Enregistre le state pour le hot-reload shader.
-    if (!rc2d_gpu_trackGraphicsRenderState("fogofwar.fragment", &fogRenderState, 1, fogSamplerBindings))
+    if (!rc2d_gpu_trackGraphicsRenderState("fogofwar.fragment", &this->fogRenderState, 1, fogSamplerBindings))
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec tracking GPURenderState pour hot-reload");
     }
 
     // Upload les uniforms initiaux.
-    uploadUniforms();
+    this->uploadUniforms();
 
     // Signale un chargement réussi.
     return true;
@@ -364,6 +370,10 @@ bool FogOfWarShader::load(void)
 
 void FogOfWarShader::update(double dt, float oceanColorMode)
 {
+    // Update fog:
+    // - avance le temps
+    // - adapte les params au mode ocean
+    // - push uniforms vers le GPU
     // Ignore l'update si le renderer n'est pas prêt.
     if (!isReady())
     {
@@ -371,20 +381,24 @@ void FogOfWarShader::update(double dt, float oceanColorMode)
     }
 
     // Incrémente le temps d'animation cumulé.
-    fogTimeSeconds += dt;
+    this->fogTimeSeconds += dt;
 
     // Met à jour le temps dans les uniforms.
-    fogUniforms.params0[0] = static_cast<float>(fogTimeSeconds);
+    this->fogUniforms.params0[0] = static_cast<float>(this->fogTimeSeconds);
 
     // Synchronise le style fog avec la palette océan.
-    syncFromOceanColorMode(oceanColorMode);
+    this->syncFromOceanColorMode(oceanColorMode);
 
     // Upload les uniforms mis à jour.
-    uploadUniforms();
+    this->uploadUniforms();
 }
 
 void FogOfWarShader::draw(const SDL_FRect& visibleRect)
 {
+    // Draw fog:
+    // - active le state GPU
+    // - dessine la texture masque sur le rect visible
+    // - desactive le state
     // Ignore le draw si le renderer n'est pas prêt.
     if (!isReady())
     {
@@ -392,16 +406,16 @@ void FogOfWarShader::draw(const SDL_FRect& visibleRect)
     }
 
     // Ignore le draw si la texture masque est absente.
-    if (fogMaskTexture.sdl_texture == nullptr)
+    if (this->fogMaskTexture.sdl_texture == nullptr)
     {
         return;
     }
 
     // Active le state GPU fog.
-    SDL_SetGPURenderState(rc2d_engine_state.renderer, fogRenderState);
+    SDL_SetGPURenderState(rc2d_engine_state.renderer, this->fogRenderState);
 
     // Dessine la texture masque sur la zone visible.
-    SDL_RenderTexture(rc2d_engine_state.renderer, fogMaskTexture.sdl_texture, nullptr, &visibleRect);
+    SDL_RenderTexture(rc2d_engine_state.renderer, this->fogMaskTexture.sdl_texture, nullptr, &visibleRect);
 
     // Désactive le state GPU après le draw.
     SDL_SetGPURenderState(rc2d_engine_state.renderer, nullptr);
@@ -410,10 +424,10 @@ void FogOfWarShader::draw(const SDL_FRect& visibleRect)
 bool FogOfWarShader::isReady(void) const
 {
     // Vérifie la présence de la texture masque.
-    const bool hasMaskTexture = (fogMaskTexture.sdl_texture != nullptr);
+    const bool hasMaskTexture = (this->fogMaskTexture.sdl_texture != nullptr);
 
     // Vérifie la présence du render state.
-    const bool hasRenderState = (fogRenderState != nullptr);
+    const bool hasRenderState = (this->fogRenderState != nullptr);
 
     // Signale l'état prêt global.
     return hasMaskTexture && hasRenderState;

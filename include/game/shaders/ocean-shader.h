@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include <RC2D/RC2D.h>
+#include "game/map/map.h"
 
 /**
  * @brief Module dedie au shader ocean.
@@ -85,6 +87,27 @@ private:
         float wakeMeta[MAX_WAKE_POINTS][4];   /**< x=intensity, y=age01, z/w reserves */
     };
 
+    /**
+     * @brief Point interne de sillage en coordonnees tuile + direction ecran.
+     */
+    struct WakeStamp {
+        float tileX;
+        float tileY;
+        float dirX;
+        float dirY;
+        float ageSeconds;
+    };
+
+    /**
+     * @brief Etat de suivi d'un navire pour le sillage.
+     */
+    struct ShipWakeTracker {
+        uint64_t shipId;
+        SDL_FPoint lastScreen;
+        bool initialized;
+        bool seenThisFrame;
+    };
+
     RC2D_Image oceanTexture;               /**< Texture base de l'ocean (t0/s0 via SDL_RenderTexture). */
     RC2D_Image oceanTextureDetail;         /**< Texture detail de l'ocean (t1/s1). */
     RC2D_Image causticTexture;             /**< Texture caustiques (t2/s2). */
@@ -96,6 +119,10 @@ private:
     SDL_GPUSampler* oceanRepeatSampler;    /**< Sampler repeat partage entre les bindings additionnels. */
     OceanUniforms oceanUniforms;           /**< Valeurs runtime des uniforms oceaniques. */
     double oceanTimeSeconds;               /**< Temps cumule pour animer le shader. */
+    std::vector<WakeStamp> wakeStamps;     /**< Historique global de sillage. */
+    std::vector<ShipWakeTracker> trackers; /**< Suivi des navires visibles. */
+    float wakeStampSpacingPx;              /**< Espacement minimal entre stamps. */
+    float wakeLifetimeSeconds;             /**< Duree de vie d'un stamp. */
 
     /**
      * @brief Convertit une couleur enum en suffixe de fichier.
@@ -123,6 +150,13 @@ private:
      * @return True si le pointeur GPU a ete trouve.
      */
     bool resolveGpuTexture(const RC2D_Image& image, const char* label, SDL_GPUTexture** outGpuTexture) const;
+
+    /**
+     * @brief Retourne (ou cree) le tracker d'un navire.
+     * @param shipId Identifiant runtime du navire.
+     * @return Reference mutable vers le tracker.
+     */
+    ShipWakeTracker& getOrCreateTracker(uint64_t shipId);
 
 public:
     /**
@@ -176,4 +210,47 @@ public:
      * @brief Vide les points de sillage envoyes au shader.
      */
     void clearWakePoints(void);
+
+    /**
+     * @brief Reinitialise completement le systeme de sillage.
+     */
+    void resetWakeSystem(void);
+
+    /**
+     * @brief Debut de frame du sillage (vieillit + nettoie).
+     * @param dt Delta time en secondes.
+     */
+    void beginWakeFrame(double dt);
+
+    /**
+     * @brief Soumet un echantillon de navire au systeme de sillage.
+     * @param shipId Identifiant runtime du navire.
+     * @param map Map active.
+     * @param tilePosition Position tuile courante.
+     * @param moving True si le navire bouge.
+     */
+    void submitWakeSample(
+        uint64_t shipId,
+        const Map& map,
+        const SDL_FPoint& tilePosition,
+        bool moving);
+
+    /**
+     * @brief Fin de frame du sillage (construit les wake points shader).
+     * @param map Map active.
+     * @param visibleRect Rectangle visible du rendu.
+     */
+    void endWakeFrame(const Map& map, const SDL_FRect& visibleRect);
+
+    /**
+     * @brief Definit l'espacement minimal entre stamps.
+     * @param spacingPx Espacement en pixels ecran.
+     */
+    void setWakeStampSpacingPx(float spacingPx);
+
+    /**
+     * @brief Definit la duree de vie des stamps.
+     * @param lifetimeSeconds Duree de vie en secondes.
+     */
+    void setWakeLifetimeSeconds(float lifetimeSeconds);
 };

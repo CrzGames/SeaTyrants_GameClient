@@ -14,8 +14,3 @@ class GameScreen {
 
         void update(double dt);
 };
-
-/**
- * @brief Instance globale de la zone de jeu, mise a jour dans callbacks.cpp.
- */
-extern GameScreen gameScreen;

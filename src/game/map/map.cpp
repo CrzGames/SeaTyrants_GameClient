@@ -12,6 +12,10 @@ Map::Map(void)
       originY(0.0f),
       blockedTiles(static_cast<size_t>(64 * 64), static_cast<Uint8>(0))
 {
+    // Etat initial volontairement simple:
+    // - grille 64x64
+    // - tuile iso 48x32
+    // - aucune collision active.
 }
 
 Map::~Map(void)
@@ -20,6 +24,7 @@ Map::~Map(void)
 
 void Map::setMapSize(int width, int height)
 {
+    // Etape 1: normaliser les dimensions pour garantir une map valide.
     // Garde-fous sur dimensions minimales.
     if (width < 1)
     {
@@ -31,45 +36,54 @@ void Map::setMapSize(int width, int height)
         height = 1;
     }
 
-    widthTiles = width;
-    heightTiles = height;
+    this->widthTiles = width;
+    this->heightTiles = height;
 
-    // On reset la couche collision à traversable.
-    blockedTiles.assign(static_cast<size_t>(widthTiles * heightTiles), static_cast<Uint8>(0));
+    // Etape 2: quand la taille change, on recree la grille de collisions
+    // avec la nouvelle taille. Tout repart en "traversable" par defaut.
+    // On reset la couche collision  traversable.
+    this->blockedTiles.assign(static_cast<size_t>(this->widthTiles * this->heightTiles), static_cast<Uint8>(0));
 }
 
 void Map::setTileSize(float width, float height)
 {
+    // On refuse une taille invalide pour eviter des divisions par zero
+    // dans les conversions tile <-> ecran.
     if (width <= 0.0f || height <= 0.0f)
     {
         return;
     }
 
-    tileWidth = width;
-    tileHeight = height;
+    this->tileWidth = width;
+    this->tileHeight = height;
 }
 
 void Map::setOrigin(float x, float y)
 {
-    originX = x;
-    originY = y;
+    this->originX = x;
+    this->originY = y;
 }
 
 void Map::centerOnRect(const SDL_FRect& rect)
 {
-    const float halfTileW = tileWidth * 0.5f;
-    const float halfTileH = tileHeight * 0.5f;
+    // Demi dimensions d'une tuile iso.
+    const float halfTileW = this->tileWidth * 0.5f;
+    const float halfTileH = this->tileHeight * 0.5f;
 
-    const float minCenterX = -(static_cast<float>(heightTiles - 1) * halfTileW);
-    const float maxCenterX =  (static_cast<float>(widthTiles - 1) * halfTileW);
+    // Bornes "visuelles" du losange global de la map en espace ecran.
+    const float minCenterX = -(static_cast<float>(this->heightTiles - 1) * halfTileW);
+    const float maxCenterX =  (static_cast<float>(this->widthTiles - 1) * halfTileW);
     const float minCenterY = 0.0f;
-    const float maxCenterY = static_cast<float>(widthTiles + heightTiles - 2) * halfTileH;
+    const float maxCenterY = static_cast<float>(this->widthTiles + this->heightTiles - 2) * halfTileH;
 
+    // Centre du losange map.
     const float mapCenterX = (minCenterX + maxCenterX) * 0.5f;
     const float mapCenterY = (minCenterY + maxCenterY) * 0.5f;
 
-    originX = (rect.x + (rect.w * 0.5f)) - mapCenterX;
-    originY = (rect.y + (rect.h * 0.5f)) - mapCenterY;
+    // Translation de l'origine pour superposer le centre map
+    // avec le centre du rectangle cible.
+    this->originX = (rect.x + (rect.w * 0.5f)) - mapCenterX;
+    this->originY = (rect.y + (rect.h * 0.5f)) - mapCenterY;
 }
 
 SDL_FPoint Map::tileToScreenCenter(int tileX, int tileY) const
@@ -79,19 +93,23 @@ SDL_FPoint Map::tileToScreenCenter(int tileX, int tileY) const
 
 SDL_FPoint Map::tileToScreenCenterFloat(float tileX, float tileY) const
 {
-    const float halfTileW = tileWidth * 0.5f;
-    const float halfTileH = tileHeight * 0.5f;
+    // Formule isometrique standard:
+    // screenX = originX + (tileX - tileY) * halfW
+    // screenY = originY + (tileX + tileY) * halfH
+    const float halfTileW = this->tileWidth * 0.5f;
+    const float halfTileH = this->tileHeight * 0.5f;
 
     SDL_FPoint result = {};
-    result.x = originX + ((tileX - tileY) * halfTileW);
-    result.y = originY + ((tileX + tileY) * halfTileH);
+    result.x = this->originX + ((tileX - tileY) * halfTileW);
+    result.y = this->originY + ((tileX + tileY) * halfTileH);
     return result;
 }
 
 SDL_FPoint Map::screenToTile(float screenX, float screenY) const
 {
-    const float halfTileW = tileWidth * 0.5f;
-    const float halfTileH = tileHeight * 0.5f;
+    // Transformation inverse de la projection isometrique.
+    const float halfTileW = this->tileWidth * 0.5f;
+    const float halfTileH = this->tileHeight * 0.5f;
 
     SDL_FPoint result = {};
 
@@ -100,9 +118,10 @@ SDL_FPoint Map::screenToTile(float screenX, float screenY) const
         return result;
     }
 
-    const float dx = (screenX - originX) / halfTileW;
-    const float dy = (screenY - originY) / halfTileH;
+    const float dx = (screenX - this->originX) / halfTileW;
+    const float dy = (screenY - this->originY) / halfTileH;
 
+    // Inversion du systeme lineaire utilise dans tileToScreenCenterFloat.
     result.x = (dx + dy) * 0.5f;
     result.y = (dy - dx) * 0.5f;
     return result;
@@ -116,6 +135,7 @@ SDL_Point Map::screenToTileNearest(float screenX, float screenY) const
 
 SDL_Point Map::roundTile(float tileX, float tileY) const
 {
+    // On arrondit vers la tuile la plus proche, utile pour les clics.
     SDL_Point tile = {};
     tile.x = static_cast<int>(std::lround(static_cast<double>(tileX)));
     tile.y = static_cast<int>(std::lround(static_cast<double>(tileY)));
@@ -124,15 +144,16 @@ SDL_Point Map::roundTile(float tileX, float tileY) const
 
 SDL_Point Map::clampTile(int tileX, int tileY) const
 {
+    // Toujours renvoyer une tuile valide tant que la map existe.
     SDL_Point result = {};
 
-    if (widthTiles <= 0 || heightTiles <= 0)
+    if (this->widthTiles <= 0 || this->heightTiles <= 0)
     {
         return result;
     }
 
-    tileX = std::clamp(tileX, 0, widthTiles - 1);
-    tileY = std::clamp(tileY, 0, heightTiles - 1);
+    tileX = std::clamp(tileX, 0, this->widthTiles - 1);
+    tileY = std::clamp(tileY, 0, this->heightTiles - 1);
 
     result.x = tileX;
     result.y = tileY;
@@ -141,69 +162,73 @@ SDL_Point Map::clampTile(int tileX, int tileY) const
 
 bool Map::isInside(int tileX, int tileY) const
 {
-    return (tileX >= 0 && tileX < widthTiles && tileY >= 0 && tileY < heightTiles);
+    return (tileX >= 0 && tileX < this->widthTiles && tileY >= 0 && tileY < this->heightTiles);
 }
 
 bool Map::setTileBlocked(int tileX, int tileY, bool blocked)
 {
-    if (!isInside(tileX, tileY))
+    // Ecriture protegee: on refuse une tuile hors map.
+    if (!this->isInside(tileX, tileY))
     {
         return false;
     }
 
-    blockedTiles[static_cast<size_t>(tileIndex(tileX, tileY))] = blocked ? static_cast<Uint8>(1) : static_cast<Uint8>(0);
+    this->blockedTiles[static_cast<size_t>(this->tileIndex(tileX, tileY))] = blocked ? static_cast<Uint8>(1) : static_cast<Uint8>(0);
     return true;
 }
 
 bool Map::isTileBlocked(int tileX, int tileY) const
 {
-    if (!isInside(tileX, tileY))
+    // Politique defensive:
+    // une tuile hors map est consideree comme bloquee.
+    if (!this->isInside(tileX, tileY))
     {
         return true;
     }
 
-    return blockedTiles[static_cast<size_t>(tileIndex(tileX, tileY))] != 0;
+    return this->blockedTiles[static_cast<size_t>(this->tileIndex(tileX, tileY))] != 0;
 }
 
 void Map::clearBlockedTiles(void)
 {
-    for (size_t i = 0; i < blockedTiles.size(); ++i)
+    // Reset complet de la couche collision.
+    for (size_t i = 0; i < this->blockedTiles.size(); ++i)
     {
-        blockedTiles[i] = static_cast<Uint8>(0);
+        this->blockedTiles[i] = static_cast<Uint8>(0);
     }
 }
 
 int Map::tileIndex(int tileX, int tileY) const
 {
-    return (tileY * widthTiles) + tileX;
+    return (tileY * this->widthTiles) + tileX;
 }
 
 int Map::getWidthTiles(void) const
 {
-    return widthTiles;
+    return this->widthTiles;
 }
 
 int Map::getHeightTiles(void) const
 {
-    return heightTiles;
+    return this->heightTiles;
 }
 
 float Map::getTileWidth(void) const
 {
-    return tileWidth;
+    return this->tileWidth;
 }
 
 float Map::getTileHeight(void) const
 {
-    return tileHeight;
+    return this->tileHeight;
 }
 
 float Map::getOriginX(void) const
 {
-    return originX;
+    return this->originX;
 }
 
 float Map::getOriginY(void) const
 {
-    return originY;
+    return this->originY;
 }

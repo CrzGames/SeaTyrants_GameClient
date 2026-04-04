@@ -30,6 +30,20 @@ public:
     ~Player(void);
 
     /**
+     * @brief Initialise l'etat runtime du joueur.
+     *
+     * Cette methode remplace la logique qui etait dans le constructeur.
+     */
+    void load(void);
+
+    /**
+     * @brief Libere l'etat runtime du joueur.
+     *
+     * Cette methode remplace la logique qui etait dans le destructeur.
+     */
+    void unload(void);
+
+    /**
      * @brief Charge les sprites du navire depuis un dossier atlas.
      * @param folderPath Dossier contenant 1.png..8.png.
      * @param storageKind Storage RC2D (TITLE/USER).
