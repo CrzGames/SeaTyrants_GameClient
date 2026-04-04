@@ -9,6 +9,10 @@ cbuffer Context : register(b0, space3)
     float4 params2;
     // params3: x=wakeCount, y=wakeStrength, z=wakeWidthPx, w=wakeLengthPx
     float4 params3;
+    // params4: x=viewRectX, y=viewRectY, z=viewRectW, w=viewRectH
+    float4 params4;
+    // params5: x=mapOriginX, y=mapOriginY, z=tileWidthPx, w=tileHeightPx
+    float4 params5;
     // wakePoints[i]: x=uvX, y=uvY, z=dirX, w=dirY
     float4 wakePoints[64];
     // wakeMeta[i]: x=intensity, y=age01, z/w=reserved
@@ -28,10 +32,8 @@ Texture2D    u_texture2 : register(t2, space2); // tile-caustic
 SamplerState s2         : register(s2, space2);
 Texture2D    u_texture3 : register(t3, space2); // tile-foam-streaks (alpha)
 SamplerState s3         : register(s3, space2);
-Texture2D    u_texture4 : register(t4, space2); // water-macro (alpha can hold fallback packed depth)
+Texture2D    u_texture4 : register(t4, space2); // water-macro
 SamplerState s4         : register(s4, space2);
-Texture2D    u_texture5 : register(t5, space2); // tile-water-depth (grayscale depth map)
-SamplerState s5         : register(s5, space2);
 
 struct PSInput
 {
@@ -139,16 +141,30 @@ PSOutput main(PSInput input)
     float  speed         = max(params1.z, 0.0);
     float  foamIntensity = saturate(params1.w);
 
-    float2 uv = input.v_uv;
+    float2 screenUv = input.v_uv;
+    // Reconstruit une coordonnee monde par pixel:
+    // - UV local de draw -> pixel ecran absolu via le game screen rect
+    // - conversion pixel ecran -> tuile isometrique via origin + tile size map
+    float2 screenPx = float2(
+        params4.x + (screenUv.x * params4.z),
+        params4.y + (screenUv.y * params4.w));
+    float halfTileW = max(params5.z * 0.5, 0.001);
+    float halfTileH = max(params5.w * 0.5, 0.001);
+    float isoDx = (screenPx.x - params5.x) / halfTileW;
+    float isoDy = (screenPx.y - params5.y) / halfTileH;
+    float tileX = 0.5 * (isoDx + isoDy);
+    float tileY = 0.5 * (isoDy - isoDx);
+    float2 worldIso = float2(tileX - tileY, tileX + tileY);
+    // Facteur calibre pour retrouver le rendu de reference a zoom 1.0.
+    float2 uv = worldIso * 0.0125;
     float2 invRes = 1.0 / resolution;
     // Enforce a minimum flow speed so the ocean never looks frozen.
-    float t = time * max(speed, 0.55);
+    float t = (time * max(speed, 0.55));
 
     float tileBase    = max(tiling, 1.45);
     float tileDetail  = tileBase * 1.78;
     float tileCaustic = tileBase * 2.85;
     float tileFoam    = tileBase * 2.70;
-    float tileDepth   = tileBase * 0.66;
     float macroTile   = 0.23;
 
     // Irregular motion field.
@@ -220,16 +236,12 @@ PSOutput main(PSInput input)
     float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 6.8 + t * 0.42 + gustNoise * 4.2);
     float gust = smoothstep(0.58, 0.90, gustBands) * (0.35 + 0.65 * gustNoise);
 
-    // Dedicated bathymetry map: dark=shallow, bright=deep.
-    float2 zUvA = frac(rotate2(uvFlow * tileDepth + float2( 0.010 * t, -0.007 * t),  0.18));
-    float2 zUvB = frac(rotate2(uvFlow * (tileDepth * 1.31) + float2(-0.008 * t, 0.009 * t), -0.63));
-    float depthA = sample4gray(u_texture5, s5, zUvA, pxBase * 3.2);
-    float depthB = sample4gray(u_texture5, s5, zUvB, pxBase * 3.8);
-    float depthMap = smoothstep(0.06, 0.96, saturate(depthA * 0.58 + depthB * 0.42));
-    float depthDeep = smoothstep(0.16, 0.92, depthMap);
-    float depthShallow = 1.0 - depthDeep;
-    float shelfBand = smoothstep(0.18, 0.55, depthShallow) * (1.0 - smoothstep(0.58, 0.92, depthShallow));
-    float depthEdge = saturate(length(float2(ddx(depthMap), ddy(depthMap))) * 8.0);
+    // Sans texture depth dediee.
+    float depthMap = 0.5;
+    float depthDeep = 0.5;
+    float depthShallow = 0.5;
+    float shelfBand = 0.0;
+    float depthEdge = 0.0;
 
     // Caustic layers:
     // add local advection + breathing scale so motion feels less "flat translation".
@@ -399,7 +411,7 @@ PSOutput main(PSInput input)
         ageFade *= ageFade;
 
         float w = wakeShape(
-            uv,
+            screenUv,
             resolution,
             wakePoints[i].xy,
             wakePoints[i].zw,
@@ -425,3 +437,4 @@ PSOutput main(PSInput input)
     o.o_color = float4(rgb, input.v_color.a);
     return o;
 }
+

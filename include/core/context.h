@@ -6,6 +6,7 @@
 #include "core/threading/queues/simulation_to_network_outgoing.h"
 #include "core/threading/queues/simulation_to_websocket.h"
 #include "core/threading/queues/websocket_to_simulation.h"
+#include "game/camera.h"
 #include "game/game_screen.h"
 #include "game/map/map.h"
 #include "game/shaders/fog-of-war-shader.h"
@@ -24,6 +25,12 @@ GameState& GetGameState();
  * @return Reference mutable vers la zone de rendu gameplay.
  */
 GameScreen& GetGameScreen();
+
+/**
+ * @brief Acces global a la camera gameplay.
+ * @return Reference mutable vers la camera.
+ */
+Camera& GetCamera();
 
 /**
  * @brief Acces global au network state.

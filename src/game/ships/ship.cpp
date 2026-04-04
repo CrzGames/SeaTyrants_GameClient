@@ -571,6 +571,11 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
     RC2D_Quad quad = {};
     quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
 
+    // Le rendu du navire suit le zoom camera global.
+    const float cameraZoom = GetCamera().getZoomFactor();
+    const float scaledX = this->config.scaleX * cameraZoom;
+    const float scaledY = this->config.scaleY * cameraZoom;
+
     const float anchorPixelX = spriteW * this->config.drawAnchorX;
     const float anchorPixelY = spriteH * this->config.drawAnchorY;
 
@@ -578,8 +583,8 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
     // - on part du centre logique
     // - on applique offset de tuning
     // - on retire l'ancre (apres scale) pour placer le sprite correctement.
-    const float drawX = (centerX + this->config.drawOffsetX) - (anchorPixelX * this->config.scaleX);
-    const float drawY = (centerY + this->config.drawOffsetY) - (anchorPixelY * this->config.scaleY);
+    const float drawX = (centerX + (this->config.drawOffsetX * cameraZoom)) - (anchorPixelX * scaledX);
+    const float drawY = (centerY + (this->config.drawOffsetY * cameraZoom)) - (anchorPixelY * scaledY);
 
     rc2d_graphics_drawQuad(
         (RC2D_Image*)&sprite,
@@ -587,8 +592,8 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
         drawX,
         drawY,
         0.0,
-        this->config.scaleX,
-        this->config.scaleY,
+        scaledX,
+        scaledY,
         -1.0f,
         -1.0f,
         false,

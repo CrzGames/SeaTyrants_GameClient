@@ -19,8 +19,8 @@ private:
     int widthTiles;   /**< Nombre de tuiles sur l'axe X. */
     int heightTiles;  /**< Nombre de tuiles sur l'axe Y. */
 
-    float tileWidth;   /**< Largeur d'une tuile isometrique. */
-    float tileHeight;  /**< Hauteur d'une tuile isometrique. */
+    float tileWidth;   /**< Largeur d'une tuile isometrique a zoom 100%. */
+    float tileHeight;  /**< Hauteur d'une tuile isometrique a zoom 100%. */
 
     float originX;  /**< Origine ecran X de la tuile (0,0). */
     float originY;  /**< Origine ecran Y de la tuile (0,0). */
@@ -72,6 +72,14 @@ public:
      * @param rect Rectangle cible en coordonnees ecran.
      */
     void centerOnRect(const SDL_FRect& rect);
+
+    /**
+     * @brief Centre une tuile specifique dans un rectangle de rendu.
+     * @param tileX Coordonnee tuile X a centrer.
+     * @param tileY Coordonnee tuile Y a centrer.
+     * @param rect Rectangle cible en coordonnees ecran.
+     */
+    void centerOnTileInRect(float tileX, float tileY, const SDL_FRect& rect);
 
     /**
      * @brief Convertit une tuile entiere vers son centre ecran.

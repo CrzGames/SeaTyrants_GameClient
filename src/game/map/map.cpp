@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/context.h"
+
 Map::Map(void)
     : widthTiles(64),
       heightTiles(64),
@@ -67,8 +69,8 @@ void Map::setOrigin(float x, float y)
 void Map::centerOnRect(const SDL_FRect& rect)
 {
     // Demi dimensions d'une tuile iso.
-    const float halfTileW = this->tileWidth * 0.5f;
-    const float halfTileH = this->tileHeight * 0.5f;
+    const float halfTileW = this->getTileWidth() * 0.5f;
+    const float halfTileH = this->getTileHeight() * 0.5f;
 
     // Bornes "visuelles" du losange global de la map en espace ecran.
     const float minCenterX = -(static_cast<float>(this->heightTiles - 1) * halfTileW);
@@ -86,6 +88,21 @@ void Map::centerOnRect(const SDL_FRect& rect)
     this->originY = (rect.y + (rect.h * 0.5f)) - mapCenterY;
 }
 
+void Map::centerOnTileInRect(float tileX, float tileY, const SDL_FRect& rect)
+{
+    // Centre ecran du rectangle cible.
+    const float screenCenterX = rect.x + (rect.w * 0.5f);
+    const float screenCenterY = rect.y + (rect.h * 0.5f);
+
+    // Demi dimensions d'une tuile apres zoom.
+    const float halfTileW = this->getTileWidth() * 0.5f;
+    const float halfTileH = this->getTileHeight() * 0.5f;
+
+    // Origin calculee pour que (tileX, tileY) tombe au centre du rect.
+    this->originX = screenCenterX - ((tileX - tileY) * halfTileW);
+    this->originY = screenCenterY - ((tileX + tileY) * halfTileH);
+}
+
 SDL_FPoint Map::tileToScreenCenter(int tileX, int tileY) const
 {
     return tileToScreenCenterFloat(static_cast<float>(tileX), static_cast<float>(tileY));
@@ -96,8 +113,8 @@ SDL_FPoint Map::tileToScreenCenterFloat(float tileX, float tileY) const
     // Formule isometrique standard:
     // screenX = originX + (tileX - tileY) * halfW
     // screenY = originY + (tileX + tileY) * halfH
-    const float halfTileW = this->tileWidth * 0.5f;
-    const float halfTileH = this->tileHeight * 0.5f;
+    const float halfTileW = this->getTileWidth() * 0.5f;
+    const float halfTileH = this->getTileHeight() * 0.5f;
 
     SDL_FPoint result = {};
     result.x = this->originX + ((tileX - tileY) * halfTileW);
@@ -108,8 +125,8 @@ SDL_FPoint Map::tileToScreenCenterFloat(float tileX, float tileY) const
 SDL_FPoint Map::screenToTile(float screenX, float screenY) const
 {
     // Transformation inverse de la projection isometrique.
-    const float halfTileW = this->tileWidth * 0.5f;
-    const float halfTileH = this->tileHeight * 0.5f;
+    const float halfTileW = this->getTileWidth() * 0.5f;
+    const float halfTileH = this->getTileHeight() * 0.5f;
 
     SDL_FPoint result = {};
 
@@ -215,12 +232,14 @@ int Map::getHeightTiles(void) const
 
 float Map::getTileWidth(void) const
 {
-    return this->tileWidth;
+    // Le zoom est pilote uniquement par la camera globale.
+    return this->tileWidth * GetCamera().getZoomFactor();
 }
 
 float Map::getTileHeight(void) const
 {
-    return this->tileHeight;
+    // Le zoom est pilote uniquement par la camera globale.
+    return this->tileHeight * GetCamera().getZoomFactor();
 }
 
 float Map::getOriginX(void) const

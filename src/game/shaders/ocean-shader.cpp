@@ -5,6 +5,19 @@
 
 #include <RC2D/RC2D_internal.h>
 
+#include "core/context.h"
+
+namespace
+{
+// Reglage de reference du sillage (calibre pour zoom camera = 1.0).
+constexpr float kWakeBaseStrength = 0.75f;
+constexpr float kWakeBaseWidthPx = 12.0f;
+constexpr float kWakeBaseLengthPx = 35.0f;
+// Garde une taille minimale pour eviter de perdre totalement le sillage a faible zoom.
+constexpr float kWakeMinWidthPx = 3.0f;
+constexpr float kWakeMinLengthPx = 9.0f;
+} // namespace
+
 const char* OceanShader::colorToSuffix(WaterColor color)
 {
     // Retourne le suffixe correspondant a la couleur BLUE.
@@ -76,8 +89,6 @@ OceanShader::OceanShader(void)
       foamStreaksTexture{},
       // Initialise la texture macro.
       macroWaterTexture{},
-      // Initialise la texture depth.
-      depthWaterTexture{},
       // Initialise le pointeur shader.
       oceanFragmentShader(nullptr),
       // Initialise le render state.
@@ -142,8 +153,6 @@ void OceanShader::unload(void)
     rc2d_graphics_freeImage(&this->foamStreaksTexture);
     // Libere la texture macro.
     rc2d_graphics_freeImage(&this->macroWaterTexture);
-    // Libere la texture depth.
-    rc2d_graphics_freeImage(&this->depthWaterTexture);
 
     // Reinitialise aussi le systeme de sillage.
     this->resetWakeSystem();
@@ -151,6 +160,18 @@ void OceanShader::unload(void)
 
 void OceanShader::resetUniforms(void)
 {
+    // Lit la taille courante de sortie si le renderer est deja pret.
+    int outputWidth = 0;
+    int outputHeight = 0;
+    if (rc2d_engine_state.renderer != nullptr)
+    {
+        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
+    }
+
+    // Recupere les references runtime pour initialiser sans constantes en dur.
+    GameScreen& gameScreen = GetGameScreen();
+    Map& map = GetCurrentMap();
+
     // Reinitialise la memoire des uniforms.
     this->oceanUniforms = {};
     // Reinitialise le temps d'animation.
@@ -165,10 +186,10 @@ void OceanShader::resetUniforms(void)
     // Initialise le tiling.
     this->oceanUniforms.params0[3] = 2.35f;
 
-    // Initialise la largeur de rendu par defaut.
-    this->oceanUniforms.params1[0] = 1920.0f;
-    // Initialise la hauteur de rendu par defaut.
-    this->oceanUniforms.params1[1] = 1080.0f;
+    // Initialise la largeur de rendu depuis la sortie courante (ou 1 mini).
+    this->oceanUniforms.params1[0] = static_cast<float>((std::max)(outputWidth, 1));
+    // Initialise la hauteur de rendu depuis la sortie courante (ou 1 mini).
+    this->oceanUniforms.params1[1] = static_cast<float>((std::max)(outputHeight, 1));
     // Initialise la vitesse d'animation.
     this->oceanUniforms.params1[2] = 0.62f;
     // Initialise l'intensite d'ecume.
@@ -186,11 +207,23 @@ void OceanShader::resetUniforms(void)
     // Initialise le nombre de points de sillage.
     this->oceanUniforms.params3[0] = 0.0f;
     // Initialise la force globale du sillage.
-    this->oceanUniforms.params3[1] = 0.75f;
+    this->oceanUniforms.params3[1] = kWakeBaseStrength;
     // Initialise la largeur du sillage en pixels ecran.
-    this->oceanUniforms.params3[2] = 12.0f;
+    this->oceanUniforms.params3[2] = kWakeBaseWidthPx;
     // Initialise la longueur du sillage en pixels ecran.
-    this->oceanUniforms.params3[3] = 35.0f;
+    this->oceanUniforms.params3[3] = kWakeBaseLengthPx;
+
+    // params4: x/y/w/h = zone visible (game screen) en pixels ecran.
+    this->oceanUniforms.params4[0] = gameScreen.rect.x;
+    this->oceanUniforms.params4[1] = gameScreen.rect.y;
+    this->oceanUniforms.params4[2] = (gameScreen.rect.w > 0.0f) ? gameScreen.rect.w : this->oceanUniforms.params1[0];
+    this->oceanUniforms.params4[3] = (gameScreen.rect.h > 0.0f) ? gameScreen.rect.h : this->oceanUniforms.params1[1];
+
+    // params5: origine map + taille tuile ecran.
+    this->oceanUniforms.params5[0] = map.getOriginX();
+    this->oceanUniforms.params5[1] = map.getOriginY();
+    this->oceanUniforms.params5[2] = (std::max)(map.getTileWidth(), 1.0f);
+    this->oceanUniforms.params5[3] = (std::max)(map.getTileHeight(), 1.0f);
 }
 
 bool OceanShader::uploadUniforms(void)
@@ -259,7 +292,7 @@ bool OceanShader::resolveGpuTexture(const RC2D_Image& image, const char* label, 
 
 OceanShader::ShipWakeTracker& OceanShader::getOrCreateTracker(uint64_t shipId)
 {
-    // Un tracker = memoire de la derniere position ecran d'un navire.
+    // Un tracker = memoire de la derniere position tuile d'un navire.
     // On le reutilise d'une frame a l'autre pour savoir quand poser un stamp.
     for (ShipWakeTracker& tracker : this->trackers)
     {
@@ -271,7 +304,7 @@ OceanShader::ShipWakeTracker& OceanShader::getOrCreateTracker(uint64_t shipId)
 
     ShipWakeTracker tracker = {};
     tracker.shipId = shipId;
-    tracker.lastScreen = SDL_FPoint{0.0f, 0.0f};
+    tracker.lastTile = SDL_FPoint{0.0f, 0.0f};
     tracker.initialized = false;
     tracker.seenThisFrame = false;
     this->trackers.push_back(tracker);
@@ -321,41 +354,51 @@ void OceanShader::submitWakeSample(
 {
     // Cette fonction est appelee par chaque navire.
     // Elle decide si un nouveau "stamp" de sillage doit etre cree
-    // selon la distance parcourue depuis le dernier stamp.
-    const SDL_FPoint currentScreen = map.tileToScreenCenterFloat(tilePosition.x, tilePosition.y);
+    // selon la distance parcourue en espace monde (independant camera).
     ShipWakeTracker& tracker = this->getOrCreateTracker(shipId);
     tracker.seenThisFrame = true;
 
     if (!tracker.initialized)
     {
-        tracker.lastScreen = currentScreen;
+        tracker.lastTile = tilePosition;
         tracker.initialized = true;
         return;
     }
 
-    const float deltaX = currentScreen.x - tracker.lastScreen.x;
-    const float deltaY = currentScreen.y - tracker.lastScreen.y;
-    const float distSq = (deltaX * deltaX) + (deltaY * deltaY);
+    // Delta en tuiles logiques (pas sensible au deplacement camera).
+    const float deltaTileX = tilePosition.x - tracker.lastTile.x;
+    const float deltaTileY = tilePosition.y - tracker.lastTile.y;
+
+    // Conversion vers un delta isometrique "monde" avec la taille de tuile non zoomee.
+    const float cameraZoom = (std::max)(GetCamera().getZoomFactor(), 0.001f);
+    const float baseTileWidth = map.getTileWidth() / cameraZoom;
+    const float baseTileHeight = map.getTileHeight() / cameraZoom;
+    const float halfBaseTileW = baseTileWidth * 0.5f;
+    const float halfBaseTileH = baseTileHeight * 0.5f;
+    const float deltaWorldX = (deltaTileX - deltaTileY) * halfBaseTileW;
+    const float deltaWorldY = (deltaTileX + deltaTileY) * halfBaseTileH;
+
+    const float distSq = (deltaWorldX * deltaWorldX) + (deltaWorldY * deltaWorldY);
     const float spacingSq = this->wakeStampSpacingPx * this->wakeStampSpacingPx;
 
     if (moving && distSq >= spacingSq)
     {
-        // On cree un stamp oriente selon le vecteur de mouvement ecran.
+        // On cree un stamp oriente selon le vecteur de mouvement monde.
         const float length = std::sqrt(distSq);
 
         WakeStamp stamp = {};
         stamp.tileX = tilePosition.x;
         stamp.tileY = tilePosition.y;
-        stamp.dirX = deltaX / length;
-        stamp.dirY = deltaY / length;
+        stamp.dirX = deltaWorldX / length;
+        stamp.dirY = deltaWorldY / length;
         stamp.ageSeconds = 0.0f;
         this->wakeStamps.push_back(stamp);
 
-        tracker.lastScreen = currentScreen;
+        tracker.lastTile = tilePosition;
     }
-    else if (!moving && distSq > 0.1f)
+    else if (!moving && (deltaTileX * deltaTileX + deltaTileY * deltaTileY) > 0.0001f)
     {
-        tracker.lastScreen = currentScreen;
+        tracker.lastTile = tilePosition;
     }
 }
 
@@ -491,7 +534,7 @@ bool OceanShader::load(WaterColor color)
     this->oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
 
     // Charge la texture caustiques.
-    this->causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic2.png", RC2D_STORAGE_TITLE);
+    this->causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite des caustiques.
     if (this->causticTexture.sdl_texture == nullptr)
     {
@@ -533,21 +576,6 @@ bool OceanShader::load(WaterColor color)
     if (!SDL_SetTextureScaleMode(this->macroWaterTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
     {
         RC2D_log(RC2D_LOG_WARN, "OceanShader: echec SDL_SetTextureScaleMode macro: %s", SDL_GetError());
-    }
-
-    // Charge la texture depth dediee.
-    this->depthWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-water-depth.png", RC2D_STORAGE_TITLE);
-    // Active le filtrage lineaire de la depth map si presente.
-    if (this->depthWaterTexture.sdl_texture != nullptr)
-    {
-        if (!SDL_SetTextureScaleMode(this->depthWaterTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
-        {
-            RC2D_log(RC2D_LOG_WARN, "OceanShader: echec SDL_SetTextureScaleMode depth: %s", SDL_GetError());
-        }
-    }
-    else
-    {
-        RC2D_log(RC2D_LOG_WARN, "OceanShader: tile-water-depth manquant, fallback macro actif");
     }
 
     // Charge le shader fragment water.
@@ -621,24 +649,8 @@ bool OceanShader::load(WaterColor color)
         return false;
     }
 
-    // Initialise le pointeur depth GPU a null.
-    SDL_GPUTexture* depthGpuTexture = nullptr;
-    // Tente de resoudre la depth map GPU si disponible.
-    if (this->depthWaterTexture.sdl_texture != nullptr)
-    {
-        if (!this->resolveGpuTexture(this->depthWaterTexture, "depth texture", &depthGpuTexture))
-        {
-            RC2D_log(RC2D_LOG_WARN, "OceanShader: fallback depth vers macro texture");
-        }
-    }
-    // Active le fallback vers macro si depth absente.
-    if (depthGpuTexture == nullptr)
-    {
-        depthGpuTexture = macroGpuTexture;
-    }
-
-    // Prepare les bindings t1..t5 du shader water.
-    SDL_GPUTextureSamplerBinding samplerBindings[5] = {};
+    // Prepare les bindings t1..t4 du shader water.
+    SDL_GPUTextureSamplerBinding samplerBindings[4] = {};
     // Lie la texture detail sur binding 0.
     samplerBindings[0].texture = detailGpuTexture;
     // Lie le sampler repeat sur binding 0.
@@ -655,17 +667,13 @@ bool OceanShader::load(WaterColor color)
     samplerBindings[3].texture = macroGpuTexture;
     // Lie le sampler repeat sur binding 3.
     samplerBindings[3].sampler = this->oceanRepeatSampler;
-    // Lie la texture depth (ou fallback macro) sur binding 4.
-    samplerBindings[4].texture = depthGpuTexture;
-    // Lie le sampler repeat sur binding 4.
-    samplerBindings[4].sampler = this->oceanRepeatSampler;
 
     // Prepare la structure de creation du render state.
     SDL_GPURenderStateCreateInfo createInfo = {};
     // Renseigne le shader fragment.
     createInfo.fragment_shader = this->oceanFragmentShader;
     // Renseigne le nombre de sampler bindings additionnels.
-    createInfo.num_sampler_bindings = 5;
+    createInfo.num_sampler_bindings = 4;
     // Renseigne le tableau des sampler bindings.
     createInfo.sampler_bindings = samplerBindings;
 
@@ -680,7 +688,7 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Enregistre le state pour le hot-reload shader.
-    if (!rc2d_gpu_trackGraphicsRenderState("water.fragment", &this->oceanRenderState, 5, samplerBindings))
+    if (!rc2d_gpu_trackGraphicsRenderState("water.fragment", &this->oceanRenderState, 4, samplerBindings))
     {
         RC2D_log(RC2D_LOG_WARN, "OceanShader: echec tracking GPURenderState pour hot-reload");
     }
@@ -719,6 +727,38 @@ void OceanShader::update(double dt)
     this->oceanUniforms.params1[0] = static_cast<float>(outputWidth);
     // Met a jour la hauteur dans les uniforms.
     this->oceanUniforms.params1[1] = static_cast<float>(outputHeight);
+
+    // Le shader ocean est ancre en espace monde:
+    // - position camera en tuiles
+    // - conversion ecran -> tuile dans le shader
+    // Cela evite un ocean "colle" a l'ecran pendant le pan camera.
+    Camera& camera = GetCamera();
+    Map& map = GetCurrentMap();
+    GameScreen& gameScreen = GetGameScreen();
+    const float cameraZoom = (std::max)(camera.getZoomFactor(), 0.001f);
+    // Le zoom de l'ocean est gere par l'ancrage monde.
+    // On conserve ici un tiling de reference stable.
+    this->oceanUniforms.params0[3] = 2.35f;
+    this->oceanUniforms.params0[2] = 3.6f * cameraZoom;
+
+    // Le sillage suit aussi le zoom:
+    // - a zoom 1.0: rendu identique a la reference
+    // - a zoom faible: taille proportionnelle au navire (pas sur-intensifiee)
+    this->oceanUniforms.params3[1] = kWakeBaseStrength;
+    this->oceanUniforms.params3[2] = (std::max)(kWakeBaseWidthPx * cameraZoom, kWakeMinWidthPx);
+    this->oceanUniforms.params3[3] = (std::max)(kWakeBaseLengthPx * cameraZoom, kWakeMinLengthPx);
+
+    // Prepare les donnees de conversion ecran -> monde pour le shader.
+    // params4 = rectangle visible du gameplay en pixels ecran.
+    this->oceanUniforms.params4[0] = gameScreen.rect.x;
+    this->oceanUniforms.params4[1] = gameScreen.rect.y;
+    this->oceanUniforms.params4[2] = gameScreen.rect.w;
+    this->oceanUniforms.params4[3] = gameScreen.rect.h;
+    // params5 = origine map + taille de tuile actuellement affichee.
+    this->oceanUniforms.params5[0] = map.getOriginX();
+    this->oceanUniforms.params5[1] = map.getOriginY();
+    this->oceanUniforms.params5[2] = map.getTileWidth();
+    this->oceanUniforms.params5[3] = map.getTileHeight();
 
     // Upload les uniforms mis a jour.
     this->uploadUniforms();
@@ -871,3 +911,4 @@ void OceanShader::clearWakePoints(void)
     // Pousse immediatement l'etat vide au GPU.
     this->uploadUniforms();
 }
+

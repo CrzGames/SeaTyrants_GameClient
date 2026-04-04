@@ -77,12 +77,16 @@ private:
      * params1 = {width, height, speed, foamIntensity}
      * params2 = {colorMode, fresnelStrength, sunGlintStrength, whitecapBoost}
      * params3 = {wakeCount, wakeStrength, wakeWidthPx, wakeLengthPx}
+     * params4 = {viewRectX, viewRectY, viewRectW, viewRectH}
+     * params5 = {mapOriginX, mapOriginY, tileWidthPx, tileHeightPx}
      */
     struct OceanUniforms {
         float params0[4];
         float params1[4];
         float params2[4];
         float params3[4];
+        float params4[4];
+        float params5[4];
         float wakePoints[MAX_WAKE_POINTS][4]; /**< x=uvX, y=uvY, z=dirX, w=dirY */
         float wakeMeta[MAX_WAKE_POINTS][4];   /**< x=intensity, y=age01, z/w reserves */
     };
@@ -103,7 +107,7 @@ private:
      */
     struct ShipWakeTracker {
         uint64_t shipId;
-        SDL_FPoint lastScreen;
+        SDL_FPoint lastTile;
         bool initialized;
         bool seenThisFrame;
     };
@@ -113,7 +117,6 @@ private:
     RC2D_Image causticTexture;             /**< Texture caustiques (t2/s2). */
     RC2D_Image foamStreaksTexture;         /**< Texture trainees d'ecume (t3/s3). */
     RC2D_Image macroWaterTexture;          /**< Texture macro anti-tiling (t4/s4). */
-    RC2D_Image depthWaterTexture;          /**< Texture depth map bathymetrie (t5/s5). */
     RC2D_GPUShader* oceanFragmentShader;   /**< Shader fragment water charge. */
     SDL_GPURenderState* oceanRenderState;  /**< Render state GPU pour le pass ocean. */
     SDL_GPUSampler* oceanRepeatSampler;    /**< Sampler repeat partage entre les bindings additionnels. */

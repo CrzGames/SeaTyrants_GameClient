@@ -2,6 +2,7 @@
 
 static GameState g_gameState;
 static GameScreen g_gameScreen;
+static Camera g_camera;
 static NetworkState g_networkState;
 static NetworkINToSimulationQueue g_netToSimQueue;
 static SimulationToNetworkOUTQueue g_simToNetQueue;
@@ -21,6 +22,11 @@ GameState& GetGameState()
 GameScreen& GetGameScreen()
 {
     return g_gameScreen;
+}
+
+Camera& GetCamera()
+{
+    return g_camera;
 }
 
 NetworkState& GetNetworkState()
