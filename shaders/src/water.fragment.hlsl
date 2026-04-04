@@ -168,10 +168,10 @@ PSOutput main(PSInput input)
     float macroTile   = 0.23;
 
     // Irregular motion field.
-    float w1 = sin((uv.x * 6.73 + uv.y * 4.11) + t * 0.63);
-    float w2 = sin((uv.y * 8.29 - uv.x * 5.37) - t * 0.57);
-    float w3 = sin((uv.x + uv.y) * 5.41 + t * 0.49);
-    float w4 = sin((uv.x * 2.17 - uv.y * 9.13) + t * 0.41);
+    float w1 = sin((uv.x * 2.24 + uv.y * 1.37) + t * 0.63);
+    float w2 = sin((uv.y * 2.76 - uv.x * 1.79) - t * 0.57);
+    float w3 = sin((uv.x + uv.y) * 1.80 + t * 0.49);
+    float w4 = sin((uv.x * 0.72 - uv.y * 3.04) + t * 0.41);
     float waveMix = (w1 + w2 + w3 + w4) * 0.25;
 
     float2 ampUv = (pixelAmp * invRes) * (0.40 + 0.82 * waveStrength);
@@ -193,8 +193,8 @@ PSOutput main(PSInput input)
     float2 uvFlow = uv + randomWarp + warp + drift;
 
     // Add local "chop" so the water does not look laminar/flat when observed up close.
-    float chop1 = abs(sin((uv.x * 21.0 - uv.y * 15.0) + t * 1.85));
-    float chop2 = abs(sin((uv.x * 18.0 + uv.y * 12.0) - t * 1.45));
+    float chop1 = abs(sin((uv.x * 7.0 - uv.y * 5.0) + t * 1.85));
+    float chop2 = abs(sin((uv.x * 6.0 + uv.y * 4.0) - t * 1.45));
     float chop = pow(saturate(chop1 * 0.55 + chop2 * 0.45), 2.0);
     float2 chopDir = normalize(float2(w1 - w3, w2 + w4) + 1e-5);
     uvFlow += chopDir * (ampUv * 0.85) * (chop - 0.35);
@@ -233,7 +233,7 @@ PSOutput main(PSInput input)
     float2 gUvB = frac(rotate2(uvFlow * 0.061 + windDir * (-0.019 * t), 0.90));
     float gustNoise = lum(lerp(sample4rgb(u_texture4, s4, gUvA, pxBase * 2.8),
                                sample4rgb(u_texture4, s4, gUvB, pxBase * 3.2), 0.45));
-    float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 6.8 + t * 0.42 + gustNoise * 4.2);
+    float gustBands = 0.5 + 0.5 * sin(dot(uvFlow, windDir) * 2.3 + t * 0.42 + gustNoise * 4.2);
     float gust = smoothstep(0.58, 0.90, gustBands) * (0.35 + 0.65 * gustNoise);
 
     // Sans texture depth dediee.
