@@ -36,10 +36,6 @@ void GameScene::load(void)
     // Configure le joueur.
     player.load();
 
-    // Configure la map de gameplay.
-    map.setTileSize(48.0f, 32.0f);
-    map.setMapSize(Map::WORLD_SIZE_TILES, Map::WORLD_SIZE_TILES);
-
     // Charge les shaders.
     if (!oceanShader.load(OceanShader::WaterColor::BLUE))
     {
@@ -55,8 +51,8 @@ void GameScene::load(void)
     this->minimapUI.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
     this->minimapUI.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
     this->minimapUI.margin_mode = RC2D_UI_MARGIN_PERCENT;
-    this->minimapUI.margin_x = 0.01f;
-    this->minimapUI.margin_y = 0.01f;
+    this->minimapUI.margin_x = 0.15f;
+    this->minimapUI.margin_y = 0.15f;
     this->minimapUI.visible = true;
     this->minimapUI.hittable = true;
 
@@ -71,19 +67,14 @@ void GameScene::load(void)
     this->buttonCenterMapUI.hittable = true;
 
     // Load le navire du joueur.
-    if (!player.loadShip("assets/atlas/elite20", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/atlas/elite21", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
     }
 
     // Spawn au secteur 30-AE (centre approximatif).
-    const SDL_Point spawnTile = map.sectorToTile(52, 52);
+    const SDL_Point spawnTile = map.sectorToTile(30, 30);
     player.spawnOnTile(map, spawnTile.x, spawnTile.y);
-
-    // Test: envoyer le navire vers 56-CH au lancement.
-    const SDL_Point targetTile = map.sectorToTile(56, 59); // 56,CH
-    player.moveToTile(map, targetTile.x, targetTile.y);
-    this->clickMarker.show(targetTile.x, targetTile.y);
 
     // Centre la camera sur le joueur au debut.
     camera.centerCameraOnTile(
@@ -114,12 +105,17 @@ void GameScene::update(double dt)
     oceanShader.update(dt);
     fogOfWarShader.update(dt, oceanShader.getColorMode());
 
-    // Met a jour les elements de la scene.
+    // Met a jour le joueur (deplacement, animation, etc).
+    // + synchronisation avec le shader ocean pour les effets de wake.
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
-    this->clickMarker.update(dt);
-    this->scrollBarOverlay.update(dt, camera, map, gameScreen.rect);
     oceanShader.endWakeFrame(map, gameScreen.rect);
+
+    // Met a jour le marqueur de clic.
+    this->clickMarker.update(dt);
+
+    // Met a jour les barres de scroll.
+    this->scrollBarOverlay.update(dt, camera, map, gameScreen.rect);
 
     // Deplace la camera avec les fleches du clavier (scroll continu).
     const bool upPressed =
@@ -193,16 +189,18 @@ void GameScene::draw(void)
         // fogOfWarShader.draw(gameScreen.rect);
     }
 
-    // Dessine les elements de la scene.
+    // Dessine le marqueur de clic.
     this->clickMarker.draw(map);
+
+    // Dessine le joueur par-dessus l'ocean et le fog.
     player.draw(map);
+
+    // Dessine les barres de scroll par-dessus tout.
+    this->scrollBarOverlay.draw(gameScreen.rect, map);
 
     // Dessine les elements d'interface.
     rc2d_ui_drawImage(&this->minimapUI);
     rc2d_ui_drawImage(&this->buttonCenterMapUI);
-
-    // Dessine les barres de scroll par-dessus tout.
-    this->scrollBarOverlay.draw(gameScreen.rect, map);
 }
 
 void GameScene::keypressed(
@@ -213,18 +211,14 @@ void GameScene::keypressed(
     bool isrepeat,
     SDL_KeyboardID keyboardID)
 {
-    (void)key;
-    (void)keycode;
-    (void)mod;
-    (void)isrepeat;
-    (void)keyboardID;
-
+    // Recupere les references aux systemes et objets necessaires.
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
     GameScreen& gameScreen = GetGameScreen();
     Camera& camera = GetCamera();
     bool cameraChanged = false;
 
+    // Seules les touches de zoom et recentrage sont traitées ici.
     if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
     {
         camera.setZoomFactor(camera.getZoomFactor() + 0.05f);
@@ -244,6 +238,7 @@ void GameScene::keypressed(
         cameraChanged = true;
     }
 
+    // Applique la camera si elle a été modifiée.
     if (cameraChanged)
     {
         camera.applyToMap(map, gameScreen.rect);
@@ -252,9 +247,6 @@ void GameScene::keypressed(
 
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
-    (void)clicks;
-    (void)mouseID;
-
     // Recupere les references aux systemes et objets necessaires.
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
@@ -265,7 +257,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         return;
     }
 
-    // Si le clic tombe sur une barre de scroll, on ne le propage pas a la map.
+    // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
     GameScreen& gameScreen = GetGameScreen();
     if (this->scrollBarOverlay.handleClick(x, y, gameScreen.rect))
     {
