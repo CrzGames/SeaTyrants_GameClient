@@ -22,6 +22,9 @@ private:
     void clampCameraToMap(const Map& map, const SDL_FRect& viewportRect);
 
 public:
+    static constexpr float CAMERA_SCROLL_SPEED_SECTORS = 8.0f;
+    static constexpr float CAMERA_DIAGONAL_FACTOR = 0.70710678f;
+
     Camera();
     ~Camera();
 

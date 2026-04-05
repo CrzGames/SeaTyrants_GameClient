@@ -84,10 +84,17 @@ void Camera::clampCameraToMap(const Map& map, const SDL_FRect& viewportRect)
     // Espace isometrique (u, v):
     // u = tileX - tileY  -> axe horizontal ecran
     // v = tileX + tileY  -> axe vertical ecran
-    const float minU = -static_cast<float>(mapHeight - 1);
-    const float maxU =  static_cast<float>(mapWidth - 1);
-    const float minV = 0.0f;
-    const float maxV = static_cast<float>(mapWidth + mapHeight - 2);
+    const float minU =
+        static_cast<float>(Map::SECTOR_BASE_X - Map::SECTOR_BASE_Y);
+
+    const float maxU =
+        minU + static_cast<float>((Map::NUM_SECTORS_X - 1) * 2 * Map::SECTOR_STEP);
+
+    const float minV =
+        static_cast<float>(Map::SECTOR_BASE_X + Map::SECTOR_BASE_Y);
+
+    const float maxV =
+        minV + static_cast<float>((Map::NUM_SECTORS_Y - 1) * 2 * Map::SECTOR_STEP);
 
     const float halfViewU = (viewportRect.w * 0.5f) / halfTileW;
     const float halfViewV = (viewportRect.h * 0.5f) / halfTileH;

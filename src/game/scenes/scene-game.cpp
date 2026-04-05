@@ -19,6 +19,7 @@ void GameScene::unload(void)
     fogOfWarShader.unload();
     player.unload();
     this->clickMarker.hide();
+    this->scrollBarOverlay.unload();
 }
 
 void GameScene::load(void)
@@ -37,7 +38,7 @@ void GameScene::load(void)
 
     // Configure la map de gameplay.
     map.setTileSize(48.0f, 32.0f);
-    map.setMapSize(256, 256);
+    map.setMapSize(Map::WORLD_SIZE_TILES, Map::WORLD_SIZE_TILES);
 
     // Charge les shaders.
     if (!oceanShader.load(OceanShader::WaterColor::BLUE))
@@ -69,19 +70,31 @@ void GameScene::load(void)
     this->buttonCenterMapUI.visible = true;
     this->buttonCenterMapUI.hittable = true;
 
-    // Configure le joueur sur la map.
+    // Load le navire du joueur.
     if (!player.loadShip("assets/atlas/elite20", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
     }
 
-    const int spawnTileX = map.getWidthTiles() / 2;
-    const int spawnTileY = map.getHeightTiles() / 2;
-    player.spawnOnTile(map, spawnTileX, spawnTileY);
+    // Spawn au secteur 30-AE (centre approximatif).
+    const SDL_Point spawnTile = map.sectorToTile(52, 52);
+    player.spawnOnTile(map, spawnTile.x, spawnTile.y);
 
-    // Initialise la camera gameplay sur la position du joueur.
-    camera.centerCameraOnTile(static_cast<float>(spawnTileX), static_cast<float>(spawnTileY), map, gameScreen.rect);
+    // Test: envoyer le navire vers 56-CH au lancement.
+    const SDL_Point targetTile = map.sectorToTile(56, 59); // 56,CH
+    player.moveToTile(map, targetTile.x, targetTile.y);
+    this->clickMarker.show(targetTile.x, targetTile.y);
+
+    // Centre la camera sur le joueur au debut.
+    camera.centerCameraOnTile(
+        static_cast<float>(spawnTile.x),
+        static_cast<float>(spawnTile.y),
+        map,
+        gameScreen.rect);
     camera.applyToMap(map, gameScreen.rect);
+
+    // Charge l'overlay des barres de scroll.
+    this->scrollBarOverlay.load();
 }
 
 void GameScene::update(double dt)
@@ -105,7 +118,63 @@ void GameScene::update(double dt)
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
     this->clickMarker.update(dt);
+    this->scrollBarOverlay.update(dt, camera, map, gameScreen.rect);
     oceanShader.endWakeFrame(map, gameScreen.rect);
+
+    // Deplace la camera avec les fleches du clavier (scroll continu).
+    const bool upPressed =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP);
+    const bool downPressed =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN);
+    const bool leftPressed =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT);
+    const bool rightPressed =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT);
+
+    float deltaSectorX = 0.0f;
+    float deltaSectorY = 0.0f;
+    deltaSectorX *= Camera::CAMERA_DIAGONAL_FACTOR;
+    deltaSectorY *= Camera::CAMERA_DIAGONAL_FACTOR;
+
+    if (upPressed)
+    {
+        deltaSectorY -= 1.0f;
+    }
+    if (downPressed)
+    {
+        deltaSectorY += 1.0f;
+    }
+    if (leftPressed)
+    {
+        deltaSectorX -= 1.0f;
+    }
+    if (rightPressed)
+    {
+        deltaSectorX += 1.0f;
+    }
+
+    if (deltaSectorX != 0.0f || deltaSectorY != 0.0f)
+    {
+        // Normalisation des diagonales pour garder la meme vitesse
+        // que les directions simples.
+        if (deltaSectorX != 0.0f && deltaSectorY != 0.0f)
+        {
+            deltaSectorX *= Camera::CAMERA_DIAGONAL_FACTOR;
+            deltaSectorY *= Camera::CAMERA_DIAGONAL_FACTOR;
+        }
+
+        const float sectorDistance = Camera::CAMERA_SCROLL_SPEED_SECTORS * static_cast<float>(dt);
+
+        deltaSectorX *= sectorDistance;
+        deltaSectorY *= sectorDistance;
+
+        const float deltaTileX =
+            (deltaSectorX + deltaSectorY) * static_cast<float>(Map::SECTOR_STEP);
+        const float deltaTileY =
+            (deltaSectorY - deltaSectorX) * static_cast<float>(Map::SECTOR_STEP);
+
+        camera.moveCameraTiles(deltaTileX, deltaTileY, map, gameScreen.rect);
+    }
 }
 
 void GameScene::draw(void)
@@ -131,6 +200,9 @@ void GameScene::draw(void)
     // Dessine les elements d'interface.
     rc2d_ui_drawImage(&this->minimapUI);
     rc2d_ui_drawImage(&this->buttonCenterMapUI);
+
+    // Dessine les barres de scroll par-dessus tout.
+    this->scrollBarOverlay.draw(gameScreen.rect, map);
 }
 
 void GameScene::keypressed(
@@ -153,74 +225,15 @@ void GameScene::keypressed(
     Camera& camera = GetCamera();
     bool cameraChanged = false;
 
-    // Deplacement camera avec les fleches (combinaisons incluses pour diagonales).
-    // Mapping isometrique:
-    // up         = (-1, -1)
-    // down       = (+1, +1)
-    // left       = (-1, +1)
-    // right      = (+1, -1)
-    // up+left    = (-2,  0)
-    // up+right   = ( 0, -2)
-    // down+left  = ( 0, +2)
-    // down+right = (+2,  0)
-    const float cameraStepTiles = 1.0f;
-    if (scancode == SDL_SCANCODE_UP ||
-        scancode == SDL_SCANCODE_DOWN ||
-        scancode == SDL_SCANCODE_LEFT ||
-        scancode == SDL_SCANCODE_RIGHT)
-    {
-        const bool upPressed = (scancode == SDL_SCANCODE_UP) ||
-                               rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP);
-        const bool downPressed = (scancode == SDL_SCANCODE_DOWN) ||
-                                 rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN);
-        const bool leftPressed = (scancode == SDL_SCANCODE_LEFT) ||
-                                 rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT);
-        const bool rightPressed = (scancode == SDL_SCANCODE_RIGHT) ||
-                                  rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT);
-
-        float deltaTileX = 0.0f;
-        float deltaTileY = 0.0f;
-
-        if (upPressed)
-        {
-            deltaTileX -= cameraStepTiles;
-            deltaTileY -= cameraStepTiles;
-        }
-        if (downPressed)
-        {
-            deltaTileX += cameraStepTiles;
-            deltaTileY += cameraStepTiles;
-        }
-        if (leftPressed)
-        {
-            deltaTileX -= cameraStepTiles;
-            deltaTileY += cameraStepTiles;
-        }
-        if (rightPressed)
-        {
-            deltaTileX += cameraStepTiles;
-            deltaTileY -= cameraStepTiles;
-        }
-
-        if (deltaTileX != 0.0f || deltaTileY != 0.0f)
-        {
-            camera.moveCameraTiles(deltaTileX, deltaTileY, map, gameScreen.rect);
-            cameraChanged = true;
-        }
-    }
-    else if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
+    if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
     {
         camera.setZoomFactor(camera.getZoomFactor() + 0.05f);
-        const SDL_FPoint shipTile = player.getTilePosition();
-        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, gameScreen.rect);
         cameraChanged = true;
         RC2D_log(RC2D_LOG_DEBUG, "Camera zoom: %.2f", camera.getZoomFactor());
     }
     else if (scancode == SDL_SCANCODE_KP_MINUS || scancode == SDL_SCANCODE_MINUS)
     {
         camera.setZoomFactor(camera.getZoomFactor() - 0.05f);
-        const SDL_FPoint shipTile = player.getTilePosition();
-        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, gameScreen.rect);
         cameraChanged = true;
         RC2D_log(RC2D_LOG_DEBUG, "Camera zoom: %.2f", camera.getZoomFactor());
     }
@@ -252,6 +265,13 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         return;
     }
 
+    // Si le clic tombe sur une barre de scroll, on ne le propage pas a la map.
+    GameScreen& gameScreen = GetGameScreen();
+    if (this->scrollBarOverlay.handleClick(x, y, gameScreen.rect))
+    {
+        return;
+    }
+
     // Convertit les coordonnees de clic en coordonnees de tuile.
     const SDL_Point tile = map.screenToTileNearest(x, y);
 
@@ -264,4 +284,4 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         // Affiche le marqueur de clic sur la tuile cliquee.
         this->clickMarker.show(tile.x, tile.y);
     }
-}
+}   

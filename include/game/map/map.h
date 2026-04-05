@@ -36,6 +36,88 @@ private:
     int tileIndex(int tileX, int tileY) const;
 
 public:
+    // -----------------------------------------------------------------------------
+    // Grille de secteurs "metier" visible par le joueur
+    // -----------------------------------------------------------------------------
+    // Axe X des secteurs : 00 -> 59 (de gauche a droite a l'ecran)
+    // Axe Y des secteurs : AA -> CH (de haut en bas a l'ecran)
+    //
+    // Attention:
+    // ces coordonnees secteurs NE sont PAS les coordonnees tuiles isometriques.
+    // Elles representent une grille logique 60x60, ensuite projetee dans la map iso.
+    // -----------------------------------------------------------------------------
+    static constexpr int NUM_SECTORS_X = 60; /**< Nombre de secteurs horizontaux : 00..59. */
+    static constexpr int NUM_SECTORS_Y = 60; /**< Nombre de secteurs verticaux   : AA..CH. */
+
+    // -----------------------------------------------------------------------------
+    // Espacement entre 2 secteurs dans la grille de tuiles isometriques
+    // -----------------------------------------------------------------------------
+    // SECTOR_STEP indique de combien de tuiles on avance dans la map technique
+    // lorsqu'on se deplace d'un secteur:
+    // - vers la droite  (secteurX + 1)
+    // - vers le bas     (secteurY + 1)
+    //
+    // Plus cette valeur est grande, plus les secteurs sont eloignes entre eux
+    // dans la map technique.
+    // -----------------------------------------------------------------------------
+    static constexpr int SECTOR_STEP = 6; /**< Distance en tuiles entre deux secteurs voisins. */
+
+    // -----------------------------------------------------------------------------
+    // Marge technique de securite autour de la zone secteurs
+    // -----------------------------------------------------------------------------
+    // Cette bordure n'est pas une zone "metier" jouable en termes de coordonnees
+    // 00..59 / AA..CH.
+    //
+    // Elle sert uniquement a:
+    // - eviter les coordonnees negatives en projection isometrique,
+    // - laisser de l'air visuellement autour de la grille,
+    // - empecher les problemes de bord d'ecran / camera / clic.
+    //
+    // En pratique, la map technique est plus grande que la zone secteurs.
+    // -----------------------------------------------------------------------------
+    static constexpr int SECTOR_PAD = 40; /**< Bordure technique autour de la zone secteurs. */
+
+    // -----------------------------------------------------------------------------
+    // Point d'ancrage de la grille secteurs dans la map technique
+    // -----------------------------------------------------------------------------
+    // Le secteur 00-AA ne correspond PAS a la tuile (0,0).
+    //
+    // On place volontairement la grille secteurs a l'interieur de la map technique,
+    // avec une marge (SECTOR_PAD), afin que toute la projection isometrique tienne
+    // proprement dans le monde sans sortir en negatif.
+    //
+    // SECTOR_BASE_X : point de depart X de la grille secteurs.
+    // SECTOR_BASE_Y : point de depart Y de la grille secteurs.
+    //
+    // Pourquoi SECTOR_BASE_Y ajoute (NUM_SECTORS_X - 1) * SECTOR_STEP ?
+    // Parce que lorsqu'on avance vers la droite dans les secteurs,
+    // la coordonnee tileY diminue dans notre repere iso.
+    // On remonte donc artificiellement le point de depart en Y pour que la premiere
+    // ligne de secteurs reste dans les bornes positives de la map.
+    // -----------------------------------------------------------------------------
+    static constexpr int SECTOR_BASE_X = SECTOR_PAD; /**< Origine X de la grille secteurs dans la map technique. */
+    static constexpr int SECTOR_BASE_Y = SECTOR_PAD + ((NUM_SECTORS_X - 1) * SECTOR_STEP); /**< Origine Y de la grille secteurs dans la map technique. */
+
+    // -----------------------------------------------------------------------------
+    // Taille totale de la map technique en tuiles
+    // -----------------------------------------------------------------------------
+    // La map ne contient pas seulement la zone secteurs utile,
+    // elle contient aussi la marge technique tout autour.
+    //
+    // Formule:
+    // - SECTOR_PAD * 2 : marge gauche + marge droite (et equivalent vertical)
+    // - (NUM_SECTORS_X + NUM_SECTORS_Y - 1) * SECTOR_STEP : taille necessaire
+    //   pour contenir toute la projection diagonale de la grille secteurs
+    // - +1 : pour inclure la derniere tuile extreme
+    //
+    // Cette taille garantit que tous les secteurs de 00-AA a 59-CH
+    // peuvent etre convertis en tuiles sans sortir de la map.
+    // -----------------------------------------------------------------------------
+    static constexpr int WORLD_SIZE_TILES =
+        (SECTOR_PAD * 2) +
+        ((NUM_SECTORS_X + NUM_SECTORS_Y - 1) * SECTOR_STEP) +
+        1; /**< Taille totale de la map technique carree, en tuiles. */
+
     /**
      * @brief Construit une map par defaut (64x64, tuiles 48x32).
      */
@@ -45,6 +127,31 @@ public:
      * @brief Destructeur.
      */
     ~Map(void);
+
+    /**
+    * @brief Convertit une coordonnee secteur (00-59 / AA-CH) en coordonnee tuile.
+    */
+    SDL_Point sectorToTile(int sectorX, int sectorY) const;
+
+    /**
+    * @brief Convertit une tuile vers une coordonnee secteur flottante.
+    */
+    SDL_FPoint tileToSectorFloat(float tileX, float tileY) const;
+
+    /**
+    * @brief Convertit une tuile vers le secteur le plus proche.
+    */
+    SDL_Point tileToSectorNearest(float tileX, float tileY) const;
+
+    /**
+    * @brief Retourne true si le secteur est dans [0..59] x [0..59].
+    */
+    bool isInsideSector(int sectorX, int sectorY) const;
+
+    /**
+    * @brief Clamp un secteur dans les bornes [0..59] x [0..59].
+    */
+    SDL_Point clampSector(int sectorX, int sectorY) const;
 
     /**
      * @brief Definit le nombre de tuiles de la map.

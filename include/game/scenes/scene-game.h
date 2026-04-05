@@ -3,6 +3,7 @@
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
+#include "game/ui/scroll-bar-overlay.h"
 #include "game/ui/tile-click-marker.h"
 
 /**
@@ -10,7 +11,8 @@
  */
 class GameScene : public Scene {
 private:
-    TileClickMarker clickMarker;    /**< Marqueur visuel de clic sur tuile. */
+    TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
+    ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
 
     RC2D_UIImage minimapUI;         /**< UI de la minimap. */
     RC2D_UIImage buttonCenterMapUI; /**< UI du bouton centrer la map. */

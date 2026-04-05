@@ -6,13 +6,13 @@
 #include "core/context.h"
 
 Map::Map(void)
-    : widthTiles(64),
-      heightTiles(64),
+    : widthTiles(Map::WORLD_SIZE_TILES),
+      heightTiles(Map::WORLD_SIZE_TILES),
       tileWidth(48.0f),
       tileHeight(32.0f),
       originX(0.0f),
       originY(0.0f),
-      blockedTiles(static_cast<size_t>(64 * 64), static_cast<Uint8>(0))
+      blockedTiles(static_cast<size_t>(Map::WORLD_SIZE_TILES * Map::WORLD_SIZE_TILES), static_cast<Uint8>(0))
 {
     // Etat initial volontairement simple:
     // - grille 64x64
@@ -22,6 +22,58 @@ Map::Map(void)
 
 Map::~Map(void)
 {
+}
+
+SDL_FPoint Map::tileToSectorFloat(float tileX, float tileY) const
+{
+    const float a =
+        (tileX - static_cast<float>(Map::SECTOR_BASE_X)) /
+        static_cast<float>(Map::SECTOR_STEP);
+
+    const float b =
+        (tileY - static_cast<float>(Map::SECTOR_BASE_Y)) /
+        static_cast<float>(Map::SECTOR_STEP);
+
+    SDL_FPoint p{};
+    p.x = (a - b) * 0.5f; // secteur X : 00..59
+    p.y = (a + b) * 0.5f; // secteur Y : AA..CH
+    return p;
+}
+
+SDL_Point Map::tileToSectorNearest(float tileX, float tileY) const
+{
+    const SDL_FPoint f = this->tileToSectorFloat(tileX, tileY);
+
+    SDL_Point p{};
+    p.x = static_cast<int>(std::lround(f.x));
+    p.y = static_cast<int>(std::lround(f.y));
+    return p;
+}
+
+SDL_Point Map::sectorToTile(int sectorX, int sectorY) const
+{
+    sectorX = std::clamp(sectorX, 0, Map::NUM_SECTORS_X - 1);
+    sectorY = std::clamp(sectorY, 0, Map::NUM_SECTORS_Y - 1);
+
+    SDL_Point p{};
+    p.x = Map::SECTOR_BASE_X + (sectorX + sectorY) * Map::SECTOR_STEP;
+    p.y = Map::SECTOR_BASE_Y + (sectorY - sectorX) * Map::SECTOR_STEP;
+    return p;
+}
+
+bool Map::isInsideSector(int sectorX, int sectorY) const
+{
+    return (
+        sectorX >= 0 && sectorX < Map::NUM_SECTORS_X &&
+        sectorY >= 0 && sectorY < Map::NUM_SECTORS_Y);
+}
+
+SDL_Point Map::clampSector(int sectorX, int sectorY) const
+{
+    SDL_Point p{};
+    p.x = std::clamp(sectorX, 0, Map::NUM_SECTORS_X - 1);
+    p.y = std::clamp(sectorY, 0, Map::NUM_SECTORS_Y - 1);
+    return p;
 }
 
 void Map::setMapSize(int width, int height)
