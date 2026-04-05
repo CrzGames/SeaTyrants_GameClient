@@ -51,8 +51,8 @@ void GameScene::load(void)
     this->minimapUI.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
     this->minimapUI.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
     this->minimapUI.margin_mode = RC2D_UI_MARGIN_PERCENT;
-    this->minimapUI.margin_x = 0.15f;
-    this->minimapUI.margin_y = 0.15f;
+    this->minimapUI.margin_x = 0.03f;
+    this->minimapUI.margin_y = 0.05f;
     this->minimapUI.visible = true;
     this->minimapUI.hittable = true;
 
