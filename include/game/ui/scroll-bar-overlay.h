@@ -2,8 +2,8 @@
 
 #include <RC2D/RC2D.h>
 #include <string>
+#include "game/map/map.h"
 
-class Map;
 class Camera;
 
 /**
@@ -13,12 +13,12 @@ class Camera;
  * des carres decoratifs dans chaque coin. Un clic gauche maintenu
  * sur une barre deplace la camera dans la direction correspondante.
  * Les barres haute et gauche affichent des coordonnees de grille
- * (numeros 00-59 en haut, lettres AA-BH a gauche).
+ * (numeros 00-59 en haut, lettres AA-CH a gauche).
  */
 class ScrollBarOverlay {
 private:
-    static const int NUM_ROWS = 60;  /**< Nombre de lignes numerotees (00-59). */
-    static const int NUM_COLS = 60;  /**< Nombre de colonnes lettrees (AA-CH). */
+    static const int NUM_ROWS = Map::NUM_SECTORS_X;  /**< Nombre de lignes numerotees (00-59). */
+    static const int NUM_COLS = Map::NUM_SECTORS_Y;  /**< Nombre de colonnes lettrees (AA-CH). */
 
     float barThickness;   /**< Epaisseur des barres en pixels. */
     float cornerSize;     /**< Taille des carres de coin en pixels. */
