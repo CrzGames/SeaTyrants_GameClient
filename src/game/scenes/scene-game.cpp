@@ -7,7 +7,11 @@
 
 GameScene::GameScene(void)
     : clickMarker{},
-      backgroundUiIngameImage{}
+      scrollBarOverlay{},
+      shipAutoFollowEnabled(true),
+      backgroundUiIngameImage{},
+      minimapUI{},
+      buttonCenterMapUI{}
 {
 }
 
@@ -104,6 +108,7 @@ void GameScene::load(void)
         static_cast<float>(spawnTile.y),
         map,
         map.rect);
+    this->shipAutoFollowEnabled = true;
     camera.applyToMap(map, map.rect);
 
     // Charge l'overlay des barres de scroll.
@@ -123,9 +128,6 @@ void GameScene::update(double dt)
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.updateMapRect(gameScreen.rect);
-
-    // Applique la camera (position + zoom) sur la map.
-    camera.applyToMap(map, map.rect);
 
     // Met a jour le shader ocean.
     oceanShader.update(dt);
@@ -194,6 +196,9 @@ void GameScene::update(double dt)
 
     if (deltaSectorX != 0.0f || deltaSectorY != 0.0f)
     {
+        // L'utilisateur prend le controle manuel de la camera.
+        this->shipAutoFollowEnabled = false;
+
         // Normalisation des diagonales pour garder la meme vitesse
         // que les directions simples.
         if (deltaSectorX != 0.0f && deltaSectorY != 0.0f)
@@ -214,6 +219,16 @@ void GameScene::update(double dt)
 
         camera.moveCameraTiles(deltaTileX, deltaTileY, map, map.rect);
     }
+
+    // Tant qu'aucun controle camera manuel n'est utilise,
+    // la camera suit en permanence le navire.
+    if (this->shipAutoFollowEnabled)
+    {
+        camera.centerCameraOnTile(playerTile.x, playerTile.y, map, map.rect);
+    }
+
+    // Applique la camera finale (zoom + position) sur la map.
+    camera.applyToMap(map, map.rect);
 }
 
 void GameScene::draw(void)
@@ -328,6 +343,7 @@ void GameScene::keypressed(
     {
         const SDL_FPoint shipTile = player.getTilePosition();
         camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
+        this->shipAutoFollowEnabled = true;
         cameraChanged = true;
     }
 
@@ -357,6 +373,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
     if (this->scrollBarOverlay.handleClick(x, y, map.rect))
     {
+        this->shipAutoFollowEnabled = false;
         return;
     }
 

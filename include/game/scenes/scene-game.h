@@ -13,6 +13,7 @@ class GameScene : public Scene {
 private:
     TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
     ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
+    bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
 
     RC2D_Image backgroundUiIngameImage; /**< Fond UI gameplay (haut/bas) dessine en (0,0). */
     RC2D_UIImage minimapUI;         /**< UI de la minimap. */
