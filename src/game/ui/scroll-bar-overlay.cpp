@@ -9,7 +9,7 @@
 #include "game/map/map.h"
 
 ScrollBarOverlay::ScrollBarOverlay(void)
-    : barThickness(35.0f),
+    : barThickness(30.0f),
       cornerSize(50.0f),
       barColor{95, 110, 125, 110},
       cornerColor{105, 120, 135, 125},

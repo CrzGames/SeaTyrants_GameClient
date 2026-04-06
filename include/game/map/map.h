@@ -36,6 +36,11 @@ private:
     int tileIndex(int tileX, int tileY) const;
 
 public:
+    SDL_FRect rect; /**< Rectangle de rendu monde (map) en coordonnees logiques. */
+
+    static constexpr float MAP_TOP_UI_MARGIN_PX = 35.0f;    /**< Marge reservee en haut pour la GUI. */
+    static constexpr float MAP_BOTTOM_UI_MARGIN_PX = 70.0f; /**< Marge reservee en bas pour la GUI. */
+
     // -----------------------------------------------------------------------------
     // Grille de secteurs "metier" visible par le joueur
     // -----------------------------------------------------------------------------
@@ -175,10 +180,16 @@ public:
     void setOrigin(float x, float y);
 
     /**
+     * @brief Met a jour le rectangle de rendu de la map.
+     * @param gameScreenRect Rectangle de base du game screen.
+     */
+    void updateMapRect(const SDL_FRect& gameScreenRect);
+
+    /**
      * @brief Centre la map dans un rectangle de rendu.
      * @param rect Rectangle cible en coordonnees ecran.
      */
-    void centerOnRect(const SDL_FRect& rect);
+    void centerOnRect(const SDL_FRect& targetRect);
 
     /**
      * @brief Centre une tuile specifique dans un rectangle de rendu.
@@ -186,7 +197,7 @@ public:
      * @param tileY Coordonnee tuile Y a centrer.
      * @param rect Rectangle cible en coordonnees ecran.
      */
-    void centerOnTileInRect(float tileX, float tileY, const SDL_FRect& rect);
+    void centerOnTileInRect(float tileX, float tileY, const SDL_FRect& targetRect);
 
     /**
      * @brief Convertit une tuile entiere vers son centre ecran.

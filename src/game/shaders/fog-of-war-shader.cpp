@@ -418,21 +418,11 @@ void FogOfWarShader::update(
 
     // Meme base que l'ocean pour que le fog ne glisse pas en camera pan/zoom.
     Map& map = GetCurrentMap();
-    GameScreen& gameScreen = GetGameScreen();
 
-    int outputWidth = 1;
-    int outputHeight = 1;
-    if (rc2d_engine_state.renderer != nullptr)
-    {
-        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
-    }
-
-    this->fogUniforms.params3[0] = gameScreen.rect.x;
-    this->fogUniforms.params3[1] = gameScreen.rect.y;
-    this->fogUniforms.params3[2] =
-        (gameScreen.rect.w > 0.0f) ? gameScreen.rect.w : static_cast<float>((std::max)(outputWidth, 1));
-    this->fogUniforms.params3[3] =
-        (gameScreen.rect.h > 0.0f) ? gameScreen.rect.h : static_cast<float>((std::max)(outputHeight, 1));
+    this->fogUniforms.params3[0] = map.rect.x;
+    this->fogUniforms.params3[1] = map.rect.y;
+    this->fogUniforms.params3[2] = (std::max)(map.rect.w, 1.0f);
+    this->fogUniforms.params3[3] = (std::max)(map.rect.h, 1.0f);
 
     this->fogUniforms.params4[0] = map.getOriginX();
     this->fogUniforms.params4[1] = map.getOriginY();

@@ -1,5 +1,8 @@
 #include "game/scenes/scene-game.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include "core/context.h"
 
 GameScene::GameScene(void)
@@ -83,13 +86,16 @@ void GameScene::load(void)
     const SDL_Point spawnTile = map.sectorToTile(30, 30);
     player.spawnOnTile(map, spawnTile.x, spawnTile.y);
 
+    // Met a jour le rectangle map (zone monde) a partir du game screen.
+    map.updateMapRect(gameScreen.rect);
+
     // Centre la camera sur le joueur au debut.
     camera.centerCameraOnTile(
         static_cast<float>(spawnTile.x),
         static_cast<float>(spawnTile.y),
         map,
-        gameScreen.rect);
-    camera.applyToMap(map, gameScreen.rect);
+        map.rect);
+    camera.applyToMap(map, map.rect);
 
     // Charge l'overlay des barres de scroll.
     this->scrollBarOverlay.load();
@@ -106,8 +112,11 @@ void GameScene::update(double dt)
     GameScreen& gameScreen = GetGameScreen();
     Camera& camera = GetCamera();
 
+    // Met a jour le rectangle map (zone monde) a partir du game screen.
+    map.updateMapRect(gameScreen.rect);
+
     // Applique la camera (position + zoom) sur la map.
-    camera.applyToMap(map, gameScreen.rect);
+    camera.applyToMap(map, map.rect);
 
     // Met a jour le shader ocean.
     oceanShader.update(dt);
@@ -116,7 +125,7 @@ void GameScene::update(double dt)
     // + synchronisation avec le shader ocean pour les effets de wake.
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
-    oceanShader.endWakeFrame(map, gameScreen.rect);
+    oceanShader.endWakeFrame(map, map.rect);
 
     // Met a jour le shader fog a partir des donnees joueur.
     const SDL_FPoint playerTile = player.getTilePosition();
@@ -140,7 +149,7 @@ void GameScene::update(double dt)
     this->clickMarker.update(dt);
 
     // Met a jour les barres de scroll.
-    this->scrollBarOverlay.update(dt, camera, map, gameScreen.rect);
+    this->scrollBarOverlay.update(dt, camera, map, map.rect);
 
     // Deplace la camera avec les fleches du clavier (scroll continu).
     const bool upPressed =
@@ -194,7 +203,7 @@ void GameScene::update(double dt)
         const float deltaTileY =
             (deltaSectorY - deltaSectorX) * static_cast<float>(Map::SECTOR_STEP);
 
-        camera.moveCameraTiles(deltaTileX, deltaTileY, map, gameScreen.rect);
+        camera.moveCameraTiles(deltaTileX, deltaTileY, map, map.rect);
     }
 }
 
@@ -206,18 +215,31 @@ void GameScene::draw(void)
     OceanShader& oceanShader = GetOceanShader();
     VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
-    GameScreen& gameScreen = GetGameScreen();
+
+    // Clip strict du rendu gameplay dans la zone map.
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer != nullptr)
+    {
+        SDL_Rect clipRect{};
+        clipRect.x = static_cast<int>(std::floor(map.rect.x));
+        clipRect.y = static_cast<int>(std::floor(map.rect.y));
+        const int clipRight = static_cast<int>(std::ceil(map.rect.x + map.rect.w));
+        const int clipBottom = static_cast<int>(std::ceil(map.rect.y + map.rect.h));
+        clipRect.w = (std::max)(clipRight - clipRect.x, 1);
+        clipRect.h = (std::max)(clipBottom - clipRect.y, 1);
+        SDL_SetRenderClipRect(renderer, &clipRect);
+    }
 
     // Dessine l'ocean.
     if (oceanShader.isReady())
     {
-        oceanShader.draw(gameScreen.rect);
+        oceanShader.draw(map.rect);
     }
 
     // Dessine le fog-of-war au-dessus de l'ocean.
     if (fogOfWarShader.isReady())
     {
-        fogOfWarShader.draw(gameScreen.rect);
+        fogOfWarShader.draw(map.rect);
     }
 
     // Dessine le marqueur de clic.
@@ -229,11 +251,17 @@ void GameScene::draw(void)
     // Dessine les nuages par-dessus le joueur pour un rendu "au-dessus".
     if (visionCloudShader.isReady())
     {
-        visionCloudShader.draw(gameScreen.rect);
+        visionCloudShader.draw(map.rect);
     }
 
     // Dessine les barres de scroll par-dessus tout.
-    this->scrollBarOverlay.draw(gameScreen.rect, map);
+    this->scrollBarOverlay.draw(map.rect, map);
+
+    // Fin du clip monde: l'overlay/UI peut dessiner librement.
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
 
     // Dessine les elements d'interface.
     rc2d_ui_drawImage(&this->minimapUI);
@@ -255,6 +283,9 @@ void GameScene::keypressed(
     Camera& camera = GetCamera();
     bool cameraChanged = false;
 
+    // Met a jour le rectangle map (zone monde) a partir du game screen.
+    map.updateMapRect(gameScreen.rect);
+
     // Seules les touches de zoom et recentrage sont traitées ici.
     if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
     {
@@ -271,14 +302,14 @@ void GameScene::keypressed(
     else if (scancode == SDL_SCANCODE_SPACE)
     {
         const SDL_FPoint shipTile = player.getTilePosition();
-        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, gameScreen.rect);
+        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
         cameraChanged = true;
     }
 
     // Applique la camera si elle a été modifiée.
     if (cameraChanged)
     {
-        camera.applyToMap(map, gameScreen.rect);
+        camera.applyToMap(map, map.rect);
     }
 }
 
@@ -294,9 +325,19 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         return;
     }
 
-    // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
+    // Met a jour le rectangle map (zone monde) a partir du game screen.
     GameScreen& gameScreen = GetGameScreen();
-    if (this->scrollBarOverlay.handleClick(x, y, gameScreen.rect))
+    map.updateMapRect(gameScreen.rect);
+
+    // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
+    if (this->scrollBarOverlay.handleClick(x, y, map.rect))
+    {
+        return;
+    }
+
+    // Ignore les clics en dehors de la zone map (GUI en haut/bas).
+    if (x < map.rect.x || x > (map.rect.x + map.rect.w) ||
+        y < map.rect.y || y > (map.rect.y + map.rect.h))
     {
         return;
     }

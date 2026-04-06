@@ -191,21 +191,11 @@ void VisionCloudShader::update(
 
     // Aligne l'espace shader sur la map/camera du gameplay.
     Map& map = GetCurrentMap();
-    GameScreen& gameScreen = GetGameScreen();
 
-    int outputWidth = 1;
-    int outputHeight = 1;
-    if (rc2d_engine_state.renderer != nullptr)
-    {
-        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
-    }
-
-    this->visionCloudUniforms.params2[0] = gameScreen.rect.x;
-    this->visionCloudUniforms.params2[1] = gameScreen.rect.y;
-    this->visionCloudUniforms.params2[2] =
-        (gameScreen.rect.w > 0.0f) ? gameScreen.rect.w : static_cast<float>((std::max)(outputWidth, 1));
-    this->visionCloudUniforms.params2[3] =
-        (gameScreen.rect.h > 0.0f) ? gameScreen.rect.h : static_cast<float>((std::max)(outputHeight, 1));
+    this->visionCloudUniforms.params2[0] = map.rect.x;
+    this->visionCloudUniforms.params2[1] = map.rect.y;
+    this->visionCloudUniforms.params2[2] = (std::max)(map.rect.w, 1.0f);
+    this->visionCloudUniforms.params2[3] = (std::max)(map.rect.h, 1.0f);
 
     this->visionCloudUniforms.params3[0] = map.getOriginX();
     this->visionCloudUniforms.params3[1] = map.getOriginY();

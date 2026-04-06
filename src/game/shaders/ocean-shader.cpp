@@ -160,16 +160,7 @@ void OceanShader::unload(void)
 
 void OceanShader::resetUniforms(void)
 {
-    // Lit la taille courante de sortie si le renderer est deja pret.
-    int outputWidth = 0;
-    int outputHeight = 0;
-    if (rc2d_engine_state.renderer != nullptr)
-    {
-        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
-    }
-
     // Recupere les references runtime pour initialiser sans constantes en dur.
-    GameScreen& gameScreen = GetGameScreen();
     Map& map = GetCurrentMap();
 
     // Reinitialise la memoire des uniforms.
@@ -186,10 +177,9 @@ void OceanShader::resetUniforms(void)
     // Initialise le tiling.
     this->oceanUniforms.params0[3] = 2.35f;
 
-    // Initialise la largeur de rendu depuis la sortie courante (ou 1 mini).
-    this->oceanUniforms.params1[0] = static_cast<float>((std::max)(outputWidth, 1));
-    // Initialise la hauteur de rendu depuis la sortie courante (ou 1 mini).
-    this->oceanUniforms.params1[1] = static_cast<float>((std::max)(outputHeight, 1));
+    // Initialise la resolution du pass gameplay a partir de la zone map.
+    this->oceanUniforms.params1[0] = (std::max)(map.rect.w, 1.0f);
+    this->oceanUniforms.params1[1] = (std::max)(map.rect.h, 1.0f);
     // Initialise la vitesse d'animation.
     this->oceanUniforms.params1[2] = 0.62f;
     // Initialise l'intensite d'ecume.
@@ -213,11 +203,11 @@ void OceanShader::resetUniforms(void)
     // Initialise la longueur du sillage en pixels ecran.
     this->oceanUniforms.params3[3] = kWakeBaseLengthPx;
 
-    // params4: x/y/w/h = zone visible (game screen) en pixels ecran.
-    this->oceanUniforms.params4[0] = gameScreen.rect.x;
-    this->oceanUniforms.params4[1] = gameScreen.rect.y;
-    this->oceanUniforms.params4[2] = (gameScreen.rect.w > 0.0f) ? gameScreen.rect.w : this->oceanUniforms.params1[0];
-    this->oceanUniforms.params4[3] = (gameScreen.rect.h > 0.0f) ? gameScreen.rect.h : this->oceanUniforms.params1[1];
+    // params4: x/y/w/h = zone visible map (monde) en pixels ecran.
+    this->oceanUniforms.params4[0] = map.rect.x;
+    this->oceanUniforms.params4[1] = map.rect.y;
+    this->oceanUniforms.params4[2] = (map.rect.w > 0.0f) ? map.rect.w : this->oceanUniforms.params1[0];
+    this->oceanUniforms.params4[3] = (map.rect.h > 0.0f) ? map.rect.h : this->oceanUniforms.params1[1];
 
     // params5: origine map + taille tuile ecran.
     this->oceanUniforms.params5[0] = map.getOriginX();
@@ -708,25 +698,10 @@ void OceanShader::update(double dt)
         return;
     }
 
-    // Initialise la largeur courante de sortie.
-    int outputWidth = 0;
-    // Initialise la hauteur courante de sortie.
-    int outputHeight = 0;
-
-    // Lit la taille de sortie actuelle du renderer SDL.
-    if (rc2d_engine_state.renderer != nullptr)
-    {
-        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
-    }
-
     // Incremente le temps d'animation cumule.
     this->oceanTimeSeconds += dt;
     // Met a jour le temps dans les uniforms.
     this->oceanUniforms.params0[0] = static_cast<float>(this->oceanTimeSeconds);
-    // Met a jour la largeur dans les uniforms.
-    this->oceanUniforms.params1[0] = static_cast<float>(outputWidth);
-    // Met a jour la hauteur dans les uniforms.
-    this->oceanUniforms.params1[1] = static_cast<float>(outputHeight);
 
     // Le shader ocean est ancre en espace monde:
     // - position camera en tuiles
@@ -734,7 +709,9 @@ void OceanShader::update(double dt)
     // Cela evite un ocean "colle" a l'ecran pendant le pan camera.
     Camera& camera = GetCamera();
     Map& map = GetCurrentMap();
-    GameScreen& gameScreen = GetGameScreen();
+    // Resolution du pass gameplay = taille de la zone map.
+    this->oceanUniforms.params1[0] = (std::max)(map.rect.w, 1.0f);
+    this->oceanUniforms.params1[1] = (std::max)(map.rect.h, 1.0f);
     const float cameraZoom = (std::max)(camera.getZoomFactor(), 0.001f);
     // Le zoom de l'ocean est gere par l'ancrage monde.
     // On conserve ici un tiling de reference stable.
@@ -749,11 +726,11 @@ void OceanShader::update(double dt)
     this->oceanUniforms.params3[3] = (std::max)(kWakeBaseLengthPx * cameraZoom, kWakeMinLengthPx);
 
     // Prepare les donnees de conversion ecran -> monde pour le shader.
-    // params4 = rectangle visible du gameplay en pixels ecran.
-    this->oceanUniforms.params4[0] = gameScreen.rect.x;
-    this->oceanUniforms.params4[1] = gameScreen.rect.y;
-    this->oceanUniforms.params4[2] = gameScreen.rect.w;
-    this->oceanUniforms.params4[3] = gameScreen.rect.h;
+    // params4 = rectangle visible de la map (monde) en pixels ecran.
+    this->oceanUniforms.params4[0] = map.rect.x;
+    this->oceanUniforms.params4[1] = map.rect.y;
+    this->oceanUniforms.params4[2] = map.rect.w;
+    this->oceanUniforms.params4[3] = map.rect.h;
     // params5 = origine map + taille de tuile actuellement affichee.
     this->oceanUniforms.params5[0] = map.getOriginX();
     this->oceanUniforms.params5[1] = map.getOriginY();

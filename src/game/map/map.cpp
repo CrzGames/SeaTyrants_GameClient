@@ -12,6 +12,7 @@ Map::Map(void)
       tileHeight(32.0f),
       originX(0.0f),
       originY(0.0f),
+      rect{0.0f, Map::MAP_TOP_UI_MARGIN_PX, 1.0f, 1.0f},
       blockedTiles(static_cast<size_t>(Map::WORLD_SIZE_TILES * Map::WORLD_SIZE_TILES), static_cast<Uint8>(0))
 {
     // Etat initial volontairement simple:
@@ -118,7 +119,28 @@ void Map::setOrigin(float x, float y)
     this->originY = y;
 }
 
-void Map::centerOnRect(const SDL_FRect& rect)
+void Map::updateMapRect(const SDL_FRect& gameScreenRect)
+{
+    // IMPORTANT:
+    // on reste dans le repere LOGIQUE du game screen (comme toute la scene),
+    // pour eviter les decales/rognes entre fenetre, plein ecran et overscan.
+    const float availableW = (std::max)(gameScreenRect.w, 1.0f);
+    const float availableH = (std::max)(gameScreenRect.h, 1.0f);
+
+    // Regle UI map (relative au game screen):
+    // - X = bord gauche du game screen
+    // - Y = +25 px
+    // - W = toute la largeur disponible
+    // - H = toute la hauteur dispo moins 25 (haut) et 70 (bas)
+    this->rect.x = gameScreenRect.x;
+    this->rect.y = gameScreenRect.y + Map::MAP_TOP_UI_MARGIN_PX;
+    this->rect.w = availableW;
+    this->rect.h = (std::max)(
+        availableH - Map::MAP_TOP_UI_MARGIN_PX - Map::MAP_BOTTOM_UI_MARGIN_PX,
+        1.0f);
+}
+
+void Map::centerOnRect(const SDL_FRect& targetRect)
 {
     // Demi dimensions d'une tuile iso.
     const float halfTileW = this->getTileWidth() * 0.5f;
@@ -136,15 +158,15 @@ void Map::centerOnRect(const SDL_FRect& rect)
 
     // Translation de l'origine pour superposer le centre map
     // avec le centre du rectangle cible.
-    this->originX = (rect.x + (rect.w * 0.5f)) - mapCenterX;
-    this->originY = (rect.y + (rect.h * 0.5f)) - mapCenterY;
+    this->originX = (targetRect.x + (targetRect.w * 0.5f)) - mapCenterX;
+    this->originY = (targetRect.y + (targetRect.h * 0.5f)) - mapCenterY;
 }
 
-void Map::centerOnTileInRect(float tileX, float tileY, const SDL_FRect& rect)
+void Map::centerOnTileInRect(float tileX, float tileY, const SDL_FRect& targetRect)
 {
     // Centre ecran du rectangle cible.
-    const float screenCenterX = rect.x + (rect.w * 0.5f);
-    const float screenCenterY = rect.y + (rect.h * 0.5f);
+    const float screenCenterX = targetRect.x + (targetRect.w * 0.5f);
+    const float screenCenterY = targetRect.y + (targetRect.h * 0.5f);
 
     // Demi dimensions d'une tuile apres zoom.
     const float halfTileW = this->getTileWidth() * 0.5f;
