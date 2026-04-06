@@ -14,6 +14,7 @@ private:
     TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
     ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
 
+    RC2D_Image backgroundUiIngameImage; /**< Fond UI gameplay (haut/bas) dessine en (0,0). */
     RC2D_UIImage minimapUI;         /**< UI de la minimap. */
     RC2D_UIImage buttonCenterMapUI; /**< UI du bouton centrer la map. */
 

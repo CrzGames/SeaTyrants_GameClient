@@ -6,7 +6,8 @@
 #include "core/context.h"
 
 GameScene::GameScene(void)
-    : clickMarker{}
+    : clickMarker{},
+      backgroundUiIngameImage{}
 {
 }
 
@@ -25,6 +26,7 @@ void GameScene::unload(void)
     player.unload();
     this->clickMarker.hide();
     this->scrollBarOverlay.unload();
+    rc2d_graphics_freeImage(&this->backgroundUiIngameImage);
 }
 
 void GameScene::load(void)
@@ -43,7 +45,7 @@ void GameScene::load(void)
     player.load();
 
     // Charge les shaders.
-    if (!oceanShader.load(OceanShader::WaterColor::YELLOW))
+    if (!oceanShader.load(OceanShader::WaterColor::TURQUOISE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement ocean shader");
     }
@@ -54,6 +56,13 @@ void GameScene::load(void)
     if (!visionCloudShader.load())
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: echec chargement vision-cloud shader");
+    }
+
+    // Charge le fond UI gameplay (haut/bas).
+    this->backgroundUiIngameImage = rc2d_graphics_loadImageFromStorage("assets/images/background-ui-ingame.png", RC2D_STORAGE_TITLE);
+    if (this->backgroundUiIngameImage.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: echec chargement background UI gameplay");
     }
 
     // Configure l'UI de minimap.
@@ -77,7 +86,7 @@ void GameScene::load(void)
     this->buttonCenterMapUI.hittable = true;
 
     // Load le navire du joueur.
-    if (!player.loadShip("assets/atlas/elite21", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/atlas/elite20", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
     }
@@ -215,6 +224,22 @@ void GameScene::draw(void)
     OceanShader& oceanShader = GetOceanShader();
     VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
+
+    // Dessine le fond UI en premier (coordonnees logiques absolues).
+    if (this->backgroundUiIngameImage.sdl_texture != nullptr)
+    {
+        rc2d_graphics_drawImage(
+            &this->backgroundUiIngameImage,
+            0.0f,
+            0.0f,
+            0.0,
+            1.0f,
+            1.0f,
+            0.0f,
+            0.0f,
+            false,
+            false);
+    }
 
     // Clip strict du rendu gameplay dans la zone map.
     SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
