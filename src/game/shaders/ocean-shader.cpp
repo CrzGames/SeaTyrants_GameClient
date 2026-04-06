@@ -470,12 +470,6 @@ bool OceanShader::load(WaterColor color)
     // - shader + sampler
     // - bindings GPU
     // - render state + uniforms initiaux
-    // Libere un eventuel etat precedent.
-    unload();
-    // Reinitialise les uniforms avant un nouveau chargement.
-    this->resetUniforms();
-    // Reinitialise le runtime de sillage.
-    this->resetWakeSystem();
 
     // Construit le chemin base avec le format impose tile-water-base-color.png.
     char requestedBaseTexturePath[256] = {};
@@ -488,6 +482,88 @@ bool OceanShader::load(WaterColor color)
     const char* loadedBaseTexturePath = requestedBaseTexturePath;
     // Conserve le chemin detail reellement utilise.
     const char* loadedDetailTexturePath = requestedDetailTexturePath;
+
+    // Hot-swap de couleur: si le pipeline ocean est deja pret,
+    // on ne detruit pas le render state, on remplace seulement
+    // les textures base/detail + les sampler bindings associes.
+    if (this->oceanRenderState != nullptr &&
+        this->oceanFragmentShader != nullptr &&
+        this->oceanRepeatSampler != nullptr &&
+        this->causticTexture.sdl_texture != nullptr &&
+        this->foamStreaksTexture.sdl_texture != nullptr &&
+        this->macroWaterTexture.sdl_texture != nullptr)
+    {
+        RC2D_Image newBaseTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
+        if (newBaseTexture.sdl_texture == nullptr)
+        {
+            RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger la texture base %s", loadedBaseTexturePath);
+            return false;
+        }
+        if (!SDL_SetTextureScaleMode(newBaseTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+        {
+            RC2D_log(RC2D_LOG_WARN, "OceanShader: echec SDL_SetTextureScaleMode base(hot-swap): %s", SDL_GetError());
+        }
+
+        RC2D_Image newDetailTexture = rc2d_graphics_loadImageFromStorage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
+        if (newDetailTexture.sdl_texture == nullptr)
+        {
+            RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger la texture detail %s", loadedDetailTexturePath);
+            rc2d_graphics_freeImage(&newBaseTexture);
+            return false;
+        }
+        if (!SDL_SetTextureScaleMode(newDetailTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
+        {
+            RC2D_log(RC2D_LOG_WARN, "OceanShader: echec SDL_SetTextureScaleMode detail(hot-swap): %s", SDL_GetError());
+        }
+
+        SDL_GPUTexture* detailGpuTexture = nullptr;
+        SDL_GPUTexture* causticGpuTexture = nullptr;
+        SDL_GPUTexture* foamGpuTexture = nullptr;
+        SDL_GPUTexture* macroGpuTexture = nullptr;
+        if (!this->resolveGpuTexture(newDetailTexture, "detail texture(hot-swap)", &detailGpuTexture) ||
+            !this->resolveGpuTexture(this->causticTexture, "caustic texture(hot-swap)", &causticGpuTexture) ||
+            !this->resolveGpuTexture(this->foamStreaksTexture, "foam texture(hot-swap)", &foamGpuTexture) ||
+            !this->resolveGpuTexture(this->macroWaterTexture, "macro texture(hot-swap)", &macroGpuTexture))
+        {
+            rc2d_graphics_freeImage(&newBaseTexture);
+            rc2d_graphics_freeImage(&newDetailTexture);
+            return false;
+        }
+
+        SDL_GPUTextureSamplerBinding samplerBindings[4] = {};
+        samplerBindings[0].texture = detailGpuTexture;
+        samplerBindings[0].sampler = this->oceanRepeatSampler;
+        samplerBindings[1].texture = causticGpuTexture;
+        samplerBindings[1].sampler = this->oceanRepeatSampler;
+        samplerBindings[2].texture = foamGpuTexture;
+        samplerBindings[2].sampler = this->oceanRepeatSampler;
+        samplerBindings[3].texture = macroGpuTexture;
+        samplerBindings[3].sampler = this->oceanRepeatSampler;
+
+        if (!SDL_SetGPURenderStateSamplerBindings(this->oceanRenderState, 4, samplerBindings))
+        {
+            RC2D_log(RC2D_LOG_ERROR, "OceanShader: SDL_SetGPURenderStateSamplerBindings failed: %s", SDL_GetError());
+            rc2d_graphics_freeImage(&newBaseTexture);
+            rc2d_graphics_freeImage(&newDetailTexture);
+            return false;
+        }
+
+        rc2d_graphics_freeImage(&this->oceanTexture);
+        rc2d_graphics_freeImage(&this->oceanTextureDetail);
+        this->oceanTexture = newBaseTexture;
+        this->oceanTextureDetail = newDetailTexture;
+        this->oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
+        this->uploadUniforms();
+        return true;
+    }
+
+    // Chargement complet (premier load ou pipeline non pret):
+    // Libere un eventuel etat precedent.
+    unload();
+    // Reinitialise les uniforms avant un nouveau chargement.
+    this->resetUniforms();
+    // Reinitialise le runtime de sillage.
+    this->resetWakeSystem();
 
     // Charge la texture base demandee.
     this->oceanTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);

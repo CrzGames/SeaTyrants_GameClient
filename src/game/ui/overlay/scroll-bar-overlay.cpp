@@ -139,17 +139,7 @@ void ScrollBarOverlay::update(double dt, Camera& camera, const Map& map, const S
     }
 
     // Récupère la position actuelle de la souris.
-    const float mx = rc2d_mouse_getX();
-    const float my = rc2d_mouse_getY();
-
-    // On capture la zone au debut du clic, puis on la conserve
-    // tant que le bouton reste enfonce.
-    if (this->activeBar == 0)
-    {
-        this->activeBar = this->hitTestBar(mx, my, screenRect);
-    }
-
-    // Si aucune barre n'est active, on ignore l'update.
+    // Seule une capture explicite via handleClick active le deplacement.
     if (this->activeBar == 0)
     {
         return;
@@ -360,6 +350,11 @@ bool ScrollBarOverlay::handleClick(float x, float y, const SDL_FRect& screenRect
 {
     this->activeBar = this->hitTestBar(x, y, screenRect);
     RC2D_log(RC2D_LOG_DEBUG, "Scroll bar clicked: %d", this->activeBar);
+    return (this->activeBar != 0);
+}
+
+bool ScrollBarOverlay::isInteracting(void) const
+{
     return (this->activeBar != 0);
 }
 

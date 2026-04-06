@@ -1,8 +1,7 @@
-#include "core/callbacks.h"
+﻿#include "core/callbacks.h"
 
 #include "core/context.h"
 #include "crypto/kx.h"
-#include "game/scenes/scene-editormap.h"
 #include "game/scenes/scene-game.h"
 #include "game/scenes/scene-manager.h"
 #include "game/scenes/scene-menu.h"
@@ -15,6 +14,11 @@
 #include "services/http/entrypoint.h"
 #include "services/websocket/entrypoint.h"
 #include "simulation/entrypoint.h"
+
+#if GAME_ENV_DEV
+#include "game/scenes/scene-editormap-anchorship.h"
+#include "game/scenes/scene-editormap-creatormap.h"
+#endif
 
 SceneManager sceneManager;
 
@@ -53,7 +57,10 @@ void rc2d_load(void)
 
     // Crée les scènes du jeu et affiche la scène de splashscreen.
     //sceneManager.addScene("menu", new MenuScene());
-    //sceneManager.addScene("editormap", new EditorMapScene());
+#if GAME_ENV_DEV
+    sceneManager.addScene("editormap-creatormap", new EditorMapCreateMapScene());
+    sceneManager.addScene("editormap-anchorship", new EditorMapAnchorShipScene());
+#endif
     //sceneManager.addScene("splashscreen", new SplashScreenScene());
     sceneManager.addScene("game", new GameScene());
     sceneManager.changeScene("game");
@@ -167,6 +174,21 @@ void rc2d_draw(void)
 
 void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID)
 {
+#if GAME_ENV_DEV
+    // Raccourcis globaux DEV pour naviguer entre gameplay et scenes editeur.
+    if (!isrepeat && scancode == SDL_SCANCODE_F9)
+    {
+        sceneManager.changeScene("editormap-creatormap");
+        return;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_F10)
+    {
+        sceneManager.changeScene("editormap-anchorship");
+        return;
+    }
+#endif
+
     sceneManager.keypressed(key, scancode, keycode, mod, isrepeat, keyboardID);
 }
 

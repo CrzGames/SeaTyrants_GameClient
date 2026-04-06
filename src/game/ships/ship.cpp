@@ -558,7 +558,7 @@ void Ship::updateDirection(MoveDirection direction)
     }
 }
 
-void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float centerY) const
+void Ship::drawSpriteCentered(const RC2D_Image& sprite, int spriteIndex, float centerX, float centerY) const
 {
     if (sprite.sdl_texture == nullptr)
     {
@@ -576,8 +576,16 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
     const float scaledX = this->config.scaleX * cameraZoom;
     const float scaledY = this->config.scaleY * cameraZoom;
 
-    const float anchorPixelX = spriteW * this->config.drawAnchorX;
-    const float anchorPixelY = spriteH * this->config.drawAnchorY;
+    SDL_FPoint anchor = SDL_FPoint{this->config.drawAnchorX, this->config.drawAnchorY};
+    if (spriteIndex >= 0 && spriteIndex < static_cast<int>(this->spriteDrawAnchors.size()))
+    {
+        anchor = this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)];
+    }
+    anchor.x = std::clamp(anchor.x, 0.0f, 1.0f);
+    anchor.y = std::clamp(anchor.y, 0.0f, 1.0f);
+
+    const float anchorPixelX = spriteW * anchor.x;
+    const float anchorPixelY = spriteH * anchor.y;
 
     // Position finale:
     // - on part du centre logique
@@ -603,8 +611,8 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, float centerX, float cen
 bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind storageKind)
 {
     // Chargement d'ancre tolerant:
-    // ordre de recherche = racine -> default -> frames["1.png"]/["1"].
-    // Si rien n'est exploitable, on garde simplement l'ancre par defaut.
+    // 1) ancre globale (racine ou default)
+    // 2) surcharge par sprite via frames["1".. "8"] / ["1.png".. "8.png"].
     if (folderPath == nullptr || folderPath[0] == '\0')
     {
         return false;
@@ -639,7 +647,24 @@ bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind stora
         return false;
     }
 
-    auto setAnchorIfValid = [this](float anchorX, float anchorY) -> bool {
+    auto getSpriteSize = [this](int spriteIndex, float& outW, float& outH) -> bool {
+        if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
+        {
+            return false;
+        }
+
+        const RC2D_Image& sprite = this->sprites[static_cast<size_t>(spriteIndex)];
+        if (sprite.sdl_texture == nullptr)
+        {
+            return false;
+        }
+
+        outW = static_cast<float>(sprite.sdl_texture->w);
+        outH = static_cast<float>(sprite.sdl_texture->h);
+        return (outW > 0.0f && outH > 0.0f);
+    };
+
+    auto setGlobalAnchorIfValid = [this](float anchorX, float anchorY) -> bool {
         if (!std::isfinite(anchorX) || !std::isfinite(anchorY))
         {
             return false;
@@ -649,116 +674,155 @@ bool Ship::loadDrawAnchorFromJson(const char* folderPath, RC2D_StorageKind stora
         return true;
     };
 
-    auto getSprite0Size = [this](float& outW, float& outH) -> bool {
-        if (this->sprites[0].sdl_texture == nullptr)
-        {
-            return false;
-        }
-
-        outW = static_cast<float>(this->sprites[0].sdl_texture->w);
-        outH = static_cast<float>(this->sprites[0].sdl_texture->h);
-        return (outW > 0.0f && outH > 0.0f);
-    };
-
-    auto setAnchorFromPixels = [&](float anchorPixelX, float anchorPixelY) -> bool {
+    auto setGlobalAnchorFromPixels = [&](float anchorPixelX, float anchorPixelY) -> bool {
         float w = 0.0f;
         float h = 0.0f;
-        if (!getSprite0Size(w, h))
+        if (!getSpriteSize(0, w, h))
         {
             return false;
         }
 
-        return setAnchorIfValid(anchorPixelX / w, anchorPixelY / h);
+        return setGlobalAnchorIfValid(anchorPixelX / w, anchorPixelY / h);
     };
 
-    bool loaded = false;
+    auto setSpriteAnchorIfValid = [this](int spriteIndex, float anchorX, float anchorY) -> bool {
+        if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->spriteDrawAnchors.size()))
+        {
+            return false;
+        }
+
+        if (!std::isfinite(anchorX) || !std::isfinite(anchorY))
+        {
+            return false;
+        }
+
+        this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].x = std::clamp(anchorX, 0.0f, 1.0f);
+        this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].y = std::clamp(anchorY, 0.0f, 1.0f);
+        return true;
+    };
+
+    auto setSpriteAnchorFromPixels = [&](int spriteIndex, float anchorPixelX, float anchorPixelY) -> bool {
+        float w = 0.0f;
+        float h = 0.0f;
+        if (!getSpriteSize(spriteIndex, w, h))
+        {
+            return false;
+        }
+
+        return setSpriteAnchorIfValid(spriteIndex, anchorPixelX / w, anchorPixelY / h);
+    };
+
+    bool loadedAny = false;
+    bool loadedGlobal = false;
 
     const cJSON* rootAnchorX = cJSON_GetObjectItemCaseSensitive(root, "anchorX");
     const cJSON* rootAnchorY = cJSON_GetObjectItemCaseSensitive(root, "anchorY");
     if (cJSON_IsNumber(rootAnchorX) && cJSON_IsNumber(rootAnchorY))
     {
-        loaded = setAnchorIfValid(
+        loadedGlobal = setGlobalAnchorIfValid(
             static_cast<float>(rootAnchorX->valuedouble),
             static_cast<float>(rootAnchorY->valuedouble));
+        loadedAny = loadedAny || loadedGlobal;
     }
 
     const cJSON* defaultObj = cJSON_GetObjectItemCaseSensitive(root, "default");
-    if (!loaded && cJSON_IsObject(defaultObj))
+    if (!loadedGlobal && cJSON_IsObject(defaultObj))
     {
         const cJSON* jAnchorX = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorX");
         const cJSON* jAnchorY = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorY");
         if (cJSON_IsNumber(jAnchorX) && cJSON_IsNumber(jAnchorY))
         {
-            loaded = setAnchorIfValid(
+            loadedGlobal = setGlobalAnchorIfValid(
                 static_cast<float>(jAnchorX->valuedouble),
                 static_cast<float>(jAnchorY->valuedouble));
+            loadedAny = loadedAny || loadedGlobal;
         }
 
-        if (!loaded)
+        if (!loadedGlobal)
         {
             const cJSON* jAnchorPixelX = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorPixelX");
             const cJSON* jAnchorPixelY = cJSON_GetObjectItemCaseSensitive(defaultObj, "anchorPixelY");
 
             if (cJSON_IsNumber(jAnchorPixelX) && cJSON_IsNumber(jAnchorPixelY))
             {
-                loaded = setAnchorFromPixels(
+                loadedGlobal = setGlobalAnchorFromPixels(
                     static_cast<float>(jAnchorPixelX->valuedouble),
                     static_cast<float>(jAnchorPixelY->valuedouble));
+                loadedAny = loadedAny || loadedGlobal;
             }
         }
     }
 
     const cJSON* framesObj = cJSON_GetObjectItemCaseSensitive(root, "frames");
-    if (!loaded && cJSON_IsObject(framesObj))
+    if (cJSON_IsObject(framesObj))
     {
-        const cJSON* frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, "1.png");
-        if (!cJSON_IsObject(frameObj))
+        for (int spriteNum = 1; spriteNum <= static_cast<int>(this->spriteDrawAnchors.size()); ++spriteNum)
         {
-            frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, "1");
-        }
+            char frameKeyPng[16] = {0};
+            char frameKeyNum[8] = {0};
+            std::snprintf(frameKeyPng, sizeof(frameKeyPng), "%d.png", spriteNum);
+            std::snprintf(frameKeyNum, sizeof(frameKeyNum), "%d", spriteNum);
 
-        if (cJSON_IsObject(frameObj))
-        {
+            const cJSON* frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, frameKeyPng);
+            if (!cJSON_IsObject(frameObj))
+            {
+                frameObj = cJSON_GetObjectItemCaseSensitive(framesObj, frameKeyNum);
+            }
+            if (!cJSON_IsObject(frameObj))
+            {
+                continue;
+            }
+
+            const int spriteIndex = spriteNum - 1;
+            bool loadedFrameAnchor = false;
+
             const cJSON* jAnchorX = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorX");
             const cJSON* jAnchorY = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorY");
             if (cJSON_IsNumber(jAnchorX) && cJSON_IsNumber(jAnchorY))
             {
-                loaded = setAnchorIfValid(
+                loadedFrameAnchor = setSpriteAnchorIfValid(
+                    spriteIndex,
                     static_cast<float>(jAnchorX->valuedouble),
                     static_cast<float>(jAnchorY->valuedouble));
             }
 
-            if (!loaded)
+            if (!loadedFrameAnchor)
             {
                 const cJSON* jAnchorPixelX = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorPixelX");
                 const cJSON* jAnchorPixelY = cJSON_GetObjectItemCaseSensitive(frameObj, "anchorPixelY");
 
                 if (cJSON_IsNumber(jAnchorPixelX) && cJSON_IsNumber(jAnchorPixelY))
                 {
-                    loaded = setAnchorFromPixels(
+                    loadedFrameAnchor = setSpriteAnchorFromPixels(
+                        spriteIndex,
                         static_cast<float>(jAnchorPixelX->valuedouble),
                         static_cast<float>(jAnchorPixelY->valuedouble));
                 }
             }
+
+            loadedAny = loadedAny || loadedFrameAnchor;
         }
     }
 
     cJSON_Delete(root);
 
-    if (loaded)
+    if (loadedAny)
     {
         RC2D_log(
             RC2D_LOG_INFO,
-            "Ship: ancre chargee depuis '%s' => anchor=(%.4f, %.4f)",
+            "Ship: anchors charges depuis '%s' (default=(%.4f, %.4f), sprite1=(%.4f, %.4f))",
             jsonPath,
             this->config.drawAnchorX,
-            this->config.drawAnchorY);
+            this->config.drawAnchorY,
+            this->spriteDrawAnchors[0].x,
+            this->spriteDrawAnchors[0].y);
     }
 
-    return loaded;
+    return loadedAny;
 }
 Ship::Ship(void)
     : sprites{},
+      spriteDrawAnchors{},
       spritesLoaded(false),
       runtimeShipId(g_nextRuntimeShipId.fetch_add(1u)),
       config{3.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.5088f, 0.6346f},
@@ -777,6 +841,7 @@ Ship::Ship(void)
 {
     // Les valeurs par defaut permettent un navire immediatement exploitable,
     // meme avant chargement d'un JSON d'ancre.
+    this->setDrawAnchor(this->config.drawAnchorX, this->config.drawAnchorY);
 }
 
 Ship::~Ship(void)
@@ -810,6 +875,10 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
             return false;
         }
     }
+
+    // Baseline: meme ancre pour tous les sprites, surchargee ensuite
+    // par ship_anchor.json si des valeurs par sprite sont presentes.
+    this->setDrawAnchor(this->config.drawAnchorX, this->config.drawAnchorY);
 
     // Optionnel: surcharge de l'ancre via ship_anchor.json.
     if (!this->loadDrawAnchorFromJson(folderPath, storageKind))
@@ -889,6 +958,27 @@ void Ship::setDrawAnchor(float anchorX, float anchorY)
 
     this->config.drawAnchorX = anchorX;
     this->config.drawAnchorY = anchorY;
+
+    // Le setter global reste compatible ancien comportement:
+    // il applique la meme ancre aux 8 sprites.
+    for (SDL_FPoint& anchor : this->spriteDrawAnchors)
+    {
+        anchor.x = anchorX;
+        anchor.y = anchorY;
+    }
+}
+
+void Ship::setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY)
+{
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->spriteDrawAnchors.size()))
+    {
+        return;
+    }
+
+    this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].x =
+        std::clamp(anchorX, 0.0f, 1.0f);
+    this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].y =
+        std::clamp(anchorY, 0.0f, 1.0f);
 }
 
 void Ship::setPositionTile(float tileX, float tileY)
@@ -1084,5 +1174,5 @@ void Ship::draw(const Map& map) const
     }
 
     const SDL_FPoint center = map.tileToScreenCenterFloat(this->tilePosition.x, this->tilePosition.y);
-    this->drawSpriteCentered(sprite, center.x, center.y);
+    this->drawSpriteCentered(sprite, spriteIndex, center.x, center.y);
 }

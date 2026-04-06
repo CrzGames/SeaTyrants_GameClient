@@ -59,6 +59,8 @@ public:
     /**
      * @brief Definit la duree d'affichage du marqueur.
      * @param value Duree en secondes.
+     *        - value > 0  : auto-expiration active.
+     *        - value <= 0 : marqueur persistant (jusqu'au prochain show/hide).
      */
     void setDurationSeconds(double value);
 

@@ -20,7 +20,7 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     Camera& camera = GetCamera();
 
     // Load le navire du joueur.
-    if (!player.loadShip("assets/atlas/elite20", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/atlas/elite8", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
     }
@@ -181,7 +181,7 @@ void GameScene::keypressed(
     Player& player = GetGameState().player;
     Camera& camera = GetCamera();
     bool cameraChanged = false;
-
+    
     // Seules les touches de zoom et recentrage sont traitees ici.
     if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
     {
@@ -201,7 +201,6 @@ void GameScene::keypressed(
         this->shipAutoFollowEnabled = true;
         cameraChanged = true;
     }
-
     // Applique la camera si elle a ete modifiee.
     if (cameraChanged)
     {
@@ -248,3 +247,5 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         this->clickMarker.show(tile.x, tile.y);
     }
 }
+
+

@@ -78,6 +78,12 @@ public:
     bool handleClick(float x, float y, const SDL_FRect& screenRect);
 
     /**
+     * @brief Retourne true si une barre de scroll est actuellement capturee
+     * (clic maintenu actif sur une barre/coin).
+     */
+    bool isInteracting(void) const;
+
+    /**
      * @brief Donne les cordonnées par rapport à la Tile X/Y (ex: "00-AA") pour une position de tuile donnée (ex: tileX=0, tileY=0). 
      */
     std::string getMapCoordFromTile(int tileX, int tileY) const;

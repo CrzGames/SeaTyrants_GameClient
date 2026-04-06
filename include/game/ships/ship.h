@@ -65,6 +65,7 @@ private:
     };
 
     std::array<RC2D_Image, 8> sprites; /**< Sprites 1..8 charges en memoire. */
+    std::array<SDL_FPoint, 8> spriteDrawAnchors; /**< Anchor normalise [0..1] par sprite. */
     bool spritesLoaded;                 /**< True si les sprites sont charges. */
     uint64_t runtimeShipId;             /**< Identifiant runtime unique pour le sillage ocean. */
 
@@ -160,10 +161,11 @@ private:
     /**
      * @brief Dessine un sprite centre sur un point ecran.
      * @param sprite Sprite a dessiner.
+     * @param spriteIndex Index du sprite [0..7] pour choisir son anchor dediee.
      * @param centerX Centre ecran X.
      * @param centerY Centre ecran Y.
      */
-    void drawSpriteCentered(const RC2D_Image& sprite, float centerX, float centerY) const;
+    void drawSpriteCentered(const RC2D_Image& sprite, int spriteIndex, float centerX, float centerY) const;
 
     /**
      * @brief Charge l'ancre de rendu depuis le fichier JSON du dossier navire.
@@ -172,7 +174,8 @@ private:
      * - racine: { "anchorX": ..., "anchorY": ... }
      * - bloc default: { "default": { "anchorX": ..., "anchorY": ... } }
      * - bloc default en pixels: { "default": { "anchorPixelX": ..., "anchorPixelY": ... } }
-     * - bloc frames["1.png"] ou frames["1"] avec anchorX/anchorY ou anchorPixelX/anchorPixelY.
+     * - bloc frames["1.png"]..["8.png"] ou frames["1"]..["8"]
+     *   avec anchorX/anchorY ou anchorPixelX/anchorPixelY.
      *
      * - ship_anchor.json
      *
@@ -261,6 +264,14 @@ public:
      * @param anchorY Anchor Y normalise [0..1].
      */
     void setDrawAnchor(float anchorX, float anchorY);
+
+    /**
+     * @brief Definit l'anchor d'un sprite specifique.
+     * @param spriteIndex Index sprite [0..7].
+     * @param anchorX Anchor X normalise [0..1].
+     * @param anchorY Anchor Y normalise [0..1].
+     */
+    void setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY);
 
     /**
      * @brief Force la position du navire en tuile flottante.

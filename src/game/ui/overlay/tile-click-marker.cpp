@@ -43,8 +43,10 @@ void TileClickMarker::update(double dt)
     }
 
     // Auto-expiration apres la duree configuree.
+    // Si durationSeconds <= 0, le marqueur reste visible jusqu'a hide()
+    // ou au prochain show().
     this->elapsedSeconds += dt;
-    if (this->elapsedSeconds >= this->durationSeconds)
+    if (this->durationSeconds > 0.0 && this->elapsedSeconds >= this->durationSeconds)
     {
         this->visible = false;
     }
@@ -80,7 +82,14 @@ void TileClickMarker::draw(const Map& map) const
 
 void TileClickMarker::setDurationSeconds(double value)
 {
-    // Garde-fou: duree strictement positive.
+    // value > 0  : auto-expiration active.
+    // value <= 0 : mode persistant (pas d'auto-expiration).
+    if (value <= 0.0)
+    {
+        this->durationSeconds = 0.0;
+        return;
+    }
+
     if (value > 0.0)
     {
         this->durationSeconds = value;
