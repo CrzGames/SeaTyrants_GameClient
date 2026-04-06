@@ -186,6 +186,14 @@ public:
     void updateMapRect(const SDL_FRect& gameScreenRect);
 
     /**
+     * @brief Met a jour l'etat runtime de la map.
+     *
+     * Pour l'instant:
+     * - synchronise le rectangle map a partir du game screen logique.
+     */
+    void update(void);
+
+    /**
      * @brief Centre la map dans un rectangle de rendu.
      * @param rect Rectangle cible en coordonnees ecran.
      */

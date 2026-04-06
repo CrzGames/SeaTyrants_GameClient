@@ -64,6 +64,12 @@ void Player::spawnOnTile(const Map& map, int tileX, int tileY)
     this->ship.setPositionTileInt(clamped.x, clamped.y);
 }
 
+void Player::spawnOnSector(const Map& map, int sectorX, int sectorY)
+{
+    const SDL_Point spawnTile = map.sectorToTile(sectorX, sectorY);
+    this->spawnOnTile(map, spawnTile.x, spawnTile.y);
+}
+
 void Player::moveToTile(const Map& map, int tileX, int tileY)
 {
     // Le pathfinding est gere dans Ship::moveToTile.

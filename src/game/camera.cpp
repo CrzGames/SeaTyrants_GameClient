@@ -59,6 +59,11 @@ void Camera::applyToMap(Map& map, const SDL_FRect& viewportRect)
     map.centerOnTileInRect(this->cameraTileX, this->cameraTileY, viewportRect);
 }
 
+void Camera::update(Map& map, const SDL_FRect& viewportRect)
+{
+    this->applyToMap(map, viewportRect);
+}
+
 void Camera::clampCameraToMap(const Map& map, const SDL_FRect& viewportRect)
 {
     const int mapWidth = map.getWidthTiles();

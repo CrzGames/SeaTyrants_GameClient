@@ -3,21 +3,21 @@
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
-#include "game/ui/scroll-bar-overlay.h"
-#include "game/ui/tile-click-marker.h"
+#include "game/ui/hud/ingame-hud-overlay.h"
+#include "game/ui/overlay/scroll-bar-overlay.h"
+#include "game/ui/overlay/tile-click-marker.h"
 
 /**
  * @brief Scene principale gameplay.
  */
 class GameScene : public Scene {
 private:
+    void initializePlayerSpawnAndCamera(void);
+
     TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
     ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
-
-    RC2D_Image backgroundUiIngameImage; /**< Fond UI gameplay (haut/bas) dessine en (0,0). */
-    RC2D_UIImage minimapUI;         /**< UI de la minimap. */
-    RC2D_UIImage buttonCenterMapUI; /**< UI du bouton centrer la map. */
+    IngameHudOverlay hudOverlay;       /**< UI gameplay (fond + minimap + bouton centre). */
 
 public:
     /**

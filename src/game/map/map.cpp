@@ -140,6 +140,11 @@ void Map::updateMapRect(const SDL_FRect& gameScreenRect)
         1.0f);
 }
 
+void Map::update(void)
+{
+    this->updateMapRect(GetGameScreen().rect);
+}
+
 void Map::centerOnRect(const SDL_FRect& targetRect)
 {
     // Demi dimensions d'une tuile iso.

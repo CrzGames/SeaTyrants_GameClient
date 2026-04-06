@@ -1,4 +1,4 @@
-#include "game/ui/scroll-bar-overlay.h"
+#include "game/ui/overlay/scroll-bar-overlay.h"
 
 #include <cstdio>
 #include <algorithm>
@@ -209,7 +209,7 @@ void ScrollBarOverlay::update(double dt, Camera& camera, const Map& map, const S
 
     // Deplace la camera et applique le changement a la map.
     camera.moveCameraTiles(deltaTileX, deltaTileY, map, screenRect);
-    camera.applyToMap(const_cast<Map&>(map), screenRect);
+    camera.update(const_cast<Map&>(map), screenRect);
 }
 
 void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)

@@ -66,6 +66,14 @@ public:
     void spawnOnTile(const Map& map, int tileX, int tileY);
 
     /**
+     * @brief Spawn le joueur sur un secteur logique (00-59 / AA-CH).
+     * @param map Map de gameplay.
+     * @param sectorX Secteur spawn X.
+     * @param sectorY Secteur spawn Y.
+     */
+    void spawnOnSector(const Map& map, int sectorX, int sectorY);
+
+    /**
      * @brief Lance un deplacement vers une tuile cible.
      * @param map Map de navigation.
      * @param tileX Tuile cible X.

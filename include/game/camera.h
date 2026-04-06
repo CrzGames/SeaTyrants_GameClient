@@ -57,4 +57,11 @@ public:
      * @brief Applique camera + zoom a la map.
      */
     void applyToMap(Map& map, const SDL_FRect& viewportRect);
+
+    /**
+     * @brief Met a jour l'etat camera sur la map.
+     *
+     * Alias explicite de applyToMap() pour les boucles d'update gameplay.
+     */
+    void update(Map& map, const SDL_FRect& viewportRect);
 };
