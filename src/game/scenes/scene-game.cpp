@@ -11,11 +11,13 @@ void GameScene::unload(void)
 {
     // Recupere les references aux systemes et objets necessaires.
     OceanShader& oceanShader = GetOceanShader();
+    VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     Player& player = GetGameState().player;
 
     // Libere les ressources du jeu.
     oceanShader.unload();
+    visionCloudShader.unload();
     fogOfWarShader.unload();
     player.unload();
     this->clickMarker.hide();
@@ -29,6 +31,7 @@ void GameScene::load(void)
     GameState& gameState = GetGameState();
     Player& player = gameState.player;
     OceanShader& oceanShader = GetOceanShader();
+    VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     GameScreen& gameScreen = GetGameScreen();
     Camera& camera = GetCamera();
@@ -37,13 +40,17 @@ void GameScene::load(void)
     player.load();
 
     // Charge les shaders.
-    if (!oceanShader.load(OceanShader::WaterColor::BLUE))
+    if (!oceanShader.load(OceanShader::WaterColor::YELLOW))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement ocean shader");
     }
     if (!fogOfWarShader.load())
     {
         RC2D_log(RC2D_LOG_WARN, "GameScene: echec chargement fog-of-war shader");
+    }
+    if (!visionCloudShader.load())
+    {
+        RC2D_log(RC2D_LOG_WARN, "GameScene: echec chargement vision-cloud shader");
     }
 
     // Configure l'UI de minimap.
@@ -94,6 +101,7 @@ void GameScene::update(double dt)
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
     OceanShader& oceanShader = GetOceanShader();
+    VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     GameScreen& gameScreen = GetGameScreen();
     Camera& camera = GetCamera();
@@ -101,15 +109,32 @@ void GameScene::update(double dt)
     // Applique la camera (position + zoom) sur la map.
     camera.applyToMap(map, gameScreen.rect);
 
-    // Met a jour les shaders ocean et fog.
+    // Met a jour le shader ocean.
     oceanShader.update(dt);
-    fogOfWarShader.update(dt, oceanShader.getColorMode());
 
     // Met a jour le joueur (deplacement, animation, etc).
     // + synchronisation avec le shader ocean pour les effets de wake.
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
     oceanShader.endWakeFrame(map, gameScreen.rect);
+
+    // Met a jour le shader fog a partir des donnees joueur.
+    const SDL_FPoint playerTile = player.getTilePosition();
+    const float playerViewRangeTiles = player.getViewRangeTiles();
+    const float visionCloudFalloffTiles = 5.5f;
+    visionCloudShader.update(
+        dt,
+        playerTile,
+        playerViewRangeTiles,
+        visionCloudFalloffTiles);
+
+    const float fogViewFalloffTiles = 4.5f; // Ajustable: plus grand = bord plus doux.
+    fogOfWarShader.update(
+        dt,
+        oceanShader.getColorMode(),
+        playerTile,
+        playerViewRangeTiles,
+        fogViewFalloffTiles);
 
     // Met a jour le marqueur de clic.
     this->clickMarker.update(dt);
@@ -179,14 +204,20 @@ void GameScene::draw(void)
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
     OceanShader& oceanShader = GetOceanShader();
+    VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     GameScreen& gameScreen = GetGameScreen();
 
-    // Dessine l'ocean et le fog-of-war.
-    if (oceanShader.isReady() && fogOfWarShader.isReady())
+    // Dessine l'ocean.
+    if (oceanShader.isReady())
     {
         oceanShader.draw(gameScreen.rect);
-        // fogOfWarShader.draw(gameScreen.rect);
+    }
+
+    // Dessine le fog-of-war au-dessus de l'ocean.
+    if (fogOfWarShader.isReady())
+    {
+        fogOfWarShader.draw(gameScreen.rect);
     }
 
     // Dessine le marqueur de clic.
@@ -194,6 +225,12 @@ void GameScene::draw(void)
 
     // Dessine le joueur par-dessus l'ocean et le fog.
     player.draw(map);
+
+    // Dessine les nuages par-dessus le joueur pour un rendu "au-dessus".
+    if (visionCloudShader.isReady())
+    {
+        visionCloudShader.draw(gameScreen.rect);
+    }
 
     // Dessine les barres de scroll par-dessus tout.
     this->scrollBarOverlay.draw(gameScreen.rect, map);

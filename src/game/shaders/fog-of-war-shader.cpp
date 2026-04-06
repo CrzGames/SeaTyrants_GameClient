@@ -1,6 +1,10 @@
 #include "game/shaders/fog-of-war-shader.h"
 
+#include <algorithm>
+
 #include <RC2D/RC2D_internal.h>
+
+#include "core/context.h"
 
 FogOfWarShader::FogOfWarShader(void)
     // Initialise la texture masque.
@@ -83,13 +87,13 @@ void FogOfWarShader::resetUniforms(void)
     this->fogUniforms.params0[2] = 0.46f;
 
     // Initialise l'intensité globale du fog.
-    this->fogUniforms.params0[3] = 0.90f;
+    this->fogUniforms.params0[3] = 0.56f;
 
     // Initialise le seuil bas de visibilité.
-    this->fogUniforms.params1[0] = 0.54f;
+    this->fogUniforms.params1[0] = 0.34f;
 
     // Initialise le seuil haut de visibilité.
-    this->fogUniforms.params1[1] = 0.86f;
+    this->fogUniforms.params1[1] = 0.66f;
 
     // Initialise le renfort de bord.
     this->fogUniforms.params1[2] = 0.80f;
@@ -108,6 +112,24 @@ void FogOfWarShader::resetUniforms(void)
 
     // Initialise l'alpha maximum.
     this->fogUniforms.params2[3] = 0.86f;
+
+    // Initialise le rect de vue gameplay.
+    this->fogUniforms.params3[0] = 0.0f;
+    this->fogUniforms.params3[1] = 0.0f;
+    this->fogUniforms.params3[2] = 1.0f;
+    this->fogUniforms.params3[3] = 1.0f;
+
+    // Initialise l'origine map et la taille de tuile.
+    this->fogUniforms.params4[0] = 0.0f;
+    this->fogUniforms.params4[1] = 0.0f;
+    this->fogUniforms.params4[2] = 1.0f;
+    this->fogUniforms.params4[3] = 1.0f;
+
+    // Initialise la zone de reveal autour du joueur.
+    this->fogUniforms.params5[0] = 0.0f;
+    this->fogUniforms.params5[1] = 0.0f;
+    this->fogUniforms.params5[2] = 1.0f;
+    this->fogUniforms.params5[3] = 2.0f;
 }
 
 void FogOfWarShader::syncFromOceanColorMode(float oceanColorMode)
@@ -128,7 +150,7 @@ void FogOfWarShader::syncFromOceanColorMode(float oceanColorMode)
     }
 
     // Ajuste l'intensité globale selon le mode océan.
-    this->fogUniforms.params0[3] = 0.90f + (0.06f * mode);
+    this->fogUniforms.params0[3] = 0.56f + (0.04f * mode);
 
     // Ajuste le renfort de bord selon le mode océan.
     this->fogUniforms.params1[2] = 0.80f + (0.10f * mode);
@@ -368,7 +390,12 @@ bool FogOfWarShader::load(void)
     return true;
 }
 
-void FogOfWarShader::update(double dt, float oceanColorMode)
+void FogOfWarShader::update(
+    double dt,
+    float oceanColorMode,
+    const SDL_FPoint& playerTile,
+    float playerViewRangeTiles,
+    float viewFalloffTiles)
 {
     // Update fog:
     // - avance le temps
@@ -388,6 +415,34 @@ void FogOfWarShader::update(double dt, float oceanColorMode)
 
     // Synchronise le style fog avec la palette océan.
     this->syncFromOceanColorMode(oceanColorMode);
+
+    // Meme base que l'ocean pour que le fog ne glisse pas en camera pan/zoom.
+    Map& map = GetCurrentMap();
+    GameScreen& gameScreen = GetGameScreen();
+
+    int outputWidth = 1;
+    int outputHeight = 1;
+    if (rc2d_engine_state.renderer != nullptr)
+    {
+        SDL_GetCurrentRenderOutputSize(rc2d_engine_state.renderer, &outputWidth, &outputHeight);
+    }
+
+    this->fogUniforms.params3[0] = gameScreen.rect.x;
+    this->fogUniforms.params3[1] = gameScreen.rect.y;
+    this->fogUniforms.params3[2] =
+        (gameScreen.rect.w > 0.0f) ? gameScreen.rect.w : static_cast<float>((std::max)(outputWidth, 1));
+    this->fogUniforms.params3[3] =
+        (gameScreen.rect.h > 0.0f) ? gameScreen.rect.h : static_cast<float>((std::max)(outputHeight, 1));
+
+    this->fogUniforms.params4[0] = map.getOriginX();
+    this->fogUniforms.params4[1] = map.getOriginY();
+    this->fogUniforms.params4[2] = (std::max)(map.getTileWidth(), 1.0f);
+    this->fogUniforms.params4[3] = (std::max)(map.getTileHeight(), 1.0f);
+
+    this->fogUniforms.params5[0] = playerTile.x;
+    this->fogUniforms.params5[1] = playerTile.y;
+    this->fogUniforms.params5[2] = (std::max)(playerViewRangeTiles, 0.0f);
+    this->fogUniforms.params5[3] = (std::max)(viewFalloffTiles, 0.001f);
 
     // Upload les uniforms mis à jour.
     this->uploadUniforms();

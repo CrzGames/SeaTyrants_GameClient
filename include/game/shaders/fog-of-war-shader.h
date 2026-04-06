@@ -16,11 +16,17 @@ private:
      * params0 = {time, noiseScale, driftSpeed, fogIntensity}
      * params1 = {revealMin, revealMax, edgeBoost, noiseContrast}
      * params2 = {tintR, tintG, tintB, alphaMax}
+     * params3 = {viewRectX, viewRectY, viewRectW, viewRectH}
+     * params4 = {mapOriginX, mapOriginY, tileWidthPx, tileHeightPx}
+     * params5 = {playerTileX, playerTileY, viewRangeTiles, viewFalloffTiles}
      */
     struct FogUniforms {
         float params0[4];
         float params1[4];
         float params2[4];
+        float params3[4];
+        float params4[4];
+        float params5[4];
     };
 
     RC2D_Image fogMaskTexture;            /**< Texture masque visible (t0/s0 via SDL_RenderTexture). */
@@ -78,8 +84,16 @@ public:
      * @brief Met a jour le temps et les uniforms fog.
      * @param dt Delta time en secondes.
      * @param oceanColorMode Mode couleur ocean pour ajuster le contraste du fog.
+     * @param playerTile Position du joueur en coordonnees tuile.
+     * @param playerViewRangeTiles Portee de vue du joueur en tuiles.
+     * @param viewFalloffTiles Douceur du bord de reveal en tuiles.
      */
-    void update(double dt, float oceanColorMode);
+    void update(
+        double dt,
+        float oceanColorMode,
+        const SDL_FPoint& playerTile,
+        float playerViewRangeTiles,
+        float viewFalloffTiles);
 
     /**
      * @brief Dessine le fog sur le rectangle de destination.

@@ -5,6 +5,7 @@
 Player::Player(void)
     : hpCurrent(0),
       hpMax(0),
+      viewRangeTiles(0.0f),
       moveSpeedTilesPerSecond(0.0f),
       ship{}
 {
@@ -20,6 +21,7 @@ void Player::load(void)
     this->hpCurrent = 100;
     this->hpMax = 100;
     this->moveSpeedTilesPerSecond = 4.0f;
+    this->viewRangeTiles = 60.0f;
 
     // La vitesse logique du joueur est propagee au navire.
     this->ship.setSpeedTilesPerSecond(this->moveSpeedTilesPerSecond);
@@ -28,6 +30,19 @@ void Player::load(void)
 void Player::unload(void)
 {
     this->unloadShip();
+}
+
+void Player::setViewRangeTiles(float value)
+{
+    if (value > 0.0f)
+    {
+        this->viewRangeTiles = value;
+    }
+}
+
+float Player::getViewRangeTiles(void) const
+{
+    return this->viewRangeTiles;
 }
 
 bool Player::loadShip(const char* folderPath, RC2D_StorageKind storageKind)

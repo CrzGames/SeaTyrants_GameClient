@@ -13,6 +13,7 @@ static WebSocketToSimulationQueue g_wsToSimQueue;
 static Map g_currentMap;
 static OceanShader g_oceanShader;
 static FogOfWarShader g_fogOfWarShader;
+static VisionCloudShader g_visionCloudShader;
 
 GameState& GetGameState()
 {
@@ -77,4 +78,9 @@ OceanShader& GetOceanShader()
 FogOfWarShader& GetFogOfWarShader()
 {
     return g_fogOfWarShader;
+}
+
+VisionCloudShader& GetVisionCloudShader()
+{
+    return g_visionCloudShader;
 }

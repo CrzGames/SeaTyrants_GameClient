@@ -534,7 +534,7 @@ bool OceanShader::load(WaterColor color)
     this->oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
 
     // Charge la texture caustiques.
-    this->causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic.png", RC2D_STORAGE_TITLE);
+    this->causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic2.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite des caustiques.
     if (this->causticTexture.sdl_texture == nullptr)
     {

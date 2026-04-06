@@ -17,6 +17,7 @@ private:
     int hpMax;                     /**< HP max du joueur. */
     float moveSpeedTilesPerSecond; /**< Vitesse logique en tuiles/s. */
     Ship ship;                     /**< Navire actuellement equipe. */
+    float viewRangeTiles;          /**< Portee de vue du joueur en tuiles. */
 
 public:
     /**
@@ -156,4 +157,16 @@ public:
      * @return True si HP > 0.
      */
     bool isAlive(void) const;
+
+    /**
+     * @brief Definit la portee de vue du joueur en tuiles.
+     * @param value Portee en tuiles.
+     */
+    void setViewRangeTiles(float value);
+
+    /**
+     * @brief Retourne la portee de vue du joueur en tuiles.
+     * @return Portee de vue en tuiles.
+     */
+    float getViewRangeTiles(void) const;
 };

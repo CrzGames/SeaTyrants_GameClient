@@ -6,6 +6,12 @@ cbuffer Context : register(b0, space3)
     float4 params1;
     // params2: x=tintR, y=tintG, z=tintB, w=alphaMax
     float4 params2;
+    // params3: x=viewRectX, y=viewRectY, z=viewRectW, w=viewRectH
+    float4 params3;
+    // params4: x=mapOriginX, y=mapOriginY, z=tileWidthPx, w=tileHeightPx
+    float4 params4;
+    // params5: x=playerTileX, y=playerTileY, z=viewRangeTiles, w=viewFalloffTiles
+    float4 params5;
 };
 
 // Auto-bound by SDL_RenderTexture:
@@ -67,7 +73,27 @@ PSOutput main(PSInput input)
     float3 fogTint = saturate(params2.xyz);
     float alphaMax = saturate(params2.w);
 
-    float2 uv = input.v_uv;
+    float2 screenUv = input.v_uv;
+    float2 screenPx = float2(
+        params3.x + (screenUv.x * params3.z),
+        params3.y + (screenUv.y * params3.w));
+    float halfTileW = max(params4.z * 0.5, 0.001);
+    float halfTileH = max(params4.w * 0.5, 0.001);
+    float isoDx = (screenPx.x - params4.x) / halfTileW;
+    float isoDy = (screenPx.y - params4.y) / halfTileH;
+    float tileX = 0.5 * (isoDx + isoDy);
+    float tileY = 0.5 * (isoDy - isoDx);
+    float2 worldIso = float2(tileX - tileY, tileX + tileY);
+    float2 uv = worldIso * 0.0125;
+
+    float2 playerTile = params5.xy;
+    float viewRangeTiles = max(params5.z, 0.0);
+    float viewFalloffTiles = max(params5.w, 0.001);
+    float revealStart = max(viewRangeTiles - viewFalloffTiles, 0.0);
+    float revealEnd = viewRangeTiles + viewFalloffTiles;
+    float distanceToPlayerTiles = distance(float2(tileX, tileY), playerTile);
+    float hiddenByRange = smoothstep(revealStart, revealEnd, distanceToPlayerTiles);
+
     float t = time * max(driftSpeed, 0.18);
 
     // Animate the visibility mask itself so cloud masses drift across the map.
@@ -81,8 +107,9 @@ PSOutput main(PSInput input)
     float visibilityRaw = lerp(visibilityFromColor, visibilitySample.a, useAlphaMask);
     float visibility = smoothstep(revealMin, revealMax, saturate(visibilityRaw));
     float hidden = 1.0 - visibility;
+    hidden *= hiddenByRange;
 
-    float2 px = float2(1.0 / 1024.0, 1.0 / 1024.0);
+    float2 px = 1.0 / max(params3.zw, float2(1.0, 1.0));
     float2 nUvA = frac(rotate2(uv * noiseScale + float2(0.030 * t, -0.022 * t),  0.41));
     float2 nUvB = frac(rotate2(uv * (noiseScale * 1.71) + float2(-0.020 * t, 0.026 * t), -0.93));
 
@@ -98,7 +125,11 @@ PSOutput main(PSInput input)
 
     // Highlight transition zone between visible and hidden areas.
     float edgeBand = pow(saturate(visibility * (1.0 - visibility) * 4.0), 0.72);
-    float edgeAlpha = edgeBand * edgeBoost * (0.40 + 0.60 * hollow) * fogIntensity;
+    float rangeEdgeBand = 1.0 - smoothstep(0.0, viewFalloffTiles, abs(distanceToPlayerTiles - viewRangeTiles));
+    edgeBand = saturate(max(edgeBand, rangeEdgeBand));
+    // Important: on applique aussi le masque de distance sur le bord
+    // pour eviter des nuages residuels a l'interieur du rond du joueur.
+    float edgeAlpha = edgeBand * edgeBoost * (0.40 + 0.60 * hollow) * fogIntensity * hiddenByRange;
 
     float alpha = saturate((baseAlpha + edgeAlpha) * max(alphaMax, 0.001));
 
