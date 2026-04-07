@@ -29,7 +29,7 @@ private:
 
     RC2D_Font font; /**< Police pour les labels de coordonnees. */
 
-    int activeBar; /**< Barre actuellement maintenue au clic: 0 = aucune, 1 = haut, 2 = bas, 3 = gauche, 4 = droite. */
+    int activeBar; /**< Zone actuellement maintenue au clic: 0 = aucune, 1..4 = barres, 5..8 = coins. */
 
     /**
      * @brief Genere le label lettre pour un index de colonne (0=AA, 25=AZ, 26=BA, 33=BH).
@@ -42,8 +42,8 @@ private:
     void getRowLabel(int index, char* out, int outSize) const;
 
     /**
-     * @brief Teste si un point (x,y) est dans une des barres.
-     * @return 0=aucune, 1=haut, 2=bas, 3=gauche, 4=droite.
+     * @brief Teste si un point (x,y) est dans une barre ou un coin.
+     * @return 0=aucune, 1=haut, 2=bas, 3=gauche, 4=droite, 5=HG, 6=HD, 7=BG, 8=BD.
      */
     int hitTestBar(float x, float y, const SDL_FRect& screenRect) const;
 

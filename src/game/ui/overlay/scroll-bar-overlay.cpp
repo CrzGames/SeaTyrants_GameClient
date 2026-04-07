@@ -11,8 +11,8 @@
 ScrollBarOverlay::ScrollBarOverlay(void)
     : barThickness(30.0f),
       cornerSize(50.0f),
-      barColor{95, 110, 125, 110},
-      cornerColor{105, 120, 135, 125},
+      barColor{95, 110, 125, 150},
+      cornerColor{105, 120, 135, 170},
       textColor{220, 230, 240, 215},
       font{},
       activeBar(0)
@@ -215,9 +215,27 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
 
     // -------------------------------------------------------------------------
+    // Feedback visuel au clic:
+    // - etat normal: alpha de base plus visible;
+    // - zone active (clic maintenu): alpha reduit pour donner un effet "pressed".
+    // -------------------------------------------------------------------------
+    auto withAlphaDelta = [](const RC2D_Color& baseColor, int deltaAlpha) -> RC2D_Color
+    {
+        RC2D_Color cpy = baseColor;
+        const int alpha = static_cast<int>(baseColor.a) + deltaAlpha;
+        cpy.a = static_cast<Uint8>(std::clamp(alpha, 0, 255));
+        return cpy;
+    };
+
+    const RC2D_Color normalBarColor = this->barColor;
+    const RC2D_Color pressedBarColor = withAlphaDelta(this->barColor, -70);
+    const RC2D_Color normalCornerColor = this->cornerColor;
+    const RC2D_Color pressedCornerColor = withAlphaDelta(this->cornerColor, -80);
+
+    // -------------------------------------------------------------------------
     // Barres de scroll
     // -------------------------------------------------------------------------
-    rc2d_graphics_setColor(this->barColor);
+    rc2d_graphics_setColor((this->activeBar == 1) ? pressedBarColor : normalBarColor);
 
     SDL_FRect barTop = {
         left + c,
@@ -227,6 +245,7 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     };
     rc2d_graphics_rectangle("fill", &barTop);
 
+    rc2d_graphics_setColor((this->activeBar == 2) ? pressedBarColor : normalBarColor);
     SDL_FRect barBottom = {
         left + c,
         bottom - t,
@@ -235,6 +254,7 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     };
     rc2d_graphics_rectangle("fill", &barBottom);
 
+    rc2d_graphics_setColor((this->activeBar == 3) ? pressedBarColor : normalBarColor);
     SDL_FRect barLeft = {
         left,
         top + c,
@@ -243,6 +263,7 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     };
     rc2d_graphics_rectangle("fill", &barLeft);
 
+    rc2d_graphics_setColor((this->activeBar == 4) ? pressedBarColor : normalBarColor);
     SDL_FRect barRight = {
         right - t,
         top + c,
@@ -254,16 +275,21 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     // -------------------------------------------------------------------------
     // Coins
     // -------------------------------------------------------------------------
-    rc2d_graphics_setColor(this->cornerColor);
-
     SDL_FRect cornerTL = {left, top, this->cornerSize, this->cornerSize};
     SDL_FRect cornerTR = {right - this->cornerSize, top, this->cornerSize, this->cornerSize};
     SDL_FRect cornerBL = {left, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
     SDL_FRect cornerBR = {right - this->cornerSize, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
 
+    rc2d_graphics_setColor((this->activeBar == 5) ? pressedCornerColor : normalCornerColor);
     rc2d_graphics_rectangle("fill", &cornerTL);
+
+    rc2d_graphics_setColor((this->activeBar == 6) ? pressedCornerColor : normalCornerColor);
     rc2d_graphics_rectangle("fill", &cornerTR);
+
+    rc2d_graphics_setColor((this->activeBar == 7) ? pressedCornerColor : normalCornerColor);
     rc2d_graphics_rectangle("fill", &cornerBL);
+
+    rc2d_graphics_setColor((this->activeBar == 8) ? pressedCornerColor : normalCornerColor);
     rc2d_graphics_rectangle("fill", &cornerBR);
 
     // -------------------------------------------------------------------------

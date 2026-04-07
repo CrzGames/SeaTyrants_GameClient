@@ -165,7 +165,7 @@ void GameScene::draw(void)
     WorldRenderClip::end(renderer);
 
     // Dessine les elements d'interface.
-    this->hudOverlay.drawWidgets();
+    this->hudOverlay.drawWidgets(map, player);
 }
 
 void GameScene::keypressed(

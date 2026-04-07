@@ -1,11 +1,14 @@
 #include "game/ui/hud/ingame-hud-overlay.h"
 
 #include "core/context.h"
+#include "game/entities/player.h"
+#include "game/map/map.h"
 
 IngameHudOverlay::IngameHudOverlay(void)
     : backgroundUiImage{},
-      minimapUi{},
-      buttonCenterMapUi{}
+      minimapWidget{},
+      centerShipButtonWidget{},
+      sectorCoordinateOverlay{}
 {
 }
 
@@ -24,34 +27,21 @@ void IngameHudOverlay::load(void)
         RC2D_log(RC2D_LOG_WARN, "IngameHudOverlay: echec chargement background UI gameplay");
     }
 
-    // UI minimap.
-    this->minimapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-game/minimap.png", RC2D_STORAGE_TITLE);
-    this->minimapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-game/minimap.png", RC2D_STORAGE_TITLE);
-    this->minimapUi.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
-    this->minimapUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
-    this->minimapUi.margin_x = 0.03f;
-    this->minimapUi.margin_y = 0.05f;
-    this->minimapUi.visible = true;
-    this->minimapUi.hittable = true;
+    // Widgets HUD extraits dans leurs propres composants.
+    this->minimapWidget.load();
 
-    // UI bouton "centrer sur le navire".
-    this->buttonCenterMapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-game/center-ship.png", RC2D_STORAGE_TITLE);
-    this->buttonCenterMapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-game/center-ship.png", RC2D_STORAGE_TITLE);
-    this->buttonCenterMapUi.anchor = RC2D_UI_ANCHOR_BOTTOM_CENTER;
-    this->buttonCenterMapUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
-    this->buttonCenterMapUi.margin_x = 0.0f;
-    this->buttonCenterMapUi.margin_y = 0.25f;
-    this->buttonCenterMapUi.visible = true;
-    this->buttonCenterMapUi.hittable = true;
+    // Bouton de recentrage du navire, garde sa logique/ressources dans son widget dedie.
+    this->centerShipButtonWidget.load();
+
+    // Overlay texte du secteur courant.
+    this->sectorCoordinateOverlay.load();
 }
 
 void IngameHudOverlay::unload(void)
 {
-    rc2d_graphics_freeImageData(&this->buttonCenterMapUi.imageData);
-    rc2d_graphics_freeImage(&this->buttonCenterMapUi.image);
-
-    rc2d_graphics_freeImageData(&this->minimapUi.imageData);
-    rc2d_graphics_freeImage(&this->minimapUi.image);
+    this->sectorCoordinateOverlay.unload();
+    this->centerShipButtonWidget.unload();
+    this->minimapWidget.unload();
 
     rc2d_graphics_freeImage(&this->backgroundUiImage);
 }
@@ -76,8 +66,9 @@ void IngameHudOverlay::drawBackground(void)
         false);
 }
 
-void IngameHudOverlay::drawWidgets(void)
+void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
 {
-    rc2d_ui_drawImage(&this->minimapUi);
-    rc2d_ui_drawImage(&this->buttonCenterMapUi);
+    this->sectorCoordinateOverlay.draw(map, player);
+    this->minimapWidget.draw();
+    this->centerShipButtonWidget.draw();
 }
