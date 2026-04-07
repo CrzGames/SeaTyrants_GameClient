@@ -29,6 +29,12 @@ void SceneManager::changeScene(const std::string& name)
     auto it = this->scenes.find(name);
     if (it != this->scenes.end()) 
     {
+        // Code défensif : ne rien faire si c'est déjà la scène courante
+        if (this->currentScene == it->second)
+        {
+            return;
+        }
+
         if (this->currentScene) 
         {
             this->currentScene->unload();

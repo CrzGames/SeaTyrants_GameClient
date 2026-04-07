@@ -27,8 +27,10 @@ void VisionCloudShader::unload(void)
     // Detruit le render state si present.
     if (this->visionCloudRenderState != nullptr)
     {
+#if RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
         // Desinscrit le state du systeme hot-reload.
         rc2d_gpu_untrackGraphicsRenderState(&this->visionCloudRenderState);
+#endif // RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
         // Detruit l'objet GPU render state.
         SDL_DestroyGPURenderState(this->visionCloudRenderState);
         // Annule le pointeur local.
@@ -162,11 +164,13 @@ bool VisionCloudShader::load(void)
         return false;
     }
 
+#if RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
     // Enregistre le state pour le hot-reload shader.
     if (!rc2d_gpu_trackGraphicsRenderState("visionclouds.fragment", &this->visionCloudRenderState, 0, nullptr))
     {
         RC2D_log(RC2D_LOG_WARN, "VisionCloudShader: echec tracking GPURenderState pour hot-reload");
     }
+#endif // RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
 
     // Upload des uniforms initiaux.
     this->uploadUniforms();

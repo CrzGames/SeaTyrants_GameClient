@@ -32,9 +32,10 @@ void FogOfWarShader::unload(void)
     // Détruit le render state si présent.
     if (this->fogRenderState != nullptr)
     {
+#if RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
         // Désinscrit le state du système hot-reload.
         rc2d_gpu_untrackGraphicsRenderState(&this->fogRenderState);
-
+#endif // RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
         // Détruit l'objet GPU render state.
         SDL_DestroyGPURenderState(this->fogRenderState);
 
@@ -377,11 +378,13 @@ bool FogOfWarShader::load(void)
         return false;
     }
 
+#if RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
     // Enregistre le state pour le hot-reload shader.
     if (!rc2d_gpu_trackGraphicsRenderState("fogofwar.fragment", &this->fogRenderState, 1, fogSamplerBindings))
     {
         RC2D_log(RC2D_LOG_WARN, "FogOfWarShader: echec tracking GPURenderState pour hot-reload");
     }
+#endif // RC2D_GPU_SHADER_HOT_RELOAD_ENABLED
 
     // Upload les uniforms initiaux.
     this->uploadUniforms();

@@ -31,6 +31,8 @@ struct OceanColorEntry
     const char* label;
 };
 
+constexpr int kShipSpriteCount = 8;
+
 constexpr std::array<OceanColorEntry, 27> kOceanColors = {{
     {OceanShader::WaterColor::BLUE, "BLUE"},
     {OceanShader::WaterColor::AMBER, "AMBER"},
@@ -92,6 +94,10 @@ constexpr RC2D_FileDialogFilter kImportFilters[] = {
 constexpr RC2D_FileDialogFilter kExportFilters[] = {
     {"JSON", "json"},
     {"Tous les fichiers", "*"},
+};
+
+constexpr RC2D_FileDialogFilter kShipFolderFilters[] = {
+    {"Dossier navire", "*"},
 };
 
 static std::string makeAssetLabel(const std::string& name, int maxChars)
@@ -206,19 +212,34 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       importBatchFailedCount(0),
       assetListScrollDragActive(false),
       assetListScrollDragGrabOffsetY(0.0f),
+      clickMarker{},
+      testShip{},
+      testShipPreview{},
+      testShipLoaded(false),
+      testShipSpawned(false),
+      testShipCameraFollowEnabled(false),
+      loadedShipFolderAbsolute(),
+      pendingShipFolderDialogCompleted(false),
+      pendingShipFolderDialogCanceled(false),
+      pendingShipFolderAbsolute(),
+      pendingShipFolderMutex{},
       buttonImportRect{},
+      buttonImportShipRect{},
       buttonExportRect{},
       buttonUndoRect{},
       buttonRedoRect{},
       buttonToolBlockRect{},
       buttonToolPlaceRect{},
       buttonToolRemoveRect{},
+      buttonToolShipRect{},
+      buttonToolShipControlRect{},
       buttonAssetPrevRect{},
       buttonAssetNextRect{},
       buttonOceanPrevRect{},
       buttonOceanNextRect{},
       buttonGridRect{},
       buttonCenterRect{},
+      buttonCenterShipRect{},
       buttonZoomOutRect{},
       buttonZoomInRect{},
       assetListRect{},
@@ -263,19 +284,37 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->importBatchFailedCount = 0;
     this->assetListScrollDragActive = false;
     this->assetListScrollDragGrabOffsetY = 0.0f;
+    this->clickMarker.hide();
+    this->clickMarker.setDurationSeconds(0.85);
+    this->testShip.unloadSprites();
+    this->testShipPreview.unloadSprites();
+    this->testShipLoaded = false;
+    this->testShipSpawned = false;
+    this->testShipCameraFollowEnabled = false;
+    this->loadedShipFolderAbsolute.clear();
+    this->pendingShipFolderDialogCompleted = false;
+    this->pendingShipFolderDialogCanceled = false;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingShipFolderMutex);
+        this->pendingShipFolderAbsolute.clear();
+    }
     this->buttonImportRect = SDL_FRect{};
+    this->buttonImportShipRect = SDL_FRect{};
     this->buttonExportRect = SDL_FRect{};
     this->buttonUndoRect = SDL_FRect{};
     this->buttonRedoRect = SDL_FRect{};
     this->buttonToolBlockRect = SDL_FRect{};
     this->buttonToolPlaceRect = SDL_FRect{};
     this->buttonToolRemoveRect = SDL_FRect{};
+    this->buttonToolShipRect = SDL_FRect{};
+    this->buttonToolShipControlRect = SDL_FRect{};
     this->buttonAssetPrevRect = SDL_FRect{};
     this->buttonAssetNextRect = SDL_FRect{};
     this->buttonOceanPrevRect = SDL_FRect{};
     this->buttonOceanNextRect = SDL_FRect{};
     this->buttonGridRect = SDL_FRect{};
     this->buttonCenterRect = SDL_FRect{};
+    this->buttonCenterShipRect = SDL_FRect{};
     this->buttonZoomOutRect = SDL_FRect{};
     this->buttonZoomInRect = SDL_FRect{};
     this->assetListRect = SDL_FRect{};
@@ -317,6 +356,8 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
 void EditorMapCreateMapScene::ensureUserStorageFolders(void)
 {
     rc2d_storage_userMkdir("editor-assets");
+    rc2d_storage_userMkdir("editor-map-ship");
+    rc2d_storage_userMkdir("editor-map-ship/current");
 }
 
 void EditorMapCreateMapScene::applySelectedOceanColor(void)
@@ -1798,6 +1839,355 @@ void EditorMapCreateMapScene::openExportMapDialog(void)
     rc2d_filedialog_saveFile(&EditorMapCreateMapScene::onExportMapDialogResult, this, &options);
 }
 
+void EditorMapCreateMapScene::openImportShipFolderDialog(void)
+{
+    RC2D_FileDialogOptions options{};
+    options.window = rc2d_window_getWindow();
+    options.filters = kShipFolderFilters;
+    options.num_filters = static_cast<int>(std::size(kShipFolderFilters));
+    options.default_location = nullptr;
+    options.allow_many = false;
+    options.title = "Selectionner le dossier navire (1.png..8.png)";
+    options.accept_label = "Ouvrir";
+    options.cancel_label = "Annuler";
+    rc2d_filedialog_openFolder(&EditorMapCreateMapScene::onImportShipFolderDialogResult, this, &options);
+}
+
+void EditorMapCreateMapScene::processPendingShipFolderRequest(void)
+{
+    bool hasResult = false;
+    bool isCanceled = false;
+    std::string selectedFolder;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingShipFolderMutex);
+        hasResult = this->pendingShipFolderDialogCompleted;
+        if (hasResult)
+        {
+            isCanceled = this->pendingShipFolderDialogCanceled;
+            selectedFolder.swap(this->pendingShipFolderAbsolute);
+            this->pendingShipFolderDialogCompleted = false;
+            this->pendingShipFolderDialogCanceled = false;
+        }
+    }
+
+    if (!hasResult)
+    {
+        return;
+    }
+
+    if (isCanceled || selectedFolder.empty())
+    {
+        this->statusMessage = "Import dossier navire annule.";
+        return;
+    }
+
+    this->loadShipFolderFromAbsolutePath(selectedFolder.c_str());
+}
+
+bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderAbsolutePath)
+{
+    if (folderAbsolutePath == nullptr || folderAbsolutePath[0] == '\0')
+    {
+        this->statusMessage = "Dossier navire invalide.";
+        return false;
+    }
+
+    std::filesystem::path folderPath(folderAbsolutePath);
+    std::error_code fsError;
+    if (!std::filesystem::exists(folderPath, fsError) ||
+        !std::filesystem::is_directory(folderPath, fsError))
+    {
+        this->statusMessage = "Dossier navire introuvable.";
+        return false;
+    }
+
+    std::array<std::filesystem::path, kShipSpriteCount> sourcePngPaths{};
+    for (int i = 0; i < kShipSpriteCount; ++i)
+    {
+        const std::filesystem::path pngPath = folderPath / (std::to_string(i + 1) + ".png");
+        if (!std::filesystem::exists(pngPath, fsError) ||
+            !std::filesystem::is_regular_file(pngPath, fsError))
+        {
+            this->statusMessage =
+                "Dossier invalide: fichier manquant '" + std::to_string(i + 1) + ".png'.";
+            return false;
+        }
+        sourcePngPaths[static_cast<size_t>(i)] = pngPath;
+    }
+
+    this->ensureUserStorageFolders();
+
+    for (int i = 0; i < kShipSpriteCount; ++i)
+    {
+        const std::filesystem::path& sourcePath = sourcePngPaths[static_cast<size_t>(i)];
+        std::ifstream input(sourcePath, std::ios::binary | std::ios::ate);
+        if (!input.is_open())
+        {
+            this->statusMessage = "Lecture impossible: " + sourcePath.string();
+            return false;
+        }
+
+        const std::streamsize fileSize = input.tellg();
+        if (fileSize <= 0)
+        {
+            this->statusMessage = "Fichier vide: " + sourcePath.string();
+            return false;
+        }
+
+        input.seekg(0, std::ios::beg);
+        std::vector<char> bytes(static_cast<size_t>(fileSize));
+        if (!input.read(bytes.data(), fileSize))
+        {
+            this->statusMessage = "Lecture bytes echouee: " + sourcePath.string();
+            return false;
+        }
+
+        char userStoragePath[128] = {};
+        SDL_snprintf(
+            userStoragePath,
+            sizeof(userStoragePath),
+            "editor-map-ship/current/%d.png",
+            i + 1);
+
+        if (!rc2d_storage_userWriteFile(userStoragePath, bytes.data(), static_cast<Uint64>(bytes.size())))
+        {
+            this->statusMessage = "Echec copie user storage: " + std::string(userStoragePath);
+            return false;
+        }
+    }
+
+    // Copie optionnelle du ship_anchor.json pour conserver un rendu navire
+    // coherent avec le gameplay. Si absent, on ecrit un JSON vide pour
+    // neutraliser un eventuel fichier stale d'un import precedent.
+    std::vector<char> anchorBytes;
+    const std::filesystem::path anchorSourcePath = folderPath / "ship_anchor.json";
+    if (std::filesystem::exists(anchorSourcePath, fsError) &&
+        std::filesystem::is_regular_file(anchorSourcePath, fsError))
+    {
+        std::ifstream anchorInput(anchorSourcePath, std::ios::binary | std::ios::ate);
+        if (anchorInput.is_open())
+        {
+            const std::streamsize anchorSize = anchorInput.tellg();
+            if (anchorSize > 0)
+            {
+                anchorInput.seekg(0, std::ios::beg);
+                anchorBytes.resize(static_cast<size_t>(anchorSize));
+                if (!anchorInput.read(anchorBytes.data(), anchorSize))
+                {
+                    anchorBytes.clear();
+                }
+            }
+        }
+    }
+    if (anchorBytes.empty())
+    {
+        constexpr const char* kEmptyAnchorJson = "{}";
+        anchorBytes.assign(kEmptyAnchorJson, kEmptyAnchorJson + 2);
+    }
+    if (!rc2d_storage_userWriteFile(
+            "editor-map-ship/current/ship_anchor.json",
+            anchorBytes.data(),
+            static_cast<Uint64>(anchorBytes.size())))
+    {
+        this->statusMessage = "Echec copie ship_anchor.json dans user storage.";
+        return false;
+    }
+
+    this->testShip.unloadSprites();
+    this->testShipPreview.unloadSprites();
+    if (!this->testShip.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
+    {
+        this->statusMessage = "Echec chargement navire test (sprites 1..8).";
+        return false;
+    }
+    if (!this->testShipPreview.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
+    {
+        this->testShip.unloadSprites();
+        this->statusMessage = "Echec chargement preview navire test.";
+        return false;
+    }
+
+    this->testShip.setSpeedTilesPerSecond(4.0f);
+    this->testShip.setHealthVisual(Ship::HealthVisual::FULL);
+    this->testShipPreview.setSpeedTilesPerSecond(4.0f);
+    this->testShipPreview.setHealthVisual(Ship::HealthVisual::FULL);
+    this->testShipLoaded = true;
+    this->testShipSpawned = false;
+    this->testShipCameraFollowEnabled = false;
+    this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
+    this->editorTool = EditorTool::SPAWN_SHIP;
+    this->statusMessage = "Navire test charge. Clique gauche sur la map pour le spawn.";
+    return true;
+}
+
+void EditorMapCreateMapScene::spawnTestShipAtTile(int tileX, int tileY)
+{
+    Map& map = GetCurrentMap();
+    if (!this->testShipLoaded)
+    {
+        this->statusMessage = "Importe d'abord un dossier navire.";
+        return;
+    }
+
+    if (!map.isInside(tileX, tileY))
+    {
+        this->statusMessage = "Spawn navire impossible: hors map.";
+        return;
+    }
+
+    if (map.isTileBlocked(tileX, tileY))
+    {
+        this->statusMessage = "Spawn navire impossible: tuile bloquee.";
+        return;
+    }
+
+    this->testShip.setPositionTileInt(tileX, tileY);
+    this->testShipSpawned = true;
+    this->statusMessage =
+        "Navire spawn en (" + std::to_string(tileX) + "," + std::to_string(tileY) + ").";
+}
+
+void EditorMapCreateMapScene::moveTestShipToTile(int tileX, int tileY)
+{
+    Map& map = GetCurrentMap();
+    if (!this->testShipLoaded || !this->testShipSpawned)
+    {
+        this->statusMessage = "Navire non spawn: place-le d'abord sur la map.";
+        return;
+    }
+
+    if (!map.isInside(tileX, tileY))
+    {
+        this->statusMessage = "Cible navire hors map.";
+        return;
+    }
+
+    this->testShip.moveToTile(map, tileX, tileY);
+    if (this->testShip.isMoving())
+    {
+        this->statusMessage =
+            "Navire deplace vers (" + std::to_string(tileX) + "," + std::to_string(tileY) + ").";
+    }
+    else
+    {
+        this->statusMessage = "Aucun chemin A* trouve vers la tuile cible.";
+    }
+}
+
+void EditorMapCreateMapScene::updateTestShip(double dt)
+{
+    this->clickMarker.update(dt);
+
+    if (!this->testShipLoaded || !this->testShipSpawned)
+    {
+        return;
+    }
+
+    Map& map = GetCurrentMap();
+    Camera& camera = GetCamera();
+    this->testShip.update(dt, map);
+
+    if (this->testShipCameraFollowEnabled)
+    {
+        const SDL_FPoint shipTile = this->testShip.getPositionTile();
+        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
+    }
+}
+
+void EditorMapCreateMapScene::drawTestShip(void)
+{
+    // Marqueur visible principalement utile en mode controle navire.
+    if (this->editorTool == EditorTool::CONTROL_SHIP)
+    {
+        this->clickMarker.draw(GetCurrentMap());
+    }
+
+    if (!this->testShipLoaded)
+    {
+        return;
+    }
+
+    // Navire effectif (si deja spawn).
+    if (this->testShipSpawned)
+    {
+        this->testShip.draw(GetCurrentMap());
+    }
+
+    // Preview de spawn sous la souris.
+    if (this->editorTool == EditorTool::SPAWN_SHIP && this->hoveredTileValid)
+    {
+        const Map& map = GetCurrentMap();
+        if (map.isInside(this->hoveredTile.x, this->hoveredTile.y))
+        {
+            this->testShipPreview.setPositionTileInt(this->hoveredTile.x, this->hoveredTile.y);
+            this->testShipPreview.draw(map);
+        }
+    }
+}
+
+bool EditorMapCreateMapScene::handleShipToolClick(float x, float y, RC2D_MouseButton button)
+{
+    if (this->editorTool != EditorTool::SPAWN_SHIP &&
+        this->editorTool != EditorTool::CONTROL_SHIP)
+    {
+        return false;
+    }
+
+    if (button != RC2D_MOUSE_BUTTON_LEFT && button != RC2D_MOUSE_BUTTON_RIGHT)
+    {
+        return true;
+    }
+
+    Map& map = GetCurrentMap();
+    const SDL_Point tile = map.screenToTileNearest(x, y);
+    if (!map.isInside(tile.x, tile.y))
+    {
+        this->statusMessage = "Hors map: clic navire ignore.";
+        return true;
+    }
+
+    if (!this->testShipLoaded)
+    {
+        this->statusMessage = "Importe d'abord un dossier navire.";
+        return true;
+    }
+
+    if (this->editorTool == EditorTool::SPAWN_SHIP)
+    {
+        // Mode spawn:
+        // - clic gauche: spawn/re-spawn exactement sur la tuile pointee.
+        // - clic droit: consomme sans action.
+        if (button != RC2D_MOUSE_BUTTON_LEFT)
+        {
+            return true;
+        }
+
+        this->spawnTestShipAtTile(tile.x, tile.y);
+        this->clickMarker.show(tile.x, tile.y);
+        return true;
+    }
+
+    // Mode controle:
+    // - clic gauche: deplacement A*.
+    // - clic droit: repositionnement direct.
+    if (!this->testShipSpawned)
+    {
+        this->statusMessage = "Navire non spawn: passe en mode SPAWN NAVIRE d'abord.";
+        return true;
+    }
+
+    if (button == RC2D_MOUSE_BUTTON_RIGHT)
+    {
+        this->spawnTestShipAtTile(tile.x, tile.y);
+        this->clickMarker.show(tile.x, tile.y);
+        return true;
+    }
+
+    this->moveTestShipToTile(tile.x, tile.y);
+    this->clickMarker.show(tile.x, tile.y);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Rendu monde (grille, collisions, assets).
 // ---------------------------------------------------------------------------
@@ -2050,17 +2440,21 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     // Ligne 1: actions principales (sans bouton quitter).
     float x = startX;
     setNextButton(&this->buttonImportRect, &x, row1Y, 160.0f);
+    setNextButton(&this->buttonImportShipRect, &x, row1Y, 164.0f);
     setNextButton(&this->buttonExportRect, &x, row1Y, 138.0f);
     setNextButton(&this->buttonUndoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonRedoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonToolBlockRect, &x, row1Y, 100.0f);
     setNextButton(&this->buttonToolPlaceRect, &x, row1Y, 100.0f);
     setNextButton(&this->buttonToolRemoveRect, &x, row1Y, 156.0f);
+    setNextButton(&this->buttonToolShipRect, &x, row1Y, 135.0f);
+    setNextButton(&this->buttonToolShipControlRect, &x, row1Y, 155.0f);
     setNextButton(&this->buttonGridRect, &x, row1Y, 74.0f);
-    setNextButton(&this->buttonCenterRect, &x, row1Y, 78.0f);
+    setNextButton(&this->buttonCenterRect, &x, row1Y, 126.0f);
 
-    // Ligne 2: selection d'asset, ocean et zoom.
+    // Ligne 2: centrage navire, selection d'asset, ocean et zoom.
     x = startX;
+    setNextButton(&this->buttonCenterShipRect, &x, row2Y, 150.0f);
     setNextButton(&this->buttonAssetPrevRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonAssetNextRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonOceanPrevRect, &x, row2Y, 92.0f);
@@ -2519,6 +2913,7 @@ void EditorMapCreateMapScene::moveCameraFromMiniMapPoint(float miniMapX, float m
 {
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
+    this->testShipCameraFollowEnabled = false;
 
     float localX = miniMapX - this->miniMapRect.x;
     float localY = miniMapY - this->miniMapRect.y;
@@ -2554,6 +2949,7 @@ bool EditorMapCreateMapScene::handleMiniMapClick(float x, float y, RC2D_MouseBut
     if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
         // On consomme le clic dans la minimap pour eviter les actions monde.
+        this->testShipCameraFollowEnabled = false;
         return true;
     }
 
@@ -2674,6 +3070,12 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         return true;
     }
 
+    if (this->pointInRect(x, y, this->buttonImportShipRect))
+    {
+        this->openImportShipFolderDialog();
+        return true;
+    }
+
     if (this->pointInRect(x, y, this->buttonExportRect))
     {
         this->openExportMapDialog();
@@ -2710,6 +3112,38 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     {
         this->editorTool = EditorTool::REMOVE_ASSETS;
         this->statusMessage = "Mode Suppression asset: clic gauche supprime.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonToolShipRect))
+    {
+        this->editorTool = EditorTool::SPAWN_SHIP;
+        if (!this->testShipLoaded)
+        {
+            this->statusMessage = "Mode SPAWN NAVIRE: importe d'abord un dossier navire.";
+        }
+        else
+        {
+            this->statusMessage = "Mode SPAWN NAVIRE: clique gauche pour spawn/re-spawn.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonToolShipControlRect))
+    {
+        this->editorTool = EditorTool::CONTROL_SHIP;
+        if (!this->testShipLoaded)
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: importe d'abord un dossier navire.";
+        }
+        else if (!this->testShipSpawned)
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: navire non spawn (utilise SPAWN NAVIRE).";
+        }
+        else
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: clic gauche deplace (A*), clic droit respawn.";
+        }
         return true;
     }
 
@@ -2781,6 +3215,26 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
             map,
             map.rect);
         camera.update(map, map.rect);
+        this->testShipCameraFollowEnabled = false;
+        this->statusMessage = "Camera recadree sur la map.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonCenterShipRect))
+    {
+        if (!this->testShipLoaded || !this->testShipSpawned)
+        {
+            this->statusMessage = "Aucun navire teste/spawn a suivre.";
+            return true;
+        }
+
+        this->testShipCameraFollowEnabled = !this->testShipCameraFollowEnabled;
+        const SDL_FPoint shipTile = this->testShip.getPositionTile();
+        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
+        camera.update(map, map.rect);
+        this->statusMessage = this->testShipCameraFollowEnabled
+            ? "Suivi camera navire: ON"
+            : "Suivi camera navire: OFF";
         return true;
     }
 
@@ -2830,22 +3284,34 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         toolLabel = "Suppression asset";
     }
+    else if (this->editorTool == EditorTool::SPAWN_SHIP)
+    {
+        toolLabel = "Spawn navire";
+    }
+    else if (this->editorTool == EditorTool::CONTROL_SHIP)
+    {
+        toolLabel = "Control navire";
+    }
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
 
     // Barre de boutons cliquables.
     this->drawToolbarButton(this->buttonImportRect, "IMPORTER ASSETS", false);
+    this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER NAVIRE", false);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER MAP", false);
     this->drawToolbarButton(this->buttonUndoRect, "Annuler", this->canUndoHistory());
     this->drawToolbarButton(this->buttonRedoRect, "Refaire", this->canRedoHistory());
     this->drawToolbarButton(this->buttonToolBlockRect, "Collision", this->editorTool == EditorTool::BLOCK_TILES);
     this->drawToolbarButton(this->buttonToolPlaceRect, "Pose Asset", this->editorTool == EditorTool::PLACE_ASSETS);
     this->drawToolbarButton(this->buttonToolRemoveRect, "Supprimer asset", this->editorTool == EditorTool::REMOVE_ASSETS);
+    this->drawToolbarButton(this->buttonToolShipRect, "SPAWN NAVIRE", this->editorTool == EditorTool::SPAWN_SHIP);
+    this->drawToolbarButton(this->buttonToolShipControlRect, "CONTROL NAVIRE", this->editorTool == EditorTool::CONTROL_SHIP);
     this->drawToolbarButton(this->buttonAssetPrevRect, "Asset precedent", false);
     this->drawToolbarButton(this->buttonAssetNextRect, "Asset suivant", false);
     this->drawToolbarButton(this->buttonOceanPrevRect, "Ocean -", false);
     this->drawToolbarButton(this->buttonOceanNextRect, "Ocean +", false);
     this->drawToolbarButton(this->buttonGridRect, "Lignes", this->showGrid);
-    this->drawToolbarButton(this->buttonCenterRect, "Centrer", false);
+    this->drawToolbarButton(this->buttonCenterRect, "CENTRER MAP", false);
+    this->drawToolbarButton(this->buttonCenterShipRect, "CENTRER NAVIRE", this->testShipCameraFollowEnabled);
     this->drawToolbarButton(this->buttonZoomOutRect, "Zoom-", false);
     this->drawToolbarButton(this->buttonZoomInRect, "Zoom+", false);
 
@@ -2880,11 +3346,34 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         static_cast<int>(this->placedAssets.size()),
         selectedAssetName);
 
+    char line3[1024] = {};
+    if (!this->testShipLoaded)
+    {
+        SDL_snprintf(line3, sizeof(line3), "Navire test: non charge");
+    }
+    else if (!this->testShipSpawned)
+    {
+        SDL_snprintf(line3, sizeof(line3), "Navire test: charge, en attente de spawn");
+    }
+    else
+    {
+        const SDL_FPoint shipTile = this->testShip.getPositionTile();
+        SDL_snprintf(
+            line3,
+            sizeof(line3),
+            "Navire test: X=%.2f Y=%.2f | Deplacement=%s | Suivi camera=%s",
+            shipTile.x,
+            shipTile.y,
+            this->testShip.isMoving() ? "ON" : "OFF",
+            this->testShipCameraFollowEnabled ? "ON" : "OFF");
+    }
+
     const Map& map = GetCurrentMap();
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
     // Infos compactes en haut a gauche.
     drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
     drawLine(line1, gameScreenRect.x + 14.0f, gameScreenRect.y + 19.0f, kHudStatusColor);
+    drawLine(line3, gameScreenRect.x + 14.0f, gameScreenRect.y + 33.0f, kHudTextColor);
 
     // Coordonnees tuile sous le pointeur en haut-centre.
     char tileHoverText[128] = {};
@@ -2965,6 +3454,30 @@ void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const ch
     }
 }
 
+void EditorMapCreateMapScene::onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index)
+{
+    (void)filter_index;
+
+    EditorMapCreateMapScene* scene = static_cast<EditorMapCreateMapScene*>(userdata);
+    if (scene == nullptr || scene != EditorMapCreateMapScene::activeInstance)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(scene->pendingShipFolderMutex);
+    scene->pendingShipFolderDialogCompleted = true;
+    scene->pendingShipFolderAbsolute.clear();
+
+    if (filelist == nullptr || filelist[0] == nullptr)
+    {
+        scene->pendingShipFolderDialogCanceled = true;
+        return;
+    }
+
+    scene->pendingShipFolderDialogCanceled = false;
+    scene->pendingShipFolderAbsolute = filelist[0];
+}
+
 void EditorMapCreateMapScene::onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index)
 {
     (void)filter_index;
@@ -2993,6 +3506,18 @@ void EditorMapCreateMapScene::unload(void)
 
     GetOceanShader().unload();
     this->scrollBarOverlay.unload();
+    this->clickMarker.hide();
+    this->testShip.unloadSprites();
+    this->testShipPreview.unloadSprites();
+    this->testShipLoaded = false;
+    this->testShipSpawned = false;
+    this->testShipCameraFollowEnabled = false;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingShipFolderMutex);
+        this->pendingShipFolderDialogCompleted = false;
+        this->pendingShipFolderDialogCanceled = false;
+        this->pendingShipFolderAbsolute.clear();
+    }
     this->unloadImportedAssets();
     rc2d_graphics_closeFont(&this->overlayFont);
     rc2d_graphics_freeImage(&this->backgroundUiImage);
@@ -3046,6 +3571,7 @@ void EditorMapCreateMapScene::update(double dt)
 
     // Traite d'abord les imports differees pour rester hors pass de rendu GPU.
     this->processPendingImportRequests();
+    this->processPendingShipFolderRequest();
 
     map.update();
     this->updateToolbarLayout();
@@ -3054,9 +3580,17 @@ void EditorMapCreateMapScene::update(double dt)
     GetOceanShader().update(dt);
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
 
-    GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect);
+    if (GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect))
+    {
+        this->testShipCameraFollowEnabled = false;
+    }
+    if (this->scrollBarOverlay.isInteracting())
+    {
+        this->testShipCameraFollowEnabled = false;
+    }
     this->handleMiniMapDragFromMouse();
     this->handleAssetListScrollDragFromMouse();
+    this->updateTestShip(dt);
     camera.update(map, map.rect);
 
     this->updateHoveredTile();
@@ -3091,6 +3625,7 @@ void EditorMapCreateMapScene::draw(void)
 
     this->drawWorldGridAndBlockedTiles();
     this->drawPlacedAssets();
+    this->drawTestShip();
     this->scrollBarOverlay.draw(map.rect, map);
 
     WorldRenderClip::end(renderer);
@@ -3141,6 +3676,12 @@ void EditorMapCreateMapScene::keypressed(
     if (scancode == SDL_SCANCODE_F6 && !isrepeat)
     {
         this->openExportMapDialog();
+        return;
+    }
+
+    if (scancode == SDL_SCANCODE_F7 && !isrepeat)
+    {
+        this->openImportShipFolderDialog();
         return;
     }
 
@@ -3207,6 +3748,38 @@ void EditorMapCreateMapScene::keypressed(
         return;
     }
 
+    if (scancode == SDL_SCANCODE_N && !isrepeat)
+    {
+        this->editorTool = EditorTool::SPAWN_SHIP;
+        if (!this->testShipLoaded)
+        {
+            this->statusMessage = "Mode SPAWN NAVIRE: importe d'abord un dossier navire.";
+        }
+        else
+        {
+            this->statusMessage = "Mode SPAWN NAVIRE: clique gauche pour spawn/re-spawn.";
+        }
+        return;
+    }
+
+    if (scancode == SDL_SCANCODE_V && !isrepeat)
+    {
+        this->editorTool = EditorTool::CONTROL_SHIP;
+        if (!this->testShipLoaded)
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: importe d'abord un dossier navire.";
+        }
+        else if (!this->testShipSpawned)
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: navire non spawn (utilise SPAWN NAVIRE).";
+        }
+        else
+        {
+            this->statusMessage = "Mode CONTROL NAVIRE: clic gauche deplace (A*), clic droit respawn.";
+        }
+        return;
+    }
+
     if (scancode == SDL_SCANCODE_G && !isrepeat)
     {
         this->showGrid = !this->showGrid;
@@ -3222,6 +3795,26 @@ void EditorMapCreateMapScene::keypressed(
             map,
             map.rect);
         camera.update(map, map.rect);
+        this->testShipCameraFollowEnabled = false;
+        this->statusMessage = "Camera recadree sur la map.";
+        return;
+    }
+
+    if (scancode == SDL_SCANCODE_H && !isrepeat)
+    {
+        if (!this->testShipLoaded || !this->testShipSpawned)
+        {
+            this->statusMessage = "Aucun navire teste/spawn a suivre.";
+            return;
+        }
+
+        this->testShipCameraFollowEnabled = !this->testShipCameraFollowEnabled;
+        const SDL_FPoint shipTile = this->testShip.getPositionTile();
+        camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
+        camera.update(map, map.rect);
+        this->statusMessage = this->testShipCameraFollowEnabled
+            ? "Suivi camera navire: ON"
+            : "Suivi camera navire: OFF";
         return;
     }
 
@@ -3258,6 +3851,7 @@ void EditorMapCreateMapScene::keypressed(
 
     if (cameraChanged)
     {
+        this->testShipCameraFollowEnabled = false;
         camera.update(map, map.rect);
     }
 }
@@ -3296,6 +3890,12 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
 
     // Les barres de scroll consomment le clic gauche dans la zone map.
     if (button == RC2D_MOUSE_BUTTON_LEFT && this->scrollBarOverlay.handleClick(renderX, renderY, map.rect))
+    {
+        this->testShipCameraFollowEnabled = false;
+        return;
+    }
+
+    if (this->handleShipToolClick(renderX, renderY, button))
     {
         return;
     }

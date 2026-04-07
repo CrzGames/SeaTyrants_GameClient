@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "game/scenes/scene.h"
+#include "game/ships/ship.h"
+#include "game/ui/overlay/tile-click-marker.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 
 /**
@@ -19,6 +21,8 @@
  * Cette scene permet de:
  * - peindre les collisions,
  * - importer/poser/supprimer des assets,
+ * - importer un navire de test (dossier 1.png..8.png),
+ * - tester le pathfinding A* du navire sur les collisions bloquees,
  * - changer la couleur ocean,
  * - exporter une map JSON.
  */
@@ -39,7 +43,9 @@ private:
     enum class EditorTool {
         BLOCK_TILES = 0, /**< Peinture collision bloque/debloque. */
         PLACE_ASSETS = 1, /**< Pose/remplacement d'assets. */
-        REMOVE_ASSETS = 2 /**< Suppression d'assets poses. */
+        REMOVE_ASSETS = 2, /**< Suppression d'assets poses. */
+        SPAWN_SHIP = 3, /**< Spawn/repositionnement du navire de test via preview. */
+        CONTROL_SHIP = 4 /**< Controle du navire de test sur la map. */
     };
 
     /**
@@ -134,20 +140,35 @@ private:
     int importBatchFailedCount; /**< Nombre de fichiers en echec dans le batch courant. */
     bool assetListScrollDragActive; /**< true si le drag de la scrollbar assets est actif. */
     float assetListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour un drag precis. */
+    TileClickMarker clickMarker; /**< Marqueur visuel de clic en mode controle navire. */
+    Ship testShip; /**< Navire de test pour validation collisions + A*. */
+    Ship testShipPreview; /**< Navire de preview sous la souris en mode spawn. */
+    bool testShipLoaded; /**< true si le dossier navire a ete importe et charge. */
+    bool testShipSpawned; /**< true si le navire de test est pose sur une tuile map. */
+    bool testShipCameraFollowEnabled; /**< true si la camera suit le navire de test. */
+    std::string loadedShipFolderAbsolute; /**< Chemin absolu du dossier navire charge. */
+    bool pendingShipFolderDialogCompleted; /**< true si le callback folder a publie un resultat. */
+    bool pendingShipFolderDialogCanceled; /**< true si l'utilisateur a annule l'import dossier navire. */
+    std::string pendingShipFolderAbsolute; /**< Chemin absolu dossier navire en attente de traitement scene. */
+    mutable std::mutex pendingShipFolderMutex; /**< Mutex callback dossier navire -> thread scene. */
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
+    SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRE". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
     SDL_FRect buttonUndoRect; /**< Bouton "Annuler". */
     SDL_FRect buttonRedoRect; /**< Bouton "Refaire". */
     SDL_FRect buttonToolBlockRect; /**< Bouton outil collision. */
     SDL_FRect buttonToolPlaceRect; /**< Bouton outil pose asset. */
     SDL_FRect buttonToolRemoveRect; /**< Bouton outil suppression asset. */
+    SDL_FRect buttonToolShipRect; /**< Bouton outil spawn navire. */
+    SDL_FRect buttonToolShipControlRect; /**< Bouton outil controle navire. */
     SDL_FRect buttonAssetPrevRect; /**< Bouton asset precedent. */
     SDL_FRect buttonAssetNextRect; /**< Bouton asset suivant. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
     SDL_FRect buttonOceanNextRect; /**< Bouton ocean suivant. */
     SDL_FRect buttonGridRect; /**< Bouton toggle lignes grille. */
-    SDL_FRect buttonCenterRect; /**< Bouton recentrage camera. */
+    SDL_FRect buttonCenterRect; /**< Bouton recentrage camera map. */
+    SDL_FRect buttonCenterShipRect; /**< Bouton recentrage/suivi navire test. */
     SDL_FRect buttonZoomOutRect; /**< Bouton zoom -. */
     SDL_FRect buttonZoomInRect; /**< Bouton zoom +. */
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
@@ -268,8 +289,35 @@ private:
     bool renderStyledMiniMapToSurface(SDL_Surface* targetSurface) const;
     /** @brief Ouvre le dialogue d'import assets. */
     void openImportAssetDialog(void);
+    /** @brief Ouvre le dialogue d'import d'un dossier navire (1.png..8.png). */
+    void openImportShipFolderDialog(void);
     /** @brief Ouvre le dialogue d'export map. */
     void openExportMapDialog(void);
+    /** @brief Traite l'import dossier navire publie par callback async. */
+    void processPendingShipFolderRequest(void);
+    /** @brief Charge un navire test depuis un dossier absolu.
+     *  @param folderAbsolutePath Chemin absolu vers dossier 1..8.png.
+     *  @return true si navire charge.
+     */
+    bool loadShipFolderFromAbsolutePath(const char* folderAbsolutePath);
+    /** @brief Place le navire test sur une tuile.
+     *  @param tileX Tuile X.
+     *  @param tileY Tuile Y.
+     */
+    void spawnTestShipAtTile(int tileX, int tileY);
+    /** @brief Demande un deplacement A* du navire test.
+     *  @param tileX Tuile cible X.
+     *  @param tileY Tuile cible Y.
+     */
+    void moveTestShipToTile(int tileX, int tileY);
+    /** @brief Met a jour le navire test et le suivi camera. */
+    void updateTestShip(double dt);
+    /** @brief Dessine le navire test. */
+    void drawTestShip(void);
+    /** @brief Gere les clics map en mode navire test.
+     *  @return true si consomme.
+     */
+    bool handleShipToolClick(float x, float y, RC2D_MouseButton button);
     /** @brief Dessine la grille visible et les tuiles bloquees. */
     void drawWorldGridAndBlockedTiles(void) const;
     /** @brief Dessine les assets poses et leur preview de pose. */
@@ -323,6 +371,8 @@ private:
 
     /** @brief Callback async de resultat import fichier. */
     static void onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index);
+    /** @brief Callback async de resultat import dossier navire. */
+    static void onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
     /** @brief Callback async de resultat export fichier. */
     static void onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
 
