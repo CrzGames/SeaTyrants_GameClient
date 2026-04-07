@@ -11,8 +11,8 @@
     #include <winres.h>
 #endif
 
-// Inclure l'icone (path relatif au fichier resource.rc generer)
-IDI_ICON1 ICON "../../icons/windows/app-icon.ico"
+// Inclure l'icone
+IDI_ICON1 ICON "@APP_ICON_FILE_RC@"
 
 // Version du fichier et du produit
 #define VER_FILEVERSION             @APP_VERSION_MAJOR@,@APP_VERSION_MINOR@,@APP_VERSION_PATCH@,0

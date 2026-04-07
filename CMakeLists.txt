@@ -859,6 +859,9 @@ if (WIN32)
     #
     #   CMake remplace @APP_VERSION@ par la valeur définie dans le CMakeLists
     #
+    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/icons/windows/app-icon.ico")
+    file(TO_CMAKE_PATH "${APP_ICON_FILE}" APP_ICON_FILE_RC)
+
     configure_file(
       "${CMAKE_CURRENT_SOURCE_DIR}/platforms/windows/resource.rc.in"
       "${GENERATED_RC}"
