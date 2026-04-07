@@ -13,17 +13,16 @@ static constexpr RC2D_Color kSilver = RC2D_Color{211, 214, 220, 232};
 static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
 static constexpr RC2D_Color kFieldFill = RC2D_Color{12, 12, 14, 235};
 static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
-static constexpr RC2D_Color kTextMuted = RC2D_Color{182, 170, 145, 255};
+static constexpr RC2D_Color kTextWhite = RC2D_Color{210, 215, 225, 255};
 
 static SDL_FRect getParamsMinimapRectFromGameScreen(void)
 {
     // Rectangle de l'ecran de jeu (zone de rendu UI).
     const SDL_FRect screenRect = GetGameScreen().rect;
-    // Position de base de la fenetre: ancree en haut-gauche.
-    // La taille est fixe via kRefW / kRefH.
+    // Position de base: centree sur l'ecran en tenant compte de la taille widget.
     return SDL_FRect{
-        screenRect.x + 6.0f,
-        screenRect.y + 22.0f,
+        screenRect.x + ((screenRect.w - kRefW) * 0.5f),
+        screenRect.y + ((screenRect.h - kRefH) * 0.5f),
         kRefW,
         kRefH
     };
@@ -120,6 +119,44 @@ static void drawCheckBox(const SDL_FRect& boxRect, bool checked)
     rc2d_graphics_line(boxRect.x + 8.0f, boxRect.y + boxRect.h - 5.0f, boxRect.x + boxRect.w - 4.0f, boxRect.y + 4.0f);
 }
 
+static void applyCursorIfChanged(SDL_SystemCursor id)
+{
+    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
+    static SDL_Cursor* cached[3] = {nullptr, nullptr, nullptr};
+    const int index =
+        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
+        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 : 2;
+
+    if (id == lastId)
+    {
+        return;
+    }
+    if (cached[index] == nullptr)
+    {
+        cached[index] = SDL_CreateSystemCursor(id);
+    }
+    if (cached[index] != nullptr)
+    {
+        SDL_SetCursor(cached[index]);
+        lastId = id;
+    }
+}
+
+static void setCursorArrow(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
+}
+
+static void setCursorHand(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
+}
+
+static void setCursorMove(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
+}
+
 ParamsMinimapWidget::ParamsMinimapWidget(void)
     : titleFont{},
       bodyFont{},
@@ -133,7 +170,8 @@ ParamsMinimapWidget::ParamsMinimapWidget(void)
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
-      widgetOffsetY(0.0f)
+      widgetOffsetY(0.0f),
+      cursorEnabled(true)
 {
 }
 
@@ -185,6 +223,50 @@ void ParamsMinimapWidget::update(double dt)
         baseRect.w,
         baseRect.h
     };
+
+    // Curseur contextuel (checkbox/boutons/drag header).
+    if (this->visible && this->cursorEnabled)
+    {
+        float mx = 0.0f;
+        float my = 0.0f;
+        getMouseRenderPosition(&mx, &my);
+        if (isPointInRect(mx, my, this->widgetRect))
+        {
+            const SDL_FRect outer = this->widgetRect;
+            const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+            const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+            const SDL_FRect closeButton = SDL_FRect{
+                outer.x + outer.w - 28.0f,
+                header.y + ((header.h - 20.0f) * 0.5f),
+                20.0f,
+                20.0f
+            };
+
+            const float rowStartY = outer.y + 56.0f;
+            const float rowStep = 41.0f;
+            const SDL_FRect checkPlayers = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 0.0f), 24.0f, 24.0f};
+            const SDL_FRect checkMonsters = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 1.0f), 24.0f, 24.0f};
+            const SDL_FRect checkShips = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 2.0f), 24.0f, 24.0f};
+            const SDL_FRect checkTreasures = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 3.0f), 24.0f, 24.0f};
+
+            if (isPointInRect(mx, my, closeButton) ||
+                isPointInRect(mx, my, checkPlayers) ||
+                isPointInRect(mx, my, checkMonsters) ||
+                isPointInRect(mx, my, checkShips) ||
+                isPointInRect(mx, my, checkTreasures))
+            {
+                setCursorHand();
+            }
+            else if (isPointInRect(mx, my, header))
+            {
+                setCursorMove();
+            }
+            else
+            {
+                setCursorArrow();
+            }
+        }
+    }
 
     // Si pas en mode drag, aucune mise a jour supplementaire.
     if (!this->widgetDragging)
@@ -375,10 +457,10 @@ void ParamsMinimapWidget::draw(void) const
     rc2d_graphics_line(closeButtonCentered.x + 15.0f, closeButtonCentered.y + 5.0f, closeButtonCentered.x + 5.0f, closeButtonCentered.y + 15.0f);
 
     // Libelles des options.
-    drawLeftCenteredY(&self->bodyFont, "Afficher les joueurs", rowPlayers, rowPlayers.x, kTextMuted);
-    drawLeftCenteredY(&self->bodyFont, "Afficher les monstres", rowMonsters, rowMonsters.x, kTextMuted);
-    drawLeftCenteredY(&self->bodyFont, "Afficher les navires", rowShips, rowShips.x, kTextMuted);
-    drawLeftCenteredY(&self->bodyFont, "Afficher les tresors", rowTreasures, rowTreasures.x, kTextMuted);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les joueurs", rowPlayers, rowPlayers.x, kTextWhite);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les monstres", rowMonsters, rowMonsters.x, kTextWhite);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les navires", rowShips, rowShips.x, kTextWhite);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les tresors", rowTreasures, rowTreasures.x, kTextWhite);
 
     // Cases a cocher selon les etats booleens.
     drawCheckBox(checkPlayers, self->showPlayers);
@@ -388,5 +470,17 @@ void ParamsMinimapWidget::draw(void) const
 
     // Restaure le mode de blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+bool ParamsMinimapWidget::containsPoint(float x, float y) const
+{
+    const SDL_FRect baseRect = getParamsMinimapRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        baseRect.w,
+        baseRect.h
+    };
+    return isPointInRect(x, y, currentRect);
 }
 

@@ -1,7 +1,11 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
+#include <string>
+#include <vector>
 
+#include "game/ui/hud/annonces-widget.h"
+#include "game/ui/hud/barre-action-widget.h"
 #include "game/ui/hud/center-ship-button-widget.h"
 #include "game/ui/hud/chat-widget.h"
 #include "game/ui/hud/espion-search-player-widget.h"
@@ -23,13 +27,30 @@ class Player;
  */
 class IngameHudOverlay {
 private:
+    enum class WindowLayer : int {
+        CHAT = 0,
+        ESPION = 1,
+        PARAMS_MINIMAP = 2,
+        ANNONCES = 3
+    };
+
     RC2D_Image backgroundUiImage; /**< Fond UI gameplay (haut/bas). */
     MinimapWidget minimapWidget; /**< Widget minimap. */
+    BarreActionWidget barreActionWidget; /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget; /**< Widget bouton centrer navire. */
     SectorCoordinateOverlay sectorCoordinateOverlay; /**< Overlay texte du secteur courant. */
     ChatWidget chatWidget; /**< Fenetre chat interactive. */
     EspionSearchPlayerWidget espionSearchPlayerWidget; /**< Fenetre "Espion" de recherche joueur. */
     ParamsMinimapWidget paramsMinimapWidget; /**< Fenetre de parametres de la minimap. */
+    AnnoncesWidget annoncesWidget; /**< Fenetre "Annonces". */
+    std::vector<WindowLayer> windowDrawOrder; /**< Ordre de rendu de bas vers haut. */
+    bool prevChatVisible; /**< Etat visible precedent du chat. */
+    bool prevEspionVisible; /**< Etat visible precedent de la fenetre espion. */
+    bool prevParamsVisible; /**< Etat visible precedent de la fenetre minimap. */
+    bool prevAnnoncesVisible; /**< Etat visible precedent de la fenetre annonces. */
+
+    void bringWindowToFront(WindowLayer layer);
+    void syncWindowOrderOnOpen(void);
 
 public:
     IngameHudOverlay(void);
@@ -87,4 +108,14 @@ public:
      * @return True si la touche est consommee par l'UI.
      */
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+
+    /**
+     * @brief Publie une annonce dans la fenetre "Annonces".
+     */
+    void publishAnnouncement(const std::string& message);
+
+    /**
+     * @brief Publie un resultat de recherche dans la fenetre "Espion".
+     */
+    void publishSearchResult(const std::string& resultText);
 };

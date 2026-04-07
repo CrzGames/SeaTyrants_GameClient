@@ -38,8 +38,8 @@ private:
 public:
     SDL_FRect rect; /**< Rectangle de rendu monde (map) en coordonnees logiques. */
 
-    static constexpr float MAP_TOP_UI_MARGIN_PX = 30.0f;    /**< Marge reservee en haut pour la GUI. */
-    static constexpr float MAP_BOTTOM_UI_MARGIN_PX = 60.0f; /**< Marge reservee en bas pour la GUI. */
+    static constexpr float MAP_TOP_UI_MARGIN_PX = 30.0f;     /**< Marge reservee en haut pour la GUI. */
+    static constexpr float MAP_BOTTOM_UI_MARGIN_PX = 65.00f; /**< Marge reservee en bas pour la GUI. */
 
     // -----------------------------------------------------------------------------
     // Grille de secteurs "metier" visible par le joueur

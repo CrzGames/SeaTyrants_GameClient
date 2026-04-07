@@ -22,6 +22,7 @@ private:
     float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche en drag. */
     float widgetOffsetX; /**< Decalage horizontal depuis la position de base. */
     float widgetOffsetY; /**< Decalage vertical depuis la position de base. */
+    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
 
 public:
     ParamsMinimapWidget(void);
@@ -71,5 +72,20 @@ public:
      * Gere la fermeture via croix, le toggle des cases et le drag par le header.
      */
     bool mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID);
+
+    /**
+     * @brief Indique si la fenetre parametres minimap est visible.
+     */
+    bool isVisible(void) const { return this->visible; }
+
+    /**
+     * @brief Autorise/interdit le pilotage du curseur par ce widget.
+     */
+    void setCursorEnabled(bool enabled) { this->cursorEnabled = enabled; }
+
+    /**
+     * @brief Teste si un point est dans la fenetre parametres courante.
+     */
+    bool containsPoint(float x, float y) const;
 };
 

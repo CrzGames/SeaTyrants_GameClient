@@ -29,6 +29,8 @@ private:
     float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche pendant le drag. */
     float widgetOffsetX; /**< Decalage X applique a la position de base. */
     float widgetOffsetY; /**< Decalage Y applique a la position de base. */
+    std::string searchResultText; /**< Valeur affichee a droite de "Resultat de la recherche :". */
+    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
 
 public:
     EspionSearchPlayerWidget(void);
@@ -67,8 +69,29 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
+     * @brief Publie un texte de resultat dans la case du bas.
+     * @param resultText Texte a afficher a droite du label.
+     */
+    void publishSearchResult(const std::string& resultText);
+
+    /**
      * @brief Retire le focus de l'input ID et masque son curseur.
      */
     void clearFocus(void);
+
+    /**
+     * @brief Indique si la fenetre espion est actuellement visible.
+     */
+    bool isVisible(void) const { return this->visible; }
+
+    /**
+     * @brief Autorise/interdit le pilotage du curseur par ce widget.
+     */
+    void setCursorEnabled(bool enabled) { this->cursorEnabled = enabled; }
+
+    /**
+     * @brief Teste si un point est dans la fenetre espion courante.
+     */
+    bool containsPoint(float x, float y) const;
 };
 

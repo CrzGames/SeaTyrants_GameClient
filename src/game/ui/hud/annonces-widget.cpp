@@ -1,0 +1,987 @@
+#include "game/ui/hud/annonces-widget.h"
+
+#include "core/context.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <sstream>
+
+static constexpr float kRefW = 314.0f;
+static constexpr float kRefH = 202.0f;
+
+static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 240};
+static constexpr RC2D_Color kGold = RC2D_Color{184, 132, 30, 250};
+static constexpr RC2D_Color kSilver = RC2D_Color{211, 214, 220, 232};
+static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
+static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
+static constexpr RC2D_Color kMessageTextColor = RC2D_Color{210, 215, 225, 255}; // Meme teinte que les messages du chat.
+static constexpr RC2D_Color kScrollTrackColor = RC2D_Color{26, 29, 33, 235};
+static constexpr RC2D_Color kScrollThumbColor = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kSeparatorColor = RC2D_Color{134, 102, 39, 220};
+static constexpr int kScrollLinesStep = 3;
+static constexpr float kScrollBarWidth = 8.0f;
+static constexpr float kScrollBarPadding = 4.0f;
+static constexpr float kMinThumbHeight = 16.0f;
+static constexpr const char* kAnnouncementPrefix = "Annonce serveur";
+
+static SDL_FRect getAnnoncesRectFromGameScreen(void)
+{
+    const SDL_FRect screenRect = GetGameScreen().rect;
+    return SDL_FRect{
+        screenRect.x + ((screenRect.w - kRefW) * 0.5f),
+        screenRect.y + ((screenRect.h - kRefH) * 0.5f),
+        kRefW,
+        kRefH
+    };
+}
+
+static bool isPointInRect(float x, float y, const SDL_FRect& r)
+{
+    return (x >= r.x && x <= (r.x + r.w) && y >= r.y && y <= (r.y + r.h));
+}
+
+static float clampf(float value, float minValue, float maxValue)
+{
+    return (std::max)(minValue, (std::min)(value, maxValue));
+}
+
+static void getMouseRenderPosition(float* outX, float* outY)
+{
+    if (outX == nullptr || outY == nullptr)
+    {
+        return;
+    }
+
+    float windowX = 0.0f;
+    float windowY = 0.0f;
+    rc2d_mouse_getPosition(&windowX, &windowY);
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer == nullptr)
+    {
+        *outX = windowX;
+        *outY = windowY;
+        return;
+    }
+
+    float renderX = windowX;
+    float renderY = windowY;
+    if (!SDL_RenderCoordinatesFromWindow(renderer, windowX, windowY, &renderX, &renderY))
+    {
+        renderX = windowX;
+        renderY = windowY;
+    }
+    *outX = renderX;
+    *outY = renderY;
+}
+
+static void drawLeftCenteredY(RC2D_Font* font, const char* text, const SDL_FRect& r, float x, RC2D_Color color)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return;
+    }
+
+    RC2D_Text t = rc2d_graphics_createText(font, text);
+    t.color = color;
+    rc2d_graphics_setTextColor(&t);
+    int w = 0;
+    int h = 0;
+    rc2d_graphics_getTextSize(&t, &w, &h);
+    (void)w;
+    rc2d_graphics_drawText(&t, std::round(x), std::round(r.y + ((r.h - static_cast<float>(h)) * 0.5f)));
+    rc2d_graphics_destroyText(&t);
+}
+
+static void drawTextAt(RC2D_Font* font, const std::string& text, float x, float y, RC2D_Color color)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text.empty())
+    {
+        return;
+    }
+
+    RC2D_Text t = rc2d_graphics_createText(font, text.c_str());
+    t.color = color;
+    rc2d_graphics_setTextColor(&t);
+    rc2d_graphics_drawText(&t, std::round(x), std::round(y));
+    rc2d_graphics_destroyText(&t);
+}
+
+static float measureTextWidth(RC2D_Font* font, const std::string& text)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text.empty())
+    {
+        return 0.0f;
+    }
+
+    RC2D_Text t = rc2d_graphics_createText(font, text.c_str());
+    int w = 0;
+    int h = 0;
+    rc2d_graphics_getTextSize(&t, &w, &h);
+    rc2d_graphics_destroyText(&t);
+    (void)h;
+    return static_cast<float>(w);
+}
+
+static float measureLineHeight(RC2D_Font* font)
+{
+    if (font == nullptr || font->sdl_font == nullptr)
+    {
+        return 14.0f;
+    }
+
+    RC2D_Text probe = rc2d_graphics_createText(font, "Ag");
+    int w = 0;
+    int h = 0;
+    rc2d_graphics_getTextSize(&probe, &w, &h);
+    rc2d_graphics_destroyText(&probe);
+    (void)w;
+    return static_cast<float>((std::max)(h, 14));
+}
+
+struct AnnonceWrappedRow
+{
+    std::string text;
+    bool messageFirstLine;
+    bool separator;
+};
+
+static std::string buildFormattedAnnouncement(const std::string& rawMessage)
+{
+    std::string body = rawMessage;
+    const std::size_t firstColon = rawMessage.find(':');
+    const std::size_t firstNewline = rawMessage.find('\n');
+    if (firstColon != std::string::npos && (firstNewline == std::string::npos || firstColon < firstNewline) && firstColon <= 24)
+    {
+        std::size_t bodyStart = firstColon + 1;
+        while (bodyStart < rawMessage.size() && std::isspace(static_cast<unsigned char>(rawMessage[bodyStart])) != 0)
+        {
+            ++bodyStart;
+        }
+        body = rawMessage.substr(bodyStart);
+    }
+    return std::string(kAnnouncementPrefix) + ": " + body;
+}
+
+static void wrapSingleParagraph(RC2D_Font* font, const std::string& paragraph, float maxWidth, std::vector<std::string>& outLines)
+{
+    if (paragraph.empty())
+    {
+        outLines.emplace_back("");
+        return;
+    }
+
+    std::istringstream iss(paragraph);
+    std::string word;
+    std::string line;
+    while (iss >> word)
+    {
+        std::string candidate = line.empty() ? word : (line + " " + word);
+        if (measureTextWidth(font, candidate) <= maxWidth)
+        {
+            line = candidate;
+            continue;
+        }
+
+        if (!line.empty())
+        {
+            outLines.push_back(line);
+            line.clear();
+        }
+
+        if (measureTextWidth(font, word) <= maxWidth)
+        {
+            line = word;
+            continue;
+        }
+
+        std::string chunk;
+        for (const char c : word)
+        {
+            std::string next = chunk + c;
+            if (!chunk.empty() && measureTextWidth(font, next) > maxWidth)
+            {
+                outLines.push_back(chunk);
+                chunk.clear();
+            }
+            chunk.push_back(c);
+        }
+        line = chunk;
+    }
+
+    if (!line.empty())
+    {
+        outLines.push_back(line);
+    }
+}
+
+static std::vector<std::string> buildWrappedMessageLines(RC2D_Font* font, const std::string& rawMessage, float maxWidth)
+{
+    std::vector<std::string> wrappedMessage;
+    if (maxWidth <= 6.0f)
+    {
+        return wrappedMessage;
+    }
+
+    std::size_t start = 0;
+    while (true)
+    {
+        const std::size_t breakPos = rawMessage.find('\n', start);
+        const std::string paragraph = (breakPos == std::string::npos) ? rawMessage.substr(start) : rawMessage.substr(start, breakPos - start);
+        wrapSingleParagraph(font, paragraph, maxWidth, wrappedMessage);
+        if (breakPos == std::string::npos)
+        {
+            break;
+        }
+        start = breakPos + 1;
+    }
+    return wrappedMessage;
+}
+
+static std::vector<AnnonceWrappedRow> buildWrappedRows(RC2D_Font* font, const std::vector<std::string>& messages, float maxWidth)
+{
+    std::vector<AnnonceWrappedRow> rows;
+    for (std::size_t i = 0; i < messages.size(); ++i)
+    {
+        const std::string formattedMessage = buildFormattedAnnouncement(messages[i]);
+        const std::vector<std::string> wrappedMessage = buildWrappedMessageLines(font, formattedMessage, maxWidth);
+        for (std::size_t lineIndex = 0; lineIndex < wrappedMessage.size(); ++lineIndex)
+        {
+            rows.push_back(AnnonceWrappedRow{
+                wrappedMessage[lineIndex],
+                lineIndex == 0,
+                false
+            });
+        }
+
+        if (i + 1 < messages.size())
+        {
+            // Espace equivalent au-dessus et en-dessous de la barre de separation.
+            rows.push_back(AnnonceWrappedRow{std::string{}, false, false});
+            rows.push_back(AnnonceWrappedRow{std::string{}, false, true});
+            rows.push_back(AnnonceWrappedRow{std::string{}, false, false});
+        }
+    }
+
+    if (rows.empty())
+    {
+        rows.push_back(AnnonceWrappedRow{std::string{}, false, false});
+    }
+    return rows;
+}
+
+static void applyCursorIfChanged(SDL_SystemCursor id)
+{
+    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
+    static SDL_Cursor* cached[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    const int index =
+        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
+        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
+        (id == SDL_SYSTEM_CURSOR_MOVE) ? 2 :
+        (id == SDL_SYSTEM_CURSOR_NWSE_RESIZE) ? 3 : 4;
+
+    if (id == lastId)
+    {
+        return;
+    }
+    if (cached[index] == nullptr)
+    {
+        cached[index] = SDL_CreateSystemCursor(id);
+    }
+    if (cached[index] != nullptr)
+    {
+        SDL_SetCursor(cached[index]);
+        lastId = id;
+    }
+}
+
+static void setCursorArrow(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
+}
+
+static void setCursorHand(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
+}
+
+static void setCursorMove(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
+}
+
+static void setCursorResizeDiag(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
+}
+
+static void setCursorResizeVertical(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
+}
+
+AnnoncesWidget::AnnoncesWidget(void)
+    : titleFont{},
+      bodyFont{},
+      widgetRect{0.0f, 0.0f, kRefW, kRefH},
+      visible(true),
+      announcements{},
+      scrollFirstLine(0),
+      scrollBarDragging(false),
+      scrollDragOffsetY(0.0f),
+      widgetDragging(false),
+      widgetDragLocked(false),
+      widgetDragOffsetX(0.0f),
+      widgetDragOffsetY(0.0f),
+      widgetOffsetX(0.0f),
+      widgetOffsetY(0.0f),
+      widgetWidth(kRefW),
+      widgetHeight(kRefH),
+      widgetResizing(false),
+      resizeStartMouseX(0.0f),
+      resizeStartMouseY(0.0f),
+      resizeStartWidth(kRefW),
+      resizeStartHeight(kRefH),
+      cursorEnabled(true)
+{
+}
+
+AnnoncesWidget::~AnnoncesWidget(void)
+{
+}
+
+void AnnoncesWidget::load(void)
+{
+    // Charge la police du titre (meme style visuel que les autres fenetres HUD).
+    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    // Charge la police du corps de texte (annonces).
+    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    // Recupere la position de base de la fenetre dans l'ecran de jeu.
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    // Reinitialise les offsets de deplacement utilisateur.
+    this->widgetOffsetX = 0.0f;
+    this->widgetOffsetY = 0.0f;
+    this->widgetWidth = kRefW;
+    this->widgetHeight = kRefH;
+    this->widgetResizing = false;
+    this->resizeStartMouseX = 0.0f;
+    this->resizeStartMouseY = 0.0f;
+    this->resizeStartWidth = kRefW;
+    this->resizeStartHeight = kRefH;
+    // Applique la rect de base.
+    this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, this->widgetWidth, this->widgetHeight};
+    // La fenetre est visible juste apres chargement.
+    this->visible = true;
+    // Aucun drag en cours au demarrage.
+    this->widgetDragging = false;
+    // Cadenas ouvert par defaut (drag autorise).
+    this->widgetDragLocked = false;
+    // Le scroll repart de la premiere ligne.
+    this->scrollFirstLine = 0;
+    this->scrollBarDragging = false;
+    this->scrollDragOffsetY = 0.0f;
+    // Nettoie l'historique d'annonces.
+    this->announcements.clear();
+}
+
+void AnnoncesWidget::unload(void)
+{
+    // Libere la police du contenu.
+    rc2d_graphics_closeFont(&this->bodyFont);
+    // Libere la police du titre.
+    rc2d_graphics_closeFont(&this->titleFont);
+}
+
+void AnnoncesWidget::update(double dt)
+{
+    // Aucun calcul temporel actuellement, mais on garde le parametre pour l'API commune.
+    (void)dt;
+
+    // Recalcule la rect finale a partir de la base + offsets.
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    this->widgetRect = SDL_FRect{baseRect.x + this->widgetOffsetX, baseRect.y + this->widgetOffsetY, this->widgetWidth, this->widgetHeight};
+
+    // Curseur contextuel selon les zones interactives de la fenetre.
+    if (this->visible && this->cursorEnabled)
+    {
+        float mx = 0.0f;
+        float my = 0.0f;
+        getMouseRenderPosition(&mx, &my);
+        if (isPointInRect(mx, my, this->widgetRect))
+        {
+            const SDL_FRect outer = this->widgetRect;
+            const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+            const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+            const SDL_FRect closeButtonRect = SDL_FRect{
+                outer.x + outer.w - 28.0f,
+                header.y + ((header.h - 20.0f) * 0.5f),
+                20.0f,
+                20.0f
+            };
+            const SDL_FRect lockButtonRect = SDL_FRect{
+                closeButtonRect.x - 24.0f,
+                closeButtonRect.y,
+                closeButtonRect.w,
+                closeButtonRect.h
+            };
+            const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+            const SDL_FRect resizeHandleRect = SDL_FRect{
+                outer.x + outer.w - 16.0f,
+                outer.y + outer.h - 16.0f,
+                14.0f,
+                14.0f
+            };
+
+            const float lineHeight = measureLineHeight(&this->bodyFont);
+            const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+            const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+            const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedRows.size()) - visibleLines);
+            const SDL_FRect scrollTrack = SDL_FRect{
+                body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+                body.y + kScrollBarPadding,
+                kScrollBarWidth,
+                body.h - (kScrollBarPadding * 2.0f)
+            };
+
+            if (isPointInRect(mx, my, resizeHandleRect))
+            {
+                setCursorResizeDiag();
+            }
+            else if (isPointInRect(mx, my, closeButtonRect) || isPointInRect(mx, my, lockButtonRect))
+            {
+                setCursorHand();
+            }
+            else if (maxFirstLine > 0 && isPointInRect(mx, my, scrollTrack))
+            {
+                setCursorResizeVertical();
+            }
+            else if (mx >= lockButtonRect.x && mx <= (closeButtonRect.x + closeButtonRect.w) &&
+                     my >= header.y && my <= (header.y + header.h))
+            {
+                // Evite le curseur MOVE entre cadenas et croix.
+                setCursorArrow();
+            }
+            else if (isPointInRect(mx, my, header))
+            {
+                setCursorMove();
+            }
+            else
+            {
+                setCursorArrow();
+            }
+        }
+    }
+
+    // Si aucun drag/resize/scrollbar actif, rien d'autre a faire.
+    if (!this->widgetDragging && !this->widgetResizing && !this->scrollBarDragging)
+    {
+        return;
+    }
+    // Si le bouton gauche est relache, on stoppe drag, resize et drag scrollbar.
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->widgetDragging = false;
+        this->widgetResizing = false;
+        this->scrollBarDragging = false;
+        return;
+    }
+
+    // Priorite au resize si une prise est active.
+    if (this->widgetResizing)
+    {
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+
+        const SDL_FRect screenRect = GetGameScreen().rect;
+        const float maxWidth = (screenRect.x + screenRect.w) - this->widgetRect.x;
+        const float maxHeight = (screenRect.y + screenRect.h) - this->widgetRect.y;
+        const float targetWidth = this->resizeStartWidth + (mouseX - this->resizeStartMouseX);
+        const float targetHeight = this->resizeStartHeight + (mouseY - this->resizeStartMouseY);
+        this->widgetWidth = clampf(targetWidth, kRefW, (std::max)(kRefW, maxWidth));
+        this->widgetHeight = clampf(targetHeight, kRefH, (std::max)(kRefH, maxHeight));
+        this->widgetRect.w = this->widgetWidth;
+        this->widgetRect.h = this->widgetHeight;
+        return;
+    }
+
+    // Priorite suivante: drag du pouce de scrollbar.
+    if (this->scrollBarDragging)
+    {
+        const SDL_FRect outer = this->widgetRect;
+        const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+        const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+        const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+
+        const float lineHeight = measureLineHeight(&this->bodyFont);
+        const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+        const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+        const int totalLines = static_cast<int>(wrappedRows.size());
+        const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
+        if (maxFirstLine <= 0)
+        {
+            this->scrollFirstLine = 0;
+            this->scrollBarDragging = false;
+            return;
+        }
+
+        const SDL_FRect scrollTrack = SDL_FRect{
+            body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+            body.y + kScrollBarPadding,
+            kScrollBarWidth,
+            body.h - (kScrollBarPadding * 2.0f)
+        };
+        const float thumbHeight = (std::max)(kMinThumbHeight, (scrollTrack.h * static_cast<float>(visibleLines) / static_cast<float>(totalLines)));
+        const float thumbTravel = (std::max)(1.0f, scrollTrack.h - thumbHeight);
+
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+        (void)mouseX;
+
+        const float thumbTop = clampf(mouseY - this->scrollDragOffsetY, scrollTrack.y, scrollTrack.y + thumbTravel);
+        const float t = (thumbTop - scrollTrack.y) / thumbTravel;
+        this->scrollFirstLine = static_cast<int>(t * static_cast<float>(maxFirstLine) + 0.5f);
+        this->scrollFirstLine = (std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine));
+        return;
+    }
+
+    // Lit la souris en coordonnees de rendu pour eviter un decalage visuel.
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    getMouseRenderPosition(&mouseX, &mouseY);
+    // Recalcule les offsets en conservant le point d'accroche initial.
+    this->widgetOffsetX = (mouseX - this->widgetDragOffsetX) - baseRect.x;
+    this->widgetOffsetY = (mouseY - this->widgetDragOffsetY) - baseRect.y;
+    // Met a jour immediatement la position effective.
+    this->widgetRect.x = baseRect.x + this->widgetOffsetX;
+    this->widgetRect.y = baseRect.y + this->widgetOffsetY;
+}
+
+void AnnoncesWidget::pushAnnouncement(const std::string& message)
+{
+    // Ignore les textes vides pour ne pas polluer l'affichage.
+    if (message.empty())
+    {
+        return;
+    }
+    // Ajoute l'annonce brute; le wrapping est calcule au rendu.
+    this->announcements.push_back(message);
+}
+
+bool AnnoncesWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
+{
+    // Parametres non utilises, imposes par l'interface d'evenements.
+    (void)clicks;
+    (void)mouseID;
+
+    // Le widget ne consomme que les clics gauches lorsqu'il est visible.
+    if (!this->visible || button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return false;
+    }
+
+    // Synchronise la rect avant tous les hit-tests.
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    this->widgetRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        this->widgetWidth,
+        this->widgetHeight
+    };
+    // Clic hors fenetre: on ne consomme pas l'evenement.
+    if (!isPointInRect(x, y, this->widgetRect))
+    {
+        return false;
+    }
+
+    // Construit les sous-zones interactives.
+    const SDL_FRect outer = this->widgetRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+    const SDL_FRect closeButtonRect = SDL_FRect{
+        outer.x + outer.w - 28.0f,
+        header.y + ((header.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+    const SDL_FRect lockButtonRect = SDL_FRect{
+        closeButtonRect.x - 24.0f,
+        closeButtonRect.y,
+        closeButtonRect.w,
+        closeButtonRect.h
+    };
+    const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+    const SDL_FRect resizeHandleRect = SDL_FRect{
+        outer.x + outer.w - 16.0f,
+        outer.y + outer.h - 16.0f,
+        14.0f,
+        14.0f
+    };
+
+    // Clic sur la zone de resize: demarre l'agrandissement de la zone texte.
+    if (isPointInRect(x, y, resizeHandleRect))
+    {
+        this->widgetResizing = true;
+        this->widgetDragging = false;
+        this->resizeStartMouseX = x;
+        this->resizeStartMouseY = y;
+        this->resizeStartWidth = this->widgetWidth;
+        this->resizeStartHeight = this->widgetHeight;
+        this->scrollBarDragging = false;
+        return true;
+    }
+
+    // Clic sur scrollbar/piste: active le drag comme dans le chat.
+    const float lineHeight = measureLineHeight(&this->bodyFont);
+    const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+    const int totalLines = static_cast<int>(wrappedRows.size());
+    const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
+    if (maxFirstLine > 0)
+    {
+        const SDL_FRect scrollTrack = SDL_FRect{
+            body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+            body.y + kScrollBarPadding,
+            kScrollBarWidth,
+            body.h - (kScrollBarPadding * 2.0f)
+        };
+        if (isPointInRect(x, y, scrollTrack))
+        {
+            const float thumbHeight = (std::max)(kMinThumbHeight, (scrollTrack.h * static_cast<float>(visibleLines) / static_cast<float>(totalLines)));
+            const float thumbTravel = (std::max)(1.0f, scrollTrack.h - thumbHeight);
+            const float currentT = static_cast<float>((std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine))) / static_cast<float>(maxFirstLine);
+            const float thumbY = scrollTrack.y + (thumbTravel * currentT);
+            const SDL_FRect scrollThumb = SDL_FRect{scrollTrack.x, thumbY, scrollTrack.w, thumbHeight};
+
+            this->scrollBarDragging = true;
+            this->widgetDragging = false;
+            this->widgetResizing = false;
+            if (isPointInRect(x, y, scrollThumb))
+            {
+                this->scrollDragOffsetY = y - scrollThumb.y;
+            }
+            else
+            {
+                this->scrollDragOffsetY = thumbHeight * 0.5f;
+                const float thumbTop = clampf(y - this->scrollDragOffsetY, scrollTrack.y, scrollTrack.y + thumbTravel);
+                const float t = (thumbTop - scrollTrack.y) / thumbTravel;
+                this->scrollFirstLine = static_cast<int>(t * static_cast<float>(maxFirstLine) + 0.5f);
+                this->scrollFirstLine = (std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine));
+            }
+            return true;
+        }
+    }
+
+    // Clic sur cadenas: toggle du verrou de drag.
+    if (isPointInRect(x, y, lockButtonRect))
+    {
+        this->widgetDragLocked = !this->widgetDragLocked;
+        // Stoppe un drag potentiel pour eviter un etat incoherent.
+        this->widgetDragging = false;
+        this->widgetResizing = false;
+        this->scrollBarDragging = false;
+        return true;
+    }
+    // Clic sur croix: ferme la fenetre.
+    if (isPointInRect(x, y, closeButtonRect))
+    {
+        this->visible = false;
+        this->widgetDragging = false;
+        this->widgetResizing = false;
+        this->scrollBarDragging = false;
+        return true;
+    }
+    // Clic sur header: demarre un drag si non verrouille.
+    if (isPointInRect(x, y, header))
+    {
+        if (this->widgetDragLocked)
+        {
+            // Verrou actif: on consomme le clic mais on ne deplace pas.
+            return true;
+        }
+        this->widgetDragging = true;
+        this->widgetResizing = false;
+        this->scrollBarDragging = false;
+        // Memorise l'ancrage souris->widget pour un drag fluide.
+        this->widgetDragOffsetX = x - this->widgetRect.x;
+        this->widgetDragOffsetY = y - this->widgetRect.y;
+        return true;
+    }
+    // Clic dans la fenetre (zone contenu): consomme.
+    return true;
+}
+
+bool AnnoncesWidget::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float wheel_x,
+    float wheel_y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    // Deltas non utilises dans cette implementation.
+    (void)wheel_x;
+    (void)wheel_y;
+    (void)integer_x;
+    (void)mouseID;
+    // Pas de scroll si la fenetre est cachee.
+    if (!this->visible)
+    {
+        return false;
+    }
+
+    // Recalcule la rect courante avant hit-test.
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    this->widgetRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        this->widgetWidth,
+        this->widgetHeight
+    };
+
+    // Calcule la zone de contenu scrollable.
+    const SDL_FRect outer = this->widgetRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+    const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+    // N'active le scroll que si la souris est au-dessus du contenu.
+    if (!isPointInRect(mouse_x, mouse_y, body))
+    {
+        return false;
+    }
+
+    // Evalue combien de lignes peuvent etre visibles.
+    const float lineHeight = measureLineHeight(&this->bodyFont);
+    const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+    // Largeur utile de wrapping.
+    const float wrapWidth = body.w - 10.0f;
+    // Construit les lignes wrappees a partir des annonces brutes.
+    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, wrapWidth);
+    const int totalLines = static_cast<int>(wrappedRows.size());
+    // Nombre max de lignes qu'on peut decaler vers le bas.
+    const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
+    // Rien a scroller si le contenu tient deja.
+    if (maxFirstLine <= 0)
+    {
+        return false;
+    }
+
+    // Pas de scroll par defaut (3 lignes), adapte si integer_y est fourni.
+    int step = kScrollLinesStep;
+    if (integer_y != 0)
+    {
+        step = (std::max)(1, std::abs(integer_y));
+    }
+    // Applique le sens de scroll.
+    if (direction == RC2D_SCROLL_UP) { this->scrollFirstLine -= step; }
+    else if (direction == RC2D_SCROLL_DOWN) { this->scrollFirstLine += step; }
+    // Clamp sur la plage autorisee.
+    this->scrollFirstLine = (std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine));
+    return true;
+}
+
+bool AnnoncesWidget::containsPoint(float x, float y) const
+{
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        this->widgetWidth,
+        this->widgetHeight
+    };
+    return isPointInRect(x, y, currentRect);
+}
+
+void AnnoncesWidget::draw(void) const
+{
+    // draw est const; on cast pour mettre a jour widgetRect cachee.
+    AnnoncesWidget* self = const_cast<AnnoncesWidget*>(this);
+    // Recalcule la rect finale (base + offsets).
+    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    self->widgetRect = SDL_FRect{
+        baseRect.x + self->widgetOffsetX,
+        baseRect.y + self->widgetOffsetY,
+        self->widgetWidth,
+        self->widgetHeight
+    };
+    // Si ferme, rien a rendre.
+    if (!self->visible)
+    {
+        return;
+    }
+
+    // Construit les zones de rendu principales.
+    const SDL_FRect outer = self->widgetRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+    const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+    const SDL_FRect closeButtonRect = SDL_FRect{
+        outer.x + outer.w - 28.0f,
+        header.y + ((header.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+    const SDL_FRect lockButtonRect = SDL_FRect{
+        closeButtonRect.x - 24.0f,
+        closeButtonRect.y,
+        closeButtonRect.w,
+        closeButtonRect.h
+    };
+    const SDL_FRect resizeHandleRect = SDL_FRect{
+        outer.x + outer.w - 16.0f,
+        outer.y + outer.h - 16.0f,
+        14.0f,
+        14.0f
+    };
+
+    // Calcule le wrapping et les bornes de scroll pour le rendu texte.
+    const float lineHeight = measureLineHeight(&self->bodyFont);
+    const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+    std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&self->bodyFont, self->announcements, body.w - 10.0f);
+    const int totalLines = static_cast<int>(wrappedRows.size());
+    const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
+    self->scrollFirstLine = (std::max)(0, (std::min)(self->scrollFirstLine, maxFirstLine));
+    const bool showScrollBar = (maxFirstLine > 0);
+    const float textPadding = 4.0f;
+    const float scrollReservedW = showScrollBar ? 8.0f : 0.0f;
+    const SDL_FRect textClip = SDL_FRect{
+        body.x + textPadding,
+        body.y + textPadding,
+        body.w - (textPadding * 2.0f) - scrollReservedW,
+        body.h - (textPadding * 2.0f)
+    };
+
+    // Active l'alpha blending pour les panneaux.
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+
+    // Cadre externe + contour or + sous-contour argent.
+    rc2d_graphics_setColor(kPanelFill);
+    rc2d_graphics_rectangle("fill", &outer);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &outer);
+    rc2d_graphics_setColor(kSilver);
+    rc2d_graphics_rectangle("line", &inner);
+
+    // Header + titre "Annonces".
+    rc2d_graphics_setColor(kHeaderFill);
+    rc2d_graphics_rectangle("fill", &header);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &header);
+    drawLeftCenteredY(&self->titleFont, "Annonces", header, header.x + 10.0f, kTextGold);
+
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_line(header.x + 1.0f, header.y + header.h + 2.0f, header.x + header.w - 1.0f, header.y + header.h + 2.0f);
+
+    // Zone de contenu vide (fond + contour).
+    rc2d_graphics_setColor(kPanelFill);
+    rc2d_graphics_rectangle("fill", &body);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &body);
+
+    // Dessine uniquement les lignes visibles apres wrapping.
+    if (!wrappedRows.empty())
+    {
+        const int lastLine = (std::min)(totalLines, self->scrollFirstLine + visibleLines);
+        float drawY = textClip.y;
+        for (int i = self->scrollFirstLine; i < lastLine; ++i)
+        {
+            const AnnonceWrappedRow& row = wrappedRows[static_cast<std::size_t>(i)];
+            if (row.separator)
+            {
+                rc2d_graphics_setColor(kSeparatorColor);
+                const float y = drawY + (lineHeight * 0.52f);
+                const float separatorWidth = textClip.w * 0.70f;
+                const float separatorX = textClip.x + ((textClip.w - separatorWidth) * 0.5f);
+                rc2d_graphics_line(separatorX, y, separatorX + separatorWidth, y);
+            }
+            else
+            {
+                bool renderedWithPrefixStyle = false;
+                if (row.messageFirstLine)
+                {
+                    const std::string prefixLabel = std::string(kAnnouncementPrefix);
+                    if (row.text.rfind(prefixLabel, 0) == 0)
+                    {
+                        drawTextAt(&self->bodyFont, prefixLabel, textClip.x, drawY, kTextGold);
+                        const std::string suffix = row.text.substr(prefixLabel.size());
+                        const float suffixX = textClip.x + measureTextWidth(&self->bodyFont, prefixLabel);
+                        drawTextAt(&self->bodyFont, suffix, suffixX, drawY, kMessageTextColor);
+                        renderedWithPrefixStyle = true;
+                    }
+                }
+
+                if (!renderedWithPrefixStyle)
+                {
+                    drawTextAt(&self->bodyFont, row.text, textClip.x, drawY, kMessageTextColor);
+                }
+            }
+            drawY += lineHeight + 1.0f;
+        }
+    }
+
+    // Bouton cadenas (meme logique visuelle que chat).
+    rc2d_graphics_setColor(this->widgetDragLocked ? kPanelFill : kHeaderFill);
+    rc2d_graphics_rectangle("fill", &lockButtonRect);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &lockButtonRect);
+    const SDL_FRect lockBody = SDL_FRect{
+        lockButtonRect.x + 5.0f,
+        lockButtonRect.y + 10.0f,
+        lockButtonRect.w - 10.0f,
+        lockButtonRect.h - 16.0f
+    };
+    rc2d_graphics_rectangle("line", &lockBody);
+    rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y, lockBody.x + 2.0f, lockBody.y - 3.0f);
+    rc2d_graphics_line(lockBody.x + lockBody.w - 2.0f, lockBody.y, lockBody.x + lockBody.w - 2.0f, lockBody.y - 3.0f);
+    if (self->widgetDragLocked)
+    {
+        rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y - 3.0f, lockBody.x + lockBody.w - 2.0f, lockBody.y - 3.0f);
+    }
+    else
+    {
+        rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y - 3.0f, lockBody.x + lockBody.w - 5.0f, lockBody.y - 3.0f);
+    }
+
+    // Bouton fermer (croix).
+    rc2d_graphics_setColor(kHeaderFill);
+    rc2d_graphics_rectangle("fill", &closeButtonRect);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &closeButtonRect);
+    rc2d_graphics_line(closeButtonRect.x + 5.0f, closeButtonRect.y + 5.0f, closeButtonRect.x + closeButtonRect.w - 5.0f, closeButtonRect.y + closeButtonRect.h - 5.0f);
+    rc2d_graphics_line(closeButtonRect.x + closeButtonRect.w - 5.0f, closeButtonRect.y + 5.0f, closeButtonRect.x + 5.0f, closeButtonRect.y + closeButtonRect.h - 5.0f);
+
+    // Scrollbar visible uniquement si le contenu depasse.
+    if (showScrollBar)
+    {
+        const SDL_FRect scrollTrack = SDL_FRect{
+            body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+            body.y + kScrollBarPadding,
+            kScrollBarWidth,
+            body.h - (kScrollBarPadding * 2.0f)
+        };
+        const float viewRatio = static_cast<float>(visibleLines) / static_cast<float>((std::max)(1, totalLines));
+        const float thumbH = (std::max)(kMinThumbHeight, scrollTrack.h * viewRatio);
+        const float travel = (std::max)(0.0f, scrollTrack.h - thumbH);
+        const float t = (maxFirstLine > 0) ? (static_cast<float>(self->scrollFirstLine) / static_cast<float>(maxFirstLine)) : 0.0f;
+        const SDL_FRect scrollThumb = SDL_FRect{scrollTrack.x, scrollTrack.y + (travel * t), scrollTrack.w, thumbH};
+
+        rc2d_graphics_setColor(kScrollTrackColor);
+        rc2d_graphics_rectangle("fill", &scrollTrack);
+        rc2d_graphics_setColor(kScrollThumbColor);
+        rc2d_graphics_rectangle("fill", &scrollThumb);
+    }
+
+    // Poignee de resize (meme idee que le chat).
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &resizeHandleRect);
+    rc2d_graphics_line(resizeHandleRect.x + 2.0f, resizeHandleRect.y + resizeHandleRect.h - 2.0f, resizeHandleRect.x + resizeHandleRect.w - 2.0f, resizeHandleRect.y + 2.0f);
+    rc2d_graphics_line(resizeHandleRect.x + 5.0f, resizeHandleRect.y + resizeHandleRect.h - 2.0f, resizeHandleRect.x + resizeHandleRect.w - 2.0f, resizeHandleRect.y + 5.0f);
+
+    // Restaure le mode de blend par defaut.
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+

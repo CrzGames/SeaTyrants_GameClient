@@ -30,6 +30,62 @@ static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
 
+static void applyCursorIfChanged(SDL_SystemCursor id)
+{
+    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
+    static SDL_Cursor* cached[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    const int index =
+        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
+        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
+        (id == SDL_SYSTEM_CURSOR_TEXT) ? 2 :
+        (id == SDL_SYSTEM_CURSOR_MOVE) ? 3 :
+        (id == SDL_SYSTEM_CURSOR_NWSE_RESIZE) ? 4 : 5;
+
+    if (id == lastId)
+    {
+        return;
+    }
+    if (cached[index] == nullptr)
+    {
+        cached[index] = SDL_CreateSystemCursor(id);
+    }
+    if (cached[index] != nullptr)
+    {
+        SDL_SetCursor(cached[index]);
+        lastId = id;
+    }
+}
+
+static void setCursorArrow(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
+}
+
+static void setCursorHand(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
+}
+
+static void setCursorIBeam(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_TEXT);
+}
+
+static void setCursorMove(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
+}
+
+static void setCursorResizeDiag(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
+}
+
+static void setCursorResizeVertical(void)
+{
+    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
+}
+
 /**
  * @brief Ligne visuelle issue du wrapping d'un message.
  */
@@ -417,7 +473,8 @@ ChatWidget::ChatWidget(void)
       resizeStartMouseX(0.0f),
       resizeStartMouseY(0.0f),
       resizeStartWidth(kRefW),
-      resizeStartHeight(kRefH)
+      resizeStartHeight(kRefH),
+      cursorEnabled(true)
 {
 }
 
@@ -470,7 +527,7 @@ void ChatWidget::load(void)
     this->scrollFirstLine = 0;
 
     // 3) Messages systeme initiaux propres au widget.
-    this->pushMessage("System: Bienvenue dans le chat du serveur ! Sois respectueux et amuse-toi ! On surveille...");
+    this->publishMessage(ChatMessageAuthor::SYSTEM, "Bienvenue dans le chat du serveur ! Sois respectueux et amuse-toi ! On surveille...");
 }
 
 void ChatWidget::unload(void)
@@ -502,6 +559,33 @@ void ChatWidget::pushMessage(const std::string& message)
     this->scrollFirstLine = 1000000;
 }
 
+void ChatWidget::publishMessage(ChatMessageAuthor author, const std::string& message, const std::string& playerName)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    std::string finalMessage;
+    switch (author)
+    {
+        case ChatMessageAuthor::SYSTEM:
+            finalMessage = "System: " + message;
+            break;
+        case ChatMessageAuthor::PLAYER:
+            finalMessage = (playerName.empty() ? "Joueur" : playerName) + ": " + message;
+            break;
+        case ChatMessageAuthor::SELF:
+            finalMessage = "Moi: " + message;
+            break;
+        default:
+            finalMessage = message;
+            break;
+    }
+
+    this->pushMessage(finalMessage);
+}
+
 void ChatWidget::update(double dt)
 {
     // Met a jour le rectangle chat depuis le gameScreen + offsets de drag.
@@ -512,6 +596,93 @@ void ChatWidget::update(double dt)
         this->widgetWidth,
         this->widgetHeight
     };
+
+    // Curseur contextuel sur toute la fenetre chat.
+    if (this->visible && this->cursorEnabled)
+    {
+        const float extraW = this->widgetRect.w - kRefW;
+        const float extraH = this->widgetRect.h - kRefH;
+        const auto RX = [&](float xValue) { return this->widgetRect.x + xValue; };
+        const auto RY = [&](float yValue) { return this->widgetRect.y + yValue; };
+        const auto RW = [&](float wValue) { return wValue; };
+        const auto RH = [&](float hValue) { return hValue; };
+
+        const SDL_FRect msgArea = SDL_FRect{RX(12.0f), RY(82.0f), RW(478.0f) + extraW, RH(214.0f) + extraH};
+        const SDL_FRect inputArea = SDL_FRect{RX(12.0f), RY(298.0f) + extraH, RW(478.0f) + extraW, RH(39.0f)};
+        const SDL_FRect header = SDL_FRect{this->widgetRect.x + RW(6.0f), this->widgetRect.y + RH(7.0f), this->widgetRect.w - RW(10.0f), RH(35.0f)};
+        const SDL_FRect closeButtonRect = SDL_FRect{
+            this->widgetRect.x + this->widgetRect.w - RW(31.0f),
+            header.y + ((header.h - RH(20.0f)) * 0.5f),
+            RW(20.0f),
+            RH(20.0f)
+        };
+        const SDL_FRect lockButtonRect = SDL_FRect{
+            closeButtonRect.x - RW(24.0f),
+            closeButtonRect.y,
+            closeButtonRect.w,
+            closeButtonRect.h
+        };
+        const SDL_FRect resizeHandleRect = SDL_FRect{
+            this->widgetRect.x + this->widgetRect.w - RW(16.0f),
+            this->widgetRect.y + this->widgetRect.h - RH(16.0f),
+            RW(14.0f),
+            RH(14.0f)
+        };
+        const SDL_FRect scrollTrack = SDL_FRect{
+            msgArea.x + msgArea.w - RW(kScrollBarWidth + kScrollBarPadding),
+            msgArea.y + RH(kScrollBarPadding),
+            RW(kScrollBarWidth),
+            msgArea.h - RH(kScrollBarPadding * 2.0f)
+        };
+
+        const SDL_FRect msgTextClip = SDL_FRect{
+            msgArea.x + RW(6.0f),
+            msgArea.y + RH(6.0f),
+            msgArea.w - RW(6.0f * 2.0f) - RW(kScrollBarWidth + (kScrollBarPadding * 2.0f)),
+            msgArea.h - RH(6.0f * 2.0f)
+        };
+        const float lineHeight = measureTextHeight(&this->bodyFont) + RH(2.0f);
+        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+        const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
+        const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedLines.size()) - visibleLines);
+
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+        if (isPointInRect(mouseX, mouseY, this->widgetRect))
+        {
+            if (isPointInRect(mouseX, mouseY, resizeHandleRect))
+            {
+                setCursorResizeDiag();
+            }
+            else if (isPointInRect(mouseX, mouseY, inputArea))
+            {
+                setCursorIBeam();
+            }
+            else if (isPointInRect(mouseX, mouseY, closeButtonRect) || isPointInRect(mouseX, mouseY, lockButtonRect))
+            {
+                setCursorHand();
+            }
+            else if (maxFirstLine > 0 && isPointInRect(mouseX, mouseY, scrollTrack))
+            {
+                setCursorResizeVertical();
+            }
+            else if (mouseX >= lockButtonRect.x && mouseX <= (closeButtonRect.x + closeButtonRect.w) &&
+                     mouseY >= header.y && mouseY <= (header.y + header.h))
+            {
+                // Evite le curseur MOVE dans l'espace entre cadenas et croix.
+                setCursorArrow();
+            }
+            else if (isPointInRect(mouseX, mouseY, header))
+            {
+                setCursorMove();
+            }
+            else
+            {
+                setCursorArrow();
+            }
+        }
+    }
 
     // Si le drag est verrouille, on stoppe un drag en cours.
     if (this->widgetDragLocked)
@@ -1052,7 +1223,7 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             // Validation: pousse le message puis reset input.
             if (!this->inputBuffer.empty())
             {
-                this->pushMessage("Moi: " + this->inputBuffer);
+                this->publishMessage(ChatMessageAuthor::SELF, this->inputBuffer);
                 this->inputBuffer.clear();
                 this->cursorIndex = 0;
             }
@@ -1389,5 +1560,17 @@ void ChatWidget::clearFocus(void)
     this->inputFocused = false;
     this->cursorVisible = false;
     this->cursorBlinkElapsed = 0.0;
+}
+
+bool ChatWidget::containsPoint(float x, float y) const
+{
+    const SDL_FRect baseRect = getChatWidgetRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        this->widgetWidth,
+        this->widgetHeight
+    };
+    return isPointInRect(x, y, currentRect);
 }
 

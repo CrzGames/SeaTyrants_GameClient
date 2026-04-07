@@ -4,6 +4,12 @@
 #include <string>
 #include <vector>
 
+enum class ChatMessageAuthor {
+    SYSTEM, /**< Message systeme (serveur/canal). */
+    PLAYER, /**< Message d'un autre joueur. */
+    SELF    /**< Message du joueur local connecte. */
+};
+
 class ChatWidget {
 private:
     static constexpr std::size_t kMaxStoredMessages = 50; /**< Limite d'historique (modifiable facilement). */
@@ -25,6 +31,12 @@ private:
 
     /** @brief Historique brut des messages du chat (avant wrapping visuel). */
     std::vector<std::string> messages;
+    /**
+     * @brief Ajoute un message dans l'historique du chat.
+     *
+     * Methode interne: utiliser publishMessage() depuis l'exterieur.
+     */
+    void pushMessage(const std::string& message);
     /** @brief Premiere ligne visuelle actuellement affichee dans la zone messages. */
     int scrollFirstLine;
     /** @brief True quand l'utilisateur maintient/drag le pouce de scrollbar. */
@@ -59,6 +71,8 @@ private:
     float resizeStartWidth;
     /** @brief Hauteur du chat capturee au debut du redimensionnement. */
     float resizeStartHeight;
+    /** @brief Autorise ce widget a piloter le curseur souris ce frame. */
+    bool cursorEnabled;
 
 public:
     ChatWidget(void);
@@ -81,9 +95,15 @@ public:
     void update(double dt);
 
     /**
-     * @brief Ajoute un message dans l'historique du chat.
+     * @brief Publie un message chat formate selon son auteur.
+     * @param author Type d'auteur (SYSTEM / PLAYER / SELF).
+     * @param message Contenu textuel du message.
+     * @param playerName Nom du joueur (utilise uniquement pour PLAYER).
+     *
+     * Formate automatiquement le prefixe ("System:", "Moi:" ou "<Nom>:")
+     * puis envoie dans l'historique.
      */
-    void pushMessage(const std::string& message);
+    void publishMessage(ChatMessageAuthor author, const std::string& message, const std::string& playerName = std::string());
 
     /**
      * @brief Traite un clic souris local au chat.
@@ -120,5 +140,20 @@ public:
      * @brief Retire le focus du champ de saisie et masque son curseur.
      */
     void clearFocus(void);
+
+    /**
+     * @brief Indique si la fenetre chat est actuellement visible.
+     */
+    bool isVisible(void) const { return this->visible; }
+
+    /**
+     * @brief Autorise/interdit le pilotage du curseur par ce widget.
+     */
+    void setCursorEnabled(bool enabled) { this->cursorEnabled = enabled; }
+
+    /**
+     * @brief Teste si un point est dans la fenetre chat courante.
+     */
+    bool containsPoint(float x, float y) const;
 };
 
