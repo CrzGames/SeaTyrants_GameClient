@@ -173,10 +173,10 @@ void MenuScene::load(void)
     this->menuMusicStarted = false;
 
     // Load logo texture.
-    this->logoUi.image = rc2d_graphics_loadImageFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
+    this->logoUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-menu/logo-st.png", RC2D_STORAGE_TITLE);
 
     // Load logo CPU data for potential pixel collision.
-    this->logoUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/logo-st-login.png", RC2D_STORAGE_TITLE);
+    this->logoUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-menu/logo-st.png", RC2D_STORAGE_TITLE);
 
     // Anchor logo at top center.
     this->logoUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
@@ -197,10 +197,10 @@ void MenuScene::load(void)
     this->logoUi.hittable = false;
 
     // Load email texture.
-    this->inputEmailUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
+    this->inputEmailUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-menu/input-email.png", RC2D_STORAGE_TITLE);
 
     // Load email CPU data.
-    this->inputEmailUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-email-login.png", RC2D_STORAGE_TITLE);
+    this->inputEmailUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-menu/input-email.png", RC2D_STORAGE_TITLE);
 
     // Anchor email at top center.
     this->inputEmailUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
@@ -221,10 +221,10 @@ void MenuScene::load(void)
     this->inputEmailUi.hittable = true;
 
     // Load password texture.
-    this->inputPasswordUi.image = rc2d_graphics_loadImageFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
+    this->inputPasswordUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-menu/input-password.png", RC2D_STORAGE_TITLE);
 
     // Load password CPU data.
-    this->inputPasswordUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/input-password-login.png", RC2D_STORAGE_TITLE);
+    this->inputPasswordUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-menu/input-password.png", RC2D_STORAGE_TITLE);
 
     // Anchor password at top center.
     this->inputPasswordUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
@@ -245,10 +245,10 @@ void MenuScene::load(void)
     this->inputPasswordUi.hittable = true;
 
     // Load login button texture.
-    this->buttonLoginUi.image = rc2d_graphics_loadImageFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
+    this->buttonLoginUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-menu/button-login.png", RC2D_STORAGE_TITLE);
 
     // Load login button CPU data.
-    this->buttonLoginUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/button-login.png", RC2D_STORAGE_TITLE);
+    this->buttonLoginUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-menu/button-login.png", RC2D_STORAGE_TITLE);
 
     // Anchor button at top center.
     this->buttonLoginUi.anchor = RC2D_UI_ANCHOR_TOP_CENTER;
@@ -339,7 +339,7 @@ void MenuScene::update(double dt)
         // Open menu background video.
         if (rc2d_video_openFromStorage(
                 &this->loginBackgroundVideo,
-                "assets/videos/background-menu.mp4",
+                "assets/videos/background-menu-1080p.mp4",
                 RC2D_STORAGE_TITLE) != 0)
         {
             // Log opening issue.

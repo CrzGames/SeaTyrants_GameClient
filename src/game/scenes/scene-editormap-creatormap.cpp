@@ -3533,7 +3533,7 @@ void EditorMapCreateMapScene::load(void)
     this->ensureUserStorageFolders();
 
     this->backgroundUiImage = rc2d_graphics_loadImageFromStorage(
-        "assets/images/background-ui-ingame.png",
+        "assets/images/ui-scene-game/background.png",
         RC2D_STORAGE_TITLE);
 
     this->overlayFont = rc2d_graphics_openFontFromStorage(

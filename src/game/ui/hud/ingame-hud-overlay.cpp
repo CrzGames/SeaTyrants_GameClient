@@ -17,17 +17,16 @@ void IngameHudOverlay::load(void)
 {
     // Fond UI gameplay (bandes haut/bas).
     this->backgroundUiImage = rc2d_graphics_loadImageFromStorage(
-        "assets/images/background-ui-ingame.png",
+        "assets/images/ui-scene-game/background.png",
         RC2D_STORAGE_TITLE);
-
     if (this->backgroundUiImage.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "IngameHudOverlay: echec chargement background UI gameplay");
     }
 
     // UI minimap.
-    this->minimapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
-    this->minimapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/minimap.png", RC2D_STORAGE_TITLE);
+    this->minimapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-game/minimap.png", RC2D_STORAGE_TITLE);
+    this->minimapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-game/minimap.png", RC2D_STORAGE_TITLE);
     this->minimapUi.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
     this->minimapUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
     this->minimapUi.margin_x = 0.03f;
@@ -35,9 +34,9 @@ void IngameHudOverlay::load(void)
     this->minimapUi.visible = true;
     this->minimapUi.hittable = true;
 
-    // UI bouton "centrer la map".
-    this->buttonCenterMapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/button-centermap-ingame.png", RC2D_STORAGE_TITLE);
-    this->buttonCenterMapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/button-centermap-ingame.png", RC2D_STORAGE_TITLE);
+    // UI bouton "centrer sur le navire".
+    this->buttonCenterMapUi.image = rc2d_graphics_loadImageFromStorage("assets/images/ui-scene-game/center-ship.png", RC2D_STORAGE_TITLE);
+    this->buttonCenterMapUi.imageData = rc2d_graphics_loadImageDataFromStorage("assets/images/ui-scene-game/center-ship.png", RC2D_STORAGE_TITLE);
     this->buttonCenterMapUi.anchor = RC2D_UI_ANCHOR_BOTTOM_CENTER;
     this->buttonCenterMapUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
     this->buttonCenterMapUi.margin_x = 0.0f;

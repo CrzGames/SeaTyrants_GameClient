@@ -20,7 +20,7 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     Camera& camera = GetCamera();
 
     // Load le navire du joueur.
-    if (!player.loadShip("assets/atlas/elite8", RC2D_STORAGE_TITLE))
+    if (!player.loadShip("assets/images/ships/elite8", RC2D_STORAGE_TITLE))
     {
         RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
     }
