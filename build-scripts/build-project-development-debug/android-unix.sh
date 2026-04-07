@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CXX_BASE="android-project/app/.cxx/Debug"
-TARGET="${1:-rc2d-game-template}"
+TARGET="${1:-SeaTyrants}"
 
 if [[ ! -d "${CXX_BASE}" ]]; then
   echo "[ERROR] Android CMake debug directory not generated: ${CXX_BASE}"
@@ -10,8 +10,8 @@ if [[ ! -d "${CXX_BASE}" ]]; then
   exit 1
 fi
 
-if [[ "${TARGET}" == "rc2d-game-template" ]]; then
-  echo "[INFO ] Android uses target 'main' for the app. Mapping rc2d-game-template -> main."
+if [[ "${TARGET}" == "SeaTyrants" ]]; then
+  echo "[INFO ] Android uses target 'main' for the app. Mapping SeaTyrants -> main."
   TARGET="main"
 fi
 

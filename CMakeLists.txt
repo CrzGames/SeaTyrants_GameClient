@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.28.0)
 # ============================================================
 # Project Configuration
 # ============================================================
-# Nom du projet : rc2d-game-template
+# Nom du projet : SeaTyrants
 #
 # Langages :
 #   - C   : cœur du moteur RC2D (C99)
@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.28.0)
 # nécessaire pour certaines intégrations, pour les exemples et pour le Game Template
 # qui est en C++.
 # ============================================================
-project(rc2d-game-template
+project(SeaTyrants
   LANGUAGES C CXX
 )
 
@@ -113,7 +113,7 @@ endfunction()
 if(DEFINED ENV{APP_NAME})
   set(APP_NAME "$ENV{APP_NAME}" CACHE STRING "Nom de l'application")
 else()
-  set(APP_NAME "rc2d-game-template" CACHE STRING "Nom de l'application")
+  set(APP_NAME "SeaTyrants" CACHE STRING "Nom de l'application")
 endif()
 
 # Version "numérique" strict (SemVer) -> pour FILEVERSION/PRODUCTVERSION (Windows) et CFBundleShortVersionString (iOS/macOS).
@@ -145,7 +145,7 @@ endif()
 if(DEFINED ENV{APP_GAME_DESCRIPTION})
   set(APP_GAME_DESCRIPTION "$ENV{APP_GAME_DESCRIPTION}" CACHE STRING "Game description")
 else()
-  set(APP_GAME_DESCRIPTION "MyGame - MMORPG" CACHE STRING "Game description")
+  set(APP_GAME_DESCRIPTION "MMORPG 2D multiplayer pirate game" CACHE STRING "Game description")
 endif()
 
 if(DEFINED ENV{APP_LEGAL_COPYRIGHT})
@@ -163,7 +163,7 @@ endif()
 if(DEFINED ENV{APP_IOSMACOS_IDENTIFIER})
   set(APP_IOSMACOS_IDENTIFIER "$ENV{APP_IOSMACOS_IDENTIFIER}" CACHE STRING "Identifiant de l'application")
 else()
-  set(APP_IOSMACOS_IDENTIFIER "com.crzgames.testexe" CACHE STRING "Identifiant de l'application")
+  set(APP_IOSMACOS_IDENTIFIER "com.crzgames.seatyrants" CACHE STRING "Identifiant de l'application")
 endif()
 
 if(DEFINED ENV{APP_IOSMACOS_DEVELOPMENT_TEAM_ID})
@@ -175,7 +175,7 @@ endif()
 if(DEFINED ENV{APP_IOS_PROVISIONING_PROFILE_NAME})
   set(APP_IOS_PROVISIONING_PROFILE_NAME "$ENV{APP_IOS_PROVISIONING_PROFILE_NAME}" CACHE STRING "Nom du profil de provisioning Apple")
 else()
-  set(APP_IOS_PROVISIONING_PROFILE_NAME "TestExe" CACHE STRING "Nom du profil de provisioning Apple")
+  set(APP_IOS_PROVISIONING_PROFILE_NAME "SeaTyrants" CACHE STRING "Nom du profil de provisioning Apple")
 endif()
 
 if(DEFINED ENV{APP_IOS_PROVISIONING_PROFILE_UUID})
@@ -266,7 +266,7 @@ file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS
 # Pour une application Android, il faut impérativement que la target soit une bibliothèque partagée (SHARED) 
 # et que son nom soit "main" pour que le système Android puisse la reconnaître comme point d'entrée de l'application.
 # 
-# Pour les autres plateformes, on peut utiliser le nom du projet (rc2d-game-template) comme nom de target pour l’exécutable.
+# Pour les autres plateformes, on peut utiliser le nom du projet (SeaTyrants) comme nom de target pour l’exécutable.
 #
 # ============================================================
 if(ANDROID)
@@ -1159,7 +1159,7 @@ elseif(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
   )
 elseif(UNIX AND NOT APPLE AND NOT ANDROID AND NOT (RC2D_PLATFORM STREQUAL "STEAMRT4")) # Linux "classique" (Ubuntu, Debian, Fedora, Arch, etc.) et Raspberry PI 5
   if(GAME_BUILD_LINUX_APPIMAGE)
-    # Pour l'executable "classique" sur Linux (on ne parle pas de l'AppImage ici, mais rc2d-game-template)
+    # Pour l'executable "classique" sur Linux (on ne parle pas de l'AppImage ici, mais SeaTyrants)
     set_target_properties(${APP_TARGET} PROPERTIES
       BUILD_RPATH "\$ORIGIN;\$ORIGIN/usr/lib"
       INSTALL_RPATH "\$ORIGIN;\$ORIGIN/usr/lib"

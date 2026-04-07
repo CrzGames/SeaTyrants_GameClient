@@ -9,12 +9,12 @@ def ksKeyPass = System.getenv("ANDROID_KEYSTORE_KEY_PASSWORD")
 def buildWithCMake = project.hasProperty('BUILD_WITH_CMAKE');
 
 android {
-    namespace = "com.crzgames.testexe"  
+    namespace = "com.crzgames.seatyrants"  
     compileSdkVersion 36
     buildToolsVersion "36.1.0"
     ndkVersion "29.0.14206865"
     defaultConfig {
-        applicationId "com.crzgames.testexe"
+        applicationId "com.crzgames.seatyrants"
         minSdkVersion 28
         targetSdkVersion 36
         versionCode = System.getenv("ANDROID_VERSION_CODE")?.toInteger() ?: 1

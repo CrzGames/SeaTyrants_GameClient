@@ -4,7 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 REM ==================================================
 REM 🔧 CONFIG (À CHANGER SEULEMENT SI PROJET CHANGE)
 REM ==================================================
-set "APP_COMPONENT=com.crzgames.testexe/.MyGame"
+set "APP_COMPONENT=com.crzgames.seatyrants/.MyGame"
 
 REM --------------------------------------------------
 REM Couleurs (ANSI) : fonctionne sur Windows 10/11 si VT est activé.

@@ -12,12 +12,12 @@ if not exist "%CXX_BASE%" (
 )
 
 if "%TARGET%"=="" (
-  set "TARGET=rc2d-game-template"
+  set "TARGET=SeaTyrants"
   echo [INFO ] No target specified, using default target: %TARGET%
 )
 
-if /I "%TARGET%"=="rc2d-game-template" (
-  echo [INFO ] Android uses target 'main' for the app. Mapping rc2d-game-template -^> main.
+if /I "%TARGET%"=="SeaTyrants" (
+  echo [INFO ] Android uses target 'main' for the app. Mapping SeaTyrants -^> main.
   set "TARGET=main"
 )
 

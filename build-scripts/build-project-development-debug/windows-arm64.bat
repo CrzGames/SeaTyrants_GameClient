@@ -12,7 +12,7 @@ if not exist "%CACHE_FILE%" (
 )
 
 if "%TARGET%"=="" (
-  set "TARGET=rc2d-game-template"
+  set "TARGET=SeaTyrants"
   echo [INFO ] No target specified, using default target: %TARGET%
 )
 

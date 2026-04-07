@@ -106,29 +106,29 @@ AAB_DEBUG="$(find "app/build/outputs" -type f -name "*debug*.aab" 2>/dev/null | 
 AAB_RELEASE="$(find "app/build/outputs" -type f -name "*release*.aab" 2>/dev/null | head -n 1 || true)"
 
 if [ -n "$APK_DEBUG" ]; then
-  cp -f "$APK_DEBUG" "../${OUT_APK_BASE}/Debug/rc2d-game-template-debug.apk"
-  echo "APK Debug  -> ${OUT_APK_BASE}/Debug/rc2d-game-template-debug.apk"
+  cp -f "$APK_DEBUG" "../${OUT_APK_BASE}/Debug/SeaTyrants-debug.apk"
+  echo "APK Debug  -> ${OUT_APK_BASE}/Debug/SeaTyrants-debug.apk"
 else
   echo "⚠️  Aucun APK Debug trouvé dans app/build/outputs/"
 fi
 
 if [ -n "$APK_RELEASE" ]; then
-  cp -f "$APK_RELEASE" "../${OUT_APK_BASE}/Release/rc2d-game-template-release.apk"
-  echo "APK Release -> ${OUT_APK_BASE}/Release/rc2d-game-template-release.apk"
+  cp -f "$APK_RELEASE" "../${OUT_APK_BASE}/Release/SeaTyrants-release.apk"
+  echo "APK Release -> ${OUT_APK_BASE}/Release/SeaTyrants-release.apk"
 else
   echo "⚠️  Aucun APK Release trouvé dans app/build/outputs/"
 fi
 
 if [ -n "$AAB_DEBUG" ]; then
-  cp -f "$AAB_DEBUG" "../${OUT_AAB_BASE}/Debug/rc2d-game-template-debug.aab"
-  echo "AAB Debug  -> ${OUT_AAB_BASE}/Debug/rc2d-game-template-debug.aab"
+  cp -f "$AAB_DEBUG" "../${OUT_AAB_BASE}/Debug/SeaTyrants-debug.aab"
+  echo "AAB Debug  -> ${OUT_AAB_BASE}/Debug/SeaTyrants-debug.aab"
 else
   echo "⚠️  Aucun AAB Debug trouvé dans app/build/outputs/"
 fi
 
 if [ -n "$AAB_RELEASE" ]; then
-  cp -f "$AAB_RELEASE" "../${OUT_AAB_BASE}/Release/rc2d-game-template-release.aab"
-  echo "AAB Release -> ${OUT_AAB_BASE}/Release/rc2d-game-template-release.aab"
+  cp -f "$AAB_RELEASE" "../${OUT_AAB_BASE}/Release/SeaTyrants-release.aab"
+  echo "AAB Release -> ${OUT_AAB_BASE}/Release/SeaTyrants-release.aab"
 else
   echo "⚠️  Aucun AAB Release trouvé dans app/build/outputs/"
 fi

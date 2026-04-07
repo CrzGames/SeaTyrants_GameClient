@@ -4,7 +4,7 @@ set -euo pipefail
 # ==================================================
 # 🔧 CONFIG (À CHANGER SEULEMENT SI PROJET CHANGE)
 # ==================================================
-APP_COMPONENT="com.crzgames.testexe/.MyGame" # Package / Activity à lancer (à adapter à ton app)
+APP_COMPONENT="com.crzgames.seatyrants/.MyGame" # Package / Activity à lancer (à adapter à ton app)
 
 # --------------------------------------------------
 # Couleurs ANSI

@@ -1,4 +1,4 @@
-package com.crzgames.testexe;
+package com.crzgames.seatyrants;
 
 import org.libsdl.app.SDLActivity;
 
@@ -40,7 +40,7 @@ public class MyGame extends SDLActivity {
             /**
              * Lib : main
              *
-             * C'est la lib qui contient le code de l'application, et elle doit être chargé
+             * C'est la lib qui contient le code de l'application, et elle doit être chargée
              * après toutes les autres libs pour que les symboles soient résolus correctement
              */
             "main"

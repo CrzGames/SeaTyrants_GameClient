@@ -3,7 +3,7 @@ set -euo pipefail
 
 BUILD_DIR="build/steamrt4/x64/Debug"
 CACHE_FILE="${BUILD_DIR}/CMakeCache.txt"
-TARGET="${1:-rc2d-game-template}"
+TARGET="${1:-SeaTyrants}"
 
 if [[ ! -f "${CACHE_FILE}" ]]; then
   echo "[ERROR] Build directory not generated: ${BUILD_DIR}"

@@ -144,7 +144,7 @@ public:
     SDL_FPoint tileToSectorFloat(float tileX, float tileY) const;
 
     /**
-    * @brief Convertit une tuile vers le secteur le plus proche.
+    * @brief Convertit une tuile vers une coordonnee secteur entiere la plus proche (arrondie).
     */
     SDL_Point tileToSectorNearest(float tileX, float tileY) const;
 
@@ -192,12 +192,6 @@ public:
      * - synchronise le rectangle map a partir du game screen logique.
      */
     void update(void);
-
-    /**
-     * @brief Centre la map dans un rectangle de rendu.
-     * @param rect Rectangle cible en coordonnees ecran.
-     */
-    void centerOnRect(const SDL_FRect& targetRect);
 
     /**
      * @brief Centre une tuile specifique dans un rectangle de rendu.

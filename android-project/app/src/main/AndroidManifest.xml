@@ -74,7 +74,7 @@
         <meta-data android:name="SDL_ENV.SDL_ANDROID_TRAP_BACK_BUTTON" android:value="0"/>
          -->
 
-        <activity android:name="com.crzgames.testexe.MyGame"
+        <activity android:name="com.crzgames.seatyrants.MyGame"
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"

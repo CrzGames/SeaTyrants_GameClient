@@ -190,41 +190,6 @@ void Map::update(void)
 // Centrage de la map / camera
 // =============================================================================
 
-void Map::centerOnRect(const SDL_FRect& targetRect)
-{
-    // --- Centre le losange isometrique complet de la map dans un rectangle ecran ---
-
-    // Demi-dimensions d'une tuile iso (avec zoom applique).
-    const float halfTileW = this->getTileWidth() * 0.5f;
-    const float halfTileH = this->getTileHeight() * 0.5f;
-
-    // Calcul des bornes ecran du losange global de la map.
-    //
-    // En projection iso, la tuile la plus a gauche est (0, heightTiles-1)
-    // et la plus a droite est (widthTiles-1, 0).
-    // La projection ecran X d'une tuile (tx, ty) est : (tx - ty) * halfTileW.
-    //
-    // minCenterX = projection de la tuile (0, heightTiles-1) = -(heightTiles-1) * halfTileW
-    // maxCenterX = projection de la tuile (widthTiles-1, 0)  = +(widthTiles-1) * halfTileW
-    const float minCenterX = -(static_cast<float>(this->heightTiles - 1) * halfTileW);
-    const float maxCenterX =  (static_cast<float>(this->widthTiles - 1) * halfTileW);
-
-    // La projection ecran Y d'une tuile (tx, ty) est : (tx + ty) * halfTileH.
-    // minCenterY = projection de la tuile (0, 0) = 0
-    // maxCenterY = projection de la tuile (widthTiles-1, heightTiles-1)
-    const float minCenterY = 0.0f;
-    const float maxCenterY = static_cast<float>(this->widthTiles + this->heightTiles - 2) * halfTileH;
-
-    // Centre geometrique du losange map en ecran.
-    const float mapCenterX = (minCenterX + maxCenterX) * 0.5f;
-    const float mapCenterY = (minCenterY + maxCenterY) * 0.5f;
-
-    // On translate l'origine pour que le centre du losange
-    // coincide avec le centre du rectangle cible.
-    this->originX = (targetRect.x + (targetRect.w * 0.5f)) - mapCenterX;
-    this->originY = (targetRect.y + (targetRect.h * 0.5f)) - mapCenterY;
-}
-
 void Map::centerOnTileInRect(float tileX, float tileY, const SDL_FRect& targetRect)
 {
     // --- Calcule l'origine pour qu'une tuile donnee apparaisse au centre du rectangle ---

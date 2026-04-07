@@ -25,15 +25,15 @@ env:
   # TODO: A modifier pour chaque nouvelle application pour : TestExe
   # Cela sert pour le CMakelists.txt et pour la CI/CD S3
   # Dois être le nom de la target CMake
-  APP_NAME: rc2d-game-template
+  APP_NAME: SeaTyrants
   # TODO: A modifier pour chaque nouvelle application iOS / macOS pour : com.crzgames.*
   # Cela sert pour le CMakelists.txt
-  APP_IOSMACOS_IDENTIFIER: com.crzgames.testexe
+  APP_IOSMACOS_IDENTIFIER: com.crzgames.seatyrants
   # Cela sert pour le CMakelists.txt
   APP_COMPANY_NAME: CrzGames
   # TODO: A modifier pour chaque nouvelle application
   # Cela sert pour le CMakelists.txt
-  APP_GAME_DESCRIPTION: MyGame - MMORPG
+  APP_GAME_DESCRIPTION: MMORPG 2D multiplayer pirate game
   # Cela sert pour le CMakelists.txt
   APP_LEGAL_COPYRIGHT: Copyright 2026 CrzGames
   # Cela sert pour le CMakelists.txt

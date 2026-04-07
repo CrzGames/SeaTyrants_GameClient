@@ -165,15 +165,15 @@ for /R "app\build\outputs" %%F in (*release*.apk) do (
 )
 
 if defined APK_DEBUG (
-  copy /Y "!APK_DEBUG!" "%OUT_APK_BASE%\Debug\rc2d-game-template-debug.apk" >nul
-  echo APK Debug  -> %OUT_APK_BASE%\Debug\rc2d-game-template-debug.apk
+  copy /Y "!APK_DEBUG!" "%OUT_APK_BASE%\Debug\SeaTyrants-debug.apk" >nul
+  echo APK Debug  -> %OUT_APK_BASE%\Debug\SeaTyrants-debug.apk
 ) else (
   echo ^(warn^) Aucun APK Debug trouvé dans app\build\outputs\
 )
 
 if defined APK_RELEASE (
-  copy /Y "!APK_RELEASE!" "%OUT_APK_BASE%\Release\rc2d-game-template-release.apk" >nul
-  echo APK Release -> %OUT_APK_BASE%\Release\rc2d-game-template-release.apk
+  copy /Y "!APK_RELEASE!" "%OUT_APK_BASE%\Release\SeaTyrants-release.apk" >nul
+  echo APK Release -> %OUT_APK_BASE%\Release\SeaTyrants-release.apk
 ) else (
   echo ^(warn^) Aucun APK Release trouvé dans app\build\outputs\
 )
@@ -190,15 +190,15 @@ for /R "app\build\outputs" %%F in (*release*.aab) do (
 )
 
 if defined AAB_DEBUG (
-  copy /Y "!AAB_DEBUG!" "%OUT_AAB_BASE%\Debug\rc2d-game-template-debug.aab" >nul
-  echo AAB Debug  -> %OUT_AAB_BASE%\Debug\rc2d-game-template-debug.aab
+  copy /Y "!AAB_DEBUG!" "%OUT_AAB_BASE%\Debug\SeaTyrants-debug.aab" >nul
+  echo AAB Debug  -> %OUT_AAB_BASE%\Debug\SeaTyrants-debug.aab
 ) else (
   echo ^(warn^) Aucun AAB Debug trouvé dans app\build\outputs\
 )
 
 if defined AAB_RELEASE (
-  copy /Y "!AAB_RELEASE!" "%OUT_AAB_BASE%\Release\rc2d-game-template-release.aab" >nul
-  echo AAB Release -> %OUT_AAB_BASE%\Release\rc2d-game-template-release.aab
+  copy /Y "!AAB_RELEASE!" "%OUT_AAB_BASE%\Release\SeaTyrants-release.aab" >nul
+  echo AAB Release -> %OUT_AAB_BASE%\Release\SeaTyrants-release.aab
 ) else (
   echo ^(warn^) Aucun AAB Release trouvé dans app\build\outputs\
 )

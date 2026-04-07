@@ -5,10 +5,10 @@ set -euo pipefail
 # 🔧 CONFIGURATION (À MODIFIER SI PROJET CHANGE)
 # ==================================================
 # Nom de la target CMake / exécutable
-APP_NAME="rc2d-game-template"
+APP_NAME="SeaTyrants"
 
 # Bundle identifier iOS
-BUNDLE_ID="com.crzgames.testexe"
+BUNDLE_ID="com.crzgames.seatyrants"
 
 # ==================================================
 # 🎨 Colors
