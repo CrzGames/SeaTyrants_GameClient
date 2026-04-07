@@ -3,6 +3,8 @@
 #include <RC2D/RC2D.h>
 
 #include "game/ui/hud/center-ship-button-widget.h"
+#include "game/ui/hud/chat-widget.h"
+#include "game/ui/hud/espion-search-player-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/sector-coordinate-overlay.h"
 
@@ -24,6 +26,8 @@ private:
     MinimapWidget minimapWidget; /**< Widget minimap. */
     CenterShipButtonWidget centerShipButtonWidget; /**< Widget bouton centrer navire. */
     SectorCoordinateOverlay sectorCoordinateOverlay; /**< Overlay texte du secteur courant. */
+    ChatWidget chatWidget; /**< Fenetre chat interactive. */
+    EspionSearchPlayerWidget espionSearchPlayerWidget; /**< Fenetre "Espion" de recherche joueur. */
 
 public:
     IngameHudOverlay(void);
@@ -40,6 +44,11 @@ public:
     void unload(void);
 
     /**
+     * @brief Met a jour les widgets qui ont un etat dynamique.
+     */
+    void update(double dt);
+
+    /**
      * @brief Dessine le fond UI gameplay (en dessous du monde).
      */
     void drawBackground(void);
@@ -50,4 +59,30 @@ public:
      * @param player Joueur courant pour afficher son secteur.
      */
     void drawWidgets(const Map& map, const Player& player);
+
+    /**
+     * @brief Propage un clic souris au HUD.
+     * @return True si le clic est consomme par l'UI.
+     */
+    bool mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID);
+
+    /**
+     * @brief Propage la molette souris/trackpad au HUD.
+     * @return True si l'evenement est consomme par l'UI.
+     */
+    bool mousewheelmoved(
+        RC2D_MouseWheelDirection direction,
+        float x,
+        float y,
+        Sint32 integer_x,
+        Sint32 integer_y,
+        float mouse_x,
+        float mouse_y,
+        SDL_MouseID mouseID);
+
+    /**
+     * @brief Propage le clavier au HUD.
+     * @return True si la touche est consommee par l'UI.
+     */
+    bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 };

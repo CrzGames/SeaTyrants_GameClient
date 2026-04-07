@@ -196,3 +196,16 @@ void rc2d_mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SD
 {
     sceneManager.mousepressed(x, y, button, clicks, mouseID);
 }
+
+void rc2d_mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    sceneManager.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID);
+}

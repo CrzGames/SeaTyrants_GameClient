@@ -98,6 +98,9 @@ void GameScene::update(double dt)
     // Met a jour le marqueur de clic.
     this->clickMarker.update(dt);
 
+    // Met a jour les widgets HUD interactifs (chat, curseur, scrollbar chat...).
+    this->hudOverlay.update(dt);
+
     // Met a jour les barres de scroll.
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
 
@@ -181,6 +184,12 @@ void GameScene::keypressed(
     Player& player = GetGameState().player;
     Camera& camera = GetCamera();
     bool cameraChanged = false;
+
+    // Priorite au chat HUD: si la touche est consommee par l'UI, on stop ici.
+    if (this->hudOverlay.keypressed(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     
     // Seules les touches de zoom et recentrage sont traitees ici.
     if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
@@ -214,6 +223,12 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
 
+    // Priorite au chat HUD: clic consomme => pas de propagation gameplay.
+    if (this->hudOverlay.mousepressed(x, y, button, clicks, mouseID))
+    {
+        return;
+    }
+
     // Si ce n'est pas un clic gauche, on ignore l'evenement.
     if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
@@ -245,6 +260,23 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
 
         // Affiche le marqueur de clic sur la tuile cliquee.
         this->clickMarker.show(tile.x, tile.y);
+    }
+}
+
+void GameScene::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    // Priorite au chat HUD pour la molette (souris + trackpad).
+    if (this->hudOverlay.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
+    {
+        return;
     }
 }
 

@@ -92,3 +92,19 @@ void SceneManager::mousepressed(float x, float y, RC2D_MouseButton button, int c
         this->currentScene->mousepressed(x, y, button, clicks, mouseID);
     }
 }
+
+void SceneManager::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    if (this->currentScene)
+    {
+        this->currentScene->mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID);
+    }
+}

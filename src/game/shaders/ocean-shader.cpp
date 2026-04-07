@@ -7,8 +7,6 @@
 
 #include "core/context.h"
 
-namespace
-{
 // Reglage de reference du sillage (calibre pour zoom camera = 1.0).
 constexpr float kWakeBaseStrength = 0.75f;
 constexpr float kWakeBaseWidthPx = 12.0f;
@@ -16,7 +14,6 @@ constexpr float kWakeBaseLengthPx = 35.0f;
 // Garde une taille minimale pour eviter de perdre totalement le sillage a faible zoom.
 constexpr float kWakeMinWidthPx = 3.0f;
 constexpr float kWakeMinLengthPx = 9.0f;
-} // namespace
 
 const char* OceanShader::colorToSuffix(WaterColor color)
 {

@@ -55,4 +55,17 @@ public:
      * @brief Callback clic souris de la scene gameplay.
      */
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) override;
+
+    /**
+     * @brief Callback molette souris / scroll trackpad.
+     */
+    void mousewheelmoved(
+        RC2D_MouseWheelDirection direction,
+        float x,
+        float y,
+        Sint32 integer_x,
+        Sint32 integer_y,
+        float mouse_x,
+        float mouse_y,
+        SDL_MouseID mouseID) override;
 };
