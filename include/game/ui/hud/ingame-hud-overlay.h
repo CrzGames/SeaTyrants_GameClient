@@ -6,6 +6,7 @@
 #include "game/ui/hud/chat-widget.h"
 #include "game/ui/hud/espion-search-player-widget.h"
 #include "game/ui/hud/minimap-widget.h"
+#include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/sector-coordinate-overlay.h"
 
 class Map;
@@ -28,6 +29,7 @@ private:
     SectorCoordinateOverlay sectorCoordinateOverlay; /**< Overlay texte du secteur courant. */
     ChatWidget chatWidget; /**< Fenetre chat interactive. */
     EspionSearchPlayerWidget espionSearchPlayerWidget; /**< Fenetre "Espion" de recherche joueur. */
+    ParamsMinimapWidget paramsMinimapWidget; /**< Fenetre de parametres de la minimap. */
 
 public:
     IngameHudOverlay(void);

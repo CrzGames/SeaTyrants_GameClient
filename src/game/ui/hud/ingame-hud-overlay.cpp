@@ -10,7 +10,8 @@ IngameHudOverlay::IngameHudOverlay(void)
       centerShipButtonWidget{},
       sectorCoordinateOverlay{},
       chatWidget{},
-      espionSearchPlayerWidget{}
+      espionSearchPlayerWidget{},
+      paramsMinimapWidget{}
 {
 }
 
@@ -41,10 +42,12 @@ void IngameHudOverlay::load(void)
     // Fenetre chat interactive.
     this->chatWidget.load();
     this->espionSearchPlayerWidget.load();
+    this->paramsMinimapWidget.load();
 }
 
 void IngameHudOverlay::unload(void)
 {
+    this->paramsMinimapWidget.unload();
     this->espionSearchPlayerWidget.unload();
     this->chatWidget.unload();
     this->sectorCoordinateOverlay.unload();
@@ -58,6 +61,7 @@ void IngameHudOverlay::update(double dt)
 {
     this->chatWidget.update(dt);
     this->espionSearchPlayerWidget.update(dt);
+    this->paramsMinimapWidget.update(dt);
 }
 
 void IngameHudOverlay::drawBackground(void)
@@ -87,10 +91,17 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
     this->centerShipButtonWidget.draw();
     this->chatWidget.draw();
     this->espionSearchPlayerWidget.draw();
+    this->paramsMinimapWidget.draw();
 }
 
 bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
+    if (this->paramsMinimapWidget.mousepressed(x, y, button, clicks, mouseID))
+    {
+        this->chatWidget.clearFocus();
+        this->espionSearchPlayerWidget.clearFocus();
+        return true;
+    }
     if (this->espionSearchPlayerWidget.mousepressed(x, y, button, clicks, mouseID))
     {
         this->chatWidget.clearFocus();
