@@ -225,6 +225,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       selectedAssetIndex(-1),
       assetListScrollOffset(0),
       showGrid(true),
+      showBlockedTiles(true),
       collisionPaintBlocks(true),
       mapNameInput{},
       mapNameInputFocused(false),
@@ -291,6 +292,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonOceanPrevRect{},
       buttonOceanNextRect{},
       buttonGridRect{},
+      buttonBlockedTilesRect{},
       buttonCenterRect{},
       buttonCenterShipRect{},
       buttonZoomOutRect{},
@@ -329,6 +331,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedAssetIndex = -1;
     this->assetListScrollOffset = 0;
     this->showGrid = true;
+    this->showBlockedTiles = true;
     this->collisionPaintBlocks = true;
     this->mapNameInput.clear();
     this->mapNameInputFocused = false;
@@ -398,6 +401,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonOceanPrevRect = SDL_FRect{};
     this->buttonOceanNextRect = SDL_FRect{};
     this->buttonGridRect = SDL_FRect{};
+    this->buttonBlockedTilesRect = SDL_FRect{};
     this->buttonCenterRect = SDL_FRect{};
     this->buttonCenterShipRect = SDL_FRect{};
     this->buttonZoomOutRect = SDL_FRect{};
@@ -2833,6 +2837,12 @@ void EditorMapCreateMapScene::moveTestShipToTile(int tileX, int tileY)
         return;
     }
 
+    if (map.isTileBlocked(tileX, tileY))
+    {
+        this->statusMessage = "Cible navire bloquee.";
+        return;
+    }
+
     this->testShip.moveToTile(map, tileX, tileY);
     if (this->testShip.isMoving())
     {
@@ -3022,7 +3032,7 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
                 continue;
             }
 
-            if (map.isTileBlocked(tileX, tileY))
+            if (this->showBlockedTiles && map.isTileBlocked(tileX, tileY))
             {
                 const RC2D_Color blockedColor = kBlockedTilePalette[static_cast<size_t>(this->selectedBlockedColorIndex)];
                 rc2d_graphics_setColor(blockedColor);
@@ -3310,6 +3320,7 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     setNextButton(&this->buttonShipReexportRect, &x, row2Y, 136.0f);
     setNextButton(&this->buttonZoomOutRect, &x, row2Y, 64.0f);
     setNextButton(&this->buttonZoomInRect, &x, row2Y, 64.0f);
+    setNextButton(&this->buttonBlockedTilesRect, &x, row2Y, 140.0f);
 
     this->mapNameInputRect = SDL_FRect{
         map.rect.x + map.rect.w - 360.0f,
@@ -4179,6 +4190,13 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         return true;
     }
 
+    if (this->pointInRect(x, y, this->buttonBlockedTilesRect))
+    {
+        this->showBlockedTiles = !this->showBlockedTiles;
+        this->statusMessage = this->showBlockedTiles ? "Affichage collisions: ON" : "Affichage collisions: OFF";
+        return true;
+    }
+
     if (this->pointInRect(x, y, this->buttonCenterRect))
     {
         const SDL_Point centerSectorTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
@@ -4312,15 +4330,17 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     this->drawToolbarButton(this->buttonCenterShipRect, "CENTRER NAVIRE", this->testShipCameraFollowEnabled);
     this->drawToolbarButton(this->buttonZoomOutRect, "Zoom-", false);
     this->drawToolbarButton(this->buttonZoomInRect, "Zoom+", false);
+    this->drawToolbarButton(this->buttonBlockedTilesRect, " COLLISION MASK", this->showBlockedTiles);
 
     char line0[1024] = {};
     SDL_snprintf(
         line0,
         sizeof(line0),
-        "EDITOR MAP | Mode:MAP_CREATOR_MAP | Outil:%s | Ocean:%s | Grille:%s",
+        "EDITOR MAP | Mode:MAP_CREATOR_MAP | Outil:%s | Ocean:%s | Grille:%s | Blocked:%s",
         toolLabel,
         oceanLabel,
-        this->showGrid ? "ON" : "OFF");
+        this->showGrid ? "ON" : "OFF",
+        this->showBlockedTiles ? "ON" : "OFF");
 
     char line1[1024] = {};
     SDL_snprintf(

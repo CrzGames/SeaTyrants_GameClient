@@ -356,22 +356,24 @@ bool Ship::isWalkableForPath(
     const SDL_Point& startTile,
     const SDL_Point& goalTile) const
 {
+    (void)goalTile;
+
     // Regle 1 : une tuile hors map est toujours interdite.
     if (!map.isInside(tileX, tileY))
     {
         return false;
     }
 
-    // Regle 2 : la tuile de depart et la tuile d'arrivee sont toujours
-    // autorisees, meme si elles sont marquees "bloquees" dans la collision.
-    // Cela permet au navire de quitter ou d'atteindre une case occupee.
-    if ((tileX == startTile.x && tileY == startTile.y) ||
-        (tileX == goalTile.x && tileY == goalTile.y))
+    // Regle 2 : la tuile de depart est toujours autorisee, meme si elle est
+    // bloquee, pour permettre au navire d'en sortir si l'edition a change la
+    // collision sous ses pieds.
+    if (tileX == startTile.x && tileY == startTile.y)
     {
         return true;
     }
 
-    // Regle 3 : sinon, c'est la couche collision de la map qui decide.
+    // Regle 3 : toutes les autres tuiles (y compris la cible) respectent
+    // strictement la couche collision.
     return !map.isTileBlocked(tileX, tileY);
 }
 

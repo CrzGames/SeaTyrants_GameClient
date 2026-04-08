@@ -128,6 +128,7 @@ private:
     int selectedAssetIndex; /**< Index asset actuellement selectionne. */
     int assetListScrollOffset; /**< Offset de scroll de la liste assets. */
     bool showGrid; /**< Affichage grille isometrique ON/OFF. */
+    bool showBlockedTiles; /**< Affichage visuel des tuiles bloquees ON/OFF. */
     bool collisionPaintBlocks; /**< true=mode peinture collision, false=mode suppression collision. */
     std::string mapNameInput; /**< Nom map saisi dans l'input. */
     bool mapNameInputFocused; /**< true si l'input nom map a le focus clavier. */
@@ -197,6 +198,7 @@ private:
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
     SDL_FRect buttonOceanNextRect; /**< Bouton ocean suivant. */
     SDL_FRect buttonGridRect; /**< Bouton toggle lignes grille. */
+    SDL_FRect buttonBlockedTilesRect; /**< Bouton toggle affichage des tiles bloquees. */
     SDL_FRect buttonCenterRect; /**< Bouton recentrage camera map. */
     SDL_FRect buttonCenterShipRect; /**< Bouton recentrage/suivi navire test. */
     SDL_FRect buttonZoomOutRect; /**< Bouton zoom -. */
