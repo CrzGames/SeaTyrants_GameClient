@@ -2441,36 +2441,61 @@ bool EditorMapCreateMapScene::renderStyledMiniMapToSurface(SDL_Surface* targetSu
 
         const int srcW = importedAsset.alphaMaskWidth;
         const int srcH = importedAsset.alphaMaskHeight;
-        for (int y = startY; y < endY; ++y)
-        {
-            const float v = ((static_cast<float>(y) + 0.5f) - dstY) / dstH;
-            if (v < 0.0f || v > 1.0f)
+        const bool useMultiSample = (dstW < 3.0f || dstH < 3.0f);
+
+        auto sampleAlphaAt = [&](float samplePixelX, float samplePixelY) -> Uint8 {
+            const float u = (samplePixelX - dstX) / dstW;
+            const float v = (samplePixelY - dstY) / dstH;
+            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f)
             {
-                continue;
+                return static_cast<Uint8>(0);
             }
 
+            const int srcX = std::clamp(
+                static_cast<int>(std::floor(u * static_cast<float>(srcW))),
+                0,
+                srcW - 1);
             const int srcY = std::clamp(
                 static_cast<int>(std::floor(v * static_cast<float>(srcH))),
                 0,
                 srcH - 1);
-            const size_t srcRowOffset = static_cast<size_t>(srcY * srcW);
+            return importedAsset.alphaMask[
+                static_cast<size_t>(srcY * srcW) + static_cast<size_t>(srcX)];
+        };
+
+        for (int y = startY; y < endY; ++y)
+        {
             const size_t dstRowOffset = static_cast<size_t>(y * outWidth);
 
             for (int x = startX; x < endX; ++x)
             {
-                const float u = ((static_cast<float>(x) + 0.5f) - dstX) / dstW;
-                if (u < 0.0f || u > 1.0f)
+                Uint8 maxAlpha = sampleAlphaAt(
+                    static_cast<float>(x) + 0.5f,
+                    static_cast<float>(y) + 0.5f);
+                if (useMultiSample && maxAlpha <= alphaThreshold)
                 {
-                    continue;
+                    constexpr float kSampleOffsets[3] = {0.17f, 0.50f, 0.83f};
+                    for (float oy : kSampleOffsets)
+                    {
+                        for (float ox : kSampleOffsets)
+                        {
+                            const Uint8 sampleAlpha = sampleAlphaAt(
+                                static_cast<float>(x) + ox,
+                                static_cast<float>(y) + oy);
+                            maxAlpha = (std::max)(maxAlpha, sampleAlpha);
+                            if (maxAlpha > alphaThreshold)
+                            {
+                                break;
+                            }
+                        }
+                        if (maxAlpha > alphaThreshold)
+                        {
+                            break;
+                        }
+                    }
                 }
 
-                const int srcX = std::clamp(
-                    static_cast<int>(std::floor(u * static_cast<float>(srcW))),
-                    0,
-                    srcW - 1);
-
-                const Uint8 alpha = importedAsset.alphaMask[srcRowOffset + static_cast<size_t>(srcX)];
-                if (alpha <= alphaThreshold)
+                if (maxAlpha <= alphaThreshold)
                 {
                     continue;
                 }
