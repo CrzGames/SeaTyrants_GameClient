@@ -71,6 +71,10 @@ void TileClickMarker::draw(const Map& map) const
     const float markerW = map.getTileWidth() * pulse;
     const float markerH = map.getTileHeight() * pulse;
 
+    // Le marqueur utilise un fill alpha: on force BLEND localement pour
+    // eviter un rendu opaque/blanchi si l'etat courant est en NONE.
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+
     // Pass 1: remplissage translucide.
     rc2d_graphics_setColor(this->fillColor);
     rc2d_graphics_drawTileIsometric("fill", center.x, center.y, markerW, markerH);
@@ -78,6 +82,9 @@ void TileClickMarker::draw(const Map& map) const
     // Pass 2: contour lisible.
     rc2d_graphics_setColor(this->lineColor);
     rc2d_graphics_drawTileIsometric("line", center.x, center.y, markerW, markerH);
+
+    // Restaure un etat neutre pour ne pas impacter les autres draws.
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
 void TileClickMarker::setDurationSeconds(double value)
