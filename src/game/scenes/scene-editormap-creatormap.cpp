@@ -95,10 +95,46 @@ constexpr RC2D_FileDialogFilter kExportFilters[] = {
     {"JSON", "json"},
     {"Tous les fichiers", "*"},
 };
+constexpr RC2D_FileDialogFilter kMapImportFilters[] = {
+    {"JSON", "json"},
+    {"Tous les fichiers", "*"},
+};
 
 constexpr RC2D_FileDialogFilter kShipFolderFilters[] = {
     {"Dossier navire", "*"},
 };
+
+constexpr std::array<RC2D_Color, 6> kBlockedTilePalette = {{
+    RC2D_Color{210, 55, 55, 108},
+    RC2D_Color{120, 170, 255, 116},
+    RC2D_Color{236, 190, 78, 118},
+    RC2D_Color{180, 95, 220, 116},
+    RC2D_Color{72, 196, 150, 114},
+    RC2D_Color{255, 125, 90, 112},
+}};
+constexpr std::array<RC2D_Color, 6> kHotspotPalette = {{
+    RC2D_Color{255, 94, 188, 145},
+    RC2D_Color{255, 75, 75, 145},
+    RC2D_Color{94, 175, 255, 145},
+    RC2D_Color{255, 214, 75, 145},
+    RC2D_Color{95, 230, 140, 145},
+    RC2D_Color{193, 140, 255, 145},
+}};
+
+static std::string trimAscii(const std::string& value)
+{
+    size_t start = 0;
+    while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])))
+    {
+        ++start;
+    }
+    size_t end = value.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
+    {
+        --end;
+    }
+    return value.substr(start, end - start);
+}
 
 static std::string makeAssetLabel(const std::string& name, int maxChars)
 {
@@ -189,6 +225,15 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       selectedAssetIndex(-1),
       assetListScrollOffset(0),
       showGrid(true),
+      collisionPaintBlocks(true),
+      mapNameInput{},
+      mapNameInputFocused(false),
+      blockedBrushRadiusTiles(0),
+      assetTransparencyEnabled(true),
+      assetOpacityPercent(100),
+      selectedBlockedColorIndex(0),
+      selectedHotspotColorIndex(0),
+      shipScalePercent(100),
       hoveredTileValid(false),
       hoveredTile{},
       dragPaintActive(false),
@@ -197,6 +242,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       lastDragPaintTile{},
       importedAssets{},
       placedAssets{},
+      towerHotspots{},
       historyActions{},
       historyCursor(0),
       importedAssetCounter(0U),
@@ -223,16 +269,23 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       pendingShipFolderDialogCanceled(false),
       pendingShipFolderAbsolute(),
       pendingShipFolderMutex{},
+      pendingMapImportDialogCompleted(false),
+      pendingMapImportDialogCanceled(false),
+      pendingMapImportAbsolutePath(),
+      pendingMapImportMutex{},
       buttonImportRect{},
+      buttonImportMapRect{},
       buttonImportShipRect{},
       buttonExportRect{},
       buttonUndoRect{},
       buttonRedoRect{},
       buttonToolBlockRect{},
+      buttonToolUnblockRect{},
       buttonToolPlaceRect{},
       buttonToolRemoveRect{},
       buttonToolShipRect{},
       buttonToolShipControlRect{},
+      buttonToolHotspotRect{},
       buttonAssetPrevRect{},
       buttonAssetNextRect{},
       buttonOceanPrevRect{},
@@ -242,6 +295,19 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonCenterShipRect{},
       buttonZoomOutRect{},
       buttonZoomInRect{},
+      buttonBlockedBrushMinusRect{},
+      buttonBlockedBrushPlusRect{},
+      buttonBlockedColorPrevRect{},
+      buttonBlockedColorNextRect{},
+      buttonHotspotColorPrevRect{},
+      buttonHotspotColorNextRect{},
+      buttonAssetOpacityToggleRect{},
+      buttonAssetOpacityMinusRect{},
+      buttonAssetOpacityPlusRect{},
+      buttonShipScaleMinusRect{},
+      buttonShipScalePlusRect{},
+      buttonShipReexportRect{},
+      mapNameInputRect{},
       assetListRect{},
       miniMapRect{},
       miniMapDragActive(false),
@@ -263,12 +329,22 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedAssetIndex = -1;
     this->assetListScrollOffset = 0;
     this->showGrid = true;
+    this->collisionPaintBlocks = true;
+    this->mapNameInput.clear();
+    this->mapNameInputFocused = false;
+    this->blockedBrushRadiusTiles = 0;
+    this->assetTransparencyEnabled = true;
+    this->assetOpacityPercent = 100;
+    this->selectedBlockedColorIndex = 0;
+    this->selectedHotspotColorIndex = 0;
+    this->shipScalePercent = 100;
     this->hoveredTileValid = false;
     this->dragPaintActive = false;
     this->dragPaintBlockedValue = true;
     this->lastDragPaintTileValid = false;
     this->historyActions.clear();
     this->historyCursor = 0;
+    this->towerHotspots.clear();
     this->importedAssetCounter = 0U;
     this->statusMessage = "Editor map pret.";
     this->pendingImportDialogCompleted = false;
@@ -298,16 +374,25 @@ void EditorMapCreateMapScene::resetEditorState(void)
         std::lock_guard<std::mutex> lock(this->pendingShipFolderMutex);
         this->pendingShipFolderAbsolute.clear();
     }
+    this->pendingMapImportDialogCompleted = false;
+    this->pendingMapImportDialogCanceled = false;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingMapImportMutex);
+        this->pendingMapImportAbsolutePath.clear();
+    }
     this->buttonImportRect = SDL_FRect{};
+    this->buttonImportMapRect = SDL_FRect{};
     this->buttonImportShipRect = SDL_FRect{};
     this->buttonExportRect = SDL_FRect{};
     this->buttonUndoRect = SDL_FRect{};
     this->buttonRedoRect = SDL_FRect{};
     this->buttonToolBlockRect = SDL_FRect{};
+    this->buttonToolUnblockRect = SDL_FRect{};
     this->buttonToolPlaceRect = SDL_FRect{};
     this->buttonToolRemoveRect = SDL_FRect{};
     this->buttonToolShipRect = SDL_FRect{};
     this->buttonToolShipControlRect = SDL_FRect{};
+    this->buttonToolHotspotRect = SDL_FRect{};
     this->buttonAssetPrevRect = SDL_FRect{};
     this->buttonAssetNextRect = SDL_FRect{};
     this->buttonOceanPrevRect = SDL_FRect{};
@@ -317,6 +402,19 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonCenterShipRect = SDL_FRect{};
     this->buttonZoomOutRect = SDL_FRect{};
     this->buttonZoomInRect = SDL_FRect{};
+    this->buttonBlockedBrushMinusRect = SDL_FRect{};
+    this->buttonBlockedBrushPlusRect = SDL_FRect{};
+    this->buttonBlockedColorPrevRect = SDL_FRect{};
+    this->buttonBlockedColorNextRect = SDL_FRect{};
+    this->buttonHotspotColorPrevRect = SDL_FRect{};
+    this->buttonHotspotColorNextRect = SDL_FRect{};
+    this->buttonAssetOpacityToggleRect = SDL_FRect{};
+    this->buttonAssetOpacityMinusRect = SDL_FRect{};
+    this->buttonAssetOpacityPlusRect = SDL_FRect{};
+    this->buttonShipScaleMinusRect = SDL_FRect{};
+    this->buttonShipScalePlusRect = SDL_FRect{};
+    this->buttonShipReexportRect = SDL_FRect{};
+    this->mapNameInputRect = SDL_FRect{};
     this->assetListRect = SDL_FRect{};
     this->miniMapRect = SDL_FRect{};
     this->miniMapDragActive = false;
@@ -645,6 +743,16 @@ void EditorMapCreateMapScene::applyHistoryAction(const HistoryAction& action, bo
         map.setTileBlocked(action.tileX, action.tileY, blockedValue);
         return;
     }
+    if (action.type == HistoryAction::Type::TILE_BLOCK_BATCH)
+    {
+        Map& map = GetCurrentMap();
+        for (const HistoryAction::TileBlockChange& change : action.tileBlockBatch)
+        {
+            const bool blockedValue = applyAfter ? change.afterBlocked : change.beforeBlocked;
+            map.setTileBlocked(change.tileX, change.tileY, blockedValue);
+        }
+        return;
+    }
 
     const bool hasAsset = applyAfter ? action.hadAfterAsset : action.hadBeforeAsset;
     if (!hasAsset)
@@ -730,6 +838,55 @@ bool EditorMapCreateMapScene::setTileBlockedWithHistory(int tileX, int tileY, bo
     return true;
 }
 
+bool EditorMapCreateMapScene::applyTileBrushWithHistory(int centerTileX, int centerTileY, bool blocked)
+{
+    Map& map = GetCurrentMap();
+    HistoryAction batchAction{};
+    batchAction.type = HistoryAction::Type::TILE_BLOCK_BATCH;
+
+    for (int oy = -this->blockedBrushRadiusTiles; oy <= this->blockedBrushRadiusTiles; ++oy)
+    {
+        for (int ox = -this->blockedBrushRadiusTiles; ox <= this->blockedBrushRadiusTiles; ++ox)
+        {
+            const int tx = centerTileX + ox;
+            const int ty = centerTileY + oy;
+            if (!map.isInside(tx, ty))
+            {
+                continue;
+            }
+            const bool beforeBlocked = map.isTileBlocked(tx, ty);
+            if (beforeBlocked == blocked)
+            {
+                continue;
+            }
+            if (!map.setTileBlocked(tx, ty, blocked))
+            {
+                continue;
+            }
+
+            HistoryAction::TileBlockChange change{};
+            change.tileX = tx;
+            change.tileY = ty;
+            change.beforeBlocked = beforeBlocked;
+            change.afterBlocked = blocked;
+            batchAction.tileBlockBatch.push_back(change);
+        }
+    }
+
+    if (batchAction.tileBlockBatch.empty())
+    {
+        return false;
+    }
+
+    // Compat legacy: renseigne aussi les champs scalaires pour debug/inspection.
+    batchAction.tileX = centerTileX;
+    batchAction.tileY = centerTileY;
+    batchAction.beforeBlocked = false;
+    batchAction.afterBlocked = blocked;
+    this->pushHistoryAction(batchAction);
+    return true;
+}
+
 void EditorMapCreateMapScene::paintTileAtMouse(bool blocked)
 {
     SDL_Point tile{};
@@ -738,7 +895,7 @@ void EditorMapCreateMapScene::paintTileAtMouse(bool blocked)
         return;
     }
 
-    if (this->setTileBlockedWithHistory(tile.x, tile.y, blocked))
+    if (this->applyTileBrushWithHistory(tile.x, tile.y, blocked))
     {
         this->lastDragPaintTileValid = true;
         this->lastDragPaintTile = tile;
@@ -791,7 +948,7 @@ void EditorMapCreateMapScene::handleTilePaintFromMouseDrag(void)
         return;
     }
 
-    const bool blockedValue = leftDown ? true : false;
+    const bool blockedValue = leftDown ? this->collisionPaintBlocks : !this->collisionPaintBlocks;
     if (this->dragPaintActive &&
         this->dragPaintBlockedValue == blockedValue &&
         this->lastDragPaintTileValid &&
@@ -801,7 +958,7 @@ void EditorMapCreateMapScene::handleTilePaintFromMouseDrag(void)
         return;
     }
 
-    if (!this->setTileBlockedWithHistory(tile.x, tile.y, blockedValue))
+    if (!this->applyTileBrushWithHistory(tile.x, tile.y, blockedValue))
     {
         return;
     }
@@ -1138,6 +1295,182 @@ bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePa
     this->ensureSelectedAssetVisible();
     this->statusMessage = "Asset importe: " + importedAsset.displayName;
     return true;
+}
+
+int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string& runtimePath)
+{
+    const std::string normalizedPath = normalizePathSlashes(runtimePath);
+    if (normalizedPath.empty())
+    {
+        return -1;
+    }
+
+    for (size_t i = 0; i < this->importedAssets.size(); ++i)
+    {
+        if (normalizePathSlashes(this->importedAssets[i].storagePath) == normalizedPath)
+        {
+            return static_cast<int>(i);
+        }
+    }
+
+    RC2D_Image image = rc2d_graphics_loadImageFromStorage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
+    if (image.sdl_texture == nullptr)
+    {
+        return -1;
+    }
+    SDL_SetTextureScaleMode(image.sdl_texture, SDL_SCALEMODE_LINEAR);
+
+    float widthPx = 0.0f;
+    float heightPx = 0.0f;
+    if (!SDL_GetTextureSize(image.sdl_texture, &widthPx, &heightPx))
+    {
+        widthPx = 0.0f;
+        heightPx = 0.0f;
+    }
+
+    RC2D_ImageData imageData = rc2d_graphics_loadImageDataFromStorage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
+    int alphaMaskWidth = 0;
+    int alphaMaskHeight = 0;
+    std::vector<Uint8> alphaMask;
+    if (imageData.sdl_surface != nullptr)
+    {
+        alphaMaskWidth = imageData.sdl_surface->w;
+        alphaMaskHeight = imageData.sdl_surface->h;
+        if (alphaMaskWidth > 0 && alphaMaskHeight > 0)
+        {
+            alphaMask.assign(static_cast<size_t>(alphaMaskWidth * alphaMaskHeight), static_cast<Uint8>(0));
+            for (int y = 0; y < alphaMaskHeight; ++y)
+            {
+                for (int x = 0; x < alphaMaskWidth; ++x)
+                {
+                    Uint8 r = 0;
+                    Uint8 g = 0;
+                    Uint8 b = 0;
+                    Uint8 a = 0;
+                    if (!SDL_ReadSurfacePixel(imageData.sdl_surface, x, y, &r, &g, &b, &a))
+                    {
+                        continue;
+                    }
+                    alphaMask[static_cast<size_t>((y * alphaMaskWidth) + x)] = a;
+                }
+            }
+        }
+    }
+
+    ImportedAsset importedAsset{};
+    ++this->importedAssetCounter;
+    importedAsset.id = "asset_runtime_" + std::to_string(this->importedAssetCounter);
+    importedAsset.displayName = extractFileName(normalizedPath);
+    importedAsset.sourcePath = normalizedPath;
+    importedAsset.storagePath = normalizedPath;
+    importedAsset.image = image;
+    importedAsset.imageData = imageData;
+    importedAsset.widthPx = widthPx;
+    importedAsset.heightPx = heightPx;
+    importedAsset.alphaMaskWidth = alphaMaskWidth;
+    importedAsset.alphaMaskHeight = alphaMaskHeight;
+    importedAsset.alphaMask = std::move(alphaMask);
+    this->importedAssets.push_back(importedAsset);
+    return static_cast<int>(this->importedAssets.size()) - 1;
+}
+
+bool EditorMapCreateMapScene::isTowerAssetName(const std::string& displayName) const
+{
+    std::string lower = displayName;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return (lower.find("tower") != std::string::npos || lower.find("tour") != std::string::npos);
+}
+
+SDL_Point EditorMapCreateMapScene::computePlacedAssetCenterTile(const PlacedAsset& asset) const
+{
+    const Map& map = GetCurrentMap();
+    SDL_Point fallback = SDL_Point{asset.tileX, asset.tileY};
+    if (asset.importedAssetIndex < 0 || asset.importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+    {
+        return fallback;
+    }
+    const ImportedAsset& importedAsset = this->importedAssets[static_cast<size_t>(asset.importedAssetIndex)];
+    const float worldZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float effectiveScale = asset.scale * worldZoom;
+    const SDL_FPoint anchorScreen = map.tileToScreenCenterFloat(asset.anchorTileX, asset.anchorTileY);
+    const float centerScreenX = anchorScreen.x + ((importedAsset.widthPx * effectiveScale) * 0.5f);
+    const float centerScreenY = anchorScreen.y + ((importedAsset.heightPx * effectiveScale) * 0.5f);
+    return map.screenToTileNearest(centerScreenX, centerScreenY);
+}
+
+void EditorMapCreateMapScene::toggleTowerHotspotAtTile(int tileX, int tileY)
+{
+    for (size_t i = 0; i < this->towerHotspots.size(); ++i)
+    {
+        if (this->towerHotspots[i].tileX == tileX && this->towerHotspots[i].tileY == tileY)
+        {
+            this->towerHotspots.erase(this->towerHotspots.begin() + static_cast<std::ptrdiff_t>(i));
+            this->statusMessage = "Hotspot tour retire.";
+            return;
+        }
+    }
+
+    this->towerHotspots.push_back(TowerHotspot{tileX, tileY});
+    this->statusMessage = "Hotspot tour ajoute.";
+}
+
+void EditorMapCreateMapScene::setAssetOpacityPercent(int value)
+{
+    this->assetOpacityPercent = std::clamp(value, 10, 100);
+}
+
+void EditorMapCreateMapScene::setShipScalePercent(int value)
+{
+    this->shipScalePercent = std::clamp(value, 10, 100);
+    const float scale = static_cast<float>(this->shipScalePercent) / 100.0f;
+    this->testShip.setDrawScale(scale);
+    this->testShipPreview.setDrawScale(scale);
+}
+
+int EditorMapCreateMapScene::findPlacedAssetIndexAtScreenPoint(float x, float y) const
+{
+    const Map& map = GetCurrentMap();
+    const float worldZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    std::vector<std::pair<size_t, int>> candidates;
+    candidates.reserve(this->placedAssets.size());
+
+    for (size_t i = 0; i < this->placedAssets.size(); ++i)
+    {
+        const PlacedAsset& placedAsset = this->placedAssets[i];
+        if (placedAsset.importedAssetIndex < 0 ||
+            placedAsset.importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            continue;
+        }
+
+        const ImportedAsset& importedAsset = this->importedAssets[static_cast<size_t>(placedAsset.importedAssetIndex)];
+        const SDL_FPoint anchorScreen = map.tileToScreenCenterFloat(placedAsset.anchorTileX, placedAsset.anchorTileY);
+        const float effectiveScale = placedAsset.scale * worldZoom;
+        const float drawW = importedAsset.widthPx * effectiveScale;
+        const float drawH = importedAsset.heightPx * effectiveScale;
+        if (x < anchorScreen.x || y < anchorScreen.y || x > (anchorScreen.x + drawW) || y > (anchorScreen.y + drawH))
+        {
+            continue;
+        }
+
+        const int depth = placedAsset.tileX + placedAsset.tileY;
+        candidates.emplace_back(i, depth);
+    }
+
+    if (candidates.empty())
+    {
+        return -1;
+    }
+    std::sort(candidates.begin(), candidates.end(), [this](const auto& a, const auto& b) {
+        const PlacedAsset& assetA = this->placedAssets[a.first];
+        const PlacedAsset& assetB = this->placedAssets[b.first];
+        if (a.second != b.second)
+        {
+            return a.second < b.second;
+        }
+        return assetA.tileY < assetB.tileY;
+    });
+    return static_cast<int>(candidates.back().first);
 }
 
 void EditorMapCreateMapScene::processPendingImportRequests(void)
@@ -1714,6 +2047,11 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
         this->statusMessage = "Export annule.";
         return false;
     }
+    if (trimAscii(this->mapNameInput).empty())
+    {
+        this->statusMessage = "Nom de map requis avant export.";
+        return false;
+    }
 
     const Map& map = GetCurrentMap();
     cJSON* root = cJSON_CreateObject();
@@ -1723,9 +2061,16 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
         return false;
     }
 
+    cJSON_AddStringToObject(root, "mapName", trimAscii(this->mapNameInput).c_str());
     cJSON_AddStringToObject(root, "oceanColor", kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label);
     cJSON_AddNumberToObject(root, "worldWidthTiles", map.getWidthTiles());
     cJSON_AddNumberToObject(root, "worldHeightTiles", map.getHeightTiles());
+    cJSON_AddNumberToObject(root, "assetOpacityPercent", this->assetOpacityPercent);
+    cJSON_AddBoolToObject(root, "assetTransparencyEnabled", this->assetTransparencyEnabled);
+    cJSON_AddNumberToObject(root, "blockedBrushRadiusTiles", this->blockedBrushRadiusTiles);
+    cJSON_AddNumberToObject(root, "shipScalePercent", this->shipScalePercent);
+    cJSON_AddNumberToObject(root, "blockedColorIndex", this->selectedBlockedColorIndex);
+    cJSON_AddNumberToObject(root, "hotspotColorIndex", this->selectedHotspotColorIndex);
 
     cJSON* blockedTilesArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "blockedTiles", blockedTilesArray);
@@ -1761,7 +2106,17 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
         cJSON_AddStringToObject(placedItem, "storagePath", runtimeStoragePath.c_str());
         cJSON_AddNumberToObject(placedItem, "tileX", placedAsset.tileX);
         cJSON_AddNumberToObject(placedItem, "tileY", placedAsset.tileY);
+        cJSON_AddNumberToObject(placedItem, "scale", placedAsset.scale);
         cJSON_AddItemToArray(placedAssetsArray, placedItem);
+    }
+    cJSON* towerHotspotsArray = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "towerHotspots", towerHotspotsArray);
+    for (const TowerHotspot& hotspot : this->towerHotspots)
+    {
+        cJSON* hotspotItem = cJSON_CreateObject();
+        cJSON_AddNumberToObject(hotspotItem, "tileX", hotspot.tileX);
+        cJSON_AddNumberToObject(hotspotItem, "tileY", hotspot.tileY);
+        cJSON_AddItemToArray(towerHotspotsArray, hotspotItem);
     }
 
     char* jsonText = cJSON_Print(root);
@@ -1825,18 +2180,62 @@ void EditorMapCreateMapScene::openImportAssetDialog(void)
     rc2d_filedialog_openFile(&EditorMapCreateMapScene::onImportAssetDialogResult, this, &options);
 }
 
+void EditorMapCreateMapScene::openImportMapDialog(void)
+{
+    RC2D_FileDialogOptions options{};
+    options.window = rc2d_window_getWindow();
+    options.filters = kMapImportFilters;
+    options.num_filters = static_cast<int>(std::size(kMapImportFilters));
+    options.default_location = nullptr;
+    options.allow_many = false;
+    options.title = "Importer map.json";
+    options.accept_label = "Importer";
+    options.cancel_label = "Annuler";
+    rc2d_filedialog_openFile(&EditorMapCreateMapScene::onImportMapDialogResult, this, &options);
+}
+
 void EditorMapCreateMapScene::openExportMapDialog(void)
 {
     RC2D_FileDialogOptions options{};
     options.window = rc2d_window_getWindow();
-    options.filters = kExportFilters;
-    options.num_filters = static_cast<int>(std::size(kExportFilters));
+    options.filters = kShipFolderFilters;
+    options.num_filters = static_cast<int>(std::size(kShipFolderFilters));
     options.default_location = nullptr;
     options.allow_many = false;
-    options.title = "Exporter la map en JSON";
+    options.title = "Choisir dossier d'export";
     options.accept_label = "Exporter";
     options.cancel_label = "Annuler";
-    rc2d_filedialog_saveFile(&EditorMapCreateMapScene::onExportMapDialogResult, this, &options);
+    rc2d_filedialog_openFolder(&EditorMapCreateMapScene::onExportMapDialogResult, this, &options);
+}
+
+bool EditorMapCreateMapScene::exportMapToFolder(const char* absoluteFolderPath)
+{
+    if (absoluteFolderPath == nullptr || absoluteFolderPath[0] == '\0')
+    {
+        this->statusMessage = "Export annule.";
+        return false;
+    }
+
+    std::filesystem::path folder(absoluteFolderPath);
+    std::error_code fsError;
+    if (!std::filesystem::exists(folder, fsError))
+    {
+        std::filesystem::create_directories(folder, fsError);
+    }
+    if (fsError || !std::filesystem::is_directory(folder, fsError))
+    {
+        this->statusMessage = "Dossier d'export invalide.";
+        return false;
+    }
+
+    const std::filesystem::path mapJsonPath = folder / "map.json";
+    if (!this->exportMapToAbsolutePath(mapJsonPath.string().c_str()))
+    {
+        return false;
+    }
+    this->statusMessage =
+        std::string("Export dossier OK: ") + folder.string() + " (map.json + map_minimap.png)";
+    return true;
 }
 
 void EditorMapCreateMapScene::openImportShipFolderDialog(void)
@@ -1882,6 +2281,198 @@ void EditorMapCreateMapScene::processPendingShipFolderRequest(void)
     }
 
     this->loadShipFolderFromAbsolutePath(selectedFolder.c_str());
+}
+
+void EditorMapCreateMapScene::processPendingMapImportRequest(void)
+{
+    bool hasResult = false;
+    bool canceled = false;
+    std::string mapPath;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingMapImportMutex);
+        hasResult = this->pendingMapImportDialogCompleted;
+        if (hasResult)
+        {
+            canceled = this->pendingMapImportDialogCanceled;
+            mapPath.swap(this->pendingMapImportAbsolutePath);
+            this->pendingMapImportDialogCompleted = false;
+            this->pendingMapImportDialogCanceled = false;
+        }
+    }
+
+    if (!hasResult)
+    {
+        return;
+    }
+    if (canceled || mapPath.empty())
+    {
+        this->statusMessage = "Import map annule.";
+        return;
+    }
+
+    this->importMapFromAbsolutePath(mapPath.c_str());
+}
+
+bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath)
+{
+    if (absolutePath == nullptr || absolutePath[0] == '\0')
+    {
+        this->statusMessage = "Fichier map invalide.";
+        return false;
+    }
+
+    std::ifstream input(absolutePath, std::ios::binary | std::ios::ate);
+    if (!input.is_open())
+    {
+        this->statusMessage = "Lecture map impossible.";
+        return false;
+    }
+    const std::streamsize size = input.tellg();
+    if (size <= 0)
+    {
+        this->statusMessage = "Map JSON vide.";
+        return false;
+    }
+    input.seekg(0, std::ios::beg);
+    std::vector<char> bytes(static_cast<size_t>(size) + 1U, '\0');
+    if (!input.read(bytes.data(), size))
+    {
+        this->statusMessage = "Lecture map JSON echouee.";
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(bytes.data());
+    if (root == nullptr)
+    {
+        this->statusMessage = "JSON map invalide.";
+        return false;
+    }
+
+    Map& map = GetCurrentMap();
+    map.clearBlockedTiles();
+    this->placedAssets.clear();
+    this->towerHotspots.clear();
+    this->historyActions.clear();
+    this->historyCursor = 0;
+
+    const cJSON* mapName = cJSON_GetObjectItemCaseSensitive(root, "mapName");
+    if (cJSON_IsString(mapName) && mapName->valuestring != nullptr)
+    {
+        this->mapNameInput = mapName->valuestring;
+    }
+
+    const cJSON* opacityPercent = cJSON_GetObjectItemCaseSensitive(root, "assetOpacityPercent");
+    if (cJSON_IsNumber(opacityPercent))
+    {
+        this->setAssetOpacityPercent(static_cast<int>(std::lround(opacityPercent->valuedouble)));
+    }
+    const cJSON* transparencyEnabled = cJSON_GetObjectItemCaseSensitive(root, "assetTransparencyEnabled");
+    if (cJSON_IsBool(transparencyEnabled))
+    {
+        this->assetTransparencyEnabled = cJSON_IsTrue(transparencyEnabled);
+    }
+    const cJSON* brushRadius = cJSON_GetObjectItemCaseSensitive(root, "blockedBrushRadiusTiles");
+    if (cJSON_IsNumber(brushRadius))
+    {
+        this->blockedBrushRadiusTiles = std::clamp(static_cast<int>(std::lround(brushRadius->valuedouble)), 0, 8);
+    }
+    const cJSON* shipScale = cJSON_GetObjectItemCaseSensitive(root, "shipScalePercent");
+    if (cJSON_IsNumber(shipScale))
+    {
+        this->setShipScalePercent(static_cast<int>(std::lround(shipScale->valuedouble)));
+    }
+    const cJSON* blockedColorIndex = cJSON_GetObjectItemCaseSensitive(root, "blockedColorIndex");
+    if (cJSON_IsNumber(blockedColorIndex))
+    {
+        this->selectedBlockedColorIndex = std::clamp(
+            static_cast<int>(std::lround(blockedColorIndex->valuedouble)),
+            0,
+            static_cast<int>(kBlockedTilePalette.size()) - 1);
+    }
+    const cJSON* hotspotColorIndex = cJSON_GetObjectItemCaseSensitive(root, "hotspotColorIndex");
+    if (cJSON_IsNumber(hotspotColorIndex))
+    {
+        this->selectedHotspotColorIndex = std::clamp(
+            static_cast<int>(std::lround(hotspotColorIndex->valuedouble)),
+            0,
+            static_cast<int>(kHotspotPalette.size()) - 1);
+    }
+
+    const cJSON* blockedTiles = cJSON_GetObjectItemCaseSensitive(root, "blockedTiles");
+    if (cJSON_IsArray(blockedTiles))
+    {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, blockedTiles)
+        {
+            const cJSON* x = cJSON_GetObjectItemCaseSensitive(item, "x");
+            const cJSON* y = cJSON_GetObjectItemCaseSensitive(item, "y");
+            if (!cJSON_IsNumber(x) || !cJSON_IsNumber(y))
+            {
+                continue;
+            }
+            map.setTileBlocked(static_cast<int>(std::lround(x->valuedouble)), static_cast<int>(std::lround(y->valuedouble)), true);
+        }
+    }
+
+    const cJSON* placedAssets = cJSON_GetObjectItemCaseSensitive(root, "placedAssets");
+    if (cJSON_IsArray(placedAssets))
+    {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, placedAssets)
+        {
+            const cJSON* storagePath = cJSON_GetObjectItemCaseSensitive(item, "storagePath");
+            const cJSON* tileX = cJSON_GetObjectItemCaseSensitive(item, "tileX");
+            const cJSON* tileY = cJSON_GetObjectItemCaseSensitive(item, "tileY");
+            if (!cJSON_IsString(storagePath) || storagePath->valuestring == nullptr ||
+                !cJSON_IsNumber(tileX) || !cJSON_IsNumber(tileY))
+            {
+                continue;
+            }
+
+            const int importedIndex = this->importAssetFromRuntimeStoragePath(storagePath->valuestring);
+            if (importedIndex < 0)
+            {
+                continue;
+            }
+
+            PlacedAsset placed{};
+            placed.importedAssetIndex = importedIndex;
+            placed.tileX = static_cast<int>(std::lround(tileX->valuedouble));
+            placed.tileY = static_cast<int>(std::lround(tileY->valuedouble));
+            placed.anchorTileX = static_cast<float>(placed.tileX);
+            placed.anchorTileY = static_cast<float>(placed.tileY);
+            placed.scale = 1.0f;
+            const cJSON* scale = cJSON_GetObjectItemCaseSensitive(item, "scale");
+            if (cJSON_IsNumber(scale) && std::isfinite(scale->valuedouble) && scale->valuedouble > 0.01)
+            {
+                placed.scale = static_cast<float>(scale->valuedouble);
+            }
+            this->placedAssets.push_back(placed);
+        }
+    }
+
+    const cJSON* towerHotspots = cJSON_GetObjectItemCaseSensitive(root, "towerHotspots");
+    if (cJSON_IsArray(towerHotspots))
+    {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, towerHotspots)
+        {
+            const cJSON* tileX = cJSON_GetObjectItemCaseSensitive(item, "tileX");
+            const cJSON* tileY = cJSON_GetObjectItemCaseSensitive(item, "tileY");
+            if (!cJSON_IsNumber(tileX) || !cJSON_IsNumber(tileY))
+            {
+                continue;
+            }
+            this->towerHotspots.push_back(
+                TowerHotspot{
+                    static_cast<int>(std::lround(tileX->valuedouble)),
+                    static_cast<int>(std::lround(tileY->valuedouble))});
+        }
+    }
+
+    cJSON_Delete(root);
+    this->statusMessage = "Map importee depuis JSON.";
+    return true;
 }
 
 bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderAbsolutePath)
@@ -2009,8 +2600,11 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
 
     this->testShip.setSpeedTilesPerSecond(4.0f);
     this->testShip.setHealthVisual(Ship::HealthVisual::FULL);
+    this->testShip.setDrawAlpha(255);
     this->testShipPreview.setSpeedTilesPerSecond(4.0f);
     this->testShipPreview.setHealthVisual(Ship::HealthVisual::FULL);
+    this->testShipPreview.setDrawAlpha(255);
+    this->setShipScalePercent(this->shipScalePercent);
     this->testShipLoaded = true;
     this->testShipSpawned = false;
     this->testShipCameraFollowEnabled = false;
@@ -2018,6 +2612,183 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
     this->editorTool = EditorTool::SPAWN_SHIP;
     this->statusMessage = "Navire test charge. Clique gauche sur la map pour le spawn.";
     return true;
+}
+
+bool EditorMapCreateMapScene::reexportLoadedShipScaled(int scalePercent)
+{
+    if (!this->testShipLoaded || this->loadedShipFolderAbsolute.empty())
+    {
+        this->statusMessage = "Aucun navire charge a reexporter.";
+        return false;
+    }
+    const int clampedPercent = std::clamp(scalePercent, 10, 100);
+    std::filesystem::path outputFolder =
+        std::filesystem::path(this->loadedShipFolderAbsolute) /
+        ("reexport_" + std::to_string(clampedPercent) + "pct");
+    std::error_code fsError;
+    std::filesystem::create_directories(outputFolder, fsError);
+    if (fsError)
+    {
+        this->statusMessage = "Impossible de creer le dossier de reexport.";
+        return false;
+    }
+
+    for (int i = 1; i <= kShipSpriteCount; ++i)
+    {
+        char storagePath[96] = {};
+        SDL_snprintf(storagePath, sizeof(storagePath), "editor-map-ship/current/%d.png", i);
+        RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(storagePath, RC2D_STORAGE_USER);
+        if (src.sdl_surface == nullptr)
+        {
+            this->statusMessage = "Reexport navire: sprite source manquant.";
+            return false;
+        }
+
+        const int srcW = src.sdl_surface->w;
+        const int srcH = src.sdl_surface->h;
+        const int dstW = (std::max)(1, static_cast<int>(std::lround((static_cast<double>(srcW) * clampedPercent) / 100.0)));
+        const int dstH = (std::max)(1, static_cast<int>(std::lround((static_cast<double>(srcH) * clampedPercent) / 100.0)));
+        SDL_Surface* dst = SDL_CreateSurface(dstW, dstH, SDL_PIXELFORMAT_RGBA32);
+        if (dst == nullptr)
+        {
+            rc2d_graphics_freeImageData(&src);
+            this->statusMessage = "Reexport navire: creation surface KO.";
+            return false;
+        }
+
+        for (int y = 0; y < dstH; ++y)
+        {
+            const int srcY = std::clamp((y * srcH) / dstH, 0, srcH - 1);
+            for (int x = 0; x < dstW; ++x)
+            {
+                const int srcX = std::clamp((x * srcW) / dstW, 0, srcW - 1);
+                Uint8 r = 0;
+                Uint8 g = 0;
+                Uint8 b = 0;
+                Uint8 a = 0;
+                SDL_ReadSurfacePixel(src.sdl_surface, srcX, srcY, &r, &g, &b, &a);
+                SDL_WriteSurfacePixel(dst, x, y, r, g, b, a);
+            }
+        }
+
+        std::filesystem::path dstPath = outputFolder / (std::to_string(i) + ".png");
+        const bool saveOk = SDL_SavePNG(dst, dstPath.string().c_str());
+        SDL_DestroySurface(dst);
+        rc2d_graphics_freeImageData(&src);
+        if (!saveOk)
+        {
+            this->statusMessage = "Reexport navire: echec ecriture PNG.";
+            return false;
+        }
+    }
+
+    this->statusMessage = "Navire reexporte en " + std::to_string(clampedPercent) + "%.";
+    return true;
+}
+
+bool EditorMapCreateMapScene::handleMapNameInputKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    if (!this->mapNameInputFocused)
+    {
+        return false;
+    }
+    (void)mod;
+    if (scancode == SDL_SCANCODE_ESCAPE)
+    {
+        this->mapNameInputFocused = false;
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER)
+    {
+        this->mapNameInputFocused = false;
+        this->statusMessage = "Nom map valide.";
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_BACKSPACE && !this->mapNameInput.empty() && !isrepeat)
+    {
+        this->mapNameInput.pop_back();
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_DELETE && !this->mapNameInput.empty() && !isrepeat)
+    {
+        this->mapNameInput.clear();
+        return true;
+    }
+
+    auto appendIfRoom = [this](char c) -> bool {
+        if (this->mapNameInput.size() >= 64U)
+        {
+            return true;
+        }
+        this->mapNameInput.push_back(c);
+        return true;
+    };
+
+    // Force la prise en charge des caracteres selon scancode,
+    // utile sur certains layouts clavier ou "key" est vide/different.
+    const bool shiftDown = ((mod & SDL_KMOD_SHIFT) != 0);
+
+    if (keycode == SDLK_MINUS || keycode == SDLK_KP_MINUS || keycode == SDLK_UNDERSCORE ||
+        scancode == SDL_SCANCODE_MINUS || scancode == SDL_SCANCODE_KP_MINUS ||
+        // AZERTY: '-' souvent sur la touche '6' (sans shift)
+        (scancode == SDL_SCANCODE_6 && !shiftDown))
+    {
+        return appendIfRoom('-');
+    }
+    if (keycode == SDLK_SLASH || keycode == SDLK_KP_DIVIDE || keycode == SDLK_QUESTION ||
+        scancode == SDL_SCANCODE_SLASH || scancode == SDL_SCANCODE_KP_DIVIDE ||
+        // AZERTY: '/' peut passer par la touche ponctuation avec shift.
+        ((scancode == SDL_SCANCODE_PERIOD ||
+          scancode == SDL_SCANCODE_COMMA ||
+          scancode == SDL_SCANCODE_SEMICOLON ||
+          scancode == SDL_SCANCODE_APOSTROPHE) && shiftDown))
+    {
+        return appendIfRoom('/');
+    }
+
+    if (key == nullptr || key[0] == '\0')
+    {
+        return true;
+    }
+
+    std::string keyNameLower = key;
+    std::transform(
+        keyNameLower.begin(),
+        keyNameLower.end(),
+        keyNameLower.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (keyNameLower.find("minus") != std::string::npos)
+    {
+        return appendIfRoom('-');
+    }
+    if (keyNameLower.find("slash") != std::string::npos || keyNameLower.find("divide") != std::string::npos)
+    {
+        return appendIfRoom('/');
+    }
+    if (std::strlen(key) != 1U)
+    {
+        return true;
+    }
+    const char c = key[0];
+    const bool printable =
+        (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '_' || c == '-' || c == '/' || c == ' ';
+    if (!printable)
+    {
+        return true;
+    }
+    if (this->mapNameInput.size() >= 64U)
+    {
+        return true;
+    }
+    return appendIfRoom(c);
 }
 
 void EditorMapCreateMapScene::spawnTestShipAtTile(int tileX, int tileY)
@@ -2120,6 +2891,7 @@ void EditorMapCreateMapScene::drawTestShip(void)
         if (map.isInside(this->hoveredTile.x, this->hoveredTile.y))
         {
             this->testShipPreview.setPositionTileInt(this->hoveredTile.x, this->hoveredTile.y);
+            this->testShipPreview.setDrawAlpha(this->testShipSpawned ? static_cast<Uint8>(255) : static_cast<Uint8>(140));
             this->testShipPreview.draw(map);
         }
     }
@@ -2252,7 +3024,8 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
 
             if (map.isTileBlocked(tileX, tileY))
             {
-                rc2d_graphics_setColor(kBlockedTileColor);
+                const RC2D_Color blockedColor = kBlockedTilePalette[static_cast<size_t>(this->selectedBlockedColorIndex)];
+                rc2d_graphics_setColor(blockedColor);
                 rc2d_graphics_drawTileIsometric("fill", center.x, center.y, tileWidth, tileHeight);
             }
 
@@ -2266,9 +3039,62 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
 
     if (this->hoveredTileValid)
     {
-        const SDL_FPoint hoveredCenter = map.tileToScreenCenter(this->hoveredTile.x, this->hoveredTile.y);
-        rc2d_graphics_setColor(kHoverTileColor);
-        rc2d_graphics_drawTileIsometric("line", hoveredCenter.x, hoveredCenter.y, tileWidth, tileHeight);
+        if (this->editorTool == EditorTool::BLOCK_TILES && this->blockedBrushRadiusTiles > 0)
+        {
+            for (int oy = -this->blockedBrushRadiusTiles; oy <= this->blockedBrushRadiusTiles; ++oy)
+            {
+                for (int ox = -this->blockedBrushRadiusTiles; ox <= this->blockedBrushRadiusTiles; ++ox)
+                {
+                    const int tx = this->hoveredTile.x + ox;
+                    const int ty = this->hoveredTile.y + oy;
+                    if (!map.isInside(tx, ty))
+                    {
+                        continue;
+                    }
+                    const SDL_FPoint hoveredCenter = map.tileToScreenCenter(tx, ty);
+                    rc2d_graphics_setColor(RC2D_Color{255, 225, 110, 62});
+                    rc2d_graphics_drawTileIsometric("fill", hoveredCenter.x, hoveredCenter.y, tileWidth, tileHeight);
+                    rc2d_graphics_setColor(kHoverTileColor);
+                    rc2d_graphics_drawTileIsometric("line", hoveredCenter.x, hoveredCenter.y, tileWidth, tileHeight);
+                }
+            }
+        }
+        else
+        {
+            const SDL_FPoint hoveredCenter = map.tileToScreenCenter(this->hoveredTile.x, this->hoveredTile.y);
+            rc2d_graphics_setColor(kHoverTileColor);
+            rc2d_graphics_drawTileIsometric("line", hoveredCenter.x, hoveredCenter.y, tileWidth, tileHeight);
+        }
+    }
+
+    const RC2D_Color hotspotColor = kHotspotPalette[static_cast<size_t>(this->selectedHotspotColorIndex)];
+    for (const TowerHotspot& hotspot : this->towerHotspots)
+    {
+        if (!map.isInside(hotspot.tileX, hotspot.tileY))
+        {
+            continue;
+        }
+        const SDL_FPoint center = map.tileToScreenCenter(hotspot.tileX, hotspot.tileY);
+        rc2d_graphics_setColor(hotspotColor);
+        rc2d_graphics_drawTileIsometric("fill", center.x, center.y, tileWidth, tileHeight);
+        rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 240});
+        rc2d_graphics_drawTileIsometric("line", center.x, center.y, tileWidth, tileHeight);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            RC2D_Text hotspotText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "H");
+            hotspotText.color = RC2D_Color{255, 255, 255, 250};
+            rc2d_graphics_setTextColor(&hotspotText);
+
+            int textW = 0;
+            int textH = 0;
+            rc2d_graphics_getTextSize(&hotspotText, &textW, &textH);
+            const float textX = center.x - (static_cast<float>(textW) * 0.5f);
+            const float textY = center.y - (static_cast<float>(textH) * 0.5f);
+            rc2d_graphics_drawText(&hotspotText, textX, textY);
+            rc2d_graphics_destroyText(&hotspotText);
+        }
     }
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
@@ -2360,6 +3186,13 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
             importedAsset.widthPx,
             importedAsset.heightPx);
 
+        Uint8 oldAlpha = 255;
+        SDL_GetTextureAlphaMod(importedAsset.image.sdl_texture, &oldAlpha);
+        const Uint8 alpha = this->assetTransparencyEnabled
+            ? static_cast<Uint8>(std::clamp((this->assetOpacityPercent * 255) / 100, 0, 255))
+            : static_cast<Uint8>(255);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, alpha);
+
         rc2d_graphics_drawQuad(
             const_cast<RC2D_Image*>(&importedAsset.image),
             &sourceQuad,
@@ -2372,6 +3205,7 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
             0.0f,
             false,
             false);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, oldAlpha);
     }
 
     if (this->editorTool == EditorTool::PLACE_ASSETS &&
@@ -2437,30 +3271,52 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         *x += w + gap;
     };
 
-    // Ligne 1: actions principales (sans bouton quitter).
+    // Ligne 1: actions principales.
     float x = startX;
     setNextButton(&this->buttonImportRect, &x, row1Y, 160.0f);
+    setNextButton(&this->buttonImportMapRect, &x, row1Y, 150.0f);
     setNextButton(&this->buttonImportShipRect, &x, row1Y, 164.0f);
     setNextButton(&this->buttonExportRect, &x, row1Y, 138.0f);
     setNextButton(&this->buttonUndoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonRedoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonToolBlockRect, &x, row1Y, 100.0f);
+    setNextButton(&this->buttonToolUnblockRect, &x, row1Y, 156.0f);
     setNextButton(&this->buttonToolPlaceRect, &x, row1Y, 100.0f);
     setNextButton(&this->buttonToolRemoveRect, &x, row1Y, 156.0f);
     setNextButton(&this->buttonToolShipRect, &x, row1Y, 135.0f);
     setNextButton(&this->buttonToolShipControlRect, &x, row1Y, 155.0f);
+    setNextButton(&this->buttonToolHotspotRect, &x, row1Y, 122.0f);
     setNextButton(&this->buttonGridRect, &x, row1Y, 74.0f);
     setNextButton(&this->buttonCenterRect, &x, row1Y, 126.0f);
 
-    // Ligne 2: centrage navire, selection d'asset, ocean et zoom.
+    // Ligne 2: centrage navire, selection d'asset, ocean, collisions/opacite/ship scale.
     x = startX;
     setNextButton(&this->buttonCenterShipRect, &x, row2Y, 150.0f);
     setNextButton(&this->buttonAssetPrevRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonAssetNextRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonOceanPrevRect, &x, row2Y, 92.0f);
     setNextButton(&this->buttonOceanNextRect, &x, row2Y, 92.0f);
+    setNextButton(&this->buttonBlockedBrushMinusRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonBlockedBrushPlusRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonBlockedColorPrevRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonBlockedColorNextRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonHotspotColorPrevRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonHotspotColorNextRect, &x, row2Y, 68.0f);
+    setNextButton(&this->buttonAssetOpacityToggleRect, &x, row2Y, 126.0f);
+    setNextButton(&this->buttonAssetOpacityMinusRect, &x, row2Y, 60.0f);
+    setNextButton(&this->buttonAssetOpacityPlusRect, &x, row2Y, 60.0f);
+    setNextButton(&this->buttonShipScaleMinusRect, &x, row2Y, 60.0f);
+    setNextButton(&this->buttonShipScalePlusRect, &x, row2Y, 60.0f);
+    setNextButton(&this->buttonShipReexportRect, &x, row2Y, 136.0f);
     setNextButton(&this->buttonZoomOutRect, &x, row2Y, 64.0f);
     setNextButton(&this->buttonZoomInRect, &x, row2Y, 64.0f);
+
+    this->mapNameInputRect = SDL_FRect{
+        map.rect.x + map.rect.w - 360.0f,
+        map.rect.y - 24.0f,
+        320.0f,
+        20.0f
+    };
 
     // Mini-liste d'assets en bas a droite, dans la zone map.
     this->assetListRect.w = 250.0f;
@@ -3044,6 +3900,22 @@ void EditorMapCreateMapScene::drawMiniMap(void) const
         rc2d_graphics_rectangle("line", &viewRect);
     }
 
+    if (this->testShipLoaded && this->testShipSpawned)
+    {
+        const Map& map = GetCurrentMap();
+        const SDL_FPoint shipTile = this->testShip.getPositionTile();
+        const SDL_FPoint shipSector = map.tileToSectorFloat(shipTile.x, shipTile.y);
+        const float nx = std::clamp((shipSector.x + 0.5f) / static_cast<float>(Map::NUM_SECTORS_X), 0.0f, 1.0f);
+        const float ny = std::clamp((shipSector.y + 0.5f) / static_cast<float>(Map::NUM_SECTORS_Y), 0.0f, 1.0f);
+        SDL_FRect pixelRect{};
+        pixelRect.w = 2.0f;
+        pixelRect.h = 2.0f;
+        pixelRect.x = this->miniMapRect.x + (nx * this->miniMapRect.w) - 1.0f;
+        pixelRect.y = this->miniMapRect.y + (ny * this->miniMapRect.h) - 1.0f;
+        rc2d_graphics_setColor(RC2D_Color{245, 45, 45, 255});
+        rc2d_graphics_rectangle("fill", &pixelRect);
+    }
+
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
@@ -3067,6 +3939,12 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonImportRect))
     {
         this->openImportAssetDialog();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonImportMapRect))
+    {
+        this->openImportMapDialog();
         return true;
     }
 
@@ -3097,7 +3975,16 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonToolBlockRect))
     {
         this->editorTool = EditorTool::BLOCK_TILES;
-        this->statusMessage = "Mode Collision: clic gauche bloque, clic droit debloque.";
+        this->collisionPaintBlocks = true;
+        this->statusMessage = "Mode Collision: clic gauche bloque (brush actif).";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonToolUnblockRect))
+    {
+        this->editorTool = EditorTool::BLOCK_TILES;
+        this->collisionPaintBlocks = false;
+        this->statusMessage = "Mode Suppression collision: clic gauche debloque (brush actif).";
         return true;
     }
 
@@ -3144,6 +4031,13 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         {
             this->statusMessage = "Mode CONTROL NAVIRE: clic gauche deplace (A*), clic droit respawn.";
         }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonToolHotspotRect))
+    {
+        this->editorTool = EditorTool::HOTSPOT_TOWERS;
+        this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue pour toggle.";
         return true;
     }
 
@@ -3196,6 +4090,85 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonOceanNextRect))
     {
         this->requestOceanColorStep(1);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonBlockedBrushMinusRect))
+    {
+        this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
+        this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonBlockedBrushPlusRect))
+    {
+        this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
+        this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonBlockedColorPrevRect))
+    {
+        const int count = static_cast<int>(kBlockedTilePalette.size());
+        this->selectedBlockedColorIndex = (this->selectedBlockedColorIndex - 1 + count) % count;
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonBlockedColorNextRect))
+    {
+        const int count = static_cast<int>(kBlockedTilePalette.size());
+        this->selectedBlockedColorIndex = (this->selectedBlockedColorIndex + 1) % count;
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonHotspotColorPrevRect))
+    {
+        const int count = static_cast<int>(kHotspotPalette.size());
+        this->selectedHotspotColorIndex = (this->selectedHotspotColorIndex - 1 + count) % count;
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonHotspotColorNextRect))
+    {
+        const int count = static_cast<int>(kHotspotPalette.size());
+        this->selectedHotspotColorIndex = (this->selectedHotspotColorIndex + 1) % count;
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonAssetOpacityToggleRect))
+    {
+        this->assetTransparencyEnabled = !this->assetTransparencyEnabled;
+        this->statusMessage = this->assetTransparencyEnabled ? "Opacite assets: ON" : "Opacite assets: OFF";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonAssetOpacityMinusRect))
+    {
+        this->setAssetOpacityPercent(this->assetOpacityPercent - 5);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonAssetOpacityPlusRect))
+    {
+        this->setAssetOpacityPercent(this->assetOpacityPercent + 5);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonShipScaleMinusRect))
+    {
+        this->setShipScalePercent(this->shipScalePercent - 5);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonShipScalePlusRect))
+    {
+        this->setShipScalePercent(this->shipScalePercent + 5);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonShipReexportRect))
+    {
+        this->reexportLoadedShipScaled(this->shipScalePercent);
         return true;
     }
 
@@ -3292,23 +4265,48 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         toolLabel = "Control navire";
     }
+    else if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
+    {
+        toolLabel = "Hotspot tours";
+    }
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
 
     // Barre de boutons cliquables.
     this->drawToolbarButton(this->buttonImportRect, "IMPORTER ASSETS", false);
+    this->drawToolbarButton(this->buttonImportMapRect, "IMPORTER MAP", false);
     this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER NAVIRE", false);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER MAP", false);
     this->drawToolbarButton(this->buttonUndoRect, "Annuler", this->canUndoHistory());
     this->drawToolbarButton(this->buttonRedoRect, "Refaire", this->canRedoHistory());
-    this->drawToolbarButton(this->buttonToolBlockRect, "Collision", this->editorTool == EditorTool::BLOCK_TILES);
+    this->drawToolbarButton(
+        this->buttonToolBlockRect,
+        "Collision",
+        this->editorTool == EditorTool::BLOCK_TILES && this->collisionPaintBlocks);
+    this->drawToolbarButton(
+        this->buttonToolUnblockRect,
+        "Suppr Collision",
+        this->editorTool == EditorTool::BLOCK_TILES && !this->collisionPaintBlocks);
     this->drawToolbarButton(this->buttonToolPlaceRect, "Pose Asset", this->editorTool == EditorTool::PLACE_ASSETS);
     this->drawToolbarButton(this->buttonToolRemoveRect, "Supprimer asset", this->editorTool == EditorTool::REMOVE_ASSETS);
     this->drawToolbarButton(this->buttonToolShipRect, "SPAWN NAVIRE", this->editorTool == EditorTool::SPAWN_SHIP);
     this->drawToolbarButton(this->buttonToolShipControlRect, "CONTROL NAVIRE", this->editorTool == EditorTool::CONTROL_SHIP);
+    this->drawToolbarButton(this->buttonToolHotspotRect, "HOTSPOT TOUR", this->editorTool == EditorTool::HOTSPOT_TOWERS);
     this->drawToolbarButton(this->buttonAssetPrevRect, "Asset precedent", false);
     this->drawToolbarButton(this->buttonAssetNextRect, "Asset suivant", false);
     this->drawToolbarButton(this->buttonOceanPrevRect, "Ocean -", false);
     this->drawToolbarButton(this->buttonOceanNextRect, "Ocean +", false);
+    this->drawToolbarButton(this->buttonBlockedBrushMinusRect, "Block -", false);
+    this->drawToolbarButton(this->buttonBlockedBrushPlusRect, "Block +", false);
+    this->drawToolbarButton(this->buttonBlockedColorPrevRect, "BCol -", false);
+    this->drawToolbarButton(this->buttonBlockedColorNextRect, "BCol +", false);
+    this->drawToolbarButton(this->buttonHotspotColorPrevRect, "HCol -", false);
+    this->drawToolbarButton(this->buttonHotspotColorNextRect, "HCol +", false);
+    this->drawToolbarButton(this->buttonAssetOpacityToggleRect, "Opacity", this->assetTransparencyEnabled);
+    this->drawToolbarButton(this->buttonAssetOpacityMinusRect, "Op -", false);
+    this->drawToolbarButton(this->buttonAssetOpacityPlusRect, "Op +", false);
+    this->drawToolbarButton(this->buttonShipScaleMinusRect, "Ship -", false);
+    this->drawToolbarButton(this->buttonShipScalePlusRect, "Ship +", false);
+    this->drawToolbarButton(this->buttonShipReexportRect, "REEXPORT SHIP", false);
     this->drawToolbarButton(this->buttonGridRect, "Lignes", this->showGrid);
     this->drawToolbarButton(this->buttonCenterRect, "CENTRER MAP", false);
     this->drawToolbarButton(this->buttonCenterShipRect, "CENTRER NAVIRE", this->testShipCameraFollowEnabled);
@@ -3341,9 +4339,10 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Assets importes:%d | Assets poses:%d | Selection:%s",
+        "Assets importes:%d | Assets poses:%d | Hotspots:%d | Selection:%s",
         static_cast<int>(this->importedAssets.size()),
         static_cast<int>(this->placedAssets.size()),
+        static_cast<int>(this->towerHotspots.size()),
         selectedAssetName);
 
     char line3[1024] = {};
@@ -3372,8 +4371,33 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
     // Infos compactes en haut a gauche.
     drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
-    drawLine(line1, gameScreenRect.x + 14.0f, gameScreenRect.y + 19.0f, kHudStatusColor);
-    drawLine(line3, gameScreenRect.x + 14.0f, gameScreenRect.y + 33.0f, kHudTextColor);
+    char line4[512] = {};
+    SDL_snprintf(
+        line4,
+        sizeof(line4),
+        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%%",
+        this->mapNameInput.empty() ? "<vide>" : this->mapNameInput.c_str(),
+        (this->blockedBrushRadiusTiles * 2) + 1,
+        this->assetOpacityPercent,
+        this->assetTransparencyEnabled ? "ON" : "OFF",
+        this->shipScalePercent);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(this->mapNameInputFocused ? RC2D_Color{58, 88, 122, 210} : RC2D_Color{28, 38, 50, 205});
+    rc2d_graphics_rectangle("fill", &this->mapNameInputRect);
+    rc2d_graphics_setColor(RC2D_Color{170, 198, 225, 235});
+    rc2d_graphics_rectangle("line", &this->mapNameInputRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    std::string inputLabel = "Map Name: " + this->mapNameInput;
+    if (this->mapNameInputFocused)
+    {
+        inputLabel += "_";
+    }
+    drawLine(
+        inputLabel.c_str(),
+        this->mapNameInputRect.x + 6.0f,
+        this->mapNameInputRect.y + 2.0f,
+        RC2D_Color{235, 245, 255, 250});
 
     // Coordonnees tuile sous le pointeur en haut-centre.
     char tileHoverText[128] = {};
@@ -3415,8 +4439,17 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     rc2d_graphics_drawText(&tileText, tileTextX, tileTextY);
     rc2d_graphics_destroyText(&tileText);
 
-    // Infos detaillees en bas a gauche, dans la zone map.
-    drawLine(line2, 14.0f, map.rect.y + map.rect.h - 20.0f, kHudTextColor);
+    // Ligne detaillee unique en bas a gauche: assets + status + navire + mapname.
+    char lineBottom[3072] = {};
+    SDL_snprintf(
+        lineBottom,
+        sizeof(lineBottom),
+        "%s | %s | %s | %s",
+        line2,
+        line1,
+        line3,
+        line4);
+    drawLine(lineBottom, 14.0f, map.rect.y + map.rect.h - 20.0f, kHudTextColor);
 
     // Minimap maison en haut a droite.
     this->drawMiniMap();
@@ -3478,6 +4511,30 @@ void EditorMapCreateMapScene::onImportShipFolderDialogResult(void* userdata, con
     scene->pendingShipFolderAbsolute = filelist[0];
 }
 
+void EditorMapCreateMapScene::onImportMapDialogResult(void* userdata, const char* const* filelist, int filter_index)
+{
+    (void)filter_index;
+
+    EditorMapCreateMapScene* scene = static_cast<EditorMapCreateMapScene*>(userdata);
+    if (scene == nullptr || scene != EditorMapCreateMapScene::activeInstance)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(scene->pendingMapImportMutex);
+    scene->pendingMapImportDialogCompleted = true;
+    scene->pendingMapImportAbsolutePath.clear();
+
+    if (filelist == nullptr || filelist[0] == nullptr)
+    {
+        scene->pendingMapImportDialogCanceled = true;
+        return;
+    }
+
+    scene->pendingMapImportDialogCanceled = false;
+    scene->pendingMapImportAbsolutePath = filelist[0];
+}
+
 void EditorMapCreateMapScene::onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index)
 {
     (void)filter_index;
@@ -3494,7 +4551,7 @@ void EditorMapCreateMapScene::onExportMapDialogResult(void* userdata, const char
         return;
     }
 
-    scene->exportMapToAbsolutePath(filelist[0]);
+    scene->exportMapToFolder(filelist[0]);
 }
 
 void EditorMapCreateMapScene::unload(void)
@@ -3517,6 +4574,12 @@ void EditorMapCreateMapScene::unload(void)
         this->pendingShipFolderDialogCompleted = false;
         this->pendingShipFolderDialogCanceled = false;
         this->pendingShipFolderAbsolute.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(this->pendingMapImportMutex);
+        this->pendingMapImportDialogCompleted = false;
+        this->pendingMapImportDialogCanceled = false;
+        this->pendingMapImportAbsolutePath.clear();
     }
     this->unloadImportedAssets();
     rc2d_graphics_closeFont(&this->overlayFont);
@@ -3559,6 +4622,7 @@ void EditorMapCreateMapScene::load(void)
     camera.update(map, map.rect);
 
     this->applySelectedOceanColor();
+    this->setShipScalePercent(this->shipScalePercent);
     this->statusMessage = "Editor map charge.";
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapCreateMapScene: loaded");
@@ -3572,6 +4636,7 @@ void EditorMapCreateMapScene::update(double dt)
     // Traite d'abord les imports differees pour rester hors pass de rendu GPU.
     this->processPendingImportRequests();
     this->processPendingShipFolderRequest();
+    this->processPendingMapImportRequest();
 
     map.update();
     this->updateToolbarLayout();
@@ -3652,6 +4717,12 @@ void EditorMapCreateMapScene::keypressed(
     // Echap desactive dans l'editor pour eviter toute fermeture involontaire.
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
+        this->mapNameInputFocused = false;
+        return;
+    }
+
+    if (this->handleMapNameInputKey(key, scancode, keycode, mod, isrepeat))
+    {
         return;
     }
 
@@ -3682,6 +4753,12 @@ void EditorMapCreateMapScene::keypressed(
     if (scancode == SDL_SCANCODE_F7 && !isrepeat)
     {
         this->openImportShipFolderDialog();
+        return;
+    }
+
+    if (scancode == SDL_SCANCODE_F8 && !isrepeat)
+    {
+        this->openImportMapDialog();
         return;
     }
 
@@ -3780,6 +4857,24 @@ void EditorMapCreateMapScene::keypressed(
         return;
     }
 
+    if (scancode == SDL_SCANCODE_T && !isrepeat)
+    {
+        this->editorTool = EditorTool::HOTSPOT_TOWERS;
+        this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue.";
+        return;
+    }
+
+    if (scancode == SDL_SCANCODE_COMMA && !isrepeat)
+    {
+        this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
+        return;
+    }
+    if (scancode == SDL_SCANCODE_PERIOD && !isrepeat)
+    {
+        this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
+        return;
+    }
+
     if (scancode == SDL_SCANCODE_G && !isrepeat)
     {
         this->showGrid = !this->showGrid;
@@ -3866,6 +4961,7 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     // RC2D convertit deja les events via SDL_ConvertEventToRenderCoordinates.
     const float renderX = x;
     const float renderY = y;
+    this->mapNameInputFocused = this->pointInRect(renderX, renderY, this->mapNameInputRect);
 
     if (button == RC2D_MOUSE_BUTTON_LEFT)
     {
@@ -3904,11 +5000,11 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     {
         if (button == RC2D_MOUSE_BUTTON_LEFT)
         {
-            this->paintTileAtMouse(true);
+            this->paintTileAtMouse(this->collisionPaintBlocks);
         }
         else if (button == RC2D_MOUSE_BUTTON_RIGHT)
         {
-            this->paintTileAtMouse(false);
+            this->paintTileAtMouse(!this->collisionPaintBlocks);
         }
         return;
     }
@@ -3932,6 +5028,22 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         {
             this->removeAssetAtMouseTile();
         }
+    }
+
+    if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
+    {
+        if (button != RC2D_MOUSE_BUTTON_LEFT)
+        {
+            return;
+        }
+        const SDL_Point tile = map.screenToTileNearest(renderX, renderY);
+        if (!map.isInside(tile.x, tile.y))
+        {
+            this->statusMessage = "Hotspot hors map: ignore.";
+            return;
+        }
+        this->toggleTowerHotspotAtTile(tile.x, tile.y);
+        return;
     }
 }
 

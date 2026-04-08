@@ -671,7 +671,9 @@ Ship::Ship(void)
       directionToggle(false),
       moveDirection(MoveDirection::NONE),
       directionA(DiagonalDirection::DOWN_RIGHT),
-      directionB(DiagonalDirection::DOWN_RIGHT)
+      directionB(DiagonalDirection::DOWN_RIGHT),
+      drawScale(1.0f),
+      drawAlpha(255)
 {
     // Anchor par defaut : centre du sprite (0.5, 0.5).
     // Sera surcharge par ship_anchor.json lors du chargement des sprites.
@@ -1042,6 +1044,30 @@ void Ship::setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY)
     this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].y = std::clamp(anchorY, 0.0f, 1.0f);
 }
 
+void Ship::setDrawScale(float scale)
+{
+    if (!std::isfinite(scale) || scale <= 0.0f)
+    {
+        return;
+    }
+    this->drawScale = scale;
+}
+
+float Ship::getDrawScale(void) const
+{
+    return this->drawScale;
+}
+
+void Ship::setDrawAlpha(Uint8 alpha)
+{
+    this->drawAlpha = alpha;
+}
+
+Uint8 Ship::getDrawAlpha(void) const
+{
+    return this->drawAlpha;
+}
+
 // =============================================================================
 // Position / Navigation
 // =============================================================================
@@ -1281,7 +1307,7 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, int spriteIndex, float c
     quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
 
     // Le zoom camera est le seul facteur d'echelle.
-    const float cameraZoom = GetCamera().getZoomFactor();
+    const float cameraZoom = GetCamera().getZoomFactor() * this->drawScale;
 
     // Anchor normalise [0..1] -> position en pixels dans le sprite.
     const SDL_FPoint& anchor = this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)];
@@ -1295,6 +1321,9 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, int spriteIndex, float c
     const float drawX = centerX - (anchorPixelX * cameraZoom);
     const float drawY = centerY - (anchorPixelY * cameraZoom);
 
+    Uint8 previousAlpha = 255;
+    SDL_GetTextureAlphaMod(sprite.sdl_texture, &previousAlpha);
+    SDL_SetTextureAlphaMod(sprite.sdl_texture, this->drawAlpha);
     rc2d_graphics_drawQuad(
         (RC2D_Image*)&sprite,
         &quad,
@@ -1307,6 +1336,7 @@ void Ship::drawSpriteCentered(const RC2D_Image& sprite, int spriteIndex, float c
         -1.0f,
         false,
         false);
+    SDL_SetTextureAlphaMod(sprite.sdl_texture, previousAlpha);
 }
 
 void Ship::draw(const Map& map) const

@@ -45,7 +45,8 @@ private:
         PLACE_ASSETS = 1, /**< Pose/remplacement d'assets. */
         REMOVE_ASSETS = 2, /**< Suppression d'assets poses. */
         SPAWN_SHIP = 3, /**< Spawn/repositionnement du navire de test via preview. */
-        CONTROL_SHIP = 4 /**< Controle du navire de test sur la map. */
+        CONTROL_SHIP = 4, /**< Controle du navire de test sur la map. */
+        HOTSPOT_TOWERS = 5 /**< Selection hotspots de tours via assets poses. */
     };
 
     /**
@@ -78,6 +79,10 @@ private:
         float anchorTileY; /**< Ancre sub-tile en Y pour un pose precis. */
         float scale; /**< Echelle logique de pose. */
     };
+    struct TowerHotspot {
+        int tileX; /**< Tuile hotspot X. */
+        int tileY; /**< Tuile hotspot Y. */
+    };
 
     /**
      * @struct HistoryAction
@@ -90,7 +95,14 @@ private:
          */
         enum class Type {
             TILE_BLOCK = 0, /**< Changement collision d'une tuile. */
-            ASSET_AT_TILE = 1 /**< Changement d'asset pose sur une tuile. */
+            ASSET_AT_TILE = 1, /**< Changement d'asset pose sur une tuile. */
+            TILE_BLOCK_BATCH = 2 /**< Changement collision multi-tuiles (brosse). */
+        };
+        struct TileBlockChange {
+            int tileX;
+            int tileY;
+            bool beforeBlocked;
+            bool afterBlocked;
         };
 
         Type type; /**< Type de l'action. */
@@ -102,6 +114,7 @@ private:
         bool hadAfterAsset; /**< Presence asset apres action. */
         PlacedAsset beforeAsset; /**< Donnee asset avant action. */
         PlacedAsset afterAsset; /**< Donnee asset apres action. */
+        std::vector<TileBlockChange> tileBlockBatch; /**< Liste des changements collision d'une brosse. */
     };
 
     RC2D_Image backgroundUiImage; /**< Fond UI (haut/bas) de la scene. */
@@ -115,6 +128,15 @@ private:
     int selectedAssetIndex; /**< Index asset actuellement selectionne. */
     int assetListScrollOffset; /**< Offset de scroll de la liste assets. */
     bool showGrid; /**< Affichage grille isometrique ON/OFF. */
+    bool collisionPaintBlocks; /**< true=mode peinture collision, false=mode suppression collision. */
+    std::string mapNameInput; /**< Nom map saisi dans l'input. */
+    bool mapNameInputFocused; /**< true si l'input nom map a le focus clavier. */
+    int blockedBrushRadiusTiles; /**< Rayon de paint collision (0 = 1 tuile). */
+    bool assetTransparencyEnabled; /**< true si l'opacite globale assets est active. */
+    int assetOpacityPercent; /**< Opacite globale assets en pourcentage [10..100]. */
+    int selectedBlockedColorIndex; /**< Index couleur des tuiles bloquees. */
+    int selectedHotspotColorIndex; /**< Index couleur des hotspots tours. */
+    int shipScalePercent; /**< Echelle navire test en % [10..100]. */
 
     bool hoveredTileValid; /**< true si la souris survole une tuile map. */
     SDL_Point hoveredTile; /**< Tuile actuellement survolee. */
@@ -125,6 +147,7 @@ private:
 
     std::vector<ImportedAsset> importedAssets; /**< Bibliotheque assets importes. */
     std::vector<PlacedAsset> placedAssets; /**< Assets poses sur la map. */
+    std::vector<TowerHotspot> towerHotspots; /**< Hotspots tours poses sur la map. */
     std::vector<HistoryAction> historyActions; /**< Pile d'historique undo/redo. */
     int historyCursor; /**< Curseur courant dans l'historique. */
     unsigned int importedAssetCounter; /**< Compteur auto pour ID d'import. */
@@ -151,17 +174,24 @@ private:
     bool pendingShipFolderDialogCanceled; /**< true si l'utilisateur a annule l'import dossier navire. */
     std::string pendingShipFolderAbsolute; /**< Chemin absolu dossier navire en attente de traitement scene. */
     mutable std::mutex pendingShipFolderMutex; /**< Mutex callback dossier navire -> thread scene. */
+    bool pendingMapImportDialogCompleted; /**< true si callback import map a publie un resultat. */
+    bool pendingMapImportDialogCanceled; /**< true si import map annule. */
+    std::string pendingMapImportAbsolutePath; /**< Chemin map JSON a importer. */
+    mutable std::mutex pendingMapImportMutex; /**< Mutex callback import map -> thread scene. */
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
+    SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
     SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRE". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
     SDL_FRect buttonUndoRect; /**< Bouton "Annuler". */
     SDL_FRect buttonRedoRect; /**< Bouton "Refaire". */
     SDL_FRect buttonToolBlockRect; /**< Bouton outil collision. */
+    SDL_FRect buttonToolUnblockRect; /**< Bouton outil suppression collision. */
     SDL_FRect buttonToolPlaceRect; /**< Bouton outil pose asset. */
     SDL_FRect buttonToolRemoveRect; /**< Bouton outil suppression asset. */
     SDL_FRect buttonToolShipRect; /**< Bouton outil spawn navire. */
     SDL_FRect buttonToolShipControlRect; /**< Bouton outil controle navire. */
+    SDL_FRect buttonToolHotspotRect; /**< Bouton outil hotspots tours. */
     SDL_FRect buttonAssetPrevRect; /**< Bouton asset precedent. */
     SDL_FRect buttonAssetNextRect; /**< Bouton asset suivant. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
@@ -171,6 +201,19 @@ private:
     SDL_FRect buttonCenterShipRect; /**< Bouton recentrage/suivi navire test. */
     SDL_FRect buttonZoomOutRect; /**< Bouton zoom -. */
     SDL_FRect buttonZoomInRect; /**< Bouton zoom +. */
+    SDL_FRect buttonBlockedBrushMinusRect; /**< Bouton radius blocked -. */
+    SDL_FRect buttonBlockedBrushPlusRect; /**< Bouton radius blocked +. */
+    SDL_FRect buttonBlockedColorPrevRect; /**< Bouton couleur blocked -. */
+    SDL_FRect buttonBlockedColorNextRect; /**< Bouton couleur blocked +. */
+    SDL_FRect buttonHotspotColorPrevRect; /**< Bouton couleur hotspot -. */
+    SDL_FRect buttonHotspotColorNextRect; /**< Bouton couleur hotspot +. */
+    SDL_FRect buttonAssetOpacityToggleRect; /**< Bouton toggle opacite globale assets. */
+    SDL_FRect buttonAssetOpacityMinusRect; /**< Bouton opacite assets -. */
+    SDL_FRect buttonAssetOpacityPlusRect; /**< Bouton opacite assets +. */
+    SDL_FRect buttonShipScaleMinusRect; /**< Bouton scale navire -. */
+    SDL_FRect buttonShipScalePlusRect; /**< Bouton scale navire +. */
+    SDL_FRect buttonShipReexportRect; /**< Bouton reexport navire scale. */
+    SDL_FRect mapNameInputRect; /**< Champ de saisie nom map. */
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
     SDL_FRect miniMapRect; /**< Minimap editeur (haut droite). */
     bool miniMapDragActive; /**< true si drag minimap en cours. */
@@ -226,6 +269,8 @@ private:
      *  @return true si une modification a ete faite.
      */
     bool setTileBlockedWithHistory(int tileX, int tileY, bool blocked);
+    /** @brief Applique la brosse collision avec historique batch. */
+    bool applyTileBrushWithHistory(int centerTileX, int centerTileY, bool blocked);
     /** @brief Peint la collision sous la souris.
      *  @param blocked true=block, false=unblock.
      */
@@ -276,6 +321,11 @@ private:
      *  @return true si export ok.
      */
     bool exportMapToAbsolutePath(const char* absolutePath);
+    /** @brief Exporte la map vers un dossier en generant map.json + minimap.png.
+     *  @param absoluteFolderPath Dossier cible.
+     *  @return true si export ok.
+     */
+    bool exportMapToFolder(const char* absoluteFolderPath);
     /** @brief Exporte une image PNG de la minimap a partir de l'etat courant.
      *  @param jsonAbsolutePath Chemin JSON exporte (utilise pour deduire le nom PNG).
      *  @param outPngAbsolutePath [out] Recoit le chemin PNG genere si non nul.
@@ -289,10 +339,36 @@ private:
     bool renderStyledMiniMapToSurface(SDL_Surface* targetSurface) const;
     /** @brief Ouvre le dialogue d'import assets. */
     void openImportAssetDialog(void);
+    /** @brief Ouvre le dialogue d'import map.json. */
+    void openImportMapDialog(void);
     /** @brief Ouvre le dialogue d'import d'un dossier navire (1.png..8.png). */
     void openImportShipFolderDialog(void);
-    /** @brief Ouvre le dialogue d'export map. */
+    /** @brief Ouvre le dialogue d'export map (selection dossier). */
     void openExportMapDialog(void);
+    /** @brief Traite l'import map publie par callback async. */
+    void processPendingMapImportRequest(void);
+    /** @brief Importe une map depuis un JSON absolu. */
+    bool importMapFromAbsolutePath(const char* absolutePath);
+    /** @brief Importe (ou reutilise) un asset depuis un path runtime JSON. */
+    int importAssetFromRuntimeStoragePath(const std::string& runtimePath);
+    /** @brief Retourne true si un asset est considere comme une tour. */
+    bool isTowerAssetName(const std::string& displayName) const;
+    /** @brief Trouve l'asset pose le plus proche sous un point ecran. */
+    int findPlacedAssetIndexAtScreenPoint(float x, float y) const;
+    /** @brief Calcule la tuile centre d'un asset pose. */
+    SDL_Point computePlacedAssetCenterTile(const PlacedAsset& asset) const;
+    /** @brief Toggle un hotspot tour. */
+    void toggleTowerHotspotAtTile(int tileX, int tileY);
+    /** @brief Ajuste l'opacite globale assets en %. */
+    void setAssetOpacityPercent(int value);
+    /** @brief Ajuste l'echelle navire test en %. */
+    void setShipScalePercent(int value);
+    /** @brief Reexporte les 8 sprites navire avec scale. */
+    bool reexportLoadedShipScaled(int scalePercent);
+    /** @brief Gère la saisie clavier nom map.
+     *  @return true si la touche est consommee.
+     */
+    bool handleMapNameInputKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
     /** @brief Traite l'import dossier navire publie par callback async. */
     void processPendingShipFolderRequest(void);
     /** @brief Charge un navire test depuis un dossier absolu.
@@ -371,9 +447,11 @@ private:
 
     /** @brief Callback async de resultat import fichier. */
     static void onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index);
+    /** @brief Callback async de resultat import map JSON. */
+    static void onImportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
     /** @brief Callback async de resultat import dossier navire. */
     static void onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
-    /** @brief Callback async de resultat export fichier. */
+    /** @brief Callback async de resultat export dossier. */
     static void onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
 
 public:

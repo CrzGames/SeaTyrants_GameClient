@@ -84,6 +84,8 @@ private:
 
     DiagonalDirection directionA; /**< Direction visuelle principale. */
     DiagonalDirection directionB; /**< Direction visuelle secondaire. */
+    float drawScale; /**< Multiplicateur d'echelle visuelle au rendu (1.0 = taille native). */
+    Uint8 drawAlpha; /**< Alpha global applique au rendu du navire (255 = opaque). */
 
     // ---- Helpers direction / sprite ----
 
@@ -229,6 +231,24 @@ public:
      * @param anchorY Anchor Y normalise [0..1].
      */
     void setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY);
+    /**
+     * @brief Definit l'echelle visuelle globale du navire.
+     * @param scale Echelle multiplicative (>0).
+     */
+    void setDrawScale(float scale);
+    /**
+     * @brief Retourne l'echelle visuelle globale du navire.
+     */
+    float getDrawScale(void) const;
+    /**
+     * @brief Definit l'alpha global du navire.
+     * @param alpha Valeur [0..255].
+     */
+    void setDrawAlpha(Uint8 alpha);
+    /**
+     * @brief Retourne l'alpha global du navire.
+     */
+    Uint8 getDrawAlpha(void) const;
 
     // ---- Position / Navigation ----
 
