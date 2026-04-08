@@ -66,6 +66,14 @@ private:
         int alphaMaskHeight; /**< Hauteur du masque alpha source. */
         std::vector<Uint8> alphaMask; /**< Masque alpha linearise [0..255]. */
     };
+    /**
+     * @struct ImportedShip
+     * @brief Donnees d'un navire importable depuis un dossier atlas.
+     */
+    struct ImportedShip {
+        std::string displayName; /**< Nom affiche dans la liste navires. */
+        std::string folderAbsolutePath; /**< Chemin absolu vers le dossier contenant 1.png..8.png. */
+    };
 
     /**
      * @struct PlacedAsset
@@ -126,7 +134,9 @@ private:
     int selectedOceanColorIndex; /**< Index couleur ocean active. */
     int pendingOceanColorDelta; /**< Delta ocean en attente d'application. */
     int selectedAssetIndex; /**< Index asset actuellement selectionne. */
+    int selectedShipIndex; /**< Index navire actuellement selectionne. */
     int assetListScrollOffset; /**< Offset de scroll de la liste assets. */
+    int shipListScrollOffset; /**< Offset de scroll de la liste navires. */
     bool showGrid; /**< Affichage grille isometrique ON/OFF. */
     bool showBlockedTiles; /**< Affichage visuel des tuiles bloquees ON/OFF. */
     bool collisionPaintBlocks; /**< true=mode peinture collision, false=mode suppression collision. */
@@ -147,6 +157,7 @@ private:
     SDL_Point lastDragPaintTile; /**< Derniere tuile peinte en drag. */
 
     std::vector<ImportedAsset> importedAssets; /**< Bibliotheque assets importes. */
+    std::vector<ImportedShip> importedShips; /**< Bibliotheque navires importes depuis dossiers. */
     std::vector<PlacedAsset> placedAssets; /**< Assets poses sur la map. */
     std::vector<TowerHotspot> towerHotspots; /**< Hotspots tours poses sur la map. */
     std::vector<HistoryAction> historyActions; /**< Pile d'historique undo/redo. */
@@ -164,6 +175,8 @@ private:
     int importBatchFailedCount; /**< Nombre de fichiers en echec dans le batch courant. */
     bool assetListScrollDragActive; /**< true si le drag de la scrollbar assets est actif. */
     float assetListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour un drag precis. */
+    bool shipListScrollDragActive; /**< true si le drag de la scrollbar navires est actif. */
+    float shipListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour drag liste navires. */
     TileClickMarker clickMarker; /**< Marqueur visuel de clic en mode controle navire. */
     Ship testShip; /**< Navire de test pour validation collisions + A*. */
     Ship testShipPreview; /**< Navire de preview sous la souris en mode spawn. */
@@ -182,7 +195,7 @@ private:
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
     SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
-    SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRE". */
+    SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRES". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
     SDL_FRect buttonUndoRect; /**< Bouton "Annuler". */
     SDL_FRect buttonRedoRect; /**< Bouton "Refaire". */
@@ -217,6 +230,7 @@ private:
     SDL_FRect buttonShipReexportRect; /**< Bouton reexport navire scale. */
     SDL_FRect mapNameInputRect; /**< Champ de saisie nom map. */
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
+    SDL_FRect shipListRect; /**< Panneau liste navires (meme format que assets). */
     SDL_FRect miniMapRect; /**< Minimap editeur (haut droite). */
     bool miniMapDragActive; /**< true si drag minimap en cours. */
     float miniMapDragOffsetX; /**< Offset drag minimap en X. */
@@ -343,8 +357,10 @@ private:
     void openImportAssetDialog(void);
     /** @brief Ouvre le dialogue d'import map.json. */
     void openImportMapDialog(void);
-    /** @brief Ouvre le dialogue d'import d'un dossier navire (1.png..8.png). */
+    /** @brief Ouvre le dialogue d'import d'un dossier racine navires (scan recursif). */
     void openImportShipFolderDialog(void);
+    /** @brief Importe recursivement des dossiers navires depuis un dossier racine. */
+    bool importShipsFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);
     /** @brief Ouvre le dialogue d'export map (selection dossier). */
     void openExportMapDialog(void);
     /** @brief Traite l'import map publie par callback async. */
@@ -378,6 +394,8 @@ private:
      *  @return true si navire charge.
      */
     bool loadShipFolderFromAbsolutePath(const char* folderAbsolutePath);
+    /** @brief Selectionne un navire importe et le charge en navire test. */
+    bool selectImportedShipAtIndex(int shipIndex);
     /** @brief Place le navire test sur une tuile.
      *  @param tileX Tuile X.
      *  @param tileY Tuile Y.
@@ -408,20 +426,36 @@ private:
     void drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const;
     /** @brief Renvoie le max de scroll de liste assets. */
     int getAssetListMaxScrollOffset(void) const;
+    /** @brief Renvoie le max de scroll de liste navires. */
+    int getShipListMaxScrollOffset(void) const;
     /** @brief Clamp l'offset de scroll assets dans ses bornes. */
     void clampAssetListScrollOffset(void);
+    /** @brief Clamp l'offset de scroll navires dans ses bornes. */
+    void clampShipListScrollOffset(void);
     /** @brief Garantit que l'asset selectionne est visible dans la liste. */
     void ensureSelectedAssetVisible(void);
+    /** @brief Garantit que le navire selectionne est visible dans la liste. */
+    void ensureSelectedShipVisible(void);
     /** @brief Calcule l'index de debut rendu de la liste assets. */
     int computeAssetListStartIndex(void) const;
+    /** @brief Calcule l'index de debut rendu de la liste navires. */
+    int computeShipListStartIndex(void) const;
     /** @brief Gere un clic dans le panneau liste assets.
      *  @return true si le clic est consomme.
      */
     bool handleAssetListClick(float x, float y);
+    /** @brief Gere un clic dans le panneau liste navires.
+     *  @return true si le clic est consomme.
+     */
+    bool handleShipListClick(float x, float y);
     /** @brief Gere le drag continu de la scrollbar liste assets. */
     void handleAssetListScrollDragFromMouse(void);
+    /** @brief Gere le drag continu de la scrollbar liste navires. */
+    void handleShipListScrollDragFromMouse(void);
     /** @brief Dessine le panneau liste assets. */
     void drawAssetListPanel(void) const;
+    /** @brief Dessine le panneau liste navires. */
+    void drawShipListPanel(void) const;
     /** @brief Construit le rect de vue courante pour la minimap.
      *  @return true si le rect est valide.
      */

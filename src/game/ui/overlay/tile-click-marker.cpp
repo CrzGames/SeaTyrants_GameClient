@@ -71,16 +71,27 @@ void TileClickMarker::draw(const Map& map) const
     const float markerW = map.getTileWidth() * pulse;
     const float markerH = map.getTileHeight() * pulse;
 
+    // Couleur dynamique:
+    // - blanc/bleute: tuile valide et traversable
+    // - rouge: tuile bloquee ou hors map
+    const bool isBlockedOrOutside = map.isTileBlocked(this->tile.x, this->tile.y);
+    const RC2D_Color currentFillColor = isBlockedOrOutside
+        ? RC2D_Color{255, 72, 72, 92}
+        : this->fillColor;
+    const RC2D_Color currentLineColor = isBlockedOrOutside
+        ? RC2D_Color{255, 85, 85, 245}
+        : this->lineColor;
+
     // Le marqueur utilise un fill alpha: on force BLEND localement pour
     // eviter un rendu opaque/blanchi si l'etat courant est en NONE.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
 
     // Pass 1: remplissage translucide.
-    rc2d_graphics_setColor(this->fillColor);
+    rc2d_graphics_setColor(currentFillColor);
     rc2d_graphics_drawTileIsometric("fill", center.x, center.y, markerW, markerH);
 
     // Pass 2: contour lisible.
-    rc2d_graphics_setColor(this->lineColor);
+    rc2d_graphics_setColor(currentLineColor);
     rc2d_graphics_drawTileIsometric("line", center.x, center.y, markerW, markerH);
 
     // Restaure un etat neutre pour ne pas impacter les autres draws.

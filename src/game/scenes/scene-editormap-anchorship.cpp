@@ -34,6 +34,7 @@ constexpr int kPreviewClickDistanceTiles = 4;
 constexpr double kPreviewPauseAfterArrivalSec = 0.55;
 constexpr float kSpritePreviewZoomMin = 0.25f;
 constexpr float kSpritePreviewZoomMax = 8.0f;
+constexpr Uint8 kAnchorPlacementSpriteAlpha = 51; // 20% pour voir la tile dessous.
 
 constexpr std::array<RC2D_FileDialogFilter, 1> kFolderFilters = {{
     {"Dossier navire", "*"},
@@ -1221,9 +1222,12 @@ bool EditorMapAnchorShipScene::tryBuildCurrentSpriteDrawRect(
     anchor.x = std::clamp(anchor.x, 0.0f, 1.0f);
     anchor.y = std::clamp(anchor.y, 0.0f, 1.0f);
 
+    // Important: utiliser la meme formule que Ship::drawSpriteCentered().
+    // Ainsi, le repere de tuile et l'anchor preview correspondent exactement
+    // au rendu runtime du navire.
     SDL_FRect drawRect{};
-    drawRect.x = spriteCenterScreen.x - ((frame.widthPx * scale) * 0.5f);
-    drawRect.y = spriteCenterScreen.y - ((frame.heightPx * scale) * 0.5f);
+    drawRect.x = spriteCenterScreen.x - ((frame.widthPx * anchor.x) * scale);
+    drawRect.y = spriteCenterScreen.y - ((frame.heightPx * anchor.y) * scale);
     drawRect.w = frame.widthPx * scale;
     drawRect.h = frame.heightPx * scale;
 
@@ -1268,16 +1272,26 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
             static_cast<float>(centerTile.y));
     }
 
-    auto drawTileAnchorCrosshair = [&map](const SDL_FPoint& center) {
+    auto drawTileAnchorMarker = [&map](const SDL_FPoint& center, bool drawCrosshair, float zoomScale) {
+        const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+        const float pulse01 = 0.5f + (0.5f * std::sin(timeSeconds * 6.0f));
+
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        const Uint8 fillAlpha = static_cast<Uint8>(std::clamp(35.0f + (pulse01 * 80.0f), 0.0f, 255.0f));
+        rc2d_graphics_setColor(RC2D_Color{90, 230, 255, fillAlpha});
+
+        const float zoom = (std::max)(zoomScale, 0.01f);
+        const float arm = (std::max)(map.getTileHeight() * 0.30f * zoom, 2.0f);
+        const float markerW = (std::max)(map.getTileWidth() * 0.28f * zoom, 2.0f);
+        const float markerH = (std::max)(map.getTileHeight() * 0.28f * zoom, 2.0f);
+        rc2d_graphics_drawTileIsometric("fill", center.x, center.y, markerW, markerH);
+
         rc2d_graphics_setColor(RC2D_Color{90, 230, 255, 245});
-
-        const float arm = std::clamp(map.getTileHeight() * 0.30f, 10.0f, 24.0f);
-        rc2d_graphics_line(center.x - arm, center.y, center.x + arm, center.y);
-        rc2d_graphics_line(center.x, center.y - arm, center.x, center.y + arm);
-
-        const float markerW = std::clamp(map.getTileWidth() * 0.28f, 14.0f, 34.0f);
-        const float markerH = std::clamp(map.getTileHeight() * 0.28f, 8.0f, 18.0f);
+        if (drawCrosshair)
+        {
+            rc2d_graphics_line(center.x - arm, center.y, center.x + arm, center.y);
+            rc2d_graphics_line(center.x, center.y - arm, center.x, center.y + arm);
+        }
         rc2d_graphics_drawTileIsometric("line", center.x, center.y, markerW, markerH);
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
     };
@@ -1287,10 +1301,7 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         // Pendant le check, on dessine le vrai Ship pour avoir le meme rendu
         // de deplacement que le player (directions/sprites alternes).
         this->movementPreviewShip.draw(GetCurrentMap());
-        if (this->showAnchorGuides)
-        {
-            drawTileAnchorCrosshair(tileAnchorCenterScreen);
-        }
+        drawTileAnchorMarker(tileAnchorCenterScreen, this->showAnchorGuides, 1.0f);
         return;
     }
 
@@ -1310,6 +1321,10 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         0.0f,
         frame.widthPx,
         frame.heightPx);
+
+    Uint8 previousAlpha = 255;
+    SDL_GetTextureAlphaMod(frame.image.sdl_texture, &previousAlpha);
+    SDL_SetTextureAlphaMod(frame.image.sdl_texture, kAnchorPlacementSpriteAlpha);
     rc2d_graphics_drawQuad(
         const_cast<RC2D_Image*>(&frame.image),
         &sourceQuad,
@@ -1322,6 +1337,11 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         -1.0f,
         false,
         false);
+    SDL_SetTextureAlphaMod(frame.image.sdl_texture, previousAlpha);
+
+    // La tuile d'ancrage clignotante reste toujours visible pour faciliter
+    // le placement precis, meme quand les autres guides sont masques.
+    drawTileAnchorMarker(tileAnchorCenterScreen, this->showAnchorGuides, scale);
 
     if (this->showAnchorGuides)
     {
@@ -1332,11 +1352,16 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         rc2d_graphics_rectangle("line", &guideRect);
 
         rc2d_graphics_setColor(RC2D_Color{255, 90, 90, 245});
-        rc2d_graphics_line(anchorScreenX - 9.0f, anchorScreenY, anchorScreenX + 9.0f, anchorScreenY);
-        rc2d_graphics_line(anchorScreenX, anchorScreenY - 9.0f, anchorScreenX, anchorScreenY + 9.0f);
-        SDL_FRect anchorDot = SDL_FRect{anchorScreenX - 2.0f, anchorScreenY - 2.0f, 4.0f, 4.0f};
+        const float anchorArm = (std::max)(9.0f * scale, 2.0f);
+        const float anchorDotSize = (std::max)(4.0f * scale, 2.0f);
+        rc2d_graphics_line(anchorScreenX - anchorArm, anchorScreenY, anchorScreenX + anchorArm, anchorScreenY);
+        rc2d_graphics_line(anchorScreenX, anchorScreenY - anchorArm, anchorScreenX, anchorScreenY + anchorArm);
+        SDL_FRect anchorDot = SDL_FRect{
+            anchorScreenX - (anchorDotSize * 0.5f),
+            anchorScreenY - (anchorDotSize * 0.5f),
+            anchorDotSize,
+            anchorDotSize};
         rc2d_graphics_rectangle("fill", &anchorDot);
-        drawTileAnchorCrosshair(tileAnchorCenterScreen);
 
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
     }
@@ -1404,7 +1429,7 @@ void EditorMapAnchorShipScene::drawHud(void) const
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Sprite %d/8 | Anchor=(%.4f, %.4f) | Ocean=%s | Guides=%s | Zoom=%.2fx | Fleches=anchor fine | Clique sur le navire pour placer l'ancre",
+        "Sprite %d/8 | Anchor=(%.4f, %.4f) | Ocean=%s | Guides=%s | Zoom=%.2fx | Fleches=decalage texture | Clique=point d'ancre",
         this->selectedSpriteIndex + 1,
         anchor.x,
         anchor.y,
@@ -1818,8 +1843,8 @@ void EditorMapAnchorShipScene::keypressed(
         return;
     }
 
-    // Reglage fin de l'ancre au clavier:
-    // - fleches: deplacement anchor
+    // Reglage fin au clavier:
+    // - fleches: deplacement de la texture autour du point d'ancre (centre tuile)
     // - SHIFT: pas plus large
     // - CTRL: pas ultra-fin
     float anchorStep = 0.001f;
@@ -1838,22 +1863,26 @@ void EditorMapAnchorShipScene::keypressed(
 
     if (scancode == SDL_SCANCODE_LEFT)
     {
-        nx -= anchorStep;
+        // Texture vers la gauche -> anchor vers la droite ecran (x normalise augmente).
+        nx += anchorStep;
         movedAnchor = true;
     }
     else if (scancode == SDL_SCANCODE_RIGHT)
     {
-        nx += anchorStep;
+        // Texture vers la droite -> anchor vers la gauche ecran (x normalise diminue).
+        nx -= anchorStep;
         movedAnchor = true;
     }
     else if (scancode == SDL_SCANCODE_UP)
     {
-        ny -= anchorStep;
+        // Texture vers le haut -> anchor vers le bas ecran (y normalise augmente).
+        ny += anchorStep;
         movedAnchor = true;
     }
     else if (scancode == SDL_SCANCODE_DOWN)
     {
-        ny += anchorStep;
+        // Texture vers le bas -> anchor vers le haut ecran (y normalise diminue).
+        ny -= anchorStep;
         movedAnchor = true;
     }
 
@@ -1868,7 +1897,7 @@ void EditorMapAnchorShipScene::keypressed(
         SDL_snprintf(
             status,
             sizeof(status),
-            "Anchor sprite %d au clavier: (%.5f, %.5f) | pas=%.5f",
+            "Decalage texture sprite %d (anchor runtime: %.5f, %.5f) | pas=%.5f",
             this->selectedSpriteIndex + 1,
             nx,
             ny,

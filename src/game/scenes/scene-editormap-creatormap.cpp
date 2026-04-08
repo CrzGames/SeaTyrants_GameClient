@@ -223,7 +223,9 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       selectedOceanColorIndex(24),
       pendingOceanColorDelta(0),
       selectedAssetIndex(-1),
+      selectedShipIndex(-1),
       assetListScrollOffset(0),
+      shipListScrollOffset(0),
       showGrid(true),
       showBlockedTiles(true),
       collisionPaintBlocks(true),
@@ -242,6 +244,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       lastDragPaintTileValid(false),
       lastDragPaintTile{},
       importedAssets{},
+      importedShips{},
       placedAssets{},
       towerHotspots{},
       historyActions{},
@@ -259,6 +262,8 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       importBatchFailedCount(0),
       assetListScrollDragActive(false),
       assetListScrollDragGrabOffsetY(0.0f),
+      shipListScrollDragActive(false),
+      shipListScrollDragGrabOffsetY(0.0f),
       clickMarker{},
       testShip{},
       testShipPreview{},
@@ -311,6 +316,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonShipReexportRect{},
       mapNameInputRect{},
       assetListRect{},
+      shipListRect{},
       miniMapRect{},
       miniMapDragActive(false),
       miniMapDragOffsetX(0.0f),
@@ -329,7 +335,9 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedOceanColorIndex = 24;
     this->pendingOceanColorDelta = 0;
     this->selectedAssetIndex = -1;
+    this->selectedShipIndex = -1;
     this->assetListScrollOffset = 0;
+    this->shipListScrollOffset = 0;
     this->showGrid = true;
     this->showBlockedTiles = true;
     this->collisionPaintBlocks = true;
@@ -348,6 +356,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->historyActions.clear();
     this->historyCursor = 0;
     this->towerHotspots.clear();
+    this->importedShips.clear();
     this->importedAssetCounter = 0U;
     this->statusMessage = "Editor map pret.";
     this->pendingImportDialogCompleted = false;
@@ -363,6 +372,8 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->importBatchFailedCount = 0;
     this->assetListScrollDragActive = false;
     this->assetListScrollDragGrabOffsetY = 0.0f;
+    this->shipListScrollDragActive = false;
+    this->shipListScrollDragGrabOffsetY = 0.0f;
     this->clickMarker.hide();
     this->clickMarker.setDurationSeconds(0.85);
     this->testShip.unloadSprites();
@@ -370,6 +381,11 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->testShipLoaded = false;
     this->testShipSpawned = false;
     this->testShipCameraFollowEnabled = false;
+    this->importedShips.clear();
+    this->selectedShipIndex = -1;
+    this->shipListScrollOffset = 0;
+    this->shipListScrollDragActive = false;
+    this->shipListScrollDragGrabOffsetY = 0.0f;
     this->loadedShipFolderAbsolute.clear();
     this->pendingShipFolderDialogCompleted = false;
     this->pendingShipFolderDialogCanceled = false;
@@ -420,6 +436,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonShipReexportRect = SDL_FRect{};
     this->mapNameInputRect = SDL_FRect{};
     this->assetListRect = SDL_FRect{};
+    this->shipListRect = SDL_FRect{};
     this->miniMapRect = SDL_FRect{};
     this->miniMapDragActive = false;
     this->miniMapDragOffsetX = 0.0f;
@@ -916,6 +933,14 @@ void EditorMapCreateMapScene::handleTilePaintFromMouseDrag(void)
 
     // Pendant le drag de la scrollbar assets, on bloque aussi le paint collision.
     if (this->assetListScrollDragActive)
+    {
+        this->dragPaintActive = false;
+        this->lastDragPaintTileValid = false;
+        return;
+    }
+
+    // Pendant le drag de la scrollbar navires, on bloque aussi le paint collision.
+    if (this->shipListScrollDragActive)
     {
         this->dragPaintActive = false;
         this->lastDragPaintTileValid = false;
@@ -2250,7 +2275,7 @@ void EditorMapCreateMapScene::openImportShipFolderDialog(void)
     options.num_filters = static_cast<int>(std::size(kShipFolderFilters));
     options.default_location = nullptr;
     options.allow_many = false;
-    options.title = "Selectionner le dossier navire (1.png..8.png)";
+    options.title = "Selectionner le dossier racine des navires (scan recursif)";
     options.accept_label = "Ouvrir";
     options.cancel_label = "Annuler";
     rc2d_filedialog_openFolder(&EditorMapCreateMapScene::onImportShipFolderDialogResult, this, &options);
@@ -2280,11 +2305,177 @@ void EditorMapCreateMapScene::processPendingShipFolderRequest(void)
 
     if (isCanceled || selectedFolder.empty())
     {
-        this->statusMessage = "Import dossier navire annule.";
+        this->statusMessage = "Import navires annule.";
         return;
     }
 
-    this->loadShipFolderFromAbsolutePath(selectedFolder.c_str());
+    this->importShipsFromRootFolderAbsolutePath(selectedFolder.c_str());
+}
+
+bool EditorMapCreateMapScene::importShipsFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath)
+{
+    if (rootFolderAbsolutePath == nullptr || rootFolderAbsolutePath[0] == '\0')
+    {
+        this->statusMessage = "Dossier navires invalide.";
+        return false;
+    }
+
+    std::filesystem::path rootPath(rootFolderAbsolutePath);
+    std::error_code fsError;
+    if (!std::filesystem::exists(rootPath, fsError) ||
+        !std::filesystem::is_directory(rootPath, fsError))
+    {
+        this->statusMessage = "Dossier navires introuvable.";
+        return false;
+    }
+
+    auto isShipAtlasFolder = [](const std::filesystem::path& folderPath) -> bool {
+        std::error_code localError;
+        if (!std::filesystem::exists(folderPath, localError) ||
+            !std::filesystem::is_directory(folderPath, localError))
+        {
+            return false;
+        }
+
+        for (int i = 1; i <= kShipSpriteCount; ++i)
+        {
+            const std::filesystem::path pngPath = folderPath / (std::to_string(i) + ".png");
+            if (!std::filesystem::exists(pngPath, localError) ||
+                !std::filesystem::is_regular_file(pngPath, localError))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    std::vector<std::filesystem::path> discoveredFolders;
+    if (isShipAtlasFolder(rootPath))
+    {
+        discoveredFolders.push_back(rootPath);
+    }
+
+    std::filesystem::recursive_directory_iterator it(
+        rootPath,
+        std::filesystem::directory_options::skip_permission_denied,
+        fsError);
+    if (!fsError)
+    {
+        std::filesystem::recursive_directory_iterator end;
+        while (it != end)
+        {
+            std::error_code entryError;
+            if (it->is_directory(entryError) && !entryError)
+            {
+                const std::filesystem::path folderPath = it->path();
+                if (isShipAtlasFolder(folderPath))
+                {
+                    discoveredFolders.push_back(folderPath);
+                }
+            }
+
+            it.increment(fsError);
+            if (fsError)
+            {
+                fsError.clear();
+            }
+        }
+    }
+
+    if (discoveredFolders.empty())
+    {
+        this->statusMessage = "Aucun dossier navire valide trouve (1.png..8.png).";
+        return false;
+    }
+
+    std::sort(
+        discoveredFolders.begin(),
+        discoveredFolders.end(),
+        [](const std::filesystem::path& a, const std::filesystem::path& b) {
+            return normalizePathSlashes(a.string()) < normalizePathSlashes(b.string());
+        });
+
+    auto makePathKey = [](const std::string& absolutePath) -> std::string {
+        std::string key = normalizePathSlashes(absolutePath);
+        std::transform(
+            key.begin(),
+            key.end(),
+            key.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return key;
+    };
+
+    std::vector<std::string> knownPathKeys;
+    knownPathKeys.reserve(this->importedShips.size() + discoveredFolders.size());
+    for (const ImportedShip& ship : this->importedShips)
+    {
+        knownPathKeys.push_back(makePathKey(ship.folderAbsolutePath));
+    }
+
+    int firstAddedIndex = -1;
+    int addedCount = 0;
+    for (const std::filesystem::path& folderPath : discoveredFolders)
+    {
+        std::error_code absError;
+        std::filesystem::path absolutePath = std::filesystem::absolute(folderPath, absError);
+        if (absError)
+        {
+            absolutePath = folderPath;
+        }
+
+        const std::string normalizedAbsolutePath = normalizePathSlashes(absolutePath.string());
+        const std::string pathKey = makePathKey(normalizedAbsolutePath);
+        if (std::find(knownPathKeys.begin(), knownPathKeys.end(), pathKey) != knownPathKeys.end())
+        {
+            continue;
+        }
+
+        knownPathKeys.push_back(pathKey);
+
+        ImportedShip importedShip{};
+        importedShip.folderAbsolutePath = normalizedAbsolutePath;
+        importedShip.displayName = folderPath.filename().string();
+        if (importedShip.displayName.empty())
+        {
+            importedShip.displayName = importedShip.folderAbsolutePath;
+        }
+
+        this->importedShips.push_back(importedShip);
+        const int newIndex = static_cast<int>(this->importedShips.size()) - 1;
+        if (firstAddedIndex < 0)
+        {
+            firstAddedIndex = newIndex;
+        }
+        addedCount += 1;
+    }
+
+    if (addedCount <= 0)
+    {
+        this->statusMessage = "Aucun nouveau navire importe (deja presents).";
+        return false;
+    }
+
+    const bool hasValidSelection =
+        this->selectedShipIndex >= 0 &&
+        this->selectedShipIndex < static_cast<int>(this->importedShips.size());
+
+    // Premier import (ou selection invalide): charge automatiquement le premier navire ajoute.
+    if ((!hasValidSelection || !this->testShipLoaded) && firstAddedIndex >= 0)
+    {
+        if (!this->selectImportedShipAtIndex(firstAddedIndex))
+        {
+            return false;
+        }
+
+        const ImportedShip& activeShip = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+        this->statusMessage =
+            std::to_string(addedCount) + " navire(s) importe(s). Navire actif: " + activeShip.displayName;
+        return true;
+    }
+
+    this->statusMessage = std::to_string(addedCount) + " navire(s) importe(s).";
+    return true;
 }
 
 void EditorMapCreateMapScene::processPendingMapImportRequest(void)
@@ -2615,6 +2806,27 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
     this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
     this->editorTool = EditorTool::SPAWN_SHIP;
     this->statusMessage = "Navire test charge. Clique gauche sur la map pour le spawn.";
+    return true;
+}
+
+bool EditorMapCreateMapScene::selectImportedShipAtIndex(int shipIndex)
+{
+    if (shipIndex < 0 || shipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        this->statusMessage = "Selection navire invalide.";
+        return false;
+    }
+
+    this->selectedShipIndex = shipIndex;
+    this->ensureSelectedShipVisible();
+
+    const ImportedShip& selectedShip = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    if (!this->loadShipFolderFromAbsolutePath(selectedShip.folderAbsolutePath.c_str()))
+    {
+        return false;
+    }
+
+    this->statusMessage = "Navire actif: " + selectedShip.displayName + ". Clique gauche pour spawn.";
     return true;
 }
 
@@ -3285,7 +3497,7 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     float x = startX;
     setNextButton(&this->buttonImportRect, &x, row1Y, 160.0f);
     setNextButton(&this->buttonImportMapRect, &x, row1Y, 150.0f);
-    setNextButton(&this->buttonImportShipRect, &x, row1Y, 164.0f);
+    setNextButton(&this->buttonImportShipRect, &x, row1Y, 190.0f);
     setNextButton(&this->buttonExportRect, &x, row1Y, 138.0f);
     setNextButton(&this->buttonUndoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonRedoRect, &x, row1Y, 92.0f);
@@ -3334,6 +3546,13 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     this->assetListRect.h = 276.0f;
     this->assetListRect.x = map.rect.x + map.rect.w - this->assetListRect.w - 40.0f;
     this->assetListRect.y = map.rect.y + map.rect.h - this->assetListRect.h - 40.0f;
+
+    // Liste navires: meme dimensions que la liste assets, placee juste a gauche.
+    this->shipListRect.w = this->assetListRect.w;
+    this->shipListRect.h = this->assetListRect.h;
+    this->shipListRect.x = this->assetListRect.x - this->shipListRect.w - 16.0f;
+    this->shipListRect.y = this->assetListRect.y;
+    this->shipListRect.x = (std::max)(this->shipListRect.x, map.rect.x + 12.0f);
 
     // Minimap maison en haut a droite dans la zone monde.
     // Minimap 1/3 plus petite (largeur + hauteur), tout en gardant le meme
@@ -3700,6 +3919,328 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
         std::string rowLabel = makeAssetLabel(this->importedAssets[static_cast<size_t>(assetIndex)].displayName, 24);
         char textBuffer[256] = {};
         SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", assetIndex + 1, rowLabel.c_str());
+
+        RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
+        rowText.color = RC2D_Color{235, 242, 250, 248};
+        rc2d_graphics_setTextColor(&rowText);
+        rc2d_graphics_drawText(&rowText, rowRect.x + 4.0f, rowRect.y + 1.0f);
+        rc2d_graphics_destroyText(&rowText);
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+int EditorMapCreateMapScene::getShipListMaxScrollOffset(void) const
+{
+    const int shipCount = static_cast<int>(this->importedShips.size());
+    return (std::max)(shipCount - kAssetListVisibleRows, 0);
+}
+
+void EditorMapCreateMapScene::clampShipListScrollOffset(void)
+{
+    this->shipListScrollOffset = std::clamp(this->shipListScrollOffset, 0, this->getShipListMaxScrollOffset());
+}
+
+void EditorMapCreateMapScene::ensureSelectedShipVisible(void)
+{
+    this->clampShipListScrollOffset();
+
+    if (this->selectedShipIndex < 0)
+    {
+        return;
+    }
+
+    if (this->selectedShipIndex < this->shipListScrollOffset)
+    {
+        this->shipListScrollOffset = this->selectedShipIndex;
+        this->clampShipListScrollOffset();
+        return;
+    }
+
+    const int lastVisibleIndex = this->shipListScrollOffset + kAssetListVisibleRows - 1;
+    if (this->selectedShipIndex > lastVisibleIndex)
+    {
+        this->shipListScrollOffset = this->selectedShipIndex - (kAssetListVisibleRows - 1);
+        this->clampShipListScrollOffset();
+    }
+}
+
+int EditorMapCreateMapScene::computeShipListStartIndex(void) const
+{
+    const int maxOffset = this->getShipListMaxScrollOffset();
+    return std::clamp(this->shipListScrollOffset, 0, maxOffset);
+}
+
+bool EditorMapCreateMapScene::handleShipListClick(float x, float y)
+{
+    if (!this->pointInRect(x, y, this->shipListRect))
+    {
+        return false;
+    }
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kAssetListVisibleRows);
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAssetListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    if (this->pointInRect(x, y, scrollTrackRect))
+    {
+        const int shipCount = static_cast<int>(this->importedShips.size());
+        const int maxOffset = (std::max)(shipCount - kAssetListVisibleRows, 0);
+        if (maxOffset <= 0)
+        {
+            this->shipListScrollDragActive = false;
+            return true;
+        }
+
+        float thumbHeight = scrollTrackRect.h;
+        float thumbY = scrollTrackRect.y;
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(shipCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(this->computeShipListStartIndex()) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+
+        SDL_FRect scrollThumbRect{};
+        scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+        scrollThumbRect.y = thumbY;
+        scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+        scrollThumbRect.h = thumbHeight;
+
+        if (this->pointInRect(x, y, scrollThumbRect))
+        {
+            this->shipListScrollDragActive = true;
+            this->shipListScrollDragGrabOffsetY = y - scrollThumbRect.y;
+        }
+        else
+        {
+            const float targetThumbY = std::clamp(
+                y - (scrollThumbRect.h * 0.5f),
+                scrollTrackRect.y,
+                scrollTrackRect.y + thumbTravel);
+            const float clickRatio = (thumbTravel > 0.0f)
+                ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
+                : 0.0f;
+            this->shipListScrollOffset = static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+            this->clampShipListScrollOffset();
+
+            this->shipListScrollDragActive = true;
+            this->shipListScrollDragGrabOffsetY = scrollThumbRect.h * 0.5f;
+        }
+        return true;
+    }
+
+    this->shipListScrollDragActive = false;
+
+    if (this->importedShips.empty())
+    {
+        this->statusMessage = "Aucun navire importe.";
+        return true;
+    }
+
+    const int startIndex = this->computeShipListStartIndex();
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int shipIndex = startIndex + i;
+        if (shipIndex >= static_cast<int>(this->importedShips.size()))
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+
+        if (!this->pointInRect(x, y, rowRect))
+        {
+            continue;
+        }
+
+        this->selectImportedShipAtIndex(shipIndex);
+        return true;
+    }
+
+    return true;
+}
+
+void EditorMapCreateMapScene::handleShipListScrollDragFromMouse(void)
+{
+    if (!this->shipListScrollDragActive)
+    {
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->shipListScrollDragActive = false;
+        this->shipListScrollDragGrabOffsetY = 0.0f;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+
+    (void)mouseX;
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAssetListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    const int shipCount = static_cast<int>(this->importedShips.size());
+    const int maxOffset = (std::max)(shipCount - kAssetListVisibleRows, 0);
+    if (maxOffset <= 0)
+    {
+        this->shipListScrollDragActive = false;
+        this->shipListScrollDragGrabOffsetY = 0.0f;
+        return;
+    }
+
+    const float thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(shipCount));
+    const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+    const float targetThumbY = std::clamp(
+        mouseY - this->shipListScrollDragGrabOffsetY,
+        scrollTrackRect.y,
+        scrollTrackRect.y + thumbTravel);
+    const float ratio = (thumbTravel > 0.0f)
+        ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
+        : 0.0f;
+
+    this->shipListScrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+    this->clampShipListScrollOffset();
+}
+
+void EditorMapCreateMapScene::drawShipListPanel(void) const
+{
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kAssetPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->shipListRect);
+    rc2d_graphics_setColor(kAssetPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->shipListRect);
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kAssetListVisibleRows);
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text headerText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Navires charges");
+        headerText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&headerText);
+        rc2d_graphics_drawText(&headerText, this->shipListRect.x + panelPadding, this->shipListRect.y + 1.0f);
+        rc2d_graphics_destroyText(&headerText);
+    }
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAssetListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+
+    if (this->importedShips.empty())
+    {
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            RC2D_Text emptyText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Aucun navire");
+            emptyText.color = kHudStatusColor;
+            rc2d_graphics_setTextColor(&emptyText);
+            rc2d_graphics_drawText(&emptyText, this->shipListRect.x + panelPadding, rowsTopY + 2.0f);
+            rc2d_graphics_destroyText(&emptyText);
+        }
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        return;
+    }
+
+    const int shipCount = static_cast<int>(this->importedShips.size());
+    const int startIndex = this->computeShipListStartIndex();
+    const int maxOffset = (std::max)(shipCount - kAssetListVisibleRows, 0);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(shipCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int shipIndex = startIndex + i;
+        if (shipIndex >= shipCount)
+        {
+            break;
+        }
+
+        const bool isSelected = (shipIndex == this->selectedShipIndex);
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+
+        rc2d_graphics_setColor(isSelected ? kAssetRowSelectedFillColor : kAssetRowFillColor);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(kAssetRowBorderColor);
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        if (this->overlayFont.sdl_font == nullptr)
+        {
+            continue;
+        }
+
+        std::string rowLabel = makeAssetLabel(this->importedShips[static_cast<size_t>(shipIndex)].displayName, 24);
+        char textBuffer[256] = {};
+        SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", shipIndex + 1, rowLabel.c_str());
 
         RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
         rowText.color = RC2D_Color{235, 242, 250, 248};
@@ -4248,6 +4789,11 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         return true;
     }
 
+    if (this->handleShipListClick(x, y))
+    {
+        return true;
+    }
+
     return false;
 }
 
@@ -4292,7 +4838,7 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     // Barre de boutons cliquables.
     this->drawToolbarButton(this->buttonImportRect, "IMPORTER ASSETS", false);
     this->drawToolbarButton(this->buttonImportMapRect, "IMPORTER MAP", false);
-    this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER NAVIRE", false);
+    this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER NAVIRES", false);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER MAP", false);
     this->drawToolbarButton(this->buttonUndoRect, "Annuler", this->canUndoHistory());
     this->drawToolbarButton(this->buttonRedoRect, "Refaire", this->canRedoHistory());
@@ -4356,14 +4902,22 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         selectedAssetName = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)].displayName.c_str();
     }
+    const char* selectedShipName = "Aucun";
+    if (this->selectedShipIndex >= 0 &&
+        this->selectedShipIndex < static_cast<int>(this->importedShips.size()))
+    {
+        selectedShipName = this->importedShips[static_cast<size_t>(this->selectedShipIndex)].displayName.c_str();
+    }
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Assets importes:%d | Assets poses:%d | Hotspots:%d | Selection:%s",
+        "Assets importes:%d | Assets poses:%d | Hotspots:%d | Selection:%s | Navires:%d | Navire actif:%s",
         static_cast<int>(this->importedAssets.size()),
         static_cast<int>(this->placedAssets.size()),
         static_cast<int>(this->towerHotspots.size()),
-        selectedAssetName);
+        selectedAssetName,
+        static_cast<int>(this->importedShips.size()),
+        selectedShipName);
 
     char line3[1024] = {};
     if (!this->testShipLoaded)
@@ -4474,7 +5028,8 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     // Minimap maison en haut a droite.
     this->drawMiniMap();
 
-    // Mini-liste assets cliquable en bas a droite.
+    // Mini-listes navires + assets cliquables en bas a droite.
+    this->drawShipListPanel();
     this->drawAssetListPanel();
 }
 
@@ -4661,6 +5216,7 @@ void EditorMapCreateMapScene::update(double dt)
     map.update();
     this->updateToolbarLayout();
     this->clampAssetListScrollOffset();
+    this->clampShipListScrollOffset();
     this->applyPendingOceanColorStep();
     GetOceanShader().update(dt);
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
@@ -4675,6 +5231,7 @@ void EditorMapCreateMapScene::update(double dt)
     }
     this->handleMiniMapDragFromMouse();
     this->handleAssetListScrollDragFromMouse();
+    this->handleShipListScrollDragFromMouse();
     this->updateTestShip(dt);
     camera.update(map, map.rect);
 
@@ -4987,6 +5544,8 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     {
         this->assetListScrollDragActive = false;
         this->assetListScrollDragGrabOffsetY = 0.0f;
+        this->shipListScrollDragActive = false;
+        this->shipListScrollDragGrabOffsetY = 0.0f;
     }
 
     if (this->handleToolbarClick(renderX, renderY))
