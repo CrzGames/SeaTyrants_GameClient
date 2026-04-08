@@ -1157,18 +1157,14 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
         return;
     }
 
-    Map& map = GetCurrentMap();
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    if (!this->getMouseRenderPosition(&mouseX, &mouseY) || !this->isInsideMapRect(mouseX, mouseY))
+    SDL_Point tile{};
+    if (!this->tryGetMouseTile(&tile))
     {
         return;
     }
 
-    const SDL_FPoint anchorTile = map.screenToTile(mouseX, mouseY);
-    SDL_Point tile = map.roundTile(anchorTile.x, anchorTile.y);
-    tile = map.clampTile(tile.x, tile.y);
+    const float snappedAnchorTileX = static_cast<float>(tile.x);
+    const float snappedAnchorTileY = static_cast<float>(tile.y);
 
     for (PlacedAsset& placedAsset : this->placedAssets)
     {
@@ -1177,8 +1173,8 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
             const PlacedAsset beforeAsset = placedAsset;
 
             placedAsset.importedAssetIndex = this->selectedAssetIndex;
-            placedAsset.anchorTileX = anchorTile.x;
-            placedAsset.anchorTileY = anchorTile.y;
+            placedAsset.anchorTileX = snappedAnchorTileX;
+            placedAsset.anchorTileY = snappedAnchorTileY;
             placedAsset.scale = 1.0f;
 
             HistoryAction action{};
@@ -1200,8 +1196,8 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
     placedAsset.importedAssetIndex = this->selectedAssetIndex;
     placedAsset.tileX = tile.x;
     placedAsset.tileY = tile.y;
-    placedAsset.anchorTileX = anchorTile.x;
-    placedAsset.anchorTileY = anchorTile.y;
+    placedAsset.anchorTileX = snappedAnchorTileX;
+    placedAsset.anchorTileY = snappedAnchorTileY;
     placedAsset.scale = 1.0f;
     this->placedAssets.push_back(placedAsset);
 
@@ -2857,7 +2853,6 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
     cJSON_AddNumberToObject(root, "assetOpacityPercent", this->assetOpacityPercent);
     cJSON_AddBoolToObject(root, "assetTransparencyEnabled", this->assetTransparencyEnabled);
     cJSON_AddNumberToObject(root, "blockedBrushRadiusTiles", this->blockedBrushRadiusTiles);
-    cJSON_AddNumberToObject(root, "shipScalePercent", this->shipScalePercent);
     cJSON_AddNumberToObject(root, "blockedColorIndex", this->selectedBlockedColorIndex);
     cJSON_AddNumberToObject(root, "hotspotColorIndex", this->selectedHotspotColorIndex);
 
@@ -2895,29 +2890,7 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
         cJSON_AddStringToObject(placedItem, "storagePath", runtimeStoragePath.c_str());
         cJSON_AddNumberToObject(placedItem, "tileX", placedAsset.tileX);
         cJSON_AddNumberToObject(placedItem, "tileY", placedAsset.tileY);
-        cJSON_AddNumberToObject(placedItem, "scale", placedAsset.scale);
         cJSON_AddItemToArray(placedAssetsArray, placedItem);
-    }
-    cJSON* placedSfxArray = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "placedSfx", placedSfxArray);
-    for (const PlacedSfx& placed : this->placedSfx)
-    {
-        if (placed.importedSfxIndex < 0 ||
-            placed.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            continue;
-        }
-
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(placed.importedSfxIndex)];
-        cJSON* placedItem = cJSON_CreateObject();
-        const std::string runtimeStoragePath =
-            buildRuntimeAssetPathFromSource(imported.sourceJsonPath, imported.displayName + ".json");
-        cJSON_AddStringToObject(placedItem, "storagePath", runtimeStoragePath.c_str());
-        cJSON_AddNumberToObject(placedItem, "tileX", placed.tileX);
-        cJSON_AddNumberToObject(placedItem, "tileY", placed.tileY);
-        cJSON_AddNumberToObject(placedItem, "scale", placed.scale);
-        cJSON_AddNumberToObject(placedItem, "fps", placed.fps);
-        cJSON_AddItemToArray(placedSfxArray, placedItem);
     }
     cJSON* towerHotspotsArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "towerHotspots", towerHotspotsArray);
@@ -3367,11 +3340,6 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     {
         this->blockedBrushRadiusTiles = std::clamp(static_cast<int>(std::lround(brushRadius->valuedouble)), 0, 8);
     }
-    const cJSON* shipScale = cJSON_GetObjectItemCaseSensitive(root, "shipScalePercent");
-    if (cJSON_IsNumber(shipScale))
-    {
-        this->setShipScalePercent(static_cast<int>(std::lround(shipScale->valuedouble)));
-    }
     const cJSON* blockedColorIndex = cJSON_GetObjectItemCaseSensitive(root, "blockedColorIndex");
     if (cJSON_IsNumber(blockedColorIndex))
     {
@@ -3442,48 +3410,8 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
         }
     }
 
-    const cJSON* placedSfxJson = cJSON_GetObjectItemCaseSensitive(root, "placedSfx");
-    if (cJSON_IsArray(placedSfxJson))
-    {
-        cJSON* item = nullptr;
-        cJSON_ArrayForEach(item, placedSfxJson)
-        {
-            const cJSON* storagePath = cJSON_GetObjectItemCaseSensitive(item, "storagePath");
-            const cJSON* tileX = cJSON_GetObjectItemCaseSensitive(item, "tileX");
-            const cJSON* tileY = cJSON_GetObjectItemCaseSensitive(item, "tileY");
-            if (!cJSON_IsString(storagePath) || storagePath->valuestring == nullptr ||
-                !cJSON_IsNumber(tileX) || !cJSON_IsNumber(tileY))
-            {
-                continue;
-            }
-
-            const int importedIndex = this->importSfxFromRuntimeStoragePath(storagePath->valuestring);
-            if (importedIndex < 0)
-            {
-                continue;
-            }
-
-            PlacedSfx placed{};
-            placed.importedSfxIndex = importedIndex;
-            placed.tileX = static_cast<int>(std::lround(tileX->valuedouble));
-            placed.tileY = static_cast<int>(std::lround(tileY->valuedouble));
-            placed.anchorTileX = static_cast<float>(placed.tileX);
-            placed.anchorTileY = static_cast<float>(placed.tileY);
-            placed.scale = 1.0f;
-            placed.fps = this->importedSfx[static_cast<size_t>(importedIndex)].defaultFps;
-            const cJSON* scale = cJSON_GetObjectItemCaseSensitive(item, "scale");
-            if (cJSON_IsNumber(scale) && std::isfinite(scale->valuedouble) && scale->valuedouble > 0.01)
-            {
-                placed.scale = static_cast<float>(scale->valuedouble);
-            }
-            const cJSON* fps = cJSON_GetObjectItemCaseSensitive(item, "fps");
-            if (cJSON_IsNumber(fps) && std::isfinite(fps->valuedouble) && fps->valuedouble > 0.1)
-            {
-                placed.fps = static_cast<float>(fps->valuedouble);
-            }
-            this->placedSfx.push_back(placed);
-        }
-    }
+    // Les SFX editor sont volontairement non persistants dans map.json.
+    // Ils restent uniquement visuels pendant la session en cours.
 
     const cJSON* towerHotspotsJson = cJSON_GetObjectItemCaseSensitive(root, "towerHotspots");
     if (cJSON_IsArray(towerHotspotsJson))
@@ -4474,12 +4402,14 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
         const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
         if (selectedAsset.image.sdl_texture != nullptr)
         {
-            float mouseX = 0.0f;
-            float mouseY = 0.0f;
-            if (this->getMouseRenderPosition(&mouseX, &mouseY) && this->isInsideMapRect(mouseX, mouseY))
+            SDL_Point snappedTile{};
+            if (this->tryGetMouseTile(&snappedTile))
             {
-                const float drawX = mouseX;
-                const float drawY = mouseY;
+                const SDL_FPoint snappedAnchorScreen = map.tileToScreenCenterFloat(
+                    static_cast<float>(snappedTile.x),
+                    static_cast<float>(snappedTile.y));
+                const float drawX = snappedAnchorScreen.x;
+                const float drawY = snappedAnchorScreen.y;
                 const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
                     const_cast<RC2D_Image*>(&selectedAsset.image),
                     0.0f,
