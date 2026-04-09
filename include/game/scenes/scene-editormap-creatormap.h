@@ -112,6 +112,8 @@ private:
         float anchorTileY; /**< Ancre sub-tile en Y pour un pose precis. */
         float scale; /**< Echelle logique de pose. */
         float fps; /**< Vitesse d'animation en frames/sec. */
+        bool loop; /**< true si l'animation tourne en boucle. */
+        float spawnTimeSeconds; /**< Horodatage de spawn (secondes) pour mode one-shot. */
     };
     struct TowerHotspot {
         int tileX; /**< Tuile hotspot X. */
@@ -173,6 +175,7 @@ private:
     bool mapNameInputFocused; /**< true si l'input nom map a le focus clavier. */
     std::string sfxFpsInput; /**< Valeur texte FPS SFX saisie dans l'input. */
     bool sfxFpsInputFocused; /**< true si l'input FPS SFX a le focus clavier. */
+    bool sfxLoopEnabled; /**< true si les VFX poses sont en mode boucle. */
     int blockedBrushRadiusTiles; /**< Rayon de paint collision (0 = 1 tuile). */
     bool assetTransparencyEnabled; /**< true si l'opacite globale assets est active. */
     int assetOpacityPercent; /**< Opacite globale assets en pourcentage [10..100]. */
@@ -240,6 +243,8 @@ private:
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
     SDL_FRect buttonImportSfxRect; /**< Bouton "IMPORTER SFX". */
+    SDL_FRect buttonClearSfxRect; /**< Bouton "CLEAR VFX". */
+    SDL_FRect buttonSfxLoopRect; /**< Bouton "LOOP". */
     SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
     SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRES". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
@@ -327,6 +332,8 @@ private:
     bool tryGetMouseTile(SDL_Point* outTile) const;
     /** @brief Met a jour la tuile survolee par la souris. */
     void updateHoveredTile(void);
+    /** @brief Supprime les VFX one-shot arrives a la fin de leur animation. */
+    void updatePlacedSfxLifecycle(void);
     /** @brief Gere la peinture collision en drag souris. */
     void handleTilePaintFromMouseDrag(void);
     /** @brief Applique une collision avec historique.
@@ -486,6 +493,8 @@ private:
     void drawWorldGridAndBlockedTiles(void) const;
     /** @brief Dessine les assets poses et leur preview de pose. */
     void drawPlacedAssets(void) const;
+    /** @brief Dessine les VFX poses et leur preview de pose (couche front). */
+    void drawPlacedSfxOverlay(void) const;
     /** @brief Pose le SFX selectionne sous la souris. */
     void placeSelectedSfxAtMouseTile(void);
     /** @brief Supprime un SFX a la souris (hit visuel prioritaire). */
