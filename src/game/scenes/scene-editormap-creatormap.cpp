@@ -138,6 +138,35 @@ static std::string trimAscii(const std::string& value)
     return value.substr(start, end - start);
 }
 
+static std::string upperAscii(std::string value)
+{
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return value;
+}
+
+static int findOceanColorIndexByLabel(const std::string& rawLabel)
+{
+    const std::string normalizedLabel = upperAscii(trimAscii(rawLabel));
+    if (normalizedLabel.empty())
+    {
+        return -1;
+    }
+
+    for (size_t i = 0; i < kOceanColors.size(); ++i)
+    {
+        if (normalizedLabel == kOceanColors[i].label)
+        {
+            return static_cast<int>(i);
+        }
+    }
+
+    return -1;
+}
+
 static std::string makeAssetLabel(const std::string& name, int maxChars)
 {
     if (maxChars <= 3 || static_cast<int>(name.size()) <= maxChars)
@@ -2917,12 +2946,6 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
     cJSON_AddStringToObject(root, "oceanColor", kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label);
     cJSON_AddNumberToObject(root, "worldWidthTiles", map.getWidthTiles());
     cJSON_AddNumberToObject(root, "worldHeightTiles", map.getHeightTiles());
-    cJSON_AddNumberToObject(root, "assetOpacityPercent", this->assetOpacityPercent);
-    cJSON_AddBoolToObject(root, "assetTransparencyEnabled", this->assetTransparencyEnabled);
-    cJSON_AddNumberToObject(root, "blockedBrushRadiusTiles", this->blockedBrushRadiusTiles);
-    cJSON_AddNumberToObject(root, "blockedColorIndex", this->selectedBlockedColorIndex);
-    cJSON_AddNumberToObject(root, "hotspotColorIndex", this->selectedHotspotColorIndex);
-
     cJSON* blockedTilesArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "blockedTiles", blockedTilesArray);
     for (int tileY = 0; tileY < map.getHeightTiles(); ++tileY)
@@ -3392,6 +3415,28 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
         this->mapNameInput = mapName->valuestring;
     }
 
+    std::string importStatusSuffix;
+    bool shouldApplyOceanColor = false;
+    const cJSON* oceanColor = cJSON_GetObjectItemCaseSensitive(root, "oceanColor");
+    if (cJSON_IsString(oceanColor) && oceanColor->valuestring != nullptr)
+    {
+        const int oceanColorIndex = findOceanColorIndexByLabel(oceanColor->valuestring);
+        if (oceanColorIndex >= 0)
+        {
+            this->selectedOceanColorIndex = oceanColorIndex;
+            this->pendingOceanColorDelta = 0;
+            shouldApplyOceanColor = true;
+        }
+        else
+        {
+            RC2D_log(
+                RC2D_LOG_WARN,
+                "EditorMapCreateMapScene: oceanColor JSON inconnu '%s'",
+                oceanColor->valuestring);
+            importStatusSuffix = " Ocean JSON inconnu, couleur courante conservee.";
+        }
+    }
+
     const cJSON* opacityPercent = cJSON_GetObjectItemCaseSensitive(root, "assetOpacityPercent");
     if (cJSON_IsNumber(opacityPercent))
     {
@@ -3500,7 +3545,15 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     }
 
     cJSON_Delete(root);
-    this->statusMessage = "Map importee depuis JSON.";
+
+    if (shouldApplyOceanColor)
+    {
+        const OceanColorEntry& entry = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)];
+        this->applySelectedOceanColor();
+        importStatusSuffix = " Ocean: " + std::string(entry.label) + ".";
+    }
+
+    this->statusMessage = "Map importee depuis JSON." + importStatusSuffix;
     return true;
 }
 
