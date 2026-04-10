@@ -166,6 +166,16 @@ private:
 
 public:
     /**
+     * @brief Directions diagonales de preview explicites (mapping sprites 1..4).
+     */
+    enum class PreviewDirection {
+        DOWN_LEFT = 0,
+        UP_RIGHT = 1,
+        UP_LEFT = 2,
+        DOWN_RIGHT = 3
+    };
+
+    /**
      * @brief Constructeur du navire.
      */
     Ship(void);
@@ -209,6 +219,10 @@ public:
      * @brief Retourne l'apparence de vie courante.
      */
     HealthVisual getHealthVisual(void) const;
+    /**
+     * @brief Force la direction visuelle pour une preview statique.
+     */
+    void setPreviewDirection(PreviewDirection direction);
 
     // ---- Vitesse ----
 
@@ -231,6 +245,20 @@ public:
      * @param anchorY Anchor Y normalise [0..1].
      */
     void setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY);
+    /**
+     * @brief Retourne l'offset ecran (px) entre l'anchor courant et le centre texture.
+     * @param outOffsetX Recoit l'offset X (anchor -> centre texture).
+     * @param outOffsetY Recoit l'offset Y (anchor -> centre texture).
+     * @return True si le sprite courant est disponible.
+     */
+    bool getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffsetY) const;
+    /**
+     * @brief Retourne la taille brute du sprite courant en pixels texture.
+     * @param outWidth Recoit la largeur.
+     * @param outHeight Recoit la hauteur.
+     * @return True si le sprite courant est disponible.
+     */
+    bool getCurrentSpriteSizePixels(float* outWidth, float* outHeight) const;
     /**
      * @brief Definit l'echelle visuelle globale du navire.
      * @param scale Echelle multiplicative (>0).

@@ -6667,7 +6667,7 @@ void EditorMapVfxScene::drawHud(void) const
     const bool shipMode = (this->editorMode == EditorMode::SHIP_VFX);
 
     this->drawToolbarButton(this->buttonModeShipVfxRect, "MODE : SHIP / VFX", shipMode);
-    this->drawToolbarButton(this->buttonModeLooseSpritesRect, "MODE : DOWNSCALE SPRITES VFX / SPRITESHEET", !shipMode);
+    this->drawToolbarButton(this->buttonModeLooseSpritesRect, "MODE : ROGNAGE DOWNSCALE FOR SPRITESHEET", !shipMode);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER", false);
     if (shipMode)
     {

@@ -1022,6 +1022,35 @@ Ship::HealthVisual Ship::getHealthVisual(void) const
     return this->healthVisual;
 }
 
+void Ship::setPreviewDirection(PreviewDirection direction)
+{
+    DiagonalDirection diagonal = DiagonalDirection::DOWN_LEFT;
+    switch (direction)
+    {
+    case PreviewDirection::DOWN_LEFT:
+        diagonal = DiagonalDirection::DOWN_LEFT;
+        break;
+    case PreviewDirection::UP_RIGHT:
+        diagonal = DiagonalDirection::UP_RIGHT;
+        break;
+    case PreviewDirection::UP_LEFT:
+        diagonal = DiagonalDirection::UP_LEFT;
+        break;
+    case PreviewDirection::DOWN_RIGHT:
+        diagonal = DiagonalDirection::DOWN_RIGHT;
+        break;
+    default:
+        break;
+    }
+
+    // Force une direction diagonale fixe sans alterner A/B.
+    this->directionUsesPair = false;
+    this->directionToggle = false;
+    this->directionA = diagonal;
+    this->directionB = diagonal;
+    this->moveDirection = MoveDirection::NONE;
+}
+
 void Ship::setSpeedTilesPerSecond(float speed)
 {
     if (speed > 0.0f)
@@ -1044,6 +1073,59 @@ void Ship::setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY)
 
     this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].x = std::clamp(anchorX, 0.0f, 1.0f);
     this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].y = std::clamp(anchorY, 0.0f, 1.0f);
+}
+
+bool Ship::getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffsetY) const
+{
+    if (outOffsetX == nullptr || outOffsetY == nullptr)
+    {
+        return false;
+    }
+
+    const int spriteIndex = this->getCurrentSpriteIndex();
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
+    {
+        return false;
+    }
+
+    const RC2D_Image& sprite = this->sprites[static_cast<size_t>(spriteIndex)];
+    if (sprite.sdl_texture == nullptr)
+    {
+        return false;
+    }
+
+    const float spriteW = static_cast<float>(sprite.sdl_texture->w);
+    const float spriteH = static_cast<float>(sprite.sdl_texture->h);
+    const SDL_FPoint& anchor = this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)];
+    const float cameraZoom = GetCamera().getZoomFactor() * this->drawScale;
+
+    *outOffsetX = (0.5f - anchor.x) * spriteW * cameraZoom;
+    *outOffsetY = (0.5f - anchor.y) * spriteH * cameraZoom;
+    return true;
+}
+
+bool Ship::getCurrentSpriteSizePixels(float* outWidth, float* outHeight) const
+{
+    if (outWidth == nullptr || outHeight == nullptr)
+    {
+        return false;
+    }
+
+    const int spriteIndex = this->getCurrentSpriteIndex();
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
+    {
+        return false;
+    }
+
+    const RC2D_Image& sprite = this->sprites[static_cast<size_t>(spriteIndex)];
+    if (sprite.sdl_texture == nullptr)
+    {
+        return false;
+    }
+
+    *outWidth = static_cast<float>(sprite.sdl_texture->w);
+    *outHeight = static_cast<float>(sprite.sdl_texture->h);
+    return true;
 }
 
 void Ship::setDrawScale(float scale)
