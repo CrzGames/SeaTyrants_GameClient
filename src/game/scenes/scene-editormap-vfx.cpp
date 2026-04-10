@@ -42,12 +42,16 @@ struct RenderItem
 constexpr int kShipSpriteCount = 8;
 constexpr float kListScrollBarWidth = 10.0f;
 constexpr int kVisibleListRows = 10;
+constexpr int kInvalidVisibleRows = 3;
+constexpr float kInvalidPanelPadding = 8.0f;
+constexpr float kInvalidPanelHeaderHeight = 22.0f;
+constexpr float kInvalidPanelRowGap = 6.0f;
 constexpr float kSfxFpsMin = 1.0f;
 constexpr float kSfxFpsMax = 9999.0f;
 constexpr int kLooseScaleMinPercent = 5;
 constexpr int kLooseScaleMaxPercent = 100;
 constexpr int kLooseScaleStepPercent = 5;
-constexpr float kVfxMoveStepPx = 8.0f;
+constexpr float kVfxMoveStepPx = 1.0f;
 constexpr float kLoosePreviewZoomMin = 0.40f;
 constexpr float kLoosePreviewZoomMax = 1.00f;
 constexpr float kLoosePreviewZoomDefault = 1.00f;
@@ -187,34 +191,6 @@ static bool tryParseNumericFrameName(const std::string& frameName, unsigned long
     return true;
 }
 
-static void sortFrameNamesByNumericOrder(std::vector<std::string>* frameNames)
-{
-    if (frameNames == nullptr)
-    {
-        return;
-    }
-
-    std::sort(frameNames->begin(), frameNames->end(), [](const std::string& a, const std::string& b) {
-        unsigned long long aNum = 0;
-        unsigned long long bNum = 0;
-        const bool aIsNumeric = tryParseNumericFrameName(a, &aNum);
-        const bool bIsNumeric = tryParseNumericFrameName(b, &bNum);
-        if (aIsNumeric && bIsNumeric)
-        {
-            if (aNum != bNum)
-            {
-                return aNum < bNum;
-            }
-            return a < b;
-        }
-        if (aIsNumeric != bIsNumeric)
-        {
-            return aIsNumeric;
-        }
-        return a < b;
-    });
-}
-
 static bool isPngFilePath(const std::filesystem::path& path)
 {
     std::string extension = path.extension().string();
@@ -277,6 +253,313 @@ static std::string makeExportAnimationSlug(const std::string& rawName)
 
     return slug;
 }
+
+static std::string makePathKeyLower(const std::string& path)
+{
+    std::string key = normalizePathSlashes(path);
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return key;
+}
+
+static std::string stripListPrefix(const std::string& rawName, const char* expectedPrefix)
+{
+    std::string label = trimAscii(extractFileName(rawName));
+    if (label.empty())
+    {
+        return rawName;
+    }
+    if (expectedPrefix == nullptr || expectedPrefix[0] == '\0')
+    {
+        return label;
+    }
+
+    std::string lower = makePathKeyLower(label);
+    std::string prefixLower = makePathKeyLower(expectedPrefix);
+    if (lower.rfind(prefixLower, 0U) == 0U)
+    {
+        label.erase(0, prefixLower.size());
+        while (!label.empty() && (label[0] == '-' || label[0] == '_' || std::isspace(static_cast<unsigned char>(label[0]))))
+        {
+            label.erase(label.begin());
+        }
+    }
+
+    label = trimAscii(label);
+    if (label.empty())
+    {
+        return rawName;
+    }
+    return label;
+}
+
+static std::string makeDefaultVfxLayerBaseName(const std::string& sourceDisplayName)
+{
+    std::string folderName = trimAscii(extractFileName(sourceDisplayName));
+    if (folderName.empty())
+    {
+        folderName = "vfx";
+    }
+
+    std::string baseName = folderName;
+    const std::string lower = makePathKeyLower(folderName);
+    if (lower.rfind("vfx-", 0U) == 0U)
+    {
+        const std::string suffix = folderName.substr(4);
+        const size_t dashPos = suffix.find('-');
+        if (dashPos != std::string::npos)
+        {
+            baseName = suffix.substr(0, dashPos);
+        }
+        else if (!suffix.empty())
+        {
+            baseName = suffix;
+        }
+    }
+
+    baseName = trimAscii(baseName);
+    if (baseName.empty())
+    {
+        baseName = "vfx";
+    }
+
+    return baseName;
+}
+
+static std::string makeDefaultVfxLayerLabel(const std::string& sourceDisplayName, int sourceNumber, int sourceInstanceNumber)
+{
+    const std::string baseName = makeDefaultVfxLayerBaseName(sourceDisplayName);
+    const int clampedSourceNumber = (std::max)(1, sourceNumber);
+    const int clampedInstanceNumber = (std::max)(1, sourceInstanceNumber);
+    return baseName + " #" + std::to_string(clampedSourceNumber) + " (" + std::to_string(clampedInstanceNumber) + ")";
+}
+
+static std::string makeShipConfigSlug(const std::string& rawName)
+{
+    std::string slug = makeExportAnimationSlug(rawName);
+    if (slug.empty())
+    {
+        slug = "ship";
+    }
+    return slug;
+}
+
+static const char* kDirectionIdDownLeft = "down_left";
+static const char* kDirectionIdUpRight = "up_right";
+static const char* kDirectionIdUpLeft = "up_left";
+static const char* kDirectionIdDownRight = "down_right";
+
+static const char* getDirectionIdByIndex(int index)
+{
+    switch (index)
+    {
+    case 0:
+        return kDirectionIdDownLeft;
+    case 1:
+        return kDirectionIdUpRight;
+    case 2:
+        return kDirectionIdUpLeft;
+    case 3:
+        return kDirectionIdDownRight;
+    default:
+        return kDirectionIdDownLeft;
+    }
+}
+
+static int getDirectionIndexById(const char* directionId)
+{
+    if (directionId == nullptr)
+    {
+        return 0;
+    }
+    if (SDL_strcasecmp(directionId, kDirectionIdDownLeft) == 0)
+    {
+        return 0;
+    }
+    if (SDL_strcasecmp(directionId, kDirectionIdUpRight) == 0)
+    {
+        return 1;
+    }
+    if (SDL_strcasecmp(directionId, kDirectionIdUpLeft) == 0)
+    {
+        return 2;
+    }
+    if (SDL_strcasecmp(directionId, kDirectionIdDownRight) == 0)
+    {
+        return 3;
+    }
+    return 0;
+}
+
+struct CustomSpritesheetFrame
+{
+    int index;
+    float x;
+    float y;
+    float w;
+    float h;
+};
+
+struct CustomSpritesheetParseResult
+{
+    std::string imageFileName;
+    float fps;
+    std::vector<CustomSpritesheetFrame> frames;
+};
+
+static bool tryParseCustomSpritesheetJson(
+    const char* jsonText,
+    const std::vector<std::string>& pngFileNames,
+    CustomSpritesheetParseResult* outResult,
+    std::string* outError)
+{
+    if (outResult == nullptr)
+    {
+        return false;
+    }
+    if (jsonText == nullptr)
+    {
+        if (outError != nullptr)
+        {
+            *outError = "JSON null.";
+        }
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(jsonText);
+    if (root == nullptr)
+    {
+        if (outError != nullptr)
+        {
+            *outError = "JSON invalide.";
+        }
+        return false;
+    }
+
+    cJSON* framesArray = cJSON_GetObjectItemCaseSensitive(root, "frames");
+    if (!cJSON_IsArray(framesArray))
+    {
+        cJSON_Delete(root);
+        if (outError != nullptr)
+        {
+            *outError = "Pas un JSON spritesheet custom (frames[] absent).";
+        }
+        return false;
+    }
+
+    float fps = 12.0f;
+    const cJSON* fpsNode = cJSON_GetObjectItemCaseSensitive(root, "fps");
+    if (cJSON_IsNumber(fpsNode) && std::isfinite(fpsNode->valuedouble))
+    {
+        fps = std::clamp(static_cast<float>(fpsNode->valuedouble), kSfxFpsMin, kSfxFpsMax);
+    }
+
+    std::string imageFileName;
+    const cJSON* imageNode = cJSON_GetObjectItemCaseSensitive(root, "image");
+    if (cJSON_IsString(imageNode) && imageNode->valuestring != nullptr)
+    {
+        imageFileName = extractFileName(imageNode->valuestring);
+    }
+    if (imageFileName.empty())
+    {
+        const cJSON* metaNode = cJSON_GetObjectItemCaseSensitive(root, "meta");
+        const cJSON* metaImageNode =
+            (metaNode != nullptr) ? cJSON_GetObjectItemCaseSensitive(metaNode, "image") : nullptr;
+        if (cJSON_IsString(metaImageNode) && metaImageNode->valuestring != nullptr)
+        {
+            imageFileName = extractFileName(metaImageNode->valuestring);
+        }
+    }
+
+    if (imageFileName.empty())
+    {
+        std::vector<std::string> sortedPng = pngFileNames;
+        std::sort(sortedPng.begin(), sortedPng.end());
+        if (!sortedPng.empty())
+        {
+            imageFileName = sortedPng[0];
+        }
+    }
+
+    if (imageFileName.empty())
+    {
+        cJSON_Delete(root);
+        if (outError != nullptr)
+        {
+            *outError = "Aucun PNG detecte pour le spritesheet custom.";
+        }
+        return false;
+    }
+
+    std::vector<CustomSpritesheetFrame> parsedFrames;
+    parsedFrames.reserve(static_cast<size_t>(cJSON_GetArraySize(framesArray)));
+    int generatedIndex = 0;
+    cJSON* frameNode = nullptr;
+    cJSON_ArrayForEach(frameNode, framesArray)
+    {
+        if (!cJSON_IsObject(frameNode))
+        {
+            continue;
+        }
+
+        const cJSON* xNode = cJSON_GetObjectItemCaseSensitive(frameNode, "x");
+        const cJSON* yNode = cJSON_GetObjectItemCaseSensitive(frameNode, "y");
+        const cJSON* wNode = cJSON_GetObjectItemCaseSensitive(frameNode, "w");
+        const cJSON* hNode = cJSON_GetObjectItemCaseSensitive(frameNode, "h");
+        const cJSON* indexNode = cJSON_GetObjectItemCaseSensitive(frameNode, "index");
+        if (!cJSON_IsNumber(xNode) || !cJSON_IsNumber(yNode) || !cJSON_IsNumber(wNode) || !cJSON_IsNumber(hNode))
+        {
+            continue;
+        }
+
+        const float x = static_cast<float>(xNode->valuedouble);
+        const float y = static_cast<float>(yNode->valuedouble);
+        const float w = static_cast<float>(wNode->valuedouble);
+        const float h = static_cast<float>(hNode->valuedouble);
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h) || w <= 0.0f || h <= 0.0f)
+        {
+            continue;
+        }
+
+        int index = generatedIndex;
+        if (cJSON_IsNumber(indexNode) && std::isfinite(indexNode->valuedouble))
+        {
+            index = static_cast<int>(std::llround(indexNode->valuedouble));
+        }
+        generatedIndex += 1;
+
+        parsedFrames.push_back(CustomSpritesheetFrame{index, x, y, w, h});
+    }
+
+    if (parsedFrames.empty())
+    {
+        cJSON_Delete(root);
+        if (outError != nullptr)
+        {
+            *outError = "frames[] vide ou invalide.";
+        }
+        return false;
+    }
+
+    std::sort(parsedFrames.begin(), parsedFrames.end(), [](const CustomSpritesheetFrame& a, const CustomSpritesheetFrame& b) {
+        if (a.index != b.index)
+        {
+            return a.index < b.index;
+        }
+        if (a.y != b.y)
+        {
+            return a.y < b.y;
+        }
+        return a.x < b.x;
+    });
+
+    cJSON_Delete(root);
+    outResult->imageFileName = imageFileName;
+    outResult->fps = fps;
+    outResult->frames = std::move(parsedFrames);
+    return true;
+}
 } // namespace
 
 EditorMapVfxScene* EditorMapVfxScene::activeInstance = nullptr;
@@ -320,8 +603,6 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       shipVfxInstances{},
       selectedVfxInstanceIndex(-1),
       nextVfxInstanceId(1U),
-      vfxFpsInput("12"),
-      vfxFpsInputFocused(false),
       looseScalePercent(100),
       loosePreviewZoomFactor(kLoosePreviewZoomDefault),
       loosePreviewMode(LoosePreviewMode::CENTER_SPRITESHEET),
@@ -371,7 +652,6 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonFollowShipRect{},
       buttonRemoveVfxRect{},
       buttonCenterVfxRect{},
-      buttonVfxFpsInputRect{},
       buttonMoveULRect{},
       buttonMoveUpRect{},
       buttonMoveURRect{},
@@ -390,8 +670,69 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonLooseClearAllVfxRect{},
       shipListRect{},
       sfxListRect{},
-      looseListRect{}
+      looseListRect{},
+      invalidVfxListRect{},
+      invalidShipListRect{},
+      layerRowDragActive(false),
+      layerRowDragMoved(false),
+      layerRowDragSourceDisplayIndex(-1),
+      layerRowDragTargetInsertIndex(-1),
+      layerRowDragStartMouseY(0.0f),
+      invalidVfxListScrollOffset(0),
+      invalidShipListScrollOffset(0),
+      invalidVfxListScrollDragActive(false),
+      invalidShipListScrollDragActive(false),
+      invalidVfxListScrollDragGrabOffsetY(0.0f),
+      invalidShipListScrollDragGrabOffsetY(0.0f)
 {
+    this->previewDirectionIndex = 0;
+    this->previewShipStateIndex = 0;
+    this->shipLayerVisible = true;
+    this->shipLayerLocked = false;
+    this->shipLayerSelected = false;
+    this->shipDebugBoundsVisible = true;
+    this->layerNameInput.clear();
+    this->layerNameInputFocused = false;
+    this->vfxDragActive = false;
+    this->vfxDragStartMouseX = 0.0f;
+    this->vfxDragStartMouseY = 0.0f;
+    this->vfxDragStartOffsetX = 0.0f;
+    this->vfxDragStartOffsetY = 0.0f;
+    this->shipVfxDirty = false;
+    this->loadedShipVfxConfigPath.clear();
+    this->invalidShipFolders.clear();
+    this->invalidVfxFolders.clear();
+    this->buttonReloadAssetsRect = SDL_FRect{};
+    this->buttonDirectionPrevRect = SDL_FRect{};
+    this->buttonDirectionNextRect = SDL_FRect{};
+    this->buttonShipStateToggleRect = SDL_FRect{};
+    this->buttonLayerOrderMinusRect = SDL_FRect{};
+    this->buttonLayerOrderPlusRect = SDL_FRect{};
+    this->buttonVisibleRect = SDL_FRect{};
+    this->buttonLockedRect = SDL_FRect{};
+    this->buttonBehindShipRect = SDL_FRect{};
+    this->buttonDuplicateVfxRect = SDL_FRect{};
+    this->buttonLayerNameInputRect = SDL_FRect{};
+    this->buttonSharedDirectionsRect = SDL_FRect{};
+    this->buttonDirectionOverrideRect = SDL_FRect{};
+    this->buttonResetTransformRect = SDL_FRect{};
+    this->layerListRect = SDL_FRect{};
+    this->layerListScrollOffset = 0;
+    this->layerListScrollDragActive = false;
+    this->layerListScrollDragGrabOffsetY = 0.0f;
+    this->layerRowDragActive = false;
+    this->layerRowDragMoved = false;
+    this->layerRowDragSourceDisplayIndex = -1;
+    this->layerRowDragTargetInsertIndex = -1;
+    this->layerRowDragStartMouseY = 0.0f;
+    this->invalidVfxListRect = SDL_FRect{};
+    this->invalidShipListRect = SDL_FRect{};
+    this->invalidVfxListScrollOffset = 0;
+    this->invalidShipListScrollOffset = 0;
+    this->invalidVfxListScrollDragActive = false;
+    this->invalidShipListScrollDragActive = false;
+    this->invalidVfxListScrollDragGrabOffsetY = 0.0f;
+    this->invalidShipListScrollDragGrabOffsetY = 0.0f;
 }
 
 EditorMapVfxScene::~EditorMapVfxScene(void)
@@ -418,13 +759,42 @@ void EditorMapVfxScene::resetEditorState(void)
     this->previewShip.unloadSprites();
     this->previewShipLoaded = false;
     this->loadedShipFolderAbsolute.clear();
+    this->previewDirectionIndex = 0;
+    this->previewShipStateIndex = 0;
+    this->shipLayerVisible = true;
+    this->shipLayerLocked = false;
+    this->shipLayerSelected = false;
+    this->shipDebugBoundsVisible = true;
     this->previewShipTile = SDL_FPoint{0.0f, 0.0f};
     this->shipDrawOrder = 0;
     this->shipVfxInstances.clear();
     this->selectedVfxInstanceIndex = -1;
     this->nextVfxInstanceId = 1U;
-    this->vfxFpsInput = "12";
-    this->vfxFpsInputFocused = false;
+    this->layerNameInput.clear();
+    this->layerNameInputFocused = false;
+    this->vfxDragActive = false;
+    this->vfxDragStartMouseX = 0.0f;
+    this->vfxDragStartMouseY = 0.0f;
+    this->vfxDragStartOffsetX = 0.0f;
+    this->vfxDragStartOffsetY = 0.0f;
+    this->shipVfxDirty = false;
+    this->loadedShipVfxConfigPath.clear();
+    this->invalidShipFolders.clear();
+    this->invalidVfxFolders.clear();
+    this->layerListScrollOffset = 0;
+    this->layerListScrollDragActive = false;
+    this->layerListScrollDragGrabOffsetY = 0.0f;
+    this->layerRowDragActive = false;
+    this->layerRowDragMoved = false;
+    this->layerRowDragSourceDisplayIndex = -1;
+    this->layerRowDragTargetInsertIndex = -1;
+    this->layerRowDragStartMouseY = 0.0f;
+    this->invalidVfxListScrollOffset = 0;
+    this->invalidShipListScrollOffset = 0;
+    this->invalidVfxListScrollDragActive = false;
+    this->invalidShipListScrollDragActive = false;
+    this->invalidVfxListScrollDragGrabOffsetY = 0.0f;
+    this->invalidShipListScrollDragGrabOffsetY = 0.0f;
     this->looseScalePercent = 100;
     this->loosePreviewZoomFactor = kLoosePreviewZoomDefault;
     this->loosePreviewMode = LoosePreviewMode::CENTER_SPRITESHEET;
@@ -457,7 +827,8 @@ void EditorMapVfxScene::unloadImportedSfx(void)
 {
     for (ImportedSfx& sfx : this->importedSfx)
     {
-        rc2d_tp_freeAtlas(&sfx.atlas);
+        rc2d_graphics_freeImage(&sfx.image);
+        sfx.frames.clear();
     }
     this->importedSfx.clear();
 }
@@ -632,6 +1003,464 @@ void EditorMapVfxScene::cycleOceanColor(int delta)
     this->applySelectedOceanColor();
 }
 
+void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
+{
+    this->previewShip.unloadSprites();
+    this->previewShipLoaded = false;
+    this->loadedShipFolderAbsolute.clear();
+    this->shipVfxInstances.clear();
+    this->setSelectedVfxInstanceIndex(-1);
+    this->nextVfxInstanceId = 1U;
+    this->shipLayerVisible = true;
+    this->shipLayerLocked = false;
+    this->shipDebugBoundsVisible = true;
+    this->shipDrawOrder = 0;
+    this->importedShips.clear();
+    this->unloadImportedSfx();
+    this->selectedShipIndex = -1;
+    this->selectedSfxIndex = -1;
+    this->shipListScrollOffset = 0;
+    this->sfxListScrollOffset = 0;
+    this->invalidShipFolders.clear();
+    this->invalidVfxFolders.clear();
+    this->importShipsFromRootFolderAbsolutePath("assets/images/ships");
+    this->importSfxFromRootFolderAbsolutePath("assets/images/vfx");
+}
+
+std::string EditorMapVfxScene::buildShipConfigJsonPath(const ImportedShip& ship) const
+{
+    std::filesystem::path base(ship.folderAbsolutePath);
+    const std::string slug = makeShipConfigSlug(ship.displayName);
+    const std::string fileName = "animations_vfx_" + slug + ".json";
+    return normalizePathSlashes((base / fileName).string());
+}
+
+void EditorMapVfxScene::applyPreviewDirectionToShip(void)
+{
+    switch (this->previewDirectionIndex)
+    {
+    case 0:
+        this->previewShip.setPreviewDirection(Ship::PreviewDirection::DOWN_LEFT);
+        break;
+    case 1:
+        this->previewShip.setPreviewDirection(Ship::PreviewDirection::UP_RIGHT);
+        break;
+    case 2:
+        this->previewShip.setPreviewDirection(Ship::PreviewDirection::UP_LEFT);
+        break;
+    case 3:
+        this->previewShip.setPreviewDirection(Ship::PreviewDirection::DOWN_RIGHT);
+        break;
+    default:
+        this->previewDirectionIndex = 0;
+        this->previewShip.setPreviewDirection(Ship::PreviewDirection::DOWN_LEFT);
+        break;
+    }
+}
+
+void EditorMapVfxScene::setPreviewDirectionIndex(int directionIndex)
+{
+    this->previewDirectionIndex = std::clamp(directionIndex, 0, 3);
+    this->applyPreviewDirectionToShip();
+}
+
+void EditorMapVfxScene::cyclePreviewDirection(int delta)
+{
+    const int count = 4;
+    int index = this->previewDirectionIndex + delta;
+    while (index < 0)
+    {
+        index += count;
+    }
+    while (index >= count)
+    {
+        index -= count;
+    }
+    this->setPreviewDirectionIndex(index);
+}
+
+void EditorMapVfxScene::cyclePreviewShipState(int delta)
+{
+    const int count = 2;
+    int index = this->previewShipStateIndex + delta;
+    while (index < 0)
+    {
+        index += count;
+    }
+    while (index >= count)
+    {
+        index -= count;
+    }
+    this->previewShipStateIndex = index;
+    this->previewShip.setHealthVisual((index == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+}
+
+const char* EditorMapVfxScene::getPreviewDirectionLabel(void) const
+{
+    switch (this->previewDirectionIndex)
+    {
+    case 0:
+        return "Bas Gauche (1/5)";
+    case 1:
+        return "Haut Droite (2/6)";
+    case 2:
+        return "Haut Gauche (3/7)";
+    case 3:
+        return "Bas Droite (4/8)";
+    default:
+        return "Bas Gauche (1/5)";
+    }
+}
+
+const char* EditorMapVfxScene::getPreviewShipStateLabel(void) const
+{
+    return (this->previewShipStateIndex == 1)
+        ? "SPRITES NAVIRE - LOW HP (5-8)"
+        : "SPRITES NAVIRE - FULL HP (1-4)";
+}
+
+void EditorMapVfxScene::markShipVfxDirty(void)
+{
+    this->shipVfxDirty = true;
+}
+
+int EditorMapVfxScene::getActiveDirectionIndexForOverrides(void) const
+{
+    return std::clamp(this->previewDirectionIndex, 0, 3);
+}
+
+bool EditorMapVfxScene::hasSelectedVfxInstance(void) const
+{
+    return this->selectedVfxInstanceIndex >= 0 &&
+        this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size());
+}
+
+EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInstance(void)
+{
+    if (!this->hasSelectedVfxInstance())
+    {
+        return nullptr;
+    }
+    return &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+}
+
+const EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInstance(void) const
+{
+    if (!this->hasSelectedVfxInstance())
+    {
+        return nullptr;
+    }
+    return &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+}
+
+EditorMapVfxScene::DirectionOverride* EditorMapVfxScene::getEditableDirectionOverride(EditorMapVfxScene::ShipVfxInstance* instance)
+{
+    if (instance == nullptr)
+    {
+        return nullptr;
+    }
+    if (instance->sharedForAllDirections)
+    {
+        return nullptr;
+    }
+
+    const int directionIndex = this->getActiveDirectionIndexForOverrides();
+    DirectionOverride& override = instance->directionOverrides[static_cast<size_t>(directionIndex)];
+    if (!override.enabled)
+    {
+        return nullptr;
+    }
+    return &override;
+}
+
+const EditorMapVfxScene::DirectionOverride* EditorMapVfxScene::getResolvedDirectionOverride(const EditorMapVfxScene::ShipVfxInstance* instance) const
+{
+    if (instance == nullptr)
+    {
+        return nullptr;
+    }
+    if (instance->sharedForAllDirections)
+    {
+        return nullptr;
+    }
+    const int directionIndex = this->getActiveDirectionIndexForOverrides();
+    const DirectionOverride& override = instance->directionOverrides[static_cast<size_t>(directionIndex)];
+    return override.enabled ? &override : nullptr;
+}
+
+void EditorMapVfxScene::resetSelectedVfxTransform(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->offsetX = 0.0f;
+        override->offsetY = 0.0f;
+        override->rotationDeg = 0.0f;
+        override->flipHorizontal = false;
+        override->flipVertical = false;
+        override->drawOrder = instance->drawOrder;
+        override->visible = true;
+    }
+    else
+    {
+        instance->offsetX = 0.0f;
+        instance->offsetY = 0.0f;
+        instance->rotationDeg = 0.0f;
+        instance->flipHorizontal = false;
+        instance->flipVertical = false;
+        instance->visible = true;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleSelectedVfxVisibility(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->visible = !override->visible;
+    }
+    else
+    {
+        instance->visible = !instance->visible;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleSelectedVfxLock(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    instance->locked = !instance->locked;
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleSelectedVfxBehindShip(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    instance->behindShip = !instance->behindShip;
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    int* drawOrder = (override != nullptr) ? &override->drawOrder : &instance->drawOrder;
+    if (instance->behindShip && *drawOrder >= this->shipDrawOrder)
+    {
+        *drawOrder = this->shipDrawOrder - 1;
+    }
+    if (!instance->behindShip && *drawOrder <= this->shipDrawOrder)
+    {
+        *drawOrder = this->shipDrawOrder + 1;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleSelectedVfxSharedForAllDirections(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+
+    if (instance->sharedForAllDirections)
+    {
+        instance->sharedForAllDirections = false;
+        for (DirectionOverride& override : instance->directionOverrides)
+        {
+            override.enabled = false;
+            override.offsetX = instance->offsetX;
+            override.offsetY = instance->offsetY;
+            override.rotationDeg = instance->rotationDeg;
+            override.flipHorizontal = instance->flipHorizontal;
+            override.flipVertical = instance->flipVertical;
+            override.drawOrder = instance->drawOrder;
+            override.visible = instance->visible;
+        }
+    }
+    else
+    {
+        const int directionIndex = this->getActiveDirectionIndexForOverrides();
+        const DirectionOverride& override = instance->directionOverrides[static_cast<size_t>(directionIndex)];
+        if (override.enabled)
+        {
+            instance->offsetX = override.offsetX;
+            instance->offsetY = override.offsetY;
+            instance->rotationDeg = override.rotationDeg;
+            instance->flipHorizontal = override.flipHorizontal;
+            instance->flipVertical = override.flipVertical;
+            instance->drawOrder = override.drawOrder;
+            instance->visible = override.visible;
+        }
+        instance->sharedForAllDirections = true;
+        for (DirectionOverride& resetOverride : instance->directionOverrides)
+        {
+            resetOverride.enabled = false;
+        }
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleSelectedVfxDirectionOverride(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    if (instance->sharedForAllDirections)
+    {
+        this->statusMessage = "Active d'abord le mode par direction.";
+        return;
+    }
+    const int directionIndex = this->getActiveDirectionIndexForOverrides();
+    DirectionOverride& override = instance->directionOverrides[static_cast<size_t>(directionIndex)];
+    if (!override.enabled)
+    {
+        override.enabled = true;
+        override.offsetX = instance->offsetX;
+        override.offsetY = instance->offsetY;
+        override.rotationDeg = instance->rotationDeg;
+        override.flipHorizontal = instance->flipHorizontal;
+        override.flipVertical = instance->flipVertical;
+        override.drawOrder = instance->drawOrder;
+        override.visible = instance->visible;
+    }
+    else
+    {
+        override.enabled = false;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    ShipVfxInstance duplicate = *instance;
+    duplicate.instanceId = this->nextVfxInstanceId++;
+    int sourceInstanceNumber = 1;
+    for (const ShipVfxInstance& existing : this->shipVfxInstances)
+    {
+        if (existing.importedSfxIndex == duplicate.importedSfxIndex)
+        {
+            sourceInstanceNumber += 1;
+        }
+    }
+    const int sourceNumber = (std::max)(1, duplicate.importedSfxIndex + 1);
+    duplicate.label = makeDefaultVfxLayerLabel(duplicate.sourceDisplayName, sourceNumber, sourceInstanceNumber);
+    duplicate.offsetX += 12.0f;
+    duplicate.offsetY += 12.0f;
+    this->shipVfxInstances.push_back(std::move(duplicate));
+    const int duplicatedIndex = static_cast<int>(this->shipVfxInstances.size()) - 1;
+    this->rebuildVfxLayerLabelsFromCurrentInstances();
+    this->setSelectedVfxInstanceIndex(duplicatedIndex);
+    this->markShipVfxDirty();
+    this->statusMessage = "Instance VFX dupliquee.";
+}
+
+void EditorMapVfxScene::moveSelectedLayerOrder(int delta)
+{
+    if (this->shipLayerSelected)
+    {
+        this->statusMessage = "Utilise le drag dans Layers (SHIP reste a z=0).";
+        return;
+    }
+
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        return;
+    }
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    int* drawOrder = (override != nullptr) ? &override->drawOrder : &instance->drawOrder;
+    *drawOrder += delta;
+    if (*drawOrder == this->shipDrawOrder)
+    {
+        *drawOrder += (delta >= 0) ? 1 : -1;
+    }
+    instance->behindShip = (*drawOrder < this->shipDrawOrder);
+    this->markShipVfxDirty();
+}
+
+bool EditorMapVfxScene::applyLayerNameInput(void)
+{
+    if (!this->hasSelectedVfxInstance())
+    {
+        this->layerNameInput.clear();
+        return false;
+    }
+
+    std::string trimmed = trimAscii(this->layerNameInput);
+    if (trimmed.empty())
+    {
+        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+        int sourceInstanceNumber = 0;
+        for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+        {
+            const ShipVfxInstance& candidate = this->shipVfxInstances[i];
+            if (candidate.importedSfxIndex == instance.importedSfxIndex)
+            {
+                sourceInstanceNumber += 1;
+            }
+            if (static_cast<int>(i) == this->selectedVfxInstanceIndex)
+            {
+                break;
+            }
+        }
+        if (sourceInstanceNumber <= 0)
+        {
+            sourceInstanceNumber = 1;
+        }
+        const int sourceNumber = (std::max)(1, instance.importedSfxIndex + 1);
+        trimmed = makeDefaultVfxLayerLabel(instance.sourceDisplayName, sourceNumber, sourceInstanceNumber);
+    }
+    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label = trimmed;
+    this->layerNameInput = trimmed;
+    this->markShipVfxDirty();
+    return true;
+}
+
 void EditorMapVfxScene::updateToolbarLayout(void)
 {
     const Map& map = GetCurrentMap();
@@ -639,6 +1468,9 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     const float topY = map.rect.y - 24.0f;
     const float row1Y = map.rect.y + map.rect.h + 4.0f;
     const float row2Y = row1Y + 30.0f;
+    const float shipRow1Y = row1Y - 26.0f;
+    const float shipRow2Y = shipRow1Y + 30.0f;
+    const float shipRow3Y = shipRow2Y + 30.0f;
     const float h = 24.0f;
     const float gap = 8.0f;
 
@@ -649,24 +1481,19 @@ void EditorMapVfxScene::updateToolbarLayout(void)
         rect->h = h;
         *x += w + gap;
     };
-
     float x = startX;
     setNextButton(&this->buttonModeShipVfxRect, &x, topY, 210.0f);
     setNextButton(&this->buttonModeLooseSpritesRect, &x, topY, 460.0f);
     setNextButton(&this->buttonExportRect, &x, topY, 126.0f);
+    setNextButton(&this->buttonReloadAssetsRect, &x, topY, 136.0f);
     setNextButton(&this->buttonOceanPrevRect, &x, topY, 92.0f);
     setNextButton(&this->buttonOceanNextRect, &x, topY, 92.0f);
 
+    // Ligne 1 (gauche): controles navire.
     x = startX;
-    setNextButton(&this->buttonImportShipRect, &x, row1Y, 260.0f);
-    setNextButton(&this->buttonImportSfxRect, &x, row1Y, 230.0f);
-    setNextButton(&this->buttonImportLooseRect, &x, row1Y, 372.0f);
-    setNextButton(&this->buttonShipOrderMinusRect, &x, row1Y, 96.0f);
-    setNextButton(&this->buttonShipOrderPlusRect, &x, row1Y, 96.0f);
-    setNextButton(&this->buttonVfxOrderMinusRect, &x, row1Y, 96.0f);
-    setNextButton(&this->buttonVfxOrderPlusRect, &x, row1Y, 96.0f);
-    setNextButton(&this->buttonRotateMinusRect, &x, row1Y, 96.0f);
-    setNextButton(&this->buttonRotatePlusRect, &x, row1Y, 96.0f);
+    setNextButton(&this->buttonDirectionPrevRect, &x, shipRow1Y, 240.0f);
+    setNextButton(&this->buttonDirectionNextRect, &x, shipRow1Y, 240.0f);
+    setNextButton(&this->buttonShipStateToggleRect, &x, shipRow1Y, 320.0f);
 
     // Mode downscale: tout sur la meme ligne (gauche zoom+repere, centre import, droite scale).
     const float looseZoomW = 110.0f;
@@ -711,11 +1538,113 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     setNextButton(&this->buttonLoosePreviewFpsInputRect, &looseRow2X, row2Y, 240.0f);
     setNextButton(&this->buttonLooseClearAllVfxRect, &looseRow2X, row2Y, 170.0f);
 
-    x = startX;
-    setNextButton(&this->buttonFlipHorizontalRect, &x, row2Y, 90.0f);
-    setNextButton(&this->buttonFlipVerticalRect, &x, row2Y, 90.0f);
-    setNextButton(&this->buttonRemoveVfxRect, &x, row2Y, 126.0f);
-    setNextButton(&this->buttonVfxFpsInputRect, &x, row2Y, 220.0f);
+    auto setPrevButtonFromRightWithGap = [h](SDL_FRect* rect, float* rightX, float y, float w, float customGap) {
+        *rightX -= w;
+        rect->x = *rightX;
+        rect->y = y;
+        rect->w = w;
+        rect->h = h;
+        *rightX -= customGap;
+    };
+
+    auto computeAdaptiveWidths = [gap](const std::vector<float>& preferred, const std::vector<float>& minimum, float availableWidth, float* outGap) {
+        std::vector<float> widths = preferred;
+        const size_t count = preferred.size();
+        if (count == 0U)
+        {
+            if (outGap != nullptr)
+            {
+                *outGap = 0.0f;
+            }
+            return widths;
+        }
+
+        const float minGapFloor = 4.0f;
+        float preferredButtonsTotal = 0.0f;
+        float minimumButtonsTotal = 0.0f;
+        for (size_t i = 0; i < count; ++i)
+        {
+            preferredButtonsTotal += preferred[i];
+            minimumButtonsTotal += minimum[i];
+        }
+
+        float workingGap = gap;
+        if (count > 1U)
+        {
+            const float maxGapFromMinWidth = (std::max)(0.0f, availableWidth - minimumButtonsTotal) / static_cast<float>(count - 1U);
+            if (maxGapFromMinWidth < minGapFloor)
+            {
+                workingGap = (std::max)(0.0f, maxGapFromMinWidth);
+            }
+            else
+            {
+                workingGap = std::clamp(gap, minGapFloor, maxGapFromMinWidth);
+            }
+        }
+
+        float availableButtonsWidth = availableWidth - (workingGap * static_cast<float>((count > 1U) ? (count - 1U) : 0U));
+        availableButtonsWidth = (std::max)(0.0f, availableButtonsWidth);
+
+        if (availableButtonsWidth >= preferredButtonsTotal)
+        {
+            widths = preferred;
+        }
+        else if (availableButtonsWidth <= 0.0f)
+        {
+            std::fill(widths.begin(), widths.end(), 0.0f);
+        }
+        else if (availableButtonsWidth <= minimumButtonsTotal)
+        {
+            const float ratio = availableButtonsWidth / (std::max)(minimumButtonsTotal, 1.0f);
+            for (size_t i = 0; i < count; ++i)
+            {
+                widths[i] = minimum[i] * ratio;
+            }
+        }
+        else
+        {
+            const float ratio = (availableButtonsWidth - minimumButtonsTotal) /
+                (std::max)(preferredButtonsTotal - minimumButtonsTotal, 0.001f);
+            for (size_t i = 0; i < count; ++i)
+            {
+                widths[i] = minimum[i] + ((preferred[i] - minimum[i]) * ratio);
+            }
+        }
+
+        if (outGap != nullptr)
+        {
+            *outGap = workingGap;
+        }
+        return widths;
+    };
+
+    const float availableBottomWidth = (std::max)(0.0f, map.rect.w - (startX * 2.0f));
+
+    // Ligne 2 (droite): outils VFX principaux.
+    float row2Gap = gap;
+    const std::vector<float> row2Widths = computeAdaptiveWidths(
+        std::vector<float>{220.0f, 220.0f, 320.0f},
+        std::vector<float>{120.0f, 120.0f, 180.0f},
+        availableBottomWidth,
+        &row2Gap);
+    float rightX = map.rect.x + map.rect.w - startX;
+    setPrevButtonFromRightWithGap(&this->buttonRotatePlusRect, &rightX, shipRow2Y, row2Widths[0], row2Gap);
+    setPrevButtonFromRightWithGap(&this->buttonRotateMinusRect, &rightX, shipRow2Y, row2Widths[1], row2Gap);
+    setPrevButtonFromRightWithGap(&this->buttonFlipHorizontalRect, &rightX, shipRow2Y, row2Widths[2], row2Gap);
+
+    // Ligne 3 (droite): outils VFX secondaires.
+    float row3Gap = gap;
+    const std::vector<float> row3Widths = computeAdaptiveWidths(
+        std::vector<float>{200.0f, 180.0f, 250.0f, 360.0f},
+        std::vector<float>{130.0f, 120.0f, 170.0f, 210.0f},
+        availableBottomWidth,
+        &row3Gap);
+    rightX = map.rect.x + map.rect.w - startX;
+    setPrevButtonFromRightWithGap(&this->buttonDirectionOverrideRect, &rightX, shipRow3Y, row3Widths[0], row3Gap);
+    setPrevButtonFromRightWithGap(&this->buttonSharedDirectionsRect, &rightX, shipRow3Y, row3Widths[1], row3Gap);
+    setPrevButtonFromRightWithGap(&this->buttonCenterVfxRect, &rightX, shipRow3Y, row3Widths[2], row3Gap);
+    setPrevButtonFromRightWithGap(&this->buttonFlipVerticalRect, &rightX, shipRow3Y, row3Widths[3], row3Gap);
+    this->buttonLayerNameInputRect = SDL_FRect{};
 
     this->shipListRect.w = 250.0f;
     this->shipListRect.h = 276.0f;
@@ -726,7 +1655,28 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect.x = this->shipListRect.x - this->sfxListRect.w - 16.0f;
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
+    this->layerListRect = this->shipListRect;
+    this->layerListRect.w = 770.0f;
+    this->layerListRect.h = 360.0f;
+    this->layerListRect.x = map.rect.x + 12.0f;
+    this->layerListRect.y = map.rect.y + map.rect.h - this->layerListRect.h - 30.0f;
+
     this->looseListRect = this->shipListRect;
+
+    // Deux panneaux invalides empiles: VFX en haut, Ships en dessous.
+    constexpr float invalidPanelHeight = 126.0f;
+    constexpr float invalidPanelGap = 12.0f;
+    constexpr float invalidPanelLiftUp = 18.0f;
+    this->invalidShipListRect = SDL_FRect{
+        this->layerListRect.x,
+        this->layerListRect.y - invalidPanelHeight - invalidPanelGap - invalidPanelLiftUp,
+        this->layerListRect.w,
+        invalidPanelHeight};
+    this->invalidVfxListRect = SDL_FRect{
+        this->layerListRect.x,
+        this->invalidShipListRect.y - invalidPanelHeight - invalidPanelGap,
+        this->layerListRect.w,
+        invalidPanelHeight};
 }
 
 void EditorMapVfxScene::drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const
@@ -1160,17 +2110,821 @@ void EditorMapVfxScene::drawListPanel(
 
         if (this->overlayFont.sdl_font != nullptr)
         {
+            const int maxChars = std::clamp(static_cast<int>((rowsWidth - 20.0f) / 6.7f), 14, 84);
             char textBuffer[256] = {};
-            SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", itemIndex + 1, makeAssetLabel(labels[static_cast<size_t>(itemIndex)], 24).c_str());
+            SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", itemIndex + 1, makeAssetLabel(labels[static_cast<size_t>(itemIndex)], maxChars).c_str());
             RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
             rowText.color = kHudTextColor;
             rc2d_graphics_setTextColor(&rowText);
-            rc2d_graphics_drawText(&rowText, rowRect.x + 4.0f, rowRect.y + 1.0f);
+            int textW = 0;
+            int textH = 0;
+            rc2d_graphics_getTextSize(&rowText, &textW, &textH);
+            const float textY = rowRect.y + (std::max)((rowRect.h - static_cast<float>(textH)) * 0.5f, 1.0f);
+            rc2d_graphics_drawText(&rowText, rowRect.x + 4.0f, textY);
             rc2d_graphics_destroyText(&rowText);
         }
     }
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerIndices) const
+{
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->layerListRect);
+    rc2d_graphics_setColor(kPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->layerListRect);
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kVisibleListRows);
+    const float rowsLeftX = this->layerListRect.x + panelPadding;
+    const float rowsWidth = this->layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text headerText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Layers (drag souris)");
+        headerText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&headerText);
+        rc2d_graphics_drawText(&headerText, this->layerListRect.x + panelPadding, this->layerListRect.y + 1.0f);
+        rc2d_graphics_destroyText(&headerText);
+    }
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+
+    const int itemCount = static_cast<int>(orderedLayerIndices.size());
+    if (itemCount <= 0)
+    {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        return;
+    }
+
+    const int startIndex = this->computeListStartIndex(this->layerListScrollOffset, itemCount);
+    const int maxOffset = (std::max)(itemCount - kVisibleListRows, 0);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kVisibleListRows)) / static_cast<float>(itemCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    const int selectedIndex = this->getSelectedLayerRowIndexForDisplay(orderedLayerIndices);
+    const int visibleCount = (std::max)((std::min)(kVisibleListRows, itemCount - startIndex), 0);
+
+    for (int i = 0; i < kVisibleListRows; ++i)
+    {
+        const int displayIndex = startIndex + i;
+        if (displayIndex >= itemCount)
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+
+        const int instanceIndex = orderedLayerIndices[static_cast<size_t>(displayIndex)];
+        const bool isShipRow = (instanceIndex < 0);
+        int drawOrder = this->shipDrawOrder;
+        bool visible = this->shipLayerVisible;
+        bool debugBoundsVisible = this->shipDebugBoundsVisible;
+        bool locked = this->shipLayerLocked;
+        std::string label = "SHIP";
+
+        if (!isShipRow)
+        {
+            const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+            const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+            drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
+            visible = (override != nullptr) ? override->visible : instance.visible;
+            debugBoundsVisible = instance.debugBoundsVisible;
+            locked = instance.locked;
+            label = instance.label;
+        }
+
+        const bool isDraggedRow = this->layerRowDragActive && (displayIndex == this->layerRowDragSourceDisplayIndex);
+        const bool isSelected = (displayIndex == selectedIndex);
+        RC2D_Color rowFill = kRowFillColor;
+        if (isDraggedRow)
+        {
+            rowFill = RC2D_Color{62, 94, 126, 220};
+        }
+        else if (isSelected)
+        {
+            rowFill = kRowSelectedFillColor;
+        }
+        if (!visible)
+        {
+            rowFill = RC2D_Color{
+                static_cast<uint8_t>((rowFill.r + 40U) / 2U),
+                static_cast<uint8_t>((rowFill.g + 40U) / 2U),
+                static_cast<uint8_t>((rowFill.b + 40U) / 2U),
+                rowFill.a};
+        }
+
+        rc2d_graphics_setColor(rowFill);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(kRowBorderColor);
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        SDL_FRect lockRect{};
+        lockRect.w = 40.0f;
+        lockRect.h = rowRect.h - 4.0f;
+        lockRect.x = rowRect.x + rowRect.w - lockRect.w - 3.0f;
+        lockRect.y = rowRect.y + 2.0f;
+
+        SDL_FRect visRect{};
+        visRect.w = 52.0f;
+        visRect.h = lockRect.h;
+        visRect.x = lockRect.x - visRect.w - 4.0f;
+        visRect.y = lockRect.y;
+
+        SDL_FRect dupRect{};
+        dupRect.w = 46.0f;
+        dupRect.h = lockRect.h;
+        dupRect.x = visRect.x - dupRect.w - 4.0f;
+        dupRect.y = lockRect.y;
+
+        SDL_FRect delRect{};
+        delRect.w = 46.0f;
+        delRect.h = lockRect.h;
+        delRect.x = dupRect.x - delRect.w - 4.0f;
+        delRect.y = lockRect.y;
+
+        SDL_FRect resetRect{};
+        resetRect.w = 58.0f;
+        resetRect.h = lockRect.h;
+        resetRect.x = delRect.x - resetRect.w - 4.0f;
+        resetRect.y = lockRect.y;
+
+        SDL_FRect debugRect{};
+        debugRect.w = 66.0f;
+        debugRect.h = lockRect.h;
+        debugRect.x = resetRect.x - debugRect.w - 4.0f;
+        debugRect.y = lockRect.y;
+
+        rc2d_graphics_setColor(visible ? RC2D_Color{74, 122, 92, 220} : RC2D_Color{92, 66, 66, 220});
+        rc2d_graphics_rectangle("fill", &visRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &visRect);
+
+        const bool lockVisualState = locked;
+        rc2d_graphics_setColor(lockVisualState ? RC2D_Color{116, 90, 58, 220} : RC2D_Color{56, 66, 78, 220});
+        rc2d_graphics_rectangle("fill", &lockRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &lockRect);
+
+        const bool canDuplicateOrDelete = !isShipRow;
+        rc2d_graphics_setColor(
+            canDuplicateOrDelete
+                ? RC2D_Color{64, 84, 110, 220}
+                : RC2D_Color{50, 58, 68, 220});
+        rc2d_graphics_rectangle("fill", &dupRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &dupRect);
+
+        rc2d_graphics_setColor(
+            canDuplicateOrDelete
+                ? RC2D_Color{118, 64, 64, 220}
+                : RC2D_Color{62, 52, 52, 220});
+        rc2d_graphics_rectangle("fill", &delRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &delRect);
+
+        const bool canReset = !isShipRow;
+        rc2d_graphics_setColor(
+            canReset
+                ? RC2D_Color{76, 96, 66, 220}
+                : RC2D_Color{56, 66, 58, 220});
+        rc2d_graphics_rectangle("fill", &resetRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &resetRect);
+
+        const bool debugActive = debugBoundsVisible;
+        rc2d_graphics_setColor(
+            debugActive ? RC2D_Color{86, 118, 68, 220} : RC2D_Color{64, 78, 60, 220});
+        rc2d_graphics_rectangle("fill", &debugRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &debugRect);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const char* visLabel = visible ? "SHOW" : "HIDE";
+            RC2D_Text visText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), visLabel);
+            visText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&visText);
+            int visW = 0;
+            int visH = 0;
+            rc2d_graphics_getTextSize(&visText, &visW, &visH);
+            rc2d_graphics_drawText(
+                &visText,
+                visRect.x + ((visRect.w - static_cast<float>(visW)) * 0.5f),
+                visRect.y + ((visRect.h - static_cast<float>(visH)) * 0.5f));
+            rc2d_graphics_destroyText(&visText);
+
+            const char* lockLabel = lockVisualState ? "LOCK" : "FREE";
+            RC2D_Text lockText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lockLabel);
+            lockText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&lockText);
+            int lockW = 0;
+            int lockH = 0;
+            rc2d_graphics_getTextSize(&lockText, &lockW, &lockH);
+            rc2d_graphics_drawText(
+                &lockText,
+                lockRect.x + ((lockRect.w - static_cast<float>(lockW)) * 0.5f),
+                lockRect.y + ((lockRect.h - static_cast<float>(lockH)) * 0.5f));
+            rc2d_graphics_destroyText(&lockText);
+
+            const char* dupLabel = canDuplicateOrDelete ? "DUP" : "-";
+            RC2D_Text dupText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), dupLabel);
+            dupText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&dupText);
+            int dupW = 0;
+            int dupH = 0;
+            rc2d_graphics_getTextSize(&dupText, &dupW, &dupH);
+            rc2d_graphics_drawText(
+                &dupText,
+                dupRect.x + ((dupRect.w - static_cast<float>(dupW)) * 0.5f),
+                dupRect.y + ((dupRect.h - static_cast<float>(dupH)) * 0.5f));
+            rc2d_graphics_destroyText(&dupText);
+
+            const char* delLabel = canDuplicateOrDelete ? "DEL" : "-";
+            RC2D_Text delText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), delLabel);
+            delText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&delText);
+            int delW = 0;
+            int delH = 0;
+            rc2d_graphics_getTextSize(&delText, &delW, &delH);
+            rc2d_graphics_drawText(
+                &delText,
+                delRect.x + ((delRect.w - static_cast<float>(delW)) * 0.5f),
+                delRect.y + ((delRect.h - static_cast<float>(delH)) * 0.5f));
+            rc2d_graphics_destroyText(&delText);
+
+            const char* resetLabel = canReset ? "RESET" : "-";
+            RC2D_Text resetText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), resetLabel);
+            resetText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&resetText);
+            int resetW = 0;
+            int resetH = 0;
+            rc2d_graphics_getTextSize(&resetText, &resetW, &resetH);
+            rc2d_graphics_drawText(
+                &resetText,
+                resetRect.x + ((resetRect.w - static_cast<float>(resetW)) * 0.5f),
+                resetRect.y + ((resetRect.h - static_cast<float>(resetH)) * 0.5f));
+            rc2d_graphics_destroyText(&resetText);
+
+            const char* debugLabel = "DEBUG";
+            RC2D_Text debugText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), debugLabel);
+            debugText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&debugText);
+            int debugW = 0;
+            int debugH = 0;
+            rc2d_graphics_getTextSize(&debugText, &debugW, &debugH);
+            rc2d_graphics_drawText(
+                &debugText,
+                debugRect.x + ((debugRect.w - static_cast<float>(debugW)) * 0.5f),
+                debugRect.y + ((debugRect.h - static_cast<float>(debugH)) * 0.5f));
+            rc2d_graphics_destroyText(&debugText);
+
+            const bool behind = (drawOrder < this->shipDrawOrder);
+            const float indent = isShipRow ? 18.0f : (behind ? 8.0f : 34.0f);
+            const float labelX = rowRect.x + indent;
+            const float labelWidth = (debugRect.x - 6.0f) - labelX;
+            const int maxChars = std::clamp(static_cast<int>(labelWidth / 6.6f), 12, 72);
+            std::string rowLabel = std::string("z=") + std::to_string(drawOrder) + " | " + label;
+
+            RC2D_Text rowText = rc2d_graphics_createText(
+                const_cast<RC2D_Font*>(&this->overlayFont),
+                makeAssetLabel(rowLabel, maxChars).c_str());
+            rowText.color = visible ? kHudTextColor : RC2D_Color{170, 178, 188, 235};
+            rc2d_graphics_setTextColor(&rowText);
+            int rowTextW = 0;
+            int rowTextH = 0;
+            rc2d_graphics_getTextSize(&rowText, &rowTextW, &rowTextH);
+            rc2d_graphics_drawText(
+                &rowText,
+                labelX,
+                rowRect.y + (std::max)((rowRect.h - static_cast<float>(rowTextH)) * 0.5f, 1.0f));
+            rc2d_graphics_destroyText(&rowText);
+        }
+    }
+
+    if (this->layerRowDragActive && this->layerRowDragMoved && visibleCount > 0)
+    {
+        const int sourceInsertIndex = this->layerRowDragSourceDisplayIndex + 1;
+        const int sourceAboveInsertIndex = this->layerRowDragSourceDisplayIndex;
+        const int insertionIndex = std::clamp(this->layerRowDragTargetInsertIndex, 0, itemCount);
+        if (insertionIndex != sourceInsertIndex &&
+            insertionIndex != sourceAboveInsertIndex &&
+            insertionIndex >= startIndex &&
+            insertionIndex <= (startIndex + visibleCount))
+        {
+            float lineY = rowsTopY + (static_cast<float>(insertionIndex - startIndex) * (rowHeight + rowGap));
+            const float rowsBottomY = rowsTopY + (static_cast<float>(visibleCount) * (rowHeight + rowGap)) - rowGap;
+            lineY = std::clamp(lineY, rowsTopY, rowsBottomY);
+            SDL_FRect insertLine{
+                rowsLeftX + 2.0f,
+                lineY - 1.0f,
+                rowsWidth - 4.0f,
+                2.0f};
+            rc2d_graphics_setColor(RC2D_Color{228, 210, 86, 240});
+            rc2d_graphics_rectangle("fill", &insertLine);
+        }
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
+{
+    if (!this->layerRowDragActive)
+    {
+        return;
+    }
+
+    const int itemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
+    if (itemCount <= 1)
+    {
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        const int sourceDisplayIndex = this->layerRowDragSourceDisplayIndex;
+        const int sourceInsertIndex = sourceDisplayIndex + 1;
+        const int targetInsertIndex = std::clamp(this->layerRowDragTargetInsertIndex, 0, itemCount);
+
+        this->layerRowDragActive = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
+
+        if (this->layerRowDragMoved && targetInsertIndex != sourceInsertIndex)
+        {
+            int targetDisplayIndex = targetInsertIndex;
+            if (targetDisplayIndex > sourceDisplayIndex)
+            {
+                targetDisplayIndex -= 1;
+            }
+            targetDisplayIndex = std::clamp(targetDisplayIndex, 0, itemCount - 1);
+            this->applyLayerPanelReorder(sourceDisplayIndex, targetDisplayIndex);
+        }
+
+        this->layerRowDragMoved = false;
+        this->layerRowDragTargetInsertIndex = -1;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+    (void)mouseX;
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kVisibleListRows);
+    const int startIndex = this->computeListStartIndex(this->layerListScrollOffset, itemCount);
+    const int visibleCount = (std::max)((std::min)(kVisibleListRows, itemCount - startIndex), 0);
+
+    int insertionIndex = startIndex;
+    if (visibleCount > 0)
+    {
+        insertionIndex = startIndex + visibleCount;
+        for (int i = 0; i < visibleCount; ++i)
+        {
+            const float rowTop = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+            const float rowMiddle = rowTop + (rowHeight * 0.5f);
+            if (mouseY < rowMiddle)
+            {
+                insertionIndex = startIndex + i;
+                break;
+            }
+        }
+    }
+    insertionIndex = std::clamp(insertionIndex, 0, itemCount);
+    if (insertionIndex == this->layerRowDragSourceDisplayIndex)
+    {
+        insertionIndex = (std::max)(0, insertionIndex - 1);
+    }
+
+    if (std::fabs(mouseY - this->layerRowDragStartMouseY) > 2.5f)
+    {
+        this->layerRowDragMoved = true;
+    }
+    this->layerRowDragTargetInsertIndex = insertionIndex;
+
+    const float autoScrollMargin = 12.0f;
+    const int maxOffset = this->getListMaxScrollOffset(itemCount);
+    if (mouseY < (rowsTopY + autoScrollMargin) && this->layerListScrollOffset > 0)
+    {
+        this->layerListScrollOffset -= 1;
+    }
+    else if (mouseY > (rowsTopY + rowsHeight - autoScrollMargin) && this->layerListScrollOffset < maxOffset)
+    {
+        this->layerListScrollOffset += 1;
+    }
+    this->clampListScrollOffset(&this->layerListScrollOffset, itemCount);
+}
+
+void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targetDisplayIndex)
+{
+    const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
+    const int itemCount = static_cast<int>(orderedLayerIndices.size());
+    if (itemCount <= 1)
+    {
+        return;
+    }
+    if (sourceDisplayIndex < 0 || sourceDisplayIndex >= itemCount)
+    {
+        return;
+    }
+    if (targetDisplayIndex < 0 || targetDisplayIndex >= itemCount)
+    {
+        return;
+    }
+    if (sourceDisplayIndex == targetDisplayIndex)
+    {
+        return;
+    }
+
+    std::vector<int> rowToInstanceIndex = orderedLayerIndices;
+
+    const int movedItem = rowToInstanceIndex[static_cast<size_t>(sourceDisplayIndex)];
+    rowToInstanceIndex.erase(rowToInstanceIndex.begin() + sourceDisplayIndex);
+    rowToInstanceIndex.insert(rowToInstanceIndex.begin() + targetDisplayIndex, movedItem);
+
+    auto shipIt = std::find(rowToInstanceIndex.begin(), rowToInstanceIndex.end(), -1);
+    if (shipIt == rowToInstanceIndex.end())
+    {
+        return;
+    }
+    const int shipDisplayIndex = static_cast<int>(std::distance(rowToInstanceIndex.begin(), shipIt));
+    this->shipDrawOrder = 0;
+
+    for (int i = 0; i < static_cast<int>(rowToInstanceIndex.size()); ++i)
+    {
+        const int instanceIndex = rowToInstanceIndex[static_cast<size_t>(i)];
+        if (instanceIndex < 0)
+        {
+            continue;
+        }
+
+        int drawOrder = i - shipDisplayIndex;
+        if (drawOrder == 0)
+        {
+            drawOrder = (i > shipDisplayIndex) ? 1 : -1;
+        }
+
+        ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+        DirectionOverride* override = this->getEditableDirectionOverride(&instance);
+        if (override != nullptr)
+        {
+            override->drawOrder = drawOrder;
+        }
+        else
+        {
+            instance.drawOrder = drawOrder;
+        }
+    }
+
+    for (ShipVfxInstance& instance : this->shipVfxInstances)
+    {
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const int effectiveOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
+        instance.behindShip = (effectiveOrder < this->shipDrawOrder);
+    }
+
+    const int selectedRow = this->getSelectedLayerRowIndexForDisplay(this->getOrderedVfxInstanceIndicesForLayerPanel());
+    this->ensureSelectionVisible(selectedRow, &this->layerListScrollOffset, itemCount);
+    this->markShipVfxDirty();
+    this->statusMessage = "Ordre des layers mis a jour (drag souris).";
+}
+
+void EditorMapVfxScene::drawInvalidAssetPanel(
+    const SDL_FRect& panelRect,
+    const char* title,
+    const std::vector<InvalidAssetEntry>& entries,
+    int scrollOffset) const
+{
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{40, 30, 20, 205});
+    rc2d_graphics_rectangle("fill", &panelRect);
+    rc2d_graphics_setColor(RC2D_Color{185, 138, 102, 230});
+    rc2d_graphics_rectangle("line", &panelRect);
+    const float panelPadding = kInvalidPanelPadding;
+    const float headerHeight = kInvalidPanelHeaderHeight;
+    const float rowGap = kInvalidPanelRowGap;
+    const float rowsTopY = panelRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        panelRect.h - ((panelPadding * 2.0f) + headerHeight + ((kInvalidVisibleRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kInvalidVisibleRows);
+    const float rowsLeftX = panelRect.x + panelPadding;
+    const float rowsWidth = panelRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{90, 70, 52, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{202, 162, 128, 225});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text titleText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
+        titleText.color = RC2D_Color{248, 210, 168, 245};
+        rc2d_graphics_setTextColor(&titleText);
+        rc2d_graphics_drawText(&titleText, panelRect.x + 8.0f, panelRect.y + 4.0f);
+        rc2d_graphics_destroyText(&titleText);
+    }
+
+    if (entries.empty())
+    {
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            RC2D_Text noEntryText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Aucune invalidation");
+            noEntryText.color = RC2D_Color{210, 232, 210, 230};
+            rc2d_graphics_setTextColor(&noEntryText);
+            rc2d_graphics_drawText(&noEntryText, panelRect.x + 8.0f, rowsTopY + 3.0f);
+            rc2d_graphics_destroyText(&noEntryText);
+        }
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        return;
+    }
+
+    const int itemCount = static_cast<int>(entries.size());
+    const int startIndex = std::clamp(scrollOffset, 0, (std::max)(itemCount - kInvalidVisibleRows, 0));
+    const int maxOffset = (std::max)(itemCount - kInvalidVisibleRows, 0);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kInvalidVisibleRows)) / static_cast<float>(itemCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{236, 198, 164, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{252, 224, 196, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    for (int i = 0; i < kInvalidVisibleRows; ++i)
+    {
+        const int itemIndex = startIndex + i;
+        if (itemIndex >= itemCount)
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+        rc2d_graphics_setColor(RC2D_Color{66, 48, 32, 220});
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(RC2D_Color{190, 150, 114, 215});
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const InvalidAssetEntry& entry = entries[static_cast<size_t>(itemIndex)];
+            std::string line = entry.folderName + ": " + entry.reason;
+            const int maxChars = std::clamp(static_cast<int>((rowsWidth - 20.0f) / 6.5f), 24, 96);
+            RC2D_Text rowText = rc2d_graphics_createText(
+                const_cast<RC2D_Font*>(&this->overlayFont),
+                makeAssetLabel(line, maxChars).c_str());
+            rowText.color = RC2D_Color{245, 210, 158, 230};
+            rc2d_graphics_setTextColor(&rowText);
+            int textW = 0;
+            int textH = 0;
+            rc2d_graphics_getTextSize(&rowText, &textW, &textH);
+            const float textY = rowRect.y + (std::max)((rowRect.h - static_cast<float>(textH)) * 0.5f, 1.0f);
+            rc2d_graphics_drawText(&rowText, rowRect.x + 6.0f, textY);
+            rc2d_graphics_destroyText(&rowText);
+        }
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+bool EditorMapVfxScene::handleInvalidAssetPanelClick(
+    float x,
+    float y,
+    const SDL_FRect& panelRect,
+    int itemCount,
+    int* scrollOffset,
+    bool* dragActive,
+    float* dragGrabOffsetY)
+{
+    if (!this->pointInRect(x, y, panelRect))
+    {
+        return false;
+    }
+
+    const float panelPadding = kInvalidPanelPadding;
+    const float headerHeight = kInvalidPanelHeaderHeight;
+    const float rowGap = kInvalidPanelRowGap;
+    const float rowsTopY = panelRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        panelRect.h - ((panelPadding * 2.0f) + headerHeight + ((kInvalidVisibleRows - 1) * rowGap));
+    const float rowsLeftX = panelRect.x + panelPadding;
+    const float rowsWidth = panelRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    if (this->pointInRect(x, y, scrollTrackRect))
+    {
+        const int maxOffset = (std::max)(itemCount - kInvalidVisibleRows, 0);
+        if (maxOffset <= 0)
+        {
+            if (dragActive != nullptr)
+            {
+                *dragActive = false;
+            }
+            return true;
+        }
+
+        const float thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kInvalidVisibleRows)) / static_cast<float>(itemCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const int startIndex = std::clamp((scrollOffset != nullptr) ? *scrollOffset : 0, 0, maxOffset);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        const float thumbY = scrollTrackRect.y + (ratio * thumbTravel);
+
+        SDL_FRect scrollThumbRect{};
+        scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+        scrollThumbRect.y = thumbY;
+        scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+        scrollThumbRect.h = thumbHeight;
+
+        if (this->pointInRect(x, y, scrollThumbRect))
+        {
+            if (dragActive != nullptr)
+            {
+                *dragActive = true;
+            }
+            if (dragGrabOffsetY != nullptr)
+            {
+                *dragGrabOffsetY = y - scrollThumbRect.y;
+            }
+        }
+        else
+        {
+            const float targetThumbY = std::clamp(
+                y - (scrollThumbRect.h * 0.5f),
+                scrollTrackRect.y,
+                scrollTrackRect.y + thumbTravel);
+            const float clickRatio = (thumbTravel > 0.0f)
+                ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
+                : 0.0f;
+            if (scrollOffset != nullptr)
+            {
+                *scrollOffset = static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+                *scrollOffset = std::clamp(*scrollOffset, 0, maxOffset);
+            }
+            if (dragActive != nullptr)
+            {
+                *dragActive = true;
+            }
+            if (dragGrabOffsetY != nullptr)
+            {
+                *dragGrabOffsetY = scrollThumbRect.h * 0.5f;
+            }
+        }
+        return true;
+    }
+
+    if (dragActive != nullptr)
+    {
+        *dragActive = false;
+    }
+    return true;
+}
+
+void EditorMapVfxScene::handleInvalidAssetPanelScrollDragFromMouse(
+    const SDL_FRect& panelRect,
+    int itemCount,
+    int* scrollOffset,
+    bool* dragActive,
+    float* dragGrabOffsetY)
+{
+    if (dragActive == nullptr || !(*dragActive))
+    {
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        *dragActive = false;
+        if (dragGrabOffsetY != nullptr)
+        {
+            *dragGrabOffsetY = 0.0f;
+        }
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+    (void)mouseX;
+
+    const float panelPadding = kInvalidPanelPadding;
+    const float headerHeight = kInvalidPanelHeaderHeight;
+    const float rowGap = kInvalidPanelRowGap;
+    const float rowsTopY = panelRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        panelRect.h - ((panelPadding * 2.0f) + headerHeight + ((kInvalidVisibleRows - 1) * rowGap));
+    const float rowsLeftX = panelRect.x + panelPadding;
+    const float rowsWidth = panelRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    const int maxOffset = (std::max)(itemCount - kInvalidVisibleRows, 0);
+    if (maxOffset <= 0)
+    {
+        *dragActive = false;
+        if (dragGrabOffsetY != nullptr)
+        {
+            *dragGrabOffsetY = 0.0f;
+        }
+        return;
+    }
+
+    const float thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kInvalidVisibleRows)) / static_cast<float>(itemCount));
+    const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+    const float targetThumbY = std::clamp(
+        mouseY - ((dragGrabOffsetY != nullptr) ? *dragGrabOffsetY : 0.0f),
+        scrollTrackRect.y,
+        scrollTrackRect.y + thumbTravel);
+    const float ratio = (thumbTravel > 0.0f)
+        ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
+        : 0.0f;
+
+    if (scrollOffset != nullptr)
+    {
+        *scrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+        *scrollOffset = std::clamp(*scrollOffset, 0, maxOffset);
+    }
 }
 
 void EditorMapVfxScene::openImportShipFolderDialog(void)
@@ -1249,7 +3003,6 @@ void EditorMapVfxScene::openLooseExportNamePopup(void)
     }
 
     this->looseExportNamePopupVisible = true;
-    this->vfxFpsInputFocused = false;
     this->loosePreviewFpsInputFocused = false;
     this->statusMessage = "Nom animation export: tape un nom puis ENTREE.";
 }
@@ -1406,130 +3159,214 @@ bool EditorMapVfxScene::importShipsFromRootFolderAbsolutePath(const char* rootFo
         return false;
     }
 
-    auto isShipAtlasFolder = [](const std::filesystem::path& folderPath) -> bool {
-        std::error_code localError;
-        if (!std::filesystem::exists(folderPath, localError) || !std::filesystem::is_directory(folderPath, localError))
-        {
-            return false;
-        }
-        for (int i = 1; i <= kShipSpriteCount; ++i)
-        {
-            const std::filesystem::path pngPath = folderPath / (std::to_string(i) + ".png");
-            if (!std::filesystem::exists(pngPath, localError) || !std::filesystem::is_regular_file(pngPath, localError))
-            {
-                return false;
-            }
-        }
-        return true;
-    };
+    this->invalidShipFolders.clear();
 
-    std::vector<std::filesystem::path> discoveredFolders;
-    if (isShipAtlasFolder(rootPath))
+    std::vector<std::filesystem::path> candidateFolders;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(rootPath, fsError))
     {
-        discoveredFolders.push_back(rootPath);
-    }
-
-    std::filesystem::recursive_directory_iterator it(
-        rootPath,
-        std::filesystem::directory_options::skip_permission_denied,
-        fsError);
-    if (!fsError)
-    {
-        std::filesystem::recursive_directory_iterator end;
-        while (it != end)
+        if (fsError)
         {
-            std::error_code entryError;
-            if (it->is_directory(entryError) && !entryError)
-            {
-                if (isShipAtlasFolder(it->path()))
-                {
-                    discoveredFolders.push_back(it->path());
-                }
-            }
-            it.increment(fsError);
-            if (fsError)
-            {
-                fsError.clear();
-            }
+            fsError.clear();
+            continue;
+        }
+        if (entry.is_directory(fsError) && !fsError)
+        {
+            candidateFolders.push_back(entry.path());
         }
     }
 
-    if (discoveredFolders.empty())
-    {
-        this->statusMessage = "Aucun dossier navire valide trouve (1.png..8.png).";
-        return false;
-    }
-
-    std::sort(discoveredFolders.begin(), discoveredFolders.end(), [](const auto& a, const auto& b) {
-        return normalizePathSlashes(a.string()) < normalizePathSlashes(b.string());
+    std::sort(candidateFolders.begin(), candidateFolders.end(), [](const auto& a, const auto& b) {
+        return makePathKeyLower(a.string()) < makePathKeyLower(b.string());
     });
 
-    auto makePathKey = [](const std::string& path) {
-        std::string key = normalizePathSlashes(path);
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return key;
-    };
-
     std::vector<std::string> knownPathKeys;
-    knownPathKeys.reserve(this->importedShips.size() + discoveredFolders.size());
+    knownPathKeys.reserve(this->importedShips.size() + candidateFolders.size());
     for (const ImportedShip& ship : this->importedShips)
     {
-        knownPathKeys.push_back(makePathKey(ship.folderAbsolutePath));
+        knownPathKeys.push_back(makePathKeyLower(ship.folderAbsolutePath));
     }
 
-    int firstAddedIndex = -1;
     int addedCount = 0;
-    for (const std::filesystem::path& folderPath : discoveredFolders)
+    for (const std::filesystem::path& folderPath : candidateFolders)
     {
         std::error_code absError;
-        std::filesystem::path absolutePath = std::filesystem::absolute(folderPath, absError);
-        if (absError)
-        {
-            absolutePath = folderPath;
-        }
-
-        const std::string normalizedAbsolutePath = normalizePathSlashes(absolutePath.string());
-        const std::string key = makePathKey(normalizedAbsolutePath);
-        if (std::find(knownPathKeys.begin(), knownPathKeys.end(), key) != knownPathKeys.end())
+        const std::filesystem::path absolutePath = std::filesystem::absolute(folderPath, absError);
+        const std::string absolutePathNorm = normalizePathSlashes((absError ? folderPath : absolutePath).string());
+        if (std::find(knownPathKeys.begin(), knownPathKeys.end(), makePathKeyLower(absolutePathNorm)) != knownPathKeys.end())
         {
             continue;
         }
 
-        knownPathKeys.push_back(key);
+        std::vector<std::string> fileNames;
+        std::vector<std::string> pngFileNames;
+        for (const std::filesystem::directory_entry& child : std::filesystem::directory_iterator(folderPath, fsError))
+        {
+            if (fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+            if (!child.is_regular_file(fsError) || fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+
+            const std::string fileName = child.path().filename().string();
+            fileNames.push_back(fileName);
+            std::string extension = child.path().extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (extension == ".png")
+            {
+                pngFileNames.push_back(fileName);
+            }
+        }
+
+        std::vector<std::string> reasons;
+        const bool hasAnchor = std::find(fileNames.begin(), fileNames.end(), "ship_anchor.json") != fileNames.end();
+        if (!hasAnchor)
+        {
+            reasons.push_back("ship_anchor.json manquant");
+        }
+
+        std::array<bool, 8> hasExpected{};
+        hasExpected.fill(false);
+        std::vector<std::string> unexpectedPng;
+        for (const std::string& pngName : pngFileNames)
+        {
+            bool matched = false;
+            for (int i = 1; i <= kShipSpriteCount; ++i)
+            {
+                if (pngName == (std::to_string(i) + ".png"))
+                {
+                    hasExpected[static_cast<size_t>(i - 1)] = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched)
+            {
+                unexpectedPng.push_back(pngName);
+            }
+        }
+
+        for (int i = 1; i <= kShipSpriteCount; ++i)
+        {
+            if (!hasExpected[static_cast<size_t>(i - 1)])
+            {
+                reasons.push_back("fichier obligatoire manquant: " + std::to_string(i) + ".png");
+            }
+        }
+        if (static_cast<int>(pngFileNames.size()) != kShipSpriteCount)
+        {
+            reasons.push_back("exactement 8 PNG requis (trouve: " + std::to_string(pngFileNames.size()) + ")");
+        }
+        if (!unexpectedPng.empty())
+        {
+            std::sort(unexpectedPng.begin(), unexpectedPng.end());
+            reasons.push_back("PNG mal nommes: " + unexpectedPng[0] + ((unexpectedPng.size() > 1) ? "..." : ""));
+        }
+
+        if (!reasons.empty())
+        {
+            InvalidAssetEntry invalid{};
+            invalid.folderName = folderPath.filename().string();
+            if (invalid.folderName.empty())
+            {
+                invalid.folderName = absolutePathNorm;
+            }
+            invalid.reason = reasons[0];
+            this->invalidShipFolders.push_back(std::move(invalid));
+            continue;
+        }
 
         ImportedShip importedShip{};
-        importedShip.folderAbsolutePath = normalizedAbsolutePath;
+        importedShip.folderAbsolutePath = absolutePathNorm;
         importedShip.displayName = folderPath.filename().string();
         if (importedShip.displayName.empty())
         {
             importedShip.displayName = importedShip.folderAbsolutePath;
         }
-
+        importedShip.configJsonPath = this->buildShipConfigJsonPath(importedShip);
         this->importedShips.push_back(importedShip);
-        if (firstAddedIndex < 0)
-        {
-            firstAddedIndex = static_cast<int>(this->importedShips.size()) - 1;
-        }
+        knownPathKeys.push_back(makePathKeyLower(absolutePathNorm));
         addedCount += 1;
     }
 
-    if (addedCount <= 0)
+    std::sort(this->importedShips.begin(), this->importedShips.end(), [](const ImportedShip& a, const ImportedShip& b) {
+        std::string aKey = makePathKeyLower(stripListPrefix(a.displayName, "ship-"));
+        std::string bKey = makePathKeyLower(stripListPrefix(b.displayName, "ship-"));
+        if (aKey.empty())
+        {
+            aKey = makePathKeyLower(a.displayName);
+        }
+        if (bKey.empty())
+        {
+            bKey = makePathKeyLower(b.displayName);
+        }
+        if (aKey != bKey)
+        {
+            return aKey < bKey;
+        }
+        const bool aPrefixed = (makePathKeyLower(trimAscii(extractFileName(a.displayName))).rfind("ship-", 0U) == 0U);
+        const bool bPrefixed = (makePathKeyLower(trimAscii(extractFileName(b.displayName))).rfind("ship-", 0U) == 0U);
+        if (aPrefixed != bPrefixed)
+        {
+            return aPrefixed; // Priorite aux dossiers "ship-*".
+        }
+        return makePathKeyLower(a.folderAbsolutePath) < makePathKeyLower(b.folderAbsolutePath);
+    });
+
+    // Deduplication silencieuse pour la liste UI:
+    // - on garde un seul element par chemin absolu
+    // - puis un seul element par libelle affiche (prefixe "ship-" retire si present)
+    // Aucun ajout dans "Ships ignores" pour ce cas.
+    std::vector<ImportedShip> deduplicatedShips;
+    deduplicatedShips.reserve(this->importedShips.size());
+    std::vector<std::string> seenPathKeys;
+    std::vector<std::string> seenUiKeys;
+    for (const ImportedShip& ship : this->importedShips)
     {
-        this->statusMessage = "Aucun nouveau navire importe (deja presents).";
+        const std::string pathKey = makePathKeyLower(ship.folderAbsolutePath);
+        if (std::find(seenPathKeys.begin(), seenPathKeys.end(), pathKey) != seenPathKeys.end())
+        {
+            continue;
+        }
+
+        std::string uiKey = makePathKeyLower(stripListPrefix(ship.displayName, "ship-"));
+        if (uiKey.empty())
+        {
+            uiKey = makePathKeyLower(ship.displayName);
+        }
+        if (std::find(seenUiKeys.begin(), seenUiKeys.end(), uiKey) != seenUiKeys.end())
+        {
+            continue;
+        }
+
+        deduplicatedShips.push_back(ship);
+        seenPathKeys.push_back(pathKey);
+        seenUiKeys.push_back(uiKey);
+    }
+    this->importedShips.swap(deduplicatedShips);
+
+    if (!this->importedShips.empty() && (this->selectedShipIndex < 0 || this->selectedShipIndex >= static_cast<int>(this->importedShips.size())))
+    {
+        this->selectImportedShipAtIndex(0);
+    }
+
+    if (addedCount <= 0 && this->importedShips.empty())
+    {
+        this->statusMessage = "Aucun navire valide detecte dans assets/images/ships.";
         return false;
     }
 
-    if ((this->selectedShipIndex < 0 || !this->previewShipLoaded) && firstAddedIndex >= 0)
-    {
-        if (!this->selectImportedShipAtIndex(firstAddedIndex))
-        {
-            return false;
-        }
-    }
-
-    this->statusMessage = std::to_string(addedCount) + " navire(s) importe(s).";
+    this->statusMessage =
+        std::to_string(static_cast<int>(this->importedShips.size())) +
+        " navire(s) valides, " +
+        std::to_string(static_cast<int>(this->invalidShipFolders.size())) +
+        " ignore(s).";
     return true;
 }
 
@@ -1597,30 +3434,36 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
         }
     }
 
-    std::vector<char> anchorBytes;
     const std::filesystem::path anchorSourcePath = folderPath / "ship_anchor.json";
-    if (std::filesystem::exists(anchorSourcePath, fsError) && std::filesystem::is_regular_file(anchorSourcePath, fsError))
+    if (!std::filesystem::exists(anchorSourcePath, fsError) || !std::filesystem::is_regular_file(anchorSourcePath, fsError))
+    {
+        this->statusMessage = "Dossier invalide: ship_anchor.json manquant.";
+        return false;
+    }
+
+    std::vector<char> anchorBytes;
     {
         std::ifstream anchorInput(anchorSourcePath, std::ios::binary | std::ios::ate);
-        if (anchorInput.is_open())
+        if (!anchorInput.is_open())
         {
-            const std::streamsize anchorSize = anchorInput.tellg();
-            if (anchorSize > 0)
-            {
-                anchorInput.seekg(0, std::ios::beg);
-                anchorBytes.resize(static_cast<size_t>(anchorSize));
-                if (!anchorInput.read(anchorBytes.data(), anchorSize))
-                {
-                    anchorBytes.clear();
-                }
-            }
+            this->statusMessage = "Lecture impossible: ship_anchor.json";
+            return false;
+        }
+        const std::streamsize anchorSize = anchorInput.tellg();
+        if (anchorSize <= 0)
+        {
+            this->statusMessage = "ship_anchor.json vide.";
+            return false;
+        }
+        anchorInput.seekg(0, std::ios::beg);
+        anchorBytes.resize(static_cast<size_t>(anchorSize));
+        if (!anchorInput.read(anchorBytes.data(), anchorSize))
+        {
+            this->statusMessage = "Lecture ship_anchor.json echouee.";
+            return false;
         }
     }
-    if (anchorBytes.empty())
-    {
-        constexpr const char* kEmptyAnchorJson = "{}";
-        anchorBytes.assign(kEmptyAnchorJson, kEmptyAnchorJson + 2);
-    }
+
     if (!rc2d_storage_userWriteFile("editor-vfx-ship/current/ship_anchor.json", anchorBytes.data(), static_cast<Uint64>(anchorBytes.size())))
     {
         this->statusMessage = "Echec copie ship_anchor.json dans user storage.";
@@ -1635,12 +3478,17 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
     }
 
     this->previewShip.setSpeedTilesPerSecond(4.0f);
-    this->previewShip.setHealthVisual(Ship::HealthVisual::FULL);
+    this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+    this->applyPreviewDirectionToShip();
     this->previewShip.setDrawAlpha(255);
     this->previewShip.setPositionTile(this->previewShipTile.x, this->previewShipTile.y);
     this->previewShipLoaded = true;
     this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
-    this->statusMessage = "Navire preview charge.";
+    this->shipLayerSelected = true;
+    this->shipLayerVisible = true;
+    this->shipLayerLocked = false;
+    this->shipDebugBoundsVisible = true;
+    this->statusMessage = "Navire preview charge (8 sprites + anchor).";
     return true;
 }
 
@@ -1661,7 +3509,17 @@ bool EditorMapVfxScene::selectImportedShipAtIndex(int shipIndex)
         return false;
     }
 
-    this->statusMessage = "Navire actif: " + selectedShip.displayName;
+    this->shipVfxInstances.clear();
+    this->setSelectedVfxInstanceIndex(-1);
+    this->nextVfxInstanceId = 1U;
+    this->shipDrawOrder = 0;
+    this->shipDebugBoundsVisible = true;
+    this->shipVfxDirty = false;
+    this->loadedShipVfxConfigPath = selectedShip.configJsonPath;
+    this->loadShipVfxConfigForSelectedShip();
+
+    this->statusMessage = "Navire actif: " + selectedShip.displayName + " | config: " +
+        (this->loadedShipVfxConfigPath.empty() ? "aucune" : this->loadedShipVfxConfigPath);
     return true;
 }
 
@@ -1681,86 +3539,109 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
         return false;
     }
 
-    const std::filesystem::path jsonSourcePath = sfxFolder / "texturepacker.json";
-    if (!std::filesystem::exists(jsonSourcePath, fsError) || !std::filesystem::is_regular_file(jsonSourcePath, fsError))
+    std::vector<std::filesystem::path> jsonFiles;
+    std::vector<std::filesystem::path> pngFiles;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(sfxFolder, fsError))
     {
-        this->statusMessage = "VFX ignore: texturepacker.json manquant.";
+        if (fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        if (!entry.is_regular_file(fsError) || fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (ext == ".json")
+        {
+            jsonFiles.push_back(entry.path());
+        }
+        else if (ext == ".png")
+        {
+            pngFiles.push_back(entry.path());
+        }
+    }
+
+    if (jsonFiles.empty() || pngFiles.empty())
+    {
+        this->statusMessage = "VFX invalide: au moins un .json et un .png requis.";
         return false;
     }
 
-    std::ifstream jsonInput(jsonSourcePath, std::ios::binary | std::ios::ate);
-    if (!jsonInput.is_open())
+    std::sort(jsonFiles.begin(), jsonFiles.end());
+    std::sort(pngFiles.begin(), pngFiles.end());
+
+    std::vector<std::string> pngNames;
+    pngNames.reserve(pngFiles.size());
+    for (const std::filesystem::path& pngPath : pngFiles)
     {
-        this->statusMessage = "Lecture texturepacker.json impossible.";
-        return false;
+        pngNames.push_back(pngPath.filename().string());
     }
-    const std::streamsize jsonSize = jsonInput.tellg();
-    if (jsonSize <= 0)
+
+    std::vector<CustomSpritesheetFrame> selectedFrames;
+    std::filesystem::path selectedJsonSourcePath;
+    std::filesystem::path selectedImageSourcePath;
+    float selectedDefaultFps = 12.0f;
+
+    for (const std::filesystem::path& jsonSourcePath : jsonFiles)
     {
-        this->statusMessage = "texturepacker.json vide.";
-        return false;
+        std::ifstream jsonInput(jsonSourcePath, std::ios::binary | std::ios::ate);
+        if (!jsonInput.is_open())
+        {
+            continue;
+        }
+        const std::streamsize jsonSize = jsonInput.tellg();
+        if (jsonSize <= 0)
+        {
+            continue;
+        }
+        jsonInput.seekg(0, std::ios::beg);
+        std::vector<char> jsonBytes(static_cast<size_t>(jsonSize) + 1U, '\0');
+        if (!jsonInput.read(jsonBytes.data(), jsonSize))
+        {
+            continue;
+        }
+
+        CustomSpritesheetParseResult parsed{};
+        std::string conversionError;
+        if (tryParseCustomSpritesheetJson(
+                jsonBytes.data(),
+                pngNames,
+                &parsed,
+                &conversionError))
+        {
+            const std::filesystem::path imageSourcePath = sfxFolder / parsed.imageFileName;
+            if (std::filesystem::exists(imageSourcePath, fsError) && std::filesystem::is_regular_file(imageSourcePath, fsError))
+            {
+                selectedFrames = std::move(parsed.frames);
+                selectedJsonSourcePath = jsonSourcePath;
+                selectedImageSourcePath = imageSourcePath;
+                selectedDefaultFps = parsed.fps;
+                break;
+            }
+        }
     }
-    jsonInput.seekg(0, std::ios::beg);
-    std::vector<char> jsonBytes(static_cast<size_t>(jsonSize) + 1U, '\0');
-    if (!jsonInput.read(jsonBytes.data(), jsonSize))
+
+    if (selectedFrames.empty() || selectedJsonSourcePath.empty() || selectedImageSourcePath.empty())
     {
-        this->statusMessage = "Lecture texturepacker.json echouee.";
+        this->statusMessage = "VFX invalide: JSON attendu au format custom {fps, frames[]}.";
         return false;
     }
 
-    cJSON* root = cJSON_Parse(jsonBytes.data());
-    if (root == nullptr)
-    {
-        this->statusMessage = "texturepacker.json invalide.";
-        return false;
-    }
-
-    cJSON* meta = cJSON_GetObjectItemCaseSensitive(root, "meta");
-    cJSON* image = (meta != nullptr) ? cJSON_GetObjectItemCaseSensitive(meta, "image") : nullptr;
-    if (!cJSON_IsObject(meta) || !cJSON_IsString(image) || image->valuestring == nullptr)
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: meta.image manquant.";
-        return false;
-    }
-
-    const std::string imageRelativePath = image->valuestring;
-    const std::filesystem::path imageSourcePath = sfxFolder / std::filesystem::path(imageRelativePath);
-    if (!std::filesystem::exists(imageSourcePath, fsError) || !std::filesystem::is_regular_file(imageSourcePath, fsError))
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: image atlas introuvable.";
-        return false;
-    }
-
-    const std::string imageFileName = extractFileName(imageRelativePath);
-    if (imageFileName.empty())
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: nom image atlas vide.";
-        return false;
-    }
-
-    cJSON_ReplaceItemInObjectCaseSensitive(meta, "image", cJSON_CreateString(imageFileName.c_str()));
-    char* patchedJson = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (patchedJson == nullptr)
-    {
-        this->statusMessage = "VFX invalide: serialisation JSON impossible.";
-        return false;
-    }
-
-    std::ifstream imageInput(imageSourcePath, std::ios::binary | std::ios::ate);
+    std::ifstream imageInput(selectedImageSourcePath, std::ios::binary | std::ios::ate);
     if (!imageInput.is_open())
     {
-        cJSON_free(patchedJson);
         this->statusMessage = "Lecture image atlas impossible.";
         return false;
     }
     const std::streamsize imageSize = imageInput.tellg();
     if (imageSize <= 0)
     {
-        cJSON_free(patchedJson);
         this->statusMessage = "Image atlas vide.";
         return false;
     }
@@ -1768,7 +3649,6 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
     std::vector<char> imageBytes(static_cast<size_t>(imageSize));
     if (!imageInput.read(imageBytes.data(), imageSize))
     {
-        cJSON_free(patchedJson);
         this->statusMessage = "Lecture image atlas echouee.";
         return false;
     }
@@ -1779,59 +3659,46 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
     SDL_snprintf(storageFolderPath, sizeof(storageFolderPath), "editor-vfx-sfx/imported-%04u", this->importedSfxCounter);
     rc2d_storage_userMkdir(storageFolderPath);
 
-    const std::string storageJsonPath = std::string(storageFolderPath) + "/texturepacker.json";
-    const std::string storageImagePath = std::string(storageFolderPath) + "/" + imageFileName;
-    const bool wroteJson = rc2d_storage_userWriteFile(storageJsonPath.c_str(), patchedJson, static_cast<Uint64>(std::strlen(patchedJson)));
-    cJSON_free(patchedJson);
-    if (!wroteJson)
-    {
-        this->statusMessage = "Echec copie texturepacker.json en storage user.";
-        return false;
-    }
+    const std::string storageImagePath = std::string(storageFolderPath) + "/" + selectedImageSourcePath.filename().string();
     if (!rc2d_storage_userWriteFile(storageImagePath.c_str(), imageBytes.data(), static_cast<Uint64>(imageBytes.size())))
     {
         this->statusMessage = "Echec copie image atlas en storage user.";
         return false;
     }
 
-    RC2D_TP_Atlas atlas = rc2d_tp_loadAtlasFromStorage(storageJsonPath.c_str(), RC2D_STORAGE_USER);
-    if (atlas.atlas_image.sdl_texture == nullptr || atlas.frame_count <= 0)
+    RC2D_Image image = rc2d_graphics_loadImageFromStorage(storageImagePath.c_str(), RC2D_STORAGE_USER);
+    if (image.sdl_texture == nullptr)
     {
-        rc2d_tp_freeAtlas(&atlas);
-        this->statusMessage = "Echec chargement atlas VFX.";
+        this->statusMessage = "Echec chargement image VFX.";
         return false;
     }
-
-    std::vector<std::string> frameNames;
-    frameNames.reserve(static_cast<size_t>(atlas.frame_count));
-    for (int i = 0; i < atlas.frame_count; ++i)
-    {
-        if (atlas.frames[i].filename == nullptr || atlas.frames[i].filename[0] == '\0')
-        {
-            continue;
-        }
-        frameNames.emplace_back(atlas.frames[i].filename);
-    }
-    sortFrameNamesByNumericOrder(&frameNames);
-    if (frameNames.empty())
-    {
-        rc2d_tp_freeAtlas(&atlas);
-        this->statusMessage = "Atlas VFX vide (aucune frame exploitable).";
-        return false;
-    }
+    SDL_SetTextureScaleMode(image.sdl_texture, SDL_SCALEMODE_LINEAR);
 
     ImportedSfx imported{};
     imported.id = "sfx_" + std::to_string(this->importedSfxCounter);
     imported.displayName = sfxFolder.filename().string();
     if (imported.displayName.empty())
     {
-        imported.displayName = jsonSourcePath.stem().string();
+        imported.displayName = selectedJsonSourcePath.stem().string();
     }
-    imported.sourceJsonPath = normalizePathSlashes(jsonSourcePath.string());
-    imported.storageJsonPath = storageJsonPath;
-    imported.atlas = atlas;
-    imported.frameNames = std::move(frameNames);
-    imported.defaultFps = 12.0f;
+    imported.sourceJsonPath = normalizePathSlashes(selectedJsonSourcePath.string());
+    imported.sourceImagePath = normalizePathSlashes(selectedImageSourcePath.string());
+    imported.sourceFolderAbsolutePath = normalizePathSlashes(sfxFolder.string());
+    imported.storageImagePath = storageImagePath;
+    imported.image = image;
+    imported.frames.reserve(selectedFrames.size());
+    for (const CustomSpritesheetFrame& parsedFrame : selectedFrames)
+    {
+        ImportedSfxFrame frame{};
+        frame.index = parsedFrame.index;
+        frame.frameName = std::to_string(parsedFrame.index) + ".png";
+        frame.x = parsedFrame.x;
+        frame.y = parsedFrame.y;
+        frame.w = parsedFrame.w;
+        frame.h = parsedFrame.h;
+        imported.frames.push_back(std::move(frame));
+    }
+    imported.defaultFps = std::clamp(selectedDefaultFps, kSfxFpsMin, kSfxFpsMax);
 
     this->importedSfx.push_back(std::move(imported));
     this->selectedSfxIndex = static_cast<int>(this->importedSfx.size()) - 1;
@@ -1856,126 +3723,123 @@ bool EditorMapVfxScene::importSfxFromRootFolderAbsolutePath(const char* rootFold
         return false;
     }
 
-    auto makePathKey = [](const std::string& path) {
-        std::string key = normalizePathSlashes(path);
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return key;
-    };
+    this->invalidVfxFolders.clear();
 
-    std::vector<std::string> knownPathKeys;
-    knownPathKeys.reserve(this->importedSfx.size());
-    for (const ImportedSfx& sfx : this->importedSfx)
+    std::vector<std::filesystem::path> candidateFolders;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(rootPath, fsError))
     {
-        knownPathKeys.push_back(makePathKey(sfx.sourceJsonPath));
+        if (fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        if (entry.is_directory(fsError) && !fsError)
+        {
+            candidateFolders.push_back(entry.path());
+        }
     }
-
-    auto isValidSfxFolder = [](const std::filesystem::path& folderPath) -> bool {
-        std::error_code localError;
-        const std::filesystem::path jsonPath = folderPath / "texturepacker.json";
-        if (!std::filesystem::exists(jsonPath, localError) || !std::filesystem::is_regular_file(jsonPath, localError))
-        {
-            return false;
-        }
-
-        std::ifstream jsonInput(jsonPath, std::ios::binary | std::ios::ate);
-        if (!jsonInput.is_open())
-        {
-            return false;
-        }
-        const std::streamsize size = jsonInput.tellg();
-        if (size <= 0)
-        {
-            return false;
-        }
-        jsonInput.seekg(0, std::ios::beg);
-        std::vector<char> bytes(static_cast<size_t>(size) + 1U, '\0');
-        if (!jsonInput.read(bytes.data(), size))
-        {
-            return false;
-        }
-
-        cJSON* root = cJSON_Parse(bytes.data());
-        if (root == nullptr)
-        {
-            return false;
-        }
-
-        const cJSON* meta = cJSON_GetObjectItemCaseSensitive(root, "meta");
-        const cJSON* image = (meta != nullptr) ? cJSON_GetObjectItemCaseSensitive(meta, "image") : nullptr;
-        bool valid = false;
-        if (cJSON_IsObject(meta) && cJSON_IsString(image) && image->valuestring != nullptr)
-        {
-            const std::filesystem::path imagePath = folderPath / std::filesystem::path(image->valuestring);
-            valid = std::filesystem::exists(imagePath, localError) && std::filesystem::is_regular_file(imagePath, localError);
-        }
-
-        cJSON_Delete(root);
-        return valid;
-    };
-
-    std::vector<std::filesystem::path> discoveredFolders;
-    if (isValidSfxFolder(rootPath))
-    {
-        discoveredFolders.push_back(rootPath);
-    }
-
-    std::filesystem::recursive_directory_iterator it(
-        rootPath,
-        std::filesystem::directory_options::skip_permission_denied,
-        fsError);
-    std::filesystem::recursive_directory_iterator end;
-    while (!fsError && it != end)
-    {
-        if (it->is_directory(fsError) && !fsError)
-        {
-            if (isValidSfxFolder(it->path()))
-            {
-                discoveredFolders.push_back(it->path());
-            }
-        }
-        it.increment(fsError);
-    }
-
-    std::sort(discoveredFolders.begin(), discoveredFolders.end(), [](const auto& a, const auto& b) {
-        return normalizePathSlashes(a.string()) < normalizePathSlashes(b.string());
+    std::sort(candidateFolders.begin(), candidateFolders.end(), [](const auto& a, const auto& b) {
+        return makePathKeyLower(a.string()) < makePathKeyLower(b.string());
     });
 
-    int addedCount = 0;
-    int failedCount = 0;
-    for (const std::filesystem::path& folderPath : discoveredFolders)
+    std::vector<std::string> knownFolderKeys;
+    knownFolderKeys.reserve(this->importedSfx.size() + candidateFolders.size());
+    for (const ImportedSfx& sfx : this->importedSfx)
     {
-        const std::string jsonKey = makePathKey((folderPath / "texturepacker.json").string());
-        if (std::find(knownPathKeys.begin(), knownPathKeys.end(), jsonKey) != knownPathKeys.end())
+        knownFolderKeys.push_back(makePathKeyLower(sfx.sourceFolderAbsolutePath));
+    }
+
+    int addedCount = 0;
+    for (const std::filesystem::path& folderPath : candidateFolders)
+    {
+        std::error_code absError;
+        const std::filesystem::path absolutePath = std::filesystem::absolute(folderPath, absError);
+        const std::string absoluteNorm = normalizePathSlashes((absError ? folderPath : absolutePath).string());
+        if (std::find(knownFolderKeys.begin(), knownFolderKeys.end(), makePathKeyLower(absoluteNorm)) != knownFolderKeys.end())
         {
             continue;
         }
 
-        if (this->importSfxFromAbsolutePath(folderPath.string().c_str()))
+        int jsonCount = 0;
+        int pngCount = 0;
+        for (const std::filesystem::directory_entry& child : std::filesystem::directory_iterator(folderPath, fsError))
         {
-            knownPathKeys.push_back(jsonKey);
+            if (fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+            if (!child.is_regular_file(fsError) || fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+            std::string ext = child.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (ext == ".json")
+            {
+                jsonCount += 1;
+            }
+            if (ext == ".png")
+            {
+                pngCount += 1;
+            }
+        }
+
+        if (jsonCount <= 0 || pngCount <= 0)
+        {
+            InvalidAssetEntry invalid{};
+            invalid.folderName = folderPath.filename().string();
+            invalid.reason = (jsonCount <= 0 && pngCount <= 0)
+                ? "Aucun .json et aucun .png"
+                : (jsonCount <= 0 ? "Aucun .json" : "Aucun .png");
+            this->invalidVfxFolders.push_back(std::move(invalid));
+            continue;
+        }
+
+        if (this->importSfxFromAbsolutePath(absoluteNorm.c_str()))
+        {
+            knownFolderKeys.push_back(makePathKeyLower(absoluteNorm));
             addedCount += 1;
         }
         else
         {
-            failedCount += 1;
+            InvalidAssetEntry invalid{};
+            invalid.folderName = folderPath.filename().string();
+            invalid.reason = this->statusMessage;
+            this->invalidVfxFolders.push_back(std::move(invalid));
         }
     }
 
-    if (addedCount > 0 && failedCount == 0)
+    std::sort(this->importedSfx.begin(), this->importedSfx.end(), [](const ImportedSfx& a, const ImportedSfx& b) {
+        const std::string aKey = makePathKeyLower(a.displayName);
+        const std::string bKey = makePathKeyLower(b.displayName);
+        if (aKey != bKey)
+        {
+            return aKey < bKey;
+        }
+        return makePathKeyLower(a.sourceFolderAbsolutePath) < makePathKeyLower(b.sourceFolderAbsolutePath);
+    });
+
+    if (!this->importedSfx.empty() && (this->selectedSfxIndex < 0 || this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size())))
     {
-        this->statusMessage = std::to_string(addedCount) + " VFX importe(s).";
-        return true;
-    }
-    if (addedCount > 0 && failedCount > 0)
-    {
-        this->statusMessage = std::to_string(addedCount) + " VFX importe(s), " + std::to_string(failedCount) + " en echec.";
-        return true;
+        this->selectedSfxIndex = 0;
     }
 
-    this->statusMessage = "Aucun dossier VFX valide trouve (texturepacker.json + image atlas).";
-    return false;
+    if (addedCount <= 0 && this->importedSfx.empty())
+    {
+        this->statusMessage = "Aucun VFX valide detecte dans assets/images/vfx.";
+        return false;
+    }
+
+    this->statusMessage =
+        std::to_string(static_cast<int>(this->importedSfx.size())) +
+        " VFX valides, " +
+        std::to_string(static_cast<int>(this->invalidVfxFolders.size())) +
+        " ignores.";
+    return true;
 }
 
 bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePath)
@@ -1991,12 +3855,6 @@ bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePa
     if (!std::filesystem::exists(folderPath, fsError) || !std::filesystem::is_directory(folderPath, fsError))
     {
         this->statusMessage = "Dossier sprites introuvable.";
-        return false;
-    }
-
-    if (std::filesystem::exists(folderPath / "texturepacker.json", fsError))
-    {
-        this->statusMessage = "Dossier ignore: texturepacker.json present.";
         return false;
     }
 
@@ -2158,10 +4016,6 @@ bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char*
         {
             return false;
         }
-        if (std::filesystem::exists(folderPath / "texturepacker.json", localError))
-        {
-            return false;
-        }
         for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(folderPath, localError))
         {
             if (localError)
@@ -2256,6 +4110,18 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
     ShipVfxInstance instance{};
     instance.instanceId = this->nextVfxInstanceId++;
+    int sourceInstanceNumber = 1;
+    for (const ShipVfxInstance& existing : this->shipVfxInstances)
+    {
+        if (existing.importedSfxIndex == this->selectedSfxIndex)
+        {
+            sourceInstanceNumber += 1;
+        }
+    }
+    const int sourceNumber = (std::max)(1, this->selectedSfxIndex + 1);
+    instance.label = makeDefaultVfxLayerLabel(imported.displayName, sourceNumber, sourceInstanceNumber);
+    instance.sourceJsonPath = imported.sourceJsonPath;
+    instance.sourceDisplayName = imported.displayName;
     instance.importedSfxIndex = this->selectedSfxIndex;
     instance.offsetX = 0.0f;
     instance.offsetY = 0.0f;
@@ -2263,10 +4129,30 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     instance.flipHorizontal = false;
     instance.flipVertical = false;
     instance.drawOrder = static_cast<int>(this->shipVfxInstances.size()) + 1;
-    instance.fps = imported.defaultFps;
+    instance.visible = true;
+    instance.debugBoundsVisible = true;
+    instance.locked = false;
+    instance.behindShip = (instance.drawOrder < this->shipDrawOrder);
     instance.followShip = true;
+    instance.sharedForAllDirections = true;
+    instance.sharedForAllStates = true;
+    for (DirectionOverride& override : instance.directionOverrides)
+    {
+        override.enabled = false;
+        override.offsetX = instance.offsetX;
+        override.offsetY = instance.offsetY;
+        override.rotationDeg = instance.rotationDeg;
+        override.flipHorizontal = instance.flipHorizontal;
+        override.flipVertical = instance.flipVertical;
+        override.drawOrder = instance.drawOrder;
+        override.visible = instance.visible;
+    }
     this->shipVfxInstances.push_back(instance);
-    this->setSelectedVfxInstanceIndex(static_cast<int>(this->shipVfxInstances.size()) - 1);
+    const int spawnedIndex = static_cast<int>(this->shipVfxInstances.size()) - 1;
+    this->rebuildVfxLayerLabelsFromCurrentInstances();
+    this->setSelectedVfxInstanceIndex(spawnedIndex);
+    this->shipLayerSelected = false;
+    this->markShipVfxDirty();
     this->statusMessage = "VFX ajoute au centre: " + imported.displayName;
 }
 
@@ -2275,12 +4161,86 @@ void EditorMapVfxScene::setSelectedVfxInstanceIndex(int index)
     if (index < 0 || index >= static_cast<int>(this->shipVfxInstances.size()))
     {
         this->selectedVfxInstanceIndex = -1;
-        this->vfxFpsInput = "12";
+        this->layerNameInput.clear();
+        this->shipLayerSelected = true;
         return;
     }
 
     this->selectedVfxInstanceIndex = index;
-    this->vfxFpsInput = formatSfxFpsValue(this->shipVfxInstances[static_cast<size_t>(index)].fps);
+    this->shipLayerSelected = false;
+    this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(index)].label;
+}
+
+void EditorMapVfxScene::rebuildVfxLayerLabelsFromCurrentInstances(void)
+{
+    struct SourceCounter
+    {
+        std::string key;
+        int sourceNumber;
+        int instanceCount;
+    };
+
+    std::vector<SourceCounter> sourceCounters;
+    sourceCounters.reserve(this->shipVfxInstances.size());
+
+    auto buildSourceKey = [this](const ShipVfxInstance& instance) -> std::string {
+        if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+        {
+            return std::string("idx:") + std::to_string(instance.importedSfxIndex);
+        }
+        if (!instance.sourceJsonPath.empty())
+        {
+            return std::string("json:") + makePathKeyLower(instance.sourceJsonPath);
+        }
+        if (!instance.sourceDisplayName.empty())
+        {
+            return std::string("name:") + makePathKeyLower(instance.sourceDisplayName);
+        }
+        return std::string("id:") + std::to_string(instance.instanceId);
+    };
+
+    auto resolveSourceDisplayName = [this](const ShipVfxInstance& instance) -> std::string {
+        if (!trimAscii(instance.sourceDisplayName).empty())
+        {
+            return instance.sourceDisplayName;
+        }
+        if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+        {
+            return this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)].displayName;
+        }
+        if (!instance.sourceJsonPath.empty())
+        {
+            return extractFileName(instance.sourceJsonPath);
+        }
+        return "vfx";
+    };
+
+    for (ShipVfxInstance& instance : this->shipVfxInstances)
+    {
+        const std::string sourceKey = buildSourceKey(instance);
+        auto counterIt = std::find_if(sourceCounters.begin(), sourceCounters.end(), [&sourceKey](const SourceCounter& value) {
+            return value.key == sourceKey;
+        });
+        if (counterIt == sourceCounters.end())
+        {
+            sourceCounters.push_back(SourceCounter{
+                sourceKey,
+                static_cast<int>(sourceCounters.size()) + 1,
+                0});
+            counterIt = sourceCounters.end() - 1;
+        }
+
+        counterIt->instanceCount += 1;
+        instance.label = makeDefaultVfxLayerLabel(
+            resolveSourceDisplayName(instance),
+            counterIt->sourceNumber,
+            counterIt->instanceCount);
+    }
+
+    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+    {
+        this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
+    }
 }
 
 void EditorMapVfxScene::removeSelectedVfxInstance(void)
@@ -2292,6 +4252,7 @@ void EditorMapVfxScene::removeSelectedVfxInstance(void)
     }
 
     this->shipVfxInstances.erase(this->shipVfxInstances.begin() + this->selectedVfxInstanceIndex);
+    this->rebuildVfxLayerLabelsFromCurrentInstances();
     if (this->shipVfxInstances.empty())
     {
         this->setSelectedVfxInstanceIndex(-1);
@@ -2301,80 +4262,143 @@ void EditorMapVfxScene::removeSelectedVfxInstance(void)
         const int nextIndex = std::clamp(this->selectedVfxInstanceIndex, 0, static_cast<int>(this->shipVfxInstances.size()) - 1);
         this->setSelectedVfxInstanceIndex(nextIndex);
     }
+    this->markShipVfxDirty();
     this->statusMessage = "VFX retire.";
 }
 
 void EditorMapVfxScene::centerSelectedVfxInstance(void)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
-
-    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
-    instance.offsetX = 0.0f;
-    instance.offsetY = 0.0f;
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->offsetX = 0.0f;
+        override->offsetY = 0.0f;
+    }
+    else
+    {
+        instance->offsetX = 0.0f;
+        instance->offsetY = 0.0f;
+    }
+    this->markShipVfxDirty();
     this->statusMessage = "VFX recentre.";
 }
 
 void EditorMapVfxScene::moveSelectedVfxInstance(float deltaX, float deltaY)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
-
-    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
     const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     // Les offsets sont stockes en "px base 1.00" pour rester stables entre les niveaux de zoom.
-    instance.offsetX += (deltaX / zoom);
-    instance.offsetY += (deltaY / zoom);
+    if (override != nullptr)
+    {
+        override->offsetX += (deltaX / zoom);
+        override->offsetY += (deltaY / zoom);
+    }
+    else
+    {
+        instance->offsetX += (deltaX / zoom);
+        instance->offsetY += (deltaY / zoom);
+    }
+    this->markShipVfxDirty();
 }
 
 void EditorMapVfxScene::adjustSelectedVfxRotation(float deltaDegrees)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
 
-    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
-    instance.rotationDeg += deltaDegrees;
-    while (instance.rotationDeg < 0.0f)
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    float* rotation = (override != nullptr) ? &override->rotationDeg : &instance->rotationDeg;
+    *rotation += deltaDegrees;
+    while (*rotation < 0.0f)
     {
-        instance.rotationDeg += 360.0f;
+        *rotation += 360.0f;
     }
-    while (instance.rotationDeg >= 360.0f)
+    while (*rotation >= 360.0f)
     {
-        instance.rotationDeg -= 360.0f;
+        *rotation -= 360.0f;
     }
+    this->markShipVfxDirty();
 }
 
 void EditorMapVfxScene::toggleSelectedVfxFlipHorizontal(void)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
-
-    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].flipHorizontal =
-        !this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].flipHorizontal;
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->flipHorizontal = !override->flipHorizontal;
+    }
+    else
+    {
+        instance->flipHorizontal = !instance->flipHorizontal;
+    }
+    this->markShipVfxDirty();
 }
 
 void EditorMapVfxScene::toggleSelectedVfxFlipVertical(void)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
-
-    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].flipVertical =
-        !this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].flipVertical;
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->flipVertical = !override->flipVertical;
+    }
+    else
+    {
+        instance->flipVertical = !instance->flipVertical;
+    }
+    this->markShipVfxDirty();
 }
 
 void EditorMapVfxScene::toggleSelectedVfxFollowShip(void)
@@ -2391,74 +4415,70 @@ void EditorMapVfxScene::toggleSelectedVfxFollowShip(void)
 
 void EditorMapVfxScene::adjustSelectedVfxDrawOrder(int delta)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
-    {
-        this->statusMessage = "Aucun VFX selectionne.";
-        return;
-    }
-
-    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].drawOrder += delta;
+    this->moveSelectedLayerOrder(delta);
 }
 
 void EditorMapVfxScene::adjustShipDrawOrder(int delta)
 {
-    this->shipDrawOrder += delta;
+    (void)delta;
+    this->statusMessage = "SHIP est fixe a z=0 (reordonne avec le panel Layers).";
 }
 
 void EditorMapVfxScene::normalizeShipVfxDrawOrders(void)
 {
-}
+    this->shipDrawOrder = 0;
 
-bool EditorMapVfxScene::applyVfxFpsInput(void)
-{
-    float fallbackFps = kLoosePreviewFpsDefault;
-    if (this->selectedVfxInstanceIndex >= 0 &&
-        this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
-    {
-        fallbackFps = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].fps;
-    }
-    else if (this->selectedSfxIndex >= 0 &&
-             this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-    {
-        fallbackFps = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps;
-    }
+    std::vector<size_t> behind;
+    std::vector<size_t> front;
+    behind.reserve(this->shipVfxInstances.size());
+    front.reserve(this->shipVfxInstances.size());
 
-    const std::string trimmed = trimAscii(this->vfxFpsInput);
-    if (trimmed.empty())
+    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
     {
-        this->vfxFpsInput = formatSfxFpsValue(fallbackFps);
-        this->statusMessage = "FPS VFX vide: valeur precedente conservee.";
-        return false;
+        const ShipVfxInstance& instance = this->shipVfxInstances[i];
+        const int effectiveOrder = instance.drawOrder;
+        if (effectiveOrder < 0)
+        {
+            behind.push_back(i);
+        }
+        else
+        {
+            front.push_back(i);
+        }
     }
 
-    char* endPtr = nullptr;
-    const float parsed = std::strtof(trimmed.c_str(), &endPtr);
-    if (endPtr == trimmed.c_str() || *endPtr != '\0' || !std::isfinite(parsed))
+    std::sort(behind.begin(), behind.end(), [this](size_t a, size_t b) {
+        const ShipVfxInstance& lhs = this->shipVfxInstances[a];
+        const ShipVfxInstance& rhs = this->shipVfxInstances[b];
+        if (lhs.drawOrder != rhs.drawOrder)
+        {
+            return lhs.drawOrder < rhs.drawOrder;
+        }
+        return lhs.instanceId < rhs.instanceId;
+    });
+    std::sort(front.begin(), front.end(), [this](size_t a, size_t b) {
+        const ShipVfxInstance& lhs = this->shipVfxInstances[a];
+        const ShipVfxInstance& rhs = this->shipVfxInstances[b];
+        if (lhs.drawOrder != rhs.drawOrder)
+        {
+            return lhs.drawOrder < rhs.drawOrder;
+        }
+        return lhs.instanceId < rhs.instanceId;
+    });
+
+    int negativeOrder = -static_cast<int>(behind.size());
+    for (size_t idx : behind)
     {
-        this->vfxFpsInput = formatSfxFpsValue(fallbackFps);
-        this->statusMessage = "FPS VFX invalide.";
-        return false;
+        this->shipVfxInstances[idx].drawOrder = negativeOrder++;
+        this->shipVfxInstances[idx].behindShip = true;
     }
 
-    const float clamped = std::clamp(parsed, kSfxFpsMin, kSfxFpsMax);
-    this->vfxFpsInput = formatSfxFpsValue(clamped);
-
-    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+    int positiveOrder = 1;
+    for (size_t idx : front)
     {
-        this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].fps = clamped;
-        this->statusMessage = "FPS VFX applique sur l'instance.";
-        return true;
+        this->shipVfxInstances[idx].drawOrder = positiveOrder++;
+        this->shipVfxInstances[idx].behindShip = false;
     }
-
-    if (this->selectedSfxIndex >= 0 && this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-    {
-        this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps = clamped;
-        this->statusMessage = "FPS VFX par defaut mis a jour.";
-        return true;
-    }
-
-    this->statusMessage = "Aucun VFX cible pour appliquer les FPS.";
-    return false;
 }
 
 float EditorMapVfxScene::getLoosePreviewFpsOrDefault(void) const
@@ -2512,14 +4532,14 @@ bool EditorMapVfxScene::applyLoosePreviewFpsInput(void)
     return true;
 }
 
-bool EditorMapVfxScene::handleVfxFpsInputKey(
+bool EditorMapVfxScene::handleLayerNameInputKey(
     const char* key,
     SDL_Scancode scancode,
     SDL_Keycode keycode,
     SDL_Keymod mod,
     bool isrepeat)
 {
-    if (!this->vfxFpsInputFocused)
+    if (!this->layerNameInputFocused)
     {
         return false;
     }
@@ -2527,106 +4547,27 @@ bool EditorMapVfxScene::handleVfxFpsInputKey(
     (void)mod;
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
-        this->vfxFpsInputFocused = false;
-        float fallbackFps = kLoosePreviewFpsDefault;
-        if (this->selectedVfxInstanceIndex >= 0 &&
-            this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+        this->layerNameInputFocused = false;
+        if (this->hasSelectedVfxInstance())
         {
-            fallbackFps = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].fps;
+            this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
         }
-        else if (this->selectedSfxIndex >= 0 &&
-                 this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-        {
-            fallbackFps = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps;
-        }
-        this->vfxFpsInput = formatSfxFpsValue(fallbackFps);
         return true;
     }
     if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER)
     {
-        this->applyVfxFpsInput();
-        this->vfxFpsInputFocused = false;
+        this->applyLayerNameInput();
+        this->layerNameInputFocused = false;
         return true;
     }
-    if (scancode == SDL_SCANCODE_BACKSPACE && !this->vfxFpsInput.empty() && !isrepeat)
+    if (scancode == SDL_SCANCODE_BACKSPACE && !this->layerNameInput.empty() && !isrepeat)
     {
-        this->vfxFpsInput.pop_back();
+        this->layerNameInput.pop_back();
         return true;
     }
-    if (scancode == SDL_SCANCODE_DELETE && !this->vfxFpsInput.empty() && !isrepeat)
+    if (scancode == SDL_SCANCODE_DELETE && !this->layerNameInput.empty() && !isrepeat)
     {
-        this->vfxFpsInput.clear();
-        return true;
-    }
-
-    auto appendCharIfAllowed = [this](char c) -> bool {
-        if (this->vfxFpsInput.size() >= 8U)
-        {
-            return true;
-        }
-        if (c == ',')
-        {
-            c = '.';
-        }
-        if (c == '.')
-        {
-            if (this->vfxFpsInput.find('.') != std::string::npos)
-            {
-                return true;
-            }
-            if (this->vfxFpsInput.empty())
-            {
-                this->vfxFpsInput = "0";
-            }
-            this->vfxFpsInput.push_back('.');
-            return true;
-        }
-        if (c >= '0' && c <= '9')
-        {
-            this->vfxFpsInput.push_back(c);
-        }
-        return true;
-    };
-
-    auto appendKeypadDigitIfAny = [&appendCharIfAllowed, keycode, scancode]() -> bool {
-        switch (keycode)
-        {
-        case SDLK_KP_0: return appendCharIfAllowed('0');
-        case SDLK_KP_1: return appendCharIfAllowed('1');
-        case SDLK_KP_2: return appendCharIfAllowed('2');
-        case SDLK_KP_3: return appendCharIfAllowed('3');
-        case SDLK_KP_4: return appendCharIfAllowed('4');
-        case SDLK_KP_5: return appendCharIfAllowed('5');
-        case SDLK_KP_6: return appendCharIfAllowed('6');
-        case SDLK_KP_7: return appendCharIfAllowed('7');
-        case SDLK_KP_8: return appendCharIfAllowed('8');
-        case SDLK_KP_9: return appendCharIfAllowed('9');
-        default: break;
-        }
-        switch (scancode)
-        {
-        case SDL_SCANCODE_KP_0: return appendCharIfAllowed('0');
-        case SDL_SCANCODE_KP_1: return appendCharIfAllowed('1');
-        case SDL_SCANCODE_KP_2: return appendCharIfAllowed('2');
-        case SDL_SCANCODE_KP_3: return appendCharIfAllowed('3');
-        case SDL_SCANCODE_KP_4: return appendCharIfAllowed('4');
-        case SDL_SCANCODE_KP_5: return appendCharIfAllowed('5');
-        case SDL_SCANCODE_KP_6: return appendCharIfAllowed('6');
-        case SDL_SCANCODE_KP_7: return appendCharIfAllowed('7');
-        case SDL_SCANCODE_KP_8: return appendCharIfAllowed('8');
-        case SDL_SCANCODE_KP_9: return appendCharIfAllowed('9');
-        default: break;
-        }
-        return false;
-    };
-
-    if (keycode == SDLK_PERIOD || keycode == SDLK_KP_PERIOD ||
-        scancode == SDL_SCANCODE_PERIOD || scancode == SDL_SCANCODE_KP_PERIOD)
-    {
-        return appendCharIfAllowed('.');
-    }
-    if (appendKeypadDigitIfAny())
-    {
+        this->layerNameInput.clear();
         return true;
     }
     if (key == nullptr || key[0] == '\0')
@@ -2637,7 +4578,18 @@ bool EditorMapVfxScene::handleVfxFpsInputKey(
     {
         return true;
     }
-    return appendCharIfAllowed(key[0]);
+
+    if (this->layerNameInput.size() >= 64U)
+    {
+        return true;
+    }
+
+    const unsigned char c = static_cast<unsigned char>(key[0]);
+    if (c >= 32U && c <= 126U)
+    {
+        this->layerNameInput.push_back(static_cast<char>(c));
+    }
+    return true;
 }
 
 bool EditorMapVfxScene::handleLoosePreviewFpsInputKey(
@@ -2844,7 +4796,14 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
     }
 
     const Map& map = GetCurrentMap();
-    const SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
 
     std::vector<std::pair<int, RenderItem>> candidates;
@@ -2852,7 +4811,14 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
     for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
     {
         const ShipVfxInstance& instance = this->shipVfxInstances[i];
-        candidates.push_back({static_cast<int>(i), RenderItem{false, instance.drawOrder, instance.instanceId, static_cast<int>(i)}});
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const bool visible = (override != nullptr) ? override->visible : instance.visible;
+        if (!visible)
+        {
+            continue;
+        }
+        const int drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
+        candidates.push_back({static_cast<int>(i), RenderItem{false, drawOrder, instance.instanceId, static_cast<int>(i)}});
     }
 
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
@@ -2873,23 +4839,20 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
         }
 
         const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
-        if (imported.frameNames.empty() || imported.atlas.atlas_image.sdl_texture == nullptr)
+        if (imported.frames.empty() || imported.image.sdl_texture == nullptr)
         {
             continue;
         }
 
-        const int frameCount = static_cast<int>(imported.frameNames.size());
-        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(instance.fps, 1.0f))) % frameCount;
-        const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&imported.atlas, imported.frameNames[static_cast<size_t>(frameIndex)].c_str());
-        if (frame == nullptr)
-        {
-            continue;
-        }
+        const int frameCount = static_cast<int>(imported.frames.size());
+        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
-        const float sourceW = (frame->sourceSize.x > 0.0f) ? frame->sourceSize.x : frame->frame.w;
-        const float sourceH = (frame->sourceSize.y > 0.0f) ? frame->sourceSize.y : frame->frame.h;
-        const float offsetX = instance.offsetX * scale;
-        const float offsetY = instance.offsetY * scale;
+        const float sourceW = frame.w;
+        const float sourceH = frame.h;
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
+        const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
         const SDL_FRect bounds = SDL_FRect{
             shipCenter.x + offsetX - ((sourceW * scale) * 0.5f),
             shipCenter.y + offsetY - ((sourceH * scale) * 0.5f),
@@ -2902,6 +4865,360 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
     }
 
     return -1;
+}
+
+bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath)
+{
+    if (absoluteFilePath == nullptr || absoluteFilePath[0] == '\0')
+    {
+        return false;
+    }
+
+    std::ifstream input(absoluteFilePath, std::ios::binary | std::ios::ate);
+    if (!input.is_open())
+    {
+        return false;
+    }
+    const std::streamsize size = input.tellg();
+    if (size <= 0)
+    {
+        return false;
+    }
+    input.seekg(0, std::ios::beg);
+    std::vector<char> bytes(static_cast<size_t>(size) + 1U, '\0');
+    if (!input.read(bytes.data(), size))
+    {
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(bytes.data());
+    if (root == nullptr)
+    {
+        return false;
+    }
+
+    const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(root, "format");
+    const cJSON* versionNode = cJSON_GetObjectItemCaseSensitive(root, "version");
+    const bool isNewFormat =
+        cJSON_IsString(formatNode) &&
+        formatNode->valuestring != nullptr &&
+        SDL_strcasecmp(formatNode->valuestring, "ship_vfx_config") == 0;
+    const int formatVersion = cJSON_IsNumber(versionNode)
+        ? static_cast<int>(std::llround(versionNode->valuedouble))
+        : 1;
+
+    this->shipVfxInstances.clear();
+    this->setSelectedVfxInstanceIndex(-1);
+    this->nextVfxInstanceId = 1U;
+
+    auto findImportedSfxIndex = [this](const std::string& sourceJsonPath, const std::string& displayName) -> int {
+        const std::string sourceKey = makePathKeyLower(sourceJsonPath);
+        if (!sourceKey.empty())
+        {
+            for (size_t i = 0; i < this->importedSfx.size(); ++i)
+            {
+                if (makePathKeyLower(this->importedSfx[i].sourceJsonPath) == sourceKey)
+                {
+                    return static_cast<int>(i);
+                }
+            }
+        }
+
+        const std::string displayKey = makePathKeyLower(displayName);
+        if (!displayKey.empty())
+        {
+            for (size_t i = 0; i < this->importedSfx.size(); ++i)
+            {
+                if (makePathKeyLower(this->importedSfx[i].displayName) == displayKey)
+                {
+                    return static_cast<int>(i);
+                }
+            }
+        }
+        return -1;
+    };
+
+    auto parseDirectionOverride = [](const cJSON* node, DirectionOverride* out) {
+        if (node == nullptr || out == nullptr || !cJSON_IsObject(node))
+        {
+            return;
+        }
+
+        const cJSON* enabledNode = cJSON_GetObjectItemCaseSensitive(node, "enabled");
+        out->enabled = cJSON_IsBool(enabledNode) ? cJSON_IsTrue(enabledNode) : out->enabled;
+
+        const cJSON* offsetXNode = cJSON_GetObjectItemCaseSensitive(node, "offsetX");
+        const cJSON* offsetYNode = cJSON_GetObjectItemCaseSensitive(node, "offsetY");
+        const cJSON* rotationNode = cJSON_GetObjectItemCaseSensitive(node, "rotationDeg");
+        const cJSON* flipHNode = cJSON_GetObjectItemCaseSensitive(node, "flipHorizontal");
+        const cJSON* flipVNode = cJSON_GetObjectItemCaseSensitive(node, "flipVertical");
+        const cJSON* drawOrderNode = cJSON_GetObjectItemCaseSensitive(node, "drawOrder");
+        const cJSON* visibleNode = cJSON_GetObjectItemCaseSensitive(node, "visible");
+
+        if (cJSON_IsNumber(offsetXNode) && std::isfinite(offsetXNode->valuedouble))
+        {
+            out->offsetX = static_cast<float>(offsetXNode->valuedouble);
+        }
+        if (cJSON_IsNumber(offsetYNode) && std::isfinite(offsetYNode->valuedouble))
+        {
+            out->offsetY = static_cast<float>(offsetYNode->valuedouble);
+        }
+        if (cJSON_IsNumber(rotationNode) && std::isfinite(rotationNode->valuedouble))
+        {
+            out->rotationDeg = static_cast<float>(rotationNode->valuedouble);
+        }
+        if (cJSON_IsBool(flipHNode))
+        {
+            out->flipHorizontal = cJSON_IsTrue(flipHNode);
+        }
+        if (cJSON_IsBool(flipVNode))
+        {
+            out->flipVertical = cJSON_IsTrue(flipVNode);
+        }
+        if (cJSON_IsNumber(drawOrderNode) && std::isfinite(drawOrderNode->valuedouble))
+        {
+            out->drawOrder = static_cast<int>(std::llround(drawOrderNode->valuedouble));
+        }
+        if (cJSON_IsBool(visibleNode))
+        {
+            out->visible = cJSON_IsTrue(visibleNode);
+        }
+    };
+
+    auto pushParsedInstance = [this, &findImportedSfxIndex, &parseDirectionOverride](const cJSON* node) {
+        if (node == nullptr || !cJSON_IsObject(node))
+        {
+            return;
+        }
+
+        ShipVfxInstance instance{};
+        const cJSON* idNode = cJSON_GetObjectItemCaseSensitive(node, "instanceId");
+        if (cJSON_IsNumber(idNode) && std::isfinite(idNode->valuedouble))
+        {
+            instance.instanceId = static_cast<uint32_t>((std::max)(1LL, static_cast<long long>(std::llround(idNode->valuedouble))));
+        }
+        else
+        {
+            instance.instanceId = this->nextVfxInstanceId++;
+        }
+
+        const cJSON* labelNode = cJSON_GetObjectItemCaseSensitive(node, "label");
+        const cJSON* displayNode = cJSON_GetObjectItemCaseSensitive(node, "displayName");
+        if (cJSON_IsString(labelNode) && labelNode->valuestring != nullptr)
+        {
+            instance.label = labelNode->valuestring;
+        }
+        else if (cJSON_IsString(displayNode) && displayNode->valuestring != nullptr)
+        {
+            instance.label = displayNode->valuestring;
+        }
+        const cJSON* sourceJsonNode = cJSON_GetObjectItemCaseSensitive(node, "sourceJsonPath");
+        if (cJSON_IsString(sourceJsonNode) && sourceJsonNode->valuestring != nullptr)
+        {
+            instance.sourceJsonPath = normalizePathSlashes(sourceJsonNode->valuestring);
+        }
+        instance.sourceDisplayName = instance.label;
+        if (cJSON_IsString(displayNode) && displayNode->valuestring != nullptr)
+        {
+            instance.sourceDisplayName = displayNode->valuestring;
+        }
+        instance.importedSfxIndex = findImportedSfxIndex(instance.sourceJsonPath, instance.sourceDisplayName);
+        if (instance.label.empty())
+        {
+            int sourceInstanceNumber = 1;
+            for (const ShipVfxInstance& existing : this->shipVfxInstances)
+            {
+                if (existing.importedSfxIndex == instance.importedSfxIndex)
+                {
+                    sourceInstanceNumber += 1;
+                }
+            }
+            const int sourceNumber = (std::max)(1, instance.importedSfxIndex + 1);
+            instance.label = makeDefaultVfxLayerLabel(instance.sourceDisplayName, sourceNumber, sourceInstanceNumber);
+        }
+
+        const cJSON* sharedDirNode = cJSON_GetObjectItemCaseSensitive(node, "sharedForAllDirections");
+        const cJSON* sharedStateNode = cJSON_GetObjectItemCaseSensitive(node, "sharedForAllStates");
+        instance.sharedForAllDirections = cJSON_IsBool(sharedDirNode) ? cJSON_IsTrue(sharedDirNode) : true;
+        instance.sharedForAllStates = cJSON_IsBool(sharedStateNode) ? cJSON_IsTrue(sharedStateNode) : true;
+
+        const cJSON* offsetXNode = cJSON_GetObjectItemCaseSensitive(node, "offsetX");
+        const cJSON* offsetYNode = cJSON_GetObjectItemCaseSensitive(node, "offsetY");
+        const cJSON* rotationNode = cJSON_GetObjectItemCaseSensitive(node, "rotationDeg");
+        const cJSON* flipHNode = cJSON_GetObjectItemCaseSensitive(node, "flipHorizontal");
+        const cJSON* flipVNode = cJSON_GetObjectItemCaseSensitive(node, "flipVertical");
+        const cJSON* drawOrderNode = cJSON_GetObjectItemCaseSensitive(node, "drawOrder");
+        const cJSON* visibleNode = cJSON_GetObjectItemCaseSensitive(node, "visible");
+        const cJSON* debugBoundsNode = cJSON_GetObjectItemCaseSensitive(node, "debugBoundsVisible");
+        const cJSON* lockedNode = cJSON_GetObjectItemCaseSensitive(node, "locked");
+        const cJSON* behindNode = cJSON_GetObjectItemCaseSensitive(node, "behindShip");
+
+        instance.offsetX = cJSON_IsNumber(offsetXNode) ? static_cast<float>(offsetXNode->valuedouble) : 0.0f;
+        instance.offsetY = cJSON_IsNumber(offsetYNode) ? static_cast<float>(offsetYNode->valuedouble) : 0.0f;
+        instance.rotationDeg = cJSON_IsNumber(rotationNode) ? static_cast<float>(rotationNode->valuedouble) : 0.0f;
+        instance.flipHorizontal = cJSON_IsBool(flipHNode) ? cJSON_IsTrue(flipHNode) : false;
+        instance.flipVertical = cJSON_IsBool(flipVNode) ? cJSON_IsTrue(flipVNode) : false;
+        instance.drawOrder = cJSON_IsNumber(drawOrderNode) ? static_cast<int>(std::llround(drawOrderNode->valuedouble)) : 0;
+        instance.visible = cJSON_IsBool(visibleNode) ? cJSON_IsTrue(visibleNode) : true;
+        instance.debugBoundsVisible = cJSON_IsBool(debugBoundsNode) ? cJSON_IsTrue(debugBoundsNode) : true;
+        instance.locked = cJSON_IsBool(lockedNode) ? cJSON_IsTrue(lockedNode) : false;
+        instance.behindShip = cJSON_IsBool(behindNode) ? cJSON_IsTrue(behindNode) : (instance.drawOrder < this->shipDrawOrder);
+        instance.followShip = true;
+
+        for (DirectionOverride& override : instance.directionOverrides)
+        {
+            override.enabled = false;
+            override.offsetX = instance.offsetX;
+            override.offsetY = instance.offsetY;
+            override.rotationDeg = instance.rotationDeg;
+            override.flipHorizontal = instance.flipHorizontal;
+            override.flipVertical = instance.flipVertical;
+            override.drawOrder = instance.drawOrder;
+            override.visible = instance.visible;
+        }
+
+        const cJSON* directionOverridesNode = cJSON_GetObjectItemCaseSensitive(node, "directionOverrides");
+        if (cJSON_IsObject(directionOverridesNode))
+        {
+            for (int directionIndex = 0; directionIndex < 4; ++directionIndex)
+            {
+                const char* key = getDirectionIdByIndex(directionIndex);
+                const cJSON* directionNode = cJSON_GetObjectItemCaseSensitive(directionOverridesNode, key);
+                parseDirectionOverride(directionNode, &instance.directionOverrides[static_cast<size_t>(directionIndex)]);
+            }
+        }
+
+        this->nextVfxInstanceId = (std::max)(this->nextVfxInstanceId, instance.instanceId + 1U);
+        this->shipVfxInstances.push_back(std::move(instance));
+    };
+
+    if (isNewFormat && formatVersion >= 2)
+    {
+        const cJSON* previewNode = cJSON_GetObjectItemCaseSensitive(root, "preview");
+        if (cJSON_IsObject(previewNode))
+        {
+            const cJSON* directionNode = cJSON_GetObjectItemCaseSensitive(previewNode, "direction");
+            const cJSON* stateNode = cJSON_GetObjectItemCaseSensitive(previewNode, "state");
+            if (cJSON_IsString(directionNode) && directionNode->valuestring != nullptr)
+            {
+                this->previewDirectionIndex = getDirectionIndexById(directionNode->valuestring);
+                this->applyPreviewDirectionToShip();
+            }
+            if (cJSON_IsString(stateNode) && stateNode->valuestring != nullptr)
+            {
+                this->previewShipStateIndex = (SDL_strcasecmp(stateNode->valuestring, "damaged") == 0) ? 1 : 0;
+                this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+            }
+        }
+
+        const cJSON* shipLayerNode = cJSON_GetObjectItemCaseSensitive(root, "shipLayer");
+        if (cJSON_IsObject(shipLayerNode))
+        {
+            const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "drawOrder");
+            const cJSON* shipVisibleNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "visible");
+            const cJSON* shipLockedNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "locked");
+            const cJSON* shipDebugNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "debugBoundsVisible");
+            if (cJSON_IsNumber(shipOrderNode))
+            {
+                this->shipDrawOrder = static_cast<int>(std::llround(shipOrderNode->valuedouble));
+            }
+            if (cJSON_IsBool(shipVisibleNode))
+            {
+                this->shipLayerVisible = cJSON_IsTrue(shipVisibleNode);
+            }
+            if (cJSON_IsBool(shipLockedNode))
+            {
+                this->shipLayerLocked = cJSON_IsTrue(shipLockedNode);
+            }
+            if (cJSON_IsBool(shipDebugNode))
+            {
+                this->shipDebugBoundsVisible = cJSON_IsTrue(shipDebugNode);
+            }
+        }
+
+        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
+        if (cJSON_IsArray(instancesNode))
+        {
+            cJSON* node = nullptr;
+            cJSON_ArrayForEach(node, instancesNode)
+            {
+                pushParsedInstance(node);
+            }
+        }
+    }
+    else
+    {
+        const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(root, "shipDrawOrder");
+        if (cJSON_IsNumber(shipOrderNode))
+        {
+            this->shipDrawOrder = static_cast<int>(std::llround(shipOrderNode->valuedouble));
+        }
+        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
+        if (cJSON_IsArray(instancesNode))
+        {
+            cJSON* node = nullptr;
+            cJSON_ArrayForEach(node, instancesNode)
+            {
+                pushParsedInstance(node);
+            }
+        }
+    }
+
+    cJSON_Delete(root);
+    this->normalizeShipVfxDrawOrders();
+    if (!this->shipVfxInstances.empty())
+    {
+        this->setSelectedVfxInstanceIndex(0);
+    }
+    this->shipVfxDirty = false;
+    return true;
+}
+
+bool EditorMapVfxScene::loadShipVfxConfigForSelectedShip(void)
+{
+    if (this->selectedShipIndex < 0 || this->selectedShipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        return false;
+    }
+
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    std::string configPath = ship.configJsonPath;
+    if (configPath.empty())
+    {
+        configPath = this->buildShipConfigJsonPath(ship);
+    }
+
+    std::error_code fsError;
+    if (!std::filesystem::exists(configPath, fsError) || !std::filesystem::is_regular_file(configPath, fsError))
+    {
+        const std::filesystem::path legacyPath = std::filesystem::path(ship.folderAbsolutePath) / "ship_vfx.json";
+        if (std::filesystem::exists(legacyPath, fsError) && std::filesystem::is_regular_file(legacyPath, fsError))
+        {
+            configPath = normalizePathSlashes(legacyPath.string());
+        }
+        else
+        {
+            this->shipVfxInstances.clear();
+            this->setSelectedVfxInstanceIndex(-1);
+            this->nextVfxInstanceId = 1U;
+            this->shipDrawOrder = 0;
+            this->shipDebugBoundsVisible = true;
+            this->shipVfxDirty = false;
+            this->loadedShipVfxConfigPath = normalizePathSlashes(configPath);
+            return false;
+        }
+    }
+
+    const bool loaded = this->importShipVfxConfigFromPath(configPath.c_str());
+    if (loaded)
+    {
+        this->loadedShipVfxConfigPath = normalizePathSlashes(configPath);
+        this->statusMessage = "Configuration VFX chargee: " + this->loadedShipVfxConfigPath;
+        return true;
+    }
+
+    this->statusMessage = "JSON VFX present mais invalide: " + configPath;
+    return false;
 }
 
 bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath)
@@ -2926,6 +5243,10 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         return false;
     }
 
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    const std::string shipSlug = makeShipConfigSlug(ship.displayName);
+    const std::filesystem::path jsonPath = folderPath / ("animations_vfx_" + shipSlug + ".json");
+
     cJSON* root = cJSON_CreateObject();
     if (root == nullptr)
     {
@@ -2933,34 +5254,69 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         return false;
     }
 
-    const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    cJSON_AddStringToObject(root, "format", "ship_vfx_config");
+    cJSON_AddNumberToObject(root, "version", 2);
     cJSON_AddStringToObject(root, "mode", "ship_vfx");
-    cJSON_AddStringToObject(root, "shipDisplayName", ship.displayName.c_str());
-    cJSON_AddStringToObject(root, "shipFolderAbsolutePath", ship.folderAbsolutePath.c_str());
-    cJSON_AddNumberToObject(root, "shipDrawOrder", this->shipDrawOrder);
+
+    cJSON* shipNode = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "ship", shipNode);
+    cJSON_AddStringToObject(shipNode, "id", shipSlug.c_str());
+    cJSON_AddStringToObject(shipNode, "displayName", ship.displayName.c_str());
+    cJSON_AddStringToObject(shipNode, "folderAbsolutePath", ship.folderAbsolutePath.c_str());
+
+    cJSON* previewNode = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "preview", previewNode);
+    cJSON_AddStringToObject(previewNode, "direction", getDirectionIdByIndex(this->previewDirectionIndex));
+    cJSON_AddStringToObject(previewNode, "state", (this->previewShipStateIndex == 1) ? "damaged" : "healthy");
+
+    cJSON* shipLayerNode = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "shipLayer", shipLayerNode);
+    cJSON_AddNumberToObject(shipLayerNode, "drawOrder", this->shipDrawOrder);
+    cJSON_AddBoolToObject(shipLayerNode, "visible", this->shipLayerVisible);
+    cJSON_AddBoolToObject(shipLayerNode, "locked", this->shipLayerLocked);
+    cJSON_AddBoolToObject(shipLayerNode, "debugBoundsVisible", this->shipDebugBoundsVisible);
+
     cJSON* instancesArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "vfxInstances", instancesArray);
 
     for (const ShipVfxInstance& instance : this->shipVfxInstances)
     {
-        if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            continue;
-        }
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "instanceId", static_cast<double>(instance.instanceId));
-        cJSON_AddStringToObject(item, "displayName", imported.displayName.c_str());
-        cJSON_AddStringToObject(item, "sourceJsonPath", imported.sourceJsonPath.c_str());
-        cJSON_AddStringToObject(item, "storageJsonPath", imported.storageJsonPath.c_str());
+        cJSON_AddStringToObject(item, "label", instance.label.c_str());
+        cJSON_AddStringToObject(item, "displayName", instance.sourceDisplayName.c_str());
+        cJSON_AddStringToObject(item, "sourceJsonPath", instance.sourceJsonPath.c_str());
         cJSON_AddNumberToObject(item, "offsetX", instance.offsetX);
         cJSON_AddNumberToObject(item, "offsetY", instance.offsetY);
         cJSON_AddNumberToObject(item, "rotationDeg", instance.rotationDeg);
         cJSON_AddBoolToObject(item, "flipHorizontal", instance.flipHorizontal);
         cJSON_AddBoolToObject(item, "flipVertical", instance.flipVertical);
         cJSON_AddNumberToObject(item, "drawOrder", instance.drawOrder);
-        cJSON_AddNumberToObject(item, "fps", instance.fps);
+        cJSON_AddBoolToObject(item, "visible", instance.visible);
+        cJSON_AddBoolToObject(item, "debugBoundsVisible", instance.debugBoundsVisible);
+        cJSON_AddBoolToObject(item, "locked", instance.locked);
+        cJSON_AddBoolToObject(item, "behindShip", instance.behindShip);
         cJSON_AddBoolToObject(item, "followShip", instance.followShip);
+        cJSON_AddBoolToObject(item, "sharedForAllDirections", instance.sharedForAllDirections);
+        cJSON_AddBoolToObject(item, "sharedForAllStates", instance.sharedForAllStates);
+
+        cJSON* directionOverridesNode = cJSON_CreateObject();
+        cJSON_AddItemToObject(item, "directionOverrides", directionOverridesNode);
+        for (int directionIndex = 0; directionIndex < 4; ++directionIndex)
+        {
+            const DirectionOverride& override = instance.directionOverrides[static_cast<size_t>(directionIndex)];
+            cJSON* directionNode = cJSON_CreateObject();
+            cJSON_AddBoolToObject(directionNode, "enabled", override.enabled);
+            cJSON_AddNumberToObject(directionNode, "offsetX", override.offsetX);
+            cJSON_AddNumberToObject(directionNode, "offsetY", override.offsetY);
+            cJSON_AddNumberToObject(directionNode, "rotationDeg", override.rotationDeg);
+            cJSON_AddBoolToObject(directionNode, "flipHorizontal", override.flipHorizontal);
+            cJSON_AddBoolToObject(directionNode, "flipVertical", override.flipVertical);
+            cJSON_AddNumberToObject(directionNode, "drawOrder", override.drawOrder);
+            cJSON_AddBoolToObject(directionNode, "visible", override.visible);
+            cJSON_AddItemToObject(directionOverridesNode, getDirectionIdByIndex(directionIndex), directionNode);
+        }
+
         cJSON_AddItemToArray(instancesArray, item);
     }
 
@@ -2972,12 +5328,11 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         return false;
     }
 
-    const std::filesystem::path jsonPath = folderPath / "ship_vfx.json";
     std::ofstream output(jsonPath, std::ios::binary | std::ios::trunc);
     if (!output.is_open())
     {
         cJSON_free(jsonText);
-        this->statusMessage = "Impossible d'ouvrir ship_vfx.json.";
+        this->statusMessage = "Impossible d'ouvrir le JSON export.";
         return false;
     }
     output.write(jsonText, static_cast<std::streamsize>(std::strlen(jsonText)));
@@ -2987,11 +5342,13 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
 
     if (!ok)
     {
-        this->statusMessage = "Ecriture ship_vfx.json echouee.";
+        this->statusMessage = "Ecriture JSON export echouee.";
         return false;
     }
 
-    this->statusMessage = "ship_vfx.json exporte.";
+    this->shipVfxDirty = false;
+    this->loadedShipVfxConfigPath = normalizePathSlashes(jsonPath.string());
+    this->statusMessage = "Export OK: " + this->loadedShipVfxConfigPath;
     return true;
 }
 
@@ -3512,17 +5869,34 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
 void EditorMapVfxScene::drawShipVfxPreview(void) const
 {
     const Map& map = GetCurrentMap();
-    const SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
 
     std::vector<RenderItem> items;
     items.reserve(this->shipVfxInstances.size() + 1U);
-    items.push_back(RenderItem{true, this->shipDrawOrder, 0U, -1});
+    if (this->shipLayerVisible)
+    {
+        items.push_back(RenderItem{true, this->shipDrawOrder, 0U, -1});
+    }
     for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
     {
         const ShipVfxInstance& instance = this->shipVfxInstances[i];
-        items.push_back(RenderItem{false, instance.drawOrder, instance.instanceId, static_cast<int>(i)});
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const bool visible = (override != nullptr) ? override->visible : instance.visible;
+        if (!visible)
+        {
+            continue;
+        }
+        const int drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
+        items.push_back(RenderItem{false, drawOrder, instance.instanceId, static_cast<int>(i)});
     }
 
     std::sort(items.begin(), items.end(), [](const RenderItem& a, const RenderItem& b) {
@@ -3545,85 +5919,111 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
         }
 
         const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(item.instanceIndex)];
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const float resolvedOffsetX = (override != nullptr) ? override->offsetX : instance.offsetX;
+        const float resolvedOffsetY = (override != nullptr) ? override->offsetY : instance.offsetY;
+        const float resolvedRotation = (override != nullptr) ? override->rotationDeg : instance.rotationDeg;
+        const bool resolvedFlipH = (override != nullptr) ? override->flipHorizontal : instance.flipHorizontal;
+        const bool resolvedFlipV = (override != nullptr) ? override->flipVertical : instance.flipVertical;
         if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
         {
             continue;
         }
 
         const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
-        if (imported.atlas.atlas_image.sdl_texture == nullptr || imported.frameNames.empty())
+        if (imported.image.sdl_texture == nullptr || imported.frames.empty())
         {
             continue;
         }
 
-        const int frameCount = static_cast<int>(imported.frameNames.size());
-        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(instance.fps, 1.0f))) % frameCount;
-        const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&imported.atlas, imported.frameNames[static_cast<size_t>(frameIndex)].c_str());
-        if (frame == nullptr)
-        {
-            continue;
-        }
+        const int frameCount = static_cast<int>(imported.frames.size());
+        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
-        const float sourceW = (frame->sourceSize.x > 0.0f) ? frame->sourceSize.x : frame->frame.w;
-        const float sourceH = (frame->sourceSize.y > 0.0f) ? frame->sourceSize.y : frame->frame.h;
-        const float offsetX = instance.offsetX * scale;
-        const float offsetY = instance.offsetY * scale;
-        const float sourceLeft = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
-        const float sourceTop = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
-        const float drawX = sourceLeft + (frame->spriteSourceSize.x * scale);
-        const float drawY = sourceTop + (frame->spriteSourceSize.y * scale);
-        const float pivotX = (sourceW * 0.5f) - frame->spriteSourceSize.x;
-        const float pivotY = (sourceH * 0.5f) - frame->spriteSourceSize.y;
+        const float sourceW = frame.w;
+        const float sourceH = frame.h;
+        const float offsetX = resolvedOffsetX * scale;
+        const float offsetY = resolvedOffsetY * scale;
+        const float drawScaleX = scale;
+        const float drawScaleY = scale;
+        const float sourceLeft = shipCenter.x + offsetX - ((sourceW * drawScaleX) * 0.5f);
+        const float sourceTop = shipCenter.y + offsetY - ((sourceH * drawScaleY) * 0.5f);
+        const float drawX = sourceLeft;
+        const float drawY = sourceTop;
+        const float pivotX = sourceW * 0.5f;
+        const float pivotY = sourceH * 0.5f;
 
         const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-            const_cast<RC2D_Image*>(&imported.atlas.atlas_image),
-            frame->frame.x,
-            frame->frame.y,
-            frame->frame.w,
-            frame->frame.h);
+            const_cast<RC2D_Image*>(&imported.image),
+            frame.x,
+            frame.y,
+            frame.w,
+            frame.h);
 
         rc2d_graphics_drawQuad(
-            const_cast<RC2D_Image*>(&imported.atlas.atlas_image),
+            const_cast<RC2D_Image*>(&imported.image),
             &sourceQuad,
             drawX,
             drawY,
-            instance.rotationDeg,
-            scale,
-            scale,
+            resolvedRotation,
+            drawScaleX,
+            drawScaleY,
             pivotX,
             pivotY,
-            instance.flipHorizontal,
-            instance.flipVertical);
+            resolvedFlipH,
+            resolvedFlipV);
+    }
+
+    if (this->shipLayerVisible && this->shipDebugBoundsVisible && this->previewShipLoaded)
+    {
+        float shipSpriteW = 0.0f;
+        float shipSpriteH = 0.0f;
+        if (this->previewShip.getCurrentSpriteSizePixels(&shipSpriteW, &shipSpriteH))
+        {
+            const float shipScale = (std::max)(GetCamera().getZoomFactor(), 0.01f) * this->previewShip.getDrawScale();
+            SDL_FRect shipBounds{};
+            shipBounds.x = shipCenter.x - ((shipSpriteW * shipScale) * 0.5f);
+            shipBounds.y = shipCenter.y - ((shipSpriteH * shipScale) * 0.5f);
+            shipBounds.w = shipSpriteW * shipScale;
+            shipBounds.h = shipSpriteH * shipScale;
+
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            rc2d_graphics_setColor(RC2D_Color{128, 210, 255, 220});
+            rc2d_graphics_rectangle("line", &shipBounds);
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        }
     }
 
     if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
     {
         const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+        if (!instance.debugBoundsVisible)
+        {
+            return;
+        }
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
         {
             const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
-            if (!imported.frameNames.empty())
+            if (!imported.frames.empty())
             {
-                const int frameCount = static_cast<int>(imported.frameNames.size());
-                const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(instance.fps, 1.0f))) % frameCount;
-                    const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&imported.atlas, imported.frameNames[static_cast<size_t>(frameIndex)].c_str());
-                if (frame != nullptr)
-                {
-                    const float sourceW = (frame->sourceSize.x > 0.0f) ? frame->sourceSize.x : frame->frame.w;
-                    const float sourceH = (frame->sourceSize.y > 0.0f) ? frame->sourceSize.y : frame->frame.h;
-                    const float offsetX = instance.offsetX * scale;
-                    const float offsetY = instance.offsetY * scale;
-                    SDL_FRect bounds{};
-                    bounds.x = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
-                    bounds.y = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
-                    bounds.w = sourceW * scale;
-                    bounds.h = sourceH * scale;
+                const int frameCount = static_cast<int>(imported.frames.size());
+                const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+                const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+                const float sourceW = frame.w;
+                const float sourceH = frame.h;
+                const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
+                const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+                SDL_FRect bounds{};
+                bounds.x = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
+                bounds.y = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
+                bounds.w = sourceW * scale;
+                bounds.h = sourceH * scale;
 
-                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-                    rc2d_graphics_setColor(RC2D_Color{255, 220, 120, 220});
-                    rc2d_graphics_rectangle("line", &bounds);
-                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-                }
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+                rc2d_graphics_setColor(RC2D_Color{255, 220, 120, 220});
+                rc2d_graphics_rectangle("line", &bounds);
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
             }
         }
     }
@@ -3850,6 +6250,64 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     }
 }
 
+std::vector<int> EditorMapVfxScene::getOrderedVfxInstanceIndicesForLayerPanel(void) const
+{
+    struct LayerEntry
+    {
+        int index; // -1 = ship, sinon index d'instance VFX
+        int drawOrder;
+        uint32_t stableId;
+    };
+
+    std::vector<LayerEntry> entries;
+    entries.reserve(this->shipVfxInstances.size() + 1U);
+    entries.push_back(LayerEntry{-1, this->shipDrawOrder, 0U});
+    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+    {
+        const ShipVfxInstance& instance = this->shipVfxInstances[i];
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const int drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
+        entries.push_back(LayerEntry{static_cast<int>(i), drawOrder, instance.instanceId});
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const LayerEntry& a, const LayerEntry& b) {
+        if (a.drawOrder != b.drawOrder)
+        {
+            return a.drawOrder < b.drawOrder;
+        }
+        // Ship avant VFX en cas d'egalite de z.
+        if ((a.index < 0) != (b.index < 0))
+        {
+            return a.index < 0;
+        }
+        return a.stableId < b.stableId;
+    });
+
+    std::vector<int> ordered;
+    ordered.reserve(entries.size());
+    for (const LayerEntry& entry : entries)
+    {
+        ordered.push_back(entry.index);
+    }
+    return ordered;
+}
+
+int EditorMapVfxScene::getSelectedLayerRowIndexForDisplay(const std::vector<int>& orderedInstanceIndices) const
+{
+    for (size_t i = 0; i < orderedInstanceIndices.size(); ++i)
+    {
+        if (this->shipLayerSelected && orderedInstanceIndices[i] < 0)
+        {
+            return static_cast<int>(i);
+        }
+        if (!this->shipLayerSelected && orderedInstanceIndices[i] == this->selectedVfxInstanceIndex)
+        {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 void EditorMapVfxScene::drawHud(void) const
 {
     const bool shipMode = (this->editorMode == EditorMode::SHIP_VFX);
@@ -3857,16 +6315,40 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawToolbarButton(this->buttonModeShipVfxRect, "MODE : SHIP / VFX", shipMode);
     this->drawToolbarButton(this->buttonModeLooseSpritesRect, "MODE : DOWNSCALE SPRITES VFX / SPRITESHEET", !shipMode);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER", false);
+    if (shipMode)
+    {
+        this->drawToolbarButton(this->buttonReloadAssetsRect, "RELOAD ASSETS", false);
+    }
     this->drawToolbarButton(this->buttonOceanPrevRect, "OCEAN -", false);
     this->drawToolbarButton(this->buttonOceanNextRect, "OCEAN +", false);
 
     if (shipMode)
     {
+        const ShipVfxInstance* selectedInstance =
+            (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+            ? &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)]
+            : nullptr;
+        const DirectionOverride* selectedOverride = this->getResolvedDirectionOverride(selectedInstance);
+        const bool selectedSharedDirection = (selectedInstance != nullptr) ? selectedInstance->sharedForAllDirections : true;
+        const bool selectedOverrideEnabled = (selectedInstance != nullptr) && (selectedOverride != nullptr) && selectedOverride->enabled;
+
+        this->drawToolbarButton(this->buttonDirectionPrevRect, "SPRITE NAVIRE DIRECTION -", false);
+        this->drawToolbarButton(this->buttonDirectionNextRect, "SPRITE NAVIRE DIRECTION +", false);
+        this->drawToolbarButton(this->buttonShipStateToggleRect, this->getPreviewShipStateLabel(), this->previewShipStateIndex == 1);
+        this->drawToolbarButton(this->buttonRotateMinusRect, "ROT -", false);
+        this->drawToolbarButton(this->buttonRotatePlusRect, "ROT +", false);
+
+        this->drawToolbarButton(this->buttonFlipHorizontalRect, "FLIP H", false);
+        this->drawToolbarButton(this->buttonFlipVerticalRect, "FLIP V", false);
+        this->drawToolbarButton(this->buttonSharedDirectionsRect, "SHARED DIR", selectedSharedDirection);
+        this->drawToolbarButton(this->buttonDirectionOverrideRect, "OVERRIDE DIR", selectedOverrideEnabled);
+        this->drawToolbarButton(this->buttonCenterVfxRect, "CENTER VFX ON SHIP", false);
+
         std::vector<std::string> shipLabels;
         shipLabels.reserve(this->importedShips.size());
         for (const ImportedShip& ship : this->importedShips)
         {
-            shipLabels.push_back(ship.displayName);
+            shipLabels.push_back(stripListPrefix(ship.displayName, "ship-"));
         }
         this->drawListPanel(this->shipListRect, "Navires", shipLabels, this->selectedShipIndex, this->shipListScrollOffset);
 
@@ -3874,9 +6356,23 @@ void EditorMapVfxScene::drawHud(void) const
         sfxLabels.reserve(this->importedSfx.size());
         for (const ImportedSfx& sfx : this->importedSfx)
         {
-            sfxLabels.push_back(sfx.displayName);
+            sfxLabels.push_back(stripListPrefix(sfx.displayName, "vfx-"));
         }
         this->drawListPanel(this->sfxListRect, "VFX", sfxLabels, this->selectedSfxIndex, this->sfxListScrollOffset);
+
+        const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
+        this->drawLayerListPanel(orderedLayerIndices);
+
+        this->drawInvalidAssetPanel(
+            this->invalidVfxListRect,
+            "VFX ignores",
+            this->invalidVfxFolders,
+            this->invalidVfxListScrollOffset);
+        this->drawInvalidAssetPanel(
+            this->invalidShipListRect,
+            "Ships ignores",
+            this->invalidShipFolders,
+            this->invalidShipListScrollOffset);
     }
     else
     {
@@ -3953,12 +6449,14 @@ void EditorMapVfxScene::drawHud(void) const
         SDL_snprintf(
             infoBuffer,
             sizeof(infoBuffer),
-            "Mode Ship / VFX | Ship: %s | Instances: %d | ShipOrder: %d | Ocean: %s | Frame/S: %s",
+            "Mode Ship / VFX | Ship: %s | Direction: %s | State: %s | Instances: %d | ShipOrder: %d | Dirty: %s | Ocean: %s",
             shipName,
+            this->getPreviewDirectionLabel(),
+            this->getPreviewShipStateLabel(),
             static_cast<int>(this->shipVfxInstances.size()),
             this->shipDrawOrder,
-            oceanLabel,
-            this->vfxFpsInput.c_str());
+            this->shipVfxDirty ? "YES" : "NO",
+            oceanLabel);
     }
     else
     {
@@ -4104,6 +6602,347 @@ bool EditorMapVfxScene::handleSfxListClick(float x, float y)
     return true;
 }
 
+bool EditorMapVfxScene::handleLayerListClick(float x, float y)
+{
+    if (!this->pointInRect(x, y, this->layerListRect))
+    {
+        return false;
+    }
+
+    const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
+    const int itemCount = static_cast<int>(orderedLayerIndices.size());
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kVisibleListRows);
+    const float rowsLeftX = this->layerListRect.x + panelPadding;
+    const float rowsWidth = this->layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    if (this->pointInRect(x, y, scrollTrackRect))
+    {
+        int clickedIndexIgnored = -1;
+        this->handleListPanelClick(
+            x,
+            y,
+            this->layerListRect,
+            itemCount,
+            &this->layerListScrollOffset,
+            &this->layerListScrollDragActive,
+            &this->layerListScrollDragGrabOffsetY,
+            &clickedIndexIgnored);
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
+        return true;
+    }
+
+    int clickedIndex = -1;
+    const int startIndex = this->computeListStartIndex(this->layerListScrollOffset, itemCount);
+    for (int i = 0; i < kVisibleListRows; ++i)
+    {
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= itemCount)
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+        if (this->pointInRect(x, y, rowRect))
+        {
+            clickedIndex = rowIndex;
+            break;
+        }
+    }
+    if (clickedIndex < 0)
+    {
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
+        return true;
+    }
+
+    const int clickedVisibleSlot = clickedIndex - startIndex;
+    if (clickedVisibleSlot < 0 || clickedVisibleSlot >= kVisibleListRows)
+    {
+        return true;
+    }
+
+    SDL_FRect clickedRowRect{};
+    clickedRowRect.x = rowsLeftX;
+    clickedRowRect.y = rowsTopY + (static_cast<float>(clickedVisibleSlot) * (rowHeight + rowGap));
+    clickedRowRect.w = rowsWidth;
+    clickedRowRect.h = rowHeight;
+
+    SDL_FRect lockRect{};
+    lockRect.w = 40.0f;
+    lockRect.h = clickedRowRect.h - 4.0f;
+    lockRect.x = clickedRowRect.x + clickedRowRect.w - lockRect.w - 3.0f;
+    lockRect.y = clickedRowRect.y + 2.0f;
+
+    SDL_FRect visRect{};
+    visRect.w = 52.0f;
+    visRect.h = lockRect.h;
+    visRect.x = lockRect.x - visRect.w - 4.0f;
+    visRect.y = lockRect.y;
+
+    SDL_FRect dupRect{};
+    dupRect.w = 46.0f;
+    dupRect.h = lockRect.h;
+    dupRect.x = visRect.x - dupRect.w - 4.0f;
+    dupRect.y = lockRect.y;
+
+    SDL_FRect delRect{};
+    delRect.w = 46.0f;
+    delRect.h = lockRect.h;
+    delRect.x = dupRect.x - delRect.w - 4.0f;
+    delRect.y = lockRect.y;
+
+    SDL_FRect resetRect{};
+    resetRect.w = 58.0f;
+    resetRect.h = lockRect.h;
+    resetRect.x = delRect.x - resetRect.w - 4.0f;
+    resetRect.y = lockRect.y;
+
+    SDL_FRect debugRect{};
+    debugRect.w = 66.0f;
+    debugRect.h = lockRect.h;
+    debugRect.x = resetRect.x - debugRect.w - 4.0f;
+    debugRect.y = lockRect.y;
+
+    auto clearLayerDragState = [this]() {
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
+    };
+
+    auto selectClickedRow = [this, &orderedLayerIndices, clickedIndex]() {
+        if (clickedIndex < 0 || clickedIndex >= static_cast<int>(orderedLayerIndices.size()))
+        {
+            return;
+        }
+        const int rowValue = orderedLayerIndices[static_cast<size_t>(clickedIndex)];
+        if (rowValue < 0)
+        {
+            this->shipLayerSelected = true;
+            this->setSelectedVfxInstanceIndex(-1);
+            return;
+        }
+
+        this->shipLayerSelected = false;
+        this->setSelectedVfxInstanceIndex(rowValue);
+    };
+
+    const bool clickedIsShipRow =
+        clickedIndex >= 0 &&
+        clickedIndex < static_cast<int>(orderedLayerIndices.size()) &&
+        orderedLayerIndices[static_cast<size_t>(clickedIndex)] < 0;
+    const int clickedInstanceIndex =
+        (!clickedIsShipRow && clickedIndex >= 0 && clickedIndex < static_cast<int>(orderedLayerIndices.size()))
+        ? orderedLayerIndices[static_cast<size_t>(clickedIndex)]
+        : -1;
+
+    if (this->pointInRect(x, y, debugRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow || clickedInstanceIndex < 0)
+        {
+            this->shipDebugBoundsVisible = !this->shipDebugBoundsVisible;
+            this->markShipVfxDirty();
+            clearLayerDragState();
+            this->statusMessage = this->shipDebugBoundsVisible ? "DEBUG SHIP active." : "DEBUG SHIP desactivee.";
+            return true;
+        }
+
+        ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        instance.debugBoundsVisible = !instance.debugBoundsVisible;
+        this->markShipVfxDirty();
+        clearLayerDragState();
+        this->statusMessage = instance.debugBoundsVisible ? "DEBUG active." : "DEBUG desactivee.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, resetRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow || clickedInstanceIndex < 0)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Reset non disponible pour SHIP.";
+            return true;
+        }
+
+        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        if (instance.locked)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Layer verrouille: reset refuse.";
+            return true;
+        }
+
+        this->resetSelectedVfxTransform();
+        clearLayerDragState();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, dupRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow || clickedInstanceIndex < 0)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Duplication non disponible pour SHIP.";
+            return true;
+        }
+
+        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        if (instance.locked)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Layer verrouille: duplication refusee.";
+            return true;
+        }
+
+        this->duplicateSelectedVfxInstance();
+        clearLayerDragState();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, delRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow || clickedInstanceIndex < 0)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Suppression non disponible pour SHIP.";
+            return true;
+        }
+
+        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        if (instance.locked)
+        {
+            clearLayerDragState();
+            this->statusMessage = "Layer verrouille: suppression refusee.";
+            return true;
+        }
+
+        this->removeSelectedVfxInstance();
+        clearLayerDragState();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, visRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow)
+        {
+            this->shipLayerVisible = !this->shipLayerVisible;
+            this->markShipVfxDirty();
+        }
+        else
+        {
+            if (clickedInstanceIndex >= 0)
+            {
+                ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+                DirectionOverride* override = this->getEditableDirectionOverride(&instance);
+                if (override != nullptr)
+                {
+                    override->visible = !override->visible;
+                }
+                else
+                {
+                    instance.visible = !instance.visible;
+                }
+                this->markShipVfxDirty();
+            }
+        }
+        clearLayerDragState();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lockRect))
+    {
+        selectClickedRow();
+        if (clickedIsShipRow)
+        {
+            this->shipLayerLocked = !this->shipLayerLocked;
+            this->markShipVfxDirty();
+            clearLayerDragState();
+            this->statusMessage = this->shipLayerLocked ? "SHIP lock active." : "SHIP lock desactive.";
+            return true;
+        }
+        else
+        {
+            if (clickedInstanceIndex >= 0)
+            {
+                ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+                instance.locked = !instance.locked;
+                this->markShipVfxDirty();
+            }
+        }
+        clearLayerDragState();
+        return true;
+    }
+
+    selectClickedRow();
+
+    bool canDragRow = true;
+    if (clickedIsShipRow)
+    {
+        canDragRow = !this->shipLayerLocked;
+        this->statusMessage = "Layer ship selectionne.";
+    }
+    else
+    {
+        if (clickedInstanceIndex >= 0)
+        {
+            const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+            canDragRow = !instance.locked;
+        }
+        this->statusMessage = "Layer VFX selectionne.";
+    }
+
+    this->ensureSelectionVisible(
+        this->getSelectedLayerRowIndexForDisplay(orderedLayerIndices),
+        &this->layerListScrollOffset,
+        itemCount);
+
+    if (!canDragRow)
+    {
+        clearLayerDragState();
+        this->statusMessage = "Layer verrouille: deverrouille pour reordonner.";
+    }
+    else
+    {
+        this->layerListScrollDragActive = false;
+        this->layerRowDragActive = true;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = clickedIndex;
+        this->layerRowDragTargetInsertIndex = clickedIndex + 1;
+        this->layerRowDragStartMouseY = y;
+    }
+    return true;
+}
+
 bool EditorMapVfxScene::handleLooseListClick(float x, float y)
 {
     int clickedIndex = -1;
@@ -4137,13 +6976,22 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
     {
         this->editorMode = EditorMode::SHIP_VFX;
         this->loosePreviewFpsInputFocused = false;
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
         this->statusMessage = "Mode Ship / VFX actif.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonModeLooseSpritesRect))
     {
         this->editorMode = EditorMode::LOOSE_SPRITES;
-        this->vfxFpsInputFocused = false;
+        this->layerRowDragActive = false;
+        this->layerRowDragMoved = false;
+        this->layerRowDragSourceDisplayIndex = -1;
+        this->layerRowDragTargetInsertIndex = -1;
+        this->layerRowDragStartMouseY = 0.0f;
         this->statusMessage = "Mode Downscale Sprites VFX actif.";
         return true;
     }
@@ -4168,6 +7016,65 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
     {
         this->requestOceanColorStep(1);
         return true;
+    }
+
+    if (this->editorMode == EditorMode::SHIP_VFX)
+    {
+        if (this->pointInRect(x, y, this->buttonReloadAssetsRect))
+        {
+            this->autoImportAssetsFromDefaultFolders();
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonDirectionPrevRect))
+        {
+            this->cyclePreviewDirection(-1);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonDirectionNextRect))
+        {
+            this->cyclePreviewDirection(1);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonShipStateToggleRect))
+        {
+            this->cyclePreviewShipState(1);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonRotateMinusRect))
+        {
+            this->adjustSelectedVfxRotation(-15.0f);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonRotatePlusRect))
+        {
+            this->adjustSelectedVfxRotation(15.0f);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonFlipHorizontalRect))
+        {
+            this->toggleSelectedVfxFlipHorizontal();
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonFlipVerticalRect))
+        {
+            this->toggleSelectedVfxFlipVertical();
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonSharedDirectionsRect))
+        {
+            this->toggleSelectedVfxSharedForAllDirections();
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonDirectionOverrideRect))
+        {
+            this->toggleSelectedVfxDirectionOverride();
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonCenterVfxRect))
+        {
+            this->centerSelectedVfxInstance();
+            return true;
+        }
     }
 
     if (this->editorMode == EditorMode::LOOSE_SPRITES)
@@ -4213,7 +7120,6 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         {
             this->loosePreviewFpsInput = formatSfxFpsValue(this->getLoosePreviewFpsOrDefault());
             this->loosePreviewFpsInputFocused = true;
-            this->vfxFpsInputFocused = false;
             return true;
         }
         if (this->pointInRect(x, y, this->buttonLooseClearAllVfxRect) &&
@@ -4265,7 +7171,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         }
     }
 
-    this->vfxFpsInputFocused = false;
+    this->layerNameInputFocused = false;
     this->loosePreviewFpsInputFocused = false;
     return false;
 }
@@ -4281,22 +7187,108 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         return false;
     }
 
-    const int hitIndex = this->findTopmostVfxInstanceIndexAtPoint(x, y);
+    auto isPointInsideInstanceBounds = [this, x, y](int instanceIndex) -> bool {
+        if (!this->previewShipLoaded)
+        {
+            return false;
+        }
+        if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+        {
+            return false;
+        }
+
+        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+        const bool visible = (override != nullptr) ? override->visible : instance.visible;
+        if (!visible)
+        {
+            return false;
+        }
+        if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+        {
+            return false;
+        }
+
+        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
+        if (imported.image.sdl_texture == nullptr || imported.frames.empty())
+        {
+            return false;
+        }
+
+        const Map& map = GetCurrentMap();
+        SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+        float shipCenterOffsetX = 0.0f;
+        float shipCenterOffsetY = 0.0f;
+        if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+        {
+            shipCenter.x += shipCenterOffsetX;
+            shipCenter.y += shipCenterOffsetY;
+        }
+
+        const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+        const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+        const int frameCount = static_cast<int>(imported.frames.size());
+        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+        const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
+        const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+        const SDL_FRect bounds = SDL_FRect{
+            shipCenter.x + offsetX - ((frame.w * scale) * 0.5f),
+            shipCenter.y + offsetY - ((frame.h * scale) * 0.5f),
+            frame.w * scale,
+            frame.h * scale};
+        return this->pointInRect(x, y, bounds);
+    };
+
     if (button == RC2D_MOUSE_BUTTON_RIGHT)
     {
+        const int hitIndex = this->findTopmostVfxInstanceIndexAtPoint(x, y);
         if (hitIndex >= 0)
         {
             this->setSelectedVfxInstanceIndex(hitIndex);
-            this->removeSelectedVfxInstance();
+            if (this->hasSelectedVfxInstance() &&
+                this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].locked)
+            {
+                this->statusMessage = "Instance verrouillee: suppression refusee.";
+            }
+            else
+            {
+                this->removeSelectedVfxInstance();
+            }
         }
         return true;
     }
     if (button == RC2D_MOUSE_BUTTON_LEFT)
     {
+        if (this->vfxDragActive && rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+        {
+            return true;
+        }
+
+        int hitIndex = this->findTopmostVfxInstanceIndexAtPoint(x, y);
+        if (this->hasSelectedVfxInstance() &&
+            isPointInsideInstanceBounds(this->selectedVfxInstanceIndex))
+        {
+            hitIndex = this->selectedVfxInstanceIndex;
+        }
+
         this->setSelectedVfxInstanceIndex(hitIndex);
         if (hitIndex >= 0)
         {
+            this->shipLayerSelected = false;
+            ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(hitIndex)];
+            const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+            this->vfxDragStartMouseX = x;
+            this->vfxDragStartMouseY = y;
+            this->vfxDragStartOffsetX = (override != nullptr) ? override->offsetX : instance.offsetX;
+            this->vfxDragStartOffsetY = (override != nullptr) ? override->offsetY : instance.offsetY;
+            this->vfxDragActive = !instance.locked;
             this->statusMessage = "VFX instance selectionnee.";
+        }
+        else
+        {
+            this->shipLayerSelected = true;
+            this->vfxDragActive = false;
         }
         return true;
     }
@@ -4517,6 +7509,13 @@ void EditorMapVfxScene::unload(void)
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
+    this->layerNameInput.clear();
+    this->layerNameInputFocused = false;
+    this->vfxDragActive = false;
+    this->shipVfxDirty = false;
+    this->loadedShipVfxConfigPath.clear();
+    this->invalidShipFolders.clear();
+    this->invalidVfxFolders.clear();
 
     this->scrollBarOverlay.unload();
     rc2d_graphics_closeFont(&this->overlayFont);
@@ -4559,9 +7558,17 @@ void EditorMapVfxScene::load(void)
         map.rect);
     camera.update(map, map.rect);
 
+    const float shipScreenX = map.rect.x + (map.rect.w * 0.5f) + 250.0f;
+    const float shipScreenY = map.rect.y + (map.rect.h * 0.5f);
+    const SDL_Point shiftedShipTile = map.screenToTileNearest(shipScreenX, shipScreenY);
+    this->previewShipTile = SDL_FPoint{
+        static_cast<float>(shiftedShipTile.x),
+        static_cast<float>(shiftedShipTile.y)};
+
     this->loadLooseReferencePreviewAssets();
     this->applySelectedOceanColor();
-    this->statusMessage = "Editor VFX charge. Importe navires, VFX atlas ou sprites.";
+    this->autoImportAssetsFromDefaultFolders();
+    this->statusMessage = "Editor VFX charge. Scan assets/images/ships et assets/images/vfx termine.";
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapVfxScene: loaded");
 }
@@ -4593,60 +7600,61 @@ void EditorMapVfxScene::update(double dt)
             &this->sfxListScrollOffset,
             &this->sfxListScrollDragActive,
             &this->sfxListScrollDragGrabOffsetY);
+        this->handleListPanelScrollDragFromMouse(
+            this->layerListRect,
+            static_cast<int>(this->shipVfxInstances.size()) + 1,
+            &this->layerListScrollOffset,
+            &this->layerListScrollDragActive,
+            &this->layerListScrollDragGrabOffsetY);
+        this->updateLayerListRowDragFromMouse();
+        this->handleInvalidAssetPanelScrollDragFromMouse(
+            this->invalidVfxListRect,
+            static_cast<int>(this->invalidVfxFolders.size()),
+            &this->invalidVfxListScrollOffset,
+            &this->invalidVfxListScrollDragActive,
+            &this->invalidVfxListScrollDragGrabOffsetY);
+        this->handleInvalidAssetPanelScrollDragFromMouse(
+            this->invalidShipListRect,
+            static_cast<int>(this->invalidShipFolders.size()),
+            &this->invalidShipListScrollOffset,
+            &this->invalidShipListScrollDragActive,
+            &this->invalidShipListScrollDragGrabOffsetY);
 
-        if (!this->vfxFpsInputFocused &&
-            this->selectedVfxInstanceIndex >= 0 &&
-            this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+        if (this->vfxDragActive)
         {
-            const bool upPressed = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP);
-            const bool downPressed = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN);
-            const bool leftPressed = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT);
-            const bool rightPressed = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT);
-
-            float deltaX = 0.0f;
-            float deltaY = 0.0f;
-            if (leftPressed)
+            if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
             {
-                deltaX -= 1.0f;
+                this->vfxDragActive = false;
             }
-            if (rightPressed)
+            else
             {
-                deltaX += 1.0f;
-            }
-            if (upPressed)
-            {
-                deltaY -= 1.0f;
-            }
-            if (downPressed)
-            {
-                deltaY += 1.0f;
-            }
-
-            if (deltaX != 0.0f || deltaY != 0.0f)
-            {
-                if (deltaX != 0.0f && deltaY != 0.0f)
+                float mouseX = 0.0f;
+                float mouseY = 0.0f;
+                if (this->getMouseRenderPosition(&mouseX, &mouseY) && this->hasSelectedVfxInstance())
                 {
-                    constexpr float kDiagonalFactor = 0.70710678f;
-                    deltaX *= kDiagonalFactor;
-                    deltaY *= kDiagonalFactor;
+                    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+                    if (instance != nullptr && !instance->locked)
+                    {
+                        const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+                        const float deltaX = (mouseX - this->vfxDragStartMouseX) / zoom;
+                        const float deltaY = (mouseY - this->vfxDragStartMouseY) / zoom;
+                        DirectionOverride* override = this->getEditableDirectionOverride(instance);
+                        if (override != nullptr)
+                        {
+                            override->offsetX = this->vfxDragStartOffsetX + deltaX;
+                            override->offsetY = this->vfxDragStartOffsetY + deltaY;
+                        }
+                        else
+                        {
+                            instance->offsetX = this->vfxDragStartOffsetX + deltaX;
+                            instance->offsetY = this->vfxDragStartOffsetY + deltaY;
+                        }
+                        this->shipVfxDirty = true;
+                    }
                 }
-
-                float moveSpeed = 220.0f;
-                if (rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LSHIFT) ||
-                    rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RSHIFT))
-                {
-                    moveSpeed *= 2.0f;
-                }
-                else if (rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LCTRL) ||
-                    rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RCTRL))
-                {
-                    moveSpeed *= 0.5f;
-                }
-
-                const float distance = moveSpeed * static_cast<float>(dt);
-                this->moveSelectedVfxInstance(deltaX * distance, deltaY * distance);
             }
         }
+
     }
     else
     {
@@ -4747,7 +7755,7 @@ void EditorMapVfxScene::keypressed(
     {
         return;
     }
-    if (this->handleVfxFpsInputKey(key, scancode, keycode, mod, isrepeat))
+    if (this->handleLayerNameInputKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
     }
@@ -4758,7 +7766,7 @@ void EditorMapVfxScene::keypressed(
 
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
-        this->vfxFpsInputFocused = false;
+        this->layerNameInputFocused = false;
         this->loosePreviewFpsInputFocused = false;
         return;
     }
@@ -4768,7 +7776,7 @@ void EditorMapVfxScene::keypressed(
         this->editorMode = (this->editorMode == EditorMode::SHIP_VFX)
             ? EditorMode::LOOSE_SPRITES
             : EditorMode::SHIP_VFX;
-        this->vfxFpsInputFocused = false;
+        this->layerNameInputFocused = false;
         this->loosePreviewFpsInputFocused = false;
         this->statusMessage = (this->editorMode == EditorMode::SHIP_VFX)
             ? "Mode Ship / VFX actif."
@@ -4796,6 +7804,12 @@ void EditorMapVfxScene::keypressed(
         return;
     }
 
+    if (!isrepeat && scancode == SDL_SCANCODE_F8)
+    {
+        this->autoImportAssetsFromDefaultFolders();
+        return;
+    }
+
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
         if (!isrepeat && scancode == SDL_SCANCODE_F5)
@@ -4806,6 +7820,66 @@ void EditorMapVfxScene::keypressed(
         if (!isrepeat && scancode == SDL_SCANCODE_F6)
         {
             this->openImportSfxFolderDialog();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_1)
+        {
+            this->setPreviewDirectionIndex(0);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_2)
+        {
+            this->setPreviewDirectionIndex(1);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_3)
+        {
+            this->setPreviewDirectionIndex(2);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_4)
+        {
+            this->setPreviewDirectionIndex(3);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_G)
+        {
+            this->cyclePreviewShipState(1);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_B)
+        {
+            this->toggleSelectedVfxBehindShip();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_I)
+        {
+            this->toggleSelectedVfxVisibility();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_L)
+        {
+            this->toggleSelectedVfxLock();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_U)
+        {
+            this->toggleSelectedVfxSharedForAllDirections();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_Y)
+        {
+            this->toggleSelectedVfxDirectionOverride();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_D)
+        {
+            this->duplicateSelectedVfxInstance();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_R)
+        {
+            this->resetSelectedVfxTransform();
             return;
         }
         if (!isrepeat && scancode == SDL_SCANCODE_H)
@@ -4867,7 +7941,81 @@ void EditorMapVfxScene::keypressed(
             this->adjustSelectedVfxRotation(15.0f);
             return;
         }
+        if (scancode == SDL_SCANCODE_UP ||
+            scancode == SDL_SCANCODE_DOWN ||
+            scancode == SDL_SCANCODE_LEFT ||
+            scancode == SDL_SCANCODE_RIGHT)
+        {
+            const bool upDown = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP) || scancode == SDL_SCANCODE_UP;
+            const bool downDown = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN) || scancode == SDL_SCANCODE_DOWN;
+            const bool leftDown = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT) || scancode == SDL_SCANCODE_LEFT;
+            const bool rightDown = rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT) || scancode == SDL_SCANCODE_RIGHT;
 
+            float deltaX = 0.0f;
+            float deltaY = 0.0f;
+            if (upDown && !downDown)
+            {
+                deltaY -= kVfxMoveStepPx;
+            }
+            else if (downDown && !upDown)
+            {
+                deltaY += kVfxMoveStepPx;
+            }
+            if (leftDown && !rightDown)
+            {
+                deltaX -= kVfxMoveStepPx;
+            }
+            else if (rightDown && !leftDown)
+            {
+                deltaX += kVfxMoveStepPx;
+            }
+
+            if (deltaX != 0.0f || deltaY != 0.0f)
+            {
+                this->moveSelectedVfxInstance(deltaX, deltaY);
+                return;
+            }
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_7)
+        {
+            this->moveSelectedVfxInstance(-kVfxMoveStepPx, -kVfxMoveStepPx);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_8)
+        {
+            this->moveSelectedVfxInstance(0.0f, -kVfxMoveStepPx);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_9)
+        {
+            this->moveSelectedVfxInstance(kVfxMoveStepPx, -kVfxMoveStepPx);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_4)
+        {
+            this->moveSelectedVfxInstance(-kVfxMoveStepPx, 0.0f);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_6)
+        {
+            this->moveSelectedVfxInstance(kVfxMoveStepPx, 0.0f);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_1)
+        {
+            this->moveSelectedVfxInstance(-kVfxMoveStepPx, kVfxMoveStepPx);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_2)
+        {
+            this->moveSelectedVfxInstance(0.0f, kVfxMoveStepPx);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_KP_3)
+        {
+            this->moveSelectedVfxInstance(kVfxMoveStepPx, kVfxMoveStepPx);
+            return;
+        }
     }
     else
     {
@@ -4966,20 +8114,17 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
 
     if (button == RC2D_MOUSE_BUTTON_LEFT)
     {
-        const bool wasVfxFpsInputFocused = this->vfxFpsInputFocused;
+        const bool wasLayerNameFocused = this->layerNameInputFocused;
         const bool wasLoosePreviewFpsInputFocused = this->loosePreviewFpsInputFocused;
-        const bool clickInVfxFpsInput =
-            (this->editorMode == EditorMode::SHIP_VFX) &&
-            this->pointInRect(x, y, this->buttonVfxFpsInputRect);
         const bool clickInLoosePreviewFpsInput =
             (this->editorMode == EditorMode::LOOSE_SPRITES) &&
             (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW) &&
             this->pointInRect(x, y, this->buttonLoosePreviewFpsInputRect);
 
-        if (wasVfxFpsInputFocused && !clickInVfxFpsInput)
+        if (wasLayerNameFocused)
         {
-            this->vfxFpsInputFocused = false;
-            this->applyVfxFpsInput();
+            this->layerNameInputFocused = false;
+            this->applyLayerNameInput();
         }
         if (wasLoosePreviewFpsInputFocused && !clickInLoosePreviewFpsInput)
         {
@@ -4997,6 +8142,32 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
 
         if (this->editorMode == EditorMode::SHIP_VFX)
         {
+            if (this->handleInvalidAssetPanelClick(
+                    x,
+                    y,
+                    this->invalidVfxListRect,
+                    static_cast<int>(this->invalidVfxFolders.size()),
+                    &this->invalidVfxListScrollOffset,
+                    &this->invalidVfxListScrollDragActive,
+                    &this->invalidVfxListScrollDragGrabOffsetY))
+            {
+                return;
+            }
+            if (this->handleInvalidAssetPanelClick(
+                    x,
+                    y,
+                    this->invalidShipListRect,
+                    static_cast<int>(this->invalidShipFolders.size()),
+                    &this->invalidShipListScrollOffset,
+                    &this->invalidShipListScrollDragActive,
+                    &this->invalidShipListScrollDragGrabOffsetY))
+            {
+                return;
+            }
+            if (this->handleLayerListClick(x, y))
+            {
+                return;
+            }
             if (this->handleShipListClick(x, y))
             {
                 return;
@@ -5030,6 +8201,127 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     }
 
     this->handleLoosePlacementPreviewClick(x, y, button);
+}
+
+void EditorMapVfxScene::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    (void)x;
+    (void)y;
+    (void)integer_x;
+    (void)mouseID;
+
+    int delta = static_cast<int>(integer_y);
+    if (delta == 0)
+    {
+        if (y > 0.0f)
+        {
+            delta = 1;
+        }
+        else if (y < 0.0f)
+        {
+            delta = -1;
+        }
+    }
+    if (delta == 0)
+    {
+        if (direction == RC2D_SCROLL_UP)
+        {
+            delta = 1;
+        }
+        else if (direction == RC2D_SCROLL_DOWN)
+        {
+            delta = -1;
+        }
+    }
+    if (delta == 0)
+    {
+        return;
+    }
+
+    float eventMouseX = mouse_x;
+    float eventMouseY = mouse_y;
+    float eventMouseRenderX = mouse_x;
+    float eventMouseRenderY = mouse_y;
+    this->convertWindowToRender(mouse_x, mouse_y, &eventMouseRenderX, &eventMouseRenderY);
+
+    float currentMouseX = 0.0f;
+    float currentMouseY = 0.0f;
+    rc2d_mouse_getPosition(&currentMouseX, &currentMouseY);
+    float currentMouseRenderX = currentMouseX;
+    float currentMouseRenderY = currentMouseY;
+    this->convertWindowToRender(currentMouseX, currentMouseY, &currentMouseRenderX, &currentMouseRenderY);
+
+    auto isMouseInsidePanel = [this, eventMouseX, eventMouseY, eventMouseRenderX, eventMouseRenderY, currentMouseX, currentMouseY, currentMouseRenderX, currentMouseRenderY](const SDL_FRect& panelRect) -> bool {
+        return
+            this->pointInRect(eventMouseX, eventMouseY, panelRect) ||
+            this->pointInRect(eventMouseRenderX, eventMouseRenderY, panelRect) ||
+            this->pointInRect(currentMouseX, currentMouseY, panelRect) ||
+            this->pointInRect(currentMouseRenderX, currentMouseRenderY, panelRect);
+    };
+
+    auto scrollListPanel = [&](const SDL_FRect& panelRect, int itemCount, int* scrollOffset) -> bool {
+        if (scrollOffset == nullptr)
+        {
+            return false;
+        }
+        if (!isMouseInsidePanel(panelRect))
+        {
+            return false;
+        }
+        *scrollOffset -= delta;
+        this->clampListScrollOffset(scrollOffset, itemCount);
+        return true;
+    };
+
+    auto scrollInvalidPanel = [&](const SDL_FRect& panelRect, int itemCount, int* scrollOffset) -> bool {
+        if (scrollOffset == nullptr)
+        {
+            return false;
+        }
+        if (!isMouseInsidePanel(panelRect))
+        {
+            return false;
+        }
+        const int maxOffset = (std::max)(itemCount - kInvalidVisibleRows, 0);
+        *scrollOffset -= delta;
+        *scrollOffset = std::clamp(*scrollOffset, 0, maxOffset);
+        return true;
+    };
+
+    if (this->editorMode == EditorMode::SHIP_VFX)
+    {
+        const int layerItemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
+        if (scrollInvalidPanel(this->invalidVfxListRect, static_cast<int>(this->invalidVfxFolders.size()), &this->invalidVfxListScrollOffset))
+        {
+            return;
+        }
+        if (scrollInvalidPanel(this->invalidShipListRect, static_cast<int>(this->invalidShipFolders.size()), &this->invalidShipListScrollOffset))
+        {
+            return;
+        }
+        if (scrollListPanel(this->shipListRect, static_cast<int>(this->importedShips.size()), &this->shipListScrollOffset))
+        {
+            return;
+        }
+        if (scrollListPanel(this->sfxListRect, static_cast<int>(this->importedSfx.size()), &this->sfxListScrollOffset))
+        {
+            return;
+        }
+        if (scrollListPanel(this->layerListRect, layerItemCount, &this->layerListScrollOffset))
+        {
+            return;
+        }
+        return;
+    }
+
 }
 
 #endif // GAME_ENV_DEV

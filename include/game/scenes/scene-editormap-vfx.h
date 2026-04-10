@@ -4,6 +4,7 @@
 
 #include <RC2D/RC2D.h>
 
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -38,20 +39,46 @@ private:
     struct ImportedShip {
         std::string displayName;
         std::string folderAbsolutePath;
+        std::string configJsonPath;
+    };
+
+    struct ImportedSfxFrame {
+        int index;
+        std::string frameName;
+        float x;
+        float y;
+        float w;
+        float h;
     };
 
     struct ImportedSfx {
         std::string id;
         std::string displayName;
         std::string sourceJsonPath;
-        std::string storageJsonPath;
-        RC2D_TP_Atlas atlas;
-        std::vector<std::string> frameNames;
+        std::string sourceImagePath;
+        std::string sourceFolderAbsolutePath;
+        std::string storageImagePath;
+        RC2D_Image image;
+        std::vector<ImportedSfxFrame> frames;
         float defaultFps;
+    };
+
+    struct DirectionOverride {
+        bool enabled;
+        float offsetX;
+        float offsetY;
+        float rotationDeg;
+        bool flipHorizontal;
+        bool flipVertical;
+        int drawOrder;
+        bool visible;
     };
 
     struct ShipVfxInstance {
         uint32_t instanceId;
+        std::string label;
+        std::string sourceJsonPath;
+        std::string sourceDisplayName;
         int importedSfxIndex;
         float offsetX;
         float offsetY;
@@ -59,8 +86,19 @@ private:
         bool flipHorizontal;
         bool flipVertical;
         int drawOrder;
-        float fps;
+        bool visible;
+        bool debugBoundsVisible;
+        bool locked;
+        bool behindShip;
         bool followShip;
+        bool sharedForAllDirections;
+        bool sharedForAllStates;
+        std::array<DirectionOverride, 4> directionOverrides;
+    };
+
+    struct InvalidAssetEntry {
+        std::string folderName;
+        std::string reason;
     };
 
     struct ImportedLooseSprite {
@@ -114,6 +152,12 @@ private:
     bool previewShipLoaded;
     std::string loadedShipFolderAbsolute;
     SDL_FPoint previewShipTile;
+    int previewDirectionIndex;
+    int previewShipStateIndex;
+    bool shipLayerVisible;
+    bool shipLayerLocked;
+    bool shipLayerSelected;
+    bool shipDebugBoundsVisible;
     int shipDrawOrder;
     RC2D_Image looseReferenceGuildIslandImage;
     RC2D_Image looseReferenceTowerLevel1Image;
@@ -128,8 +172,15 @@ private:
     std::vector<ShipVfxInstance> shipVfxInstances;
     int selectedVfxInstanceIndex;
     uint32_t nextVfxInstanceId;
-    std::string vfxFpsInput;
-    bool vfxFpsInputFocused;
+    std::string layerNameInput;
+    bool layerNameInputFocused;
+    bool vfxDragActive;
+    float vfxDragStartMouseX;
+    float vfxDragStartMouseY;
+    float vfxDragStartOffsetX;
+    float vfxDragStartOffsetY;
+    bool shipVfxDirty;
+    std::string loadedShipVfxConfigPath;
 
     int looseScalePercent;
     float loosePreviewZoomFactor;
@@ -145,6 +196,8 @@ private:
     unsigned int importedLooseFolderCounter;
 
     std::string statusMessage;
+    std::vector<InvalidAssetEntry> invalidShipFolders;
+    std::vector<InvalidAssetEntry> invalidVfxFolders;
 
     bool pendingShipFolderDialogCompleted;
     bool pendingShipFolderDialogCanceled;
@@ -171,23 +224,36 @@ private:
     SDL_FRect buttonModeLooseSpritesRect;
     SDL_FRect buttonImportShipRect;
     SDL_FRect buttonImportSfxRect;
+    SDL_FRect buttonReloadAssetsRect;
     SDL_FRect buttonImportLooseRect;
     SDL_FRect buttonExportRect;
     SDL_FRect buttonOceanPrevRect;
     SDL_FRect buttonOceanNextRect;
 
+    SDL_FRect buttonDirectionPrevRect;
+    SDL_FRect buttonDirectionNextRect;
+    SDL_FRect buttonShipStateToggleRect;
     SDL_FRect buttonShipOrderMinusRect;
     SDL_FRect buttonShipOrderPlusRect;
+    SDL_FRect buttonLayerOrderMinusRect;
+    SDL_FRect buttonLayerOrderPlusRect;
     SDL_FRect buttonVfxOrderMinusRect;
     SDL_FRect buttonVfxOrderPlusRect;
     SDL_FRect buttonRotateMinusRect;
     SDL_FRect buttonRotatePlusRect;
     SDL_FRect buttonFlipHorizontalRect;
     SDL_FRect buttonFlipVerticalRect;
+    SDL_FRect buttonVisibleRect;
+    SDL_FRect buttonLockedRect;
+    SDL_FRect buttonBehindShipRect;
     SDL_FRect buttonFollowShipRect;
     SDL_FRect buttonRemoveVfxRect;
+    SDL_FRect buttonDuplicateVfxRect;
     SDL_FRect buttonCenterVfxRect;
-    SDL_FRect buttonVfxFpsInputRect;
+    SDL_FRect buttonLayerNameInputRect;
+    SDL_FRect buttonSharedDirectionsRect;
+    SDL_FRect buttonDirectionOverrideRect;
+    SDL_FRect buttonResetTransformRect;
     SDL_FRect buttonMoveULRect;
     SDL_FRect buttonMoveUpRect;
     SDL_FRect buttonMoveURRect;
@@ -208,7 +274,24 @@ private:
 
     SDL_FRect shipListRect;
     SDL_FRect sfxListRect;
+    SDL_FRect layerListRect;
     SDL_FRect looseListRect;
+    SDL_FRect invalidVfxListRect;
+    SDL_FRect invalidShipListRect;
+    int layerListScrollOffset;
+    bool layerListScrollDragActive;
+    float layerListScrollDragGrabOffsetY;
+    bool layerRowDragActive;
+    bool layerRowDragMoved;
+    int layerRowDragSourceDisplayIndex;
+    int layerRowDragTargetInsertIndex;
+    float layerRowDragStartMouseY;
+    int invalidVfxListScrollOffset;
+    int invalidShipListScrollOffset;
+    bool invalidVfxListScrollDragActive;
+    bool invalidShipListScrollDragActive;
+    float invalidVfxListScrollDragGrabOffsetY;
+    float invalidShipListScrollDragGrabOffsetY;
 
     static EditorMapVfxScene* activeInstance;
 
@@ -223,6 +306,32 @@ private:
     void requestOceanColorStep(int delta);
     void applyPendingOceanColorStep(void);
     void cycleOceanColor(int delta);
+    void autoImportAssetsFromDefaultFolders(void);
+    std::string buildShipConfigJsonPath(const ImportedShip& ship) const;
+    void applyPreviewDirectionToShip(void);
+    void setPreviewDirectionIndex(int directionIndex);
+    void cyclePreviewDirection(int delta);
+    void cyclePreviewShipState(int delta);
+    const char* getPreviewDirectionLabel(void) const;
+    const char* getPreviewShipStateLabel(void) const;
+    void markShipVfxDirty(void);
+    int getActiveDirectionIndexForOverrides(void) const;
+    bool hasSelectedVfxInstance(void) const;
+    ShipVfxInstance* getSelectedVfxInstance(void);
+    const ShipVfxInstance* getSelectedVfxInstance(void) const;
+    DirectionOverride* getEditableDirectionOverride(ShipVfxInstance* instance);
+    const DirectionOverride* getResolvedDirectionOverride(const ShipVfxInstance* instance) const;
+    void resetSelectedVfxTransform(void);
+    void toggleSelectedVfxVisibility(void);
+    void toggleSelectedVfxLock(void);
+    void toggleSelectedVfxBehindShip(void);
+    void toggleSelectedVfxSharedForAllDirections(void);
+    void toggleSelectedVfxDirectionOverride(void);
+    void duplicateSelectedVfxInstance(void);
+    void moveSelectedLayerOrder(int delta);
+    bool applyLayerNameInput(void);
+    bool importShipVfxConfigFromPath(const char* absoluteFilePath);
+    bool loadShipVfxConfigForSelectedShip(void);
 
     void updateToolbarLayout(void);
     void drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const;
@@ -255,6 +364,28 @@ private:
         const std::vector<std::string>& labels,
         int selectedIndex,
         int scrollOffset) const;
+    void drawLayerListPanel(const std::vector<int>& orderedLayerIndices) const;
+    void updateLayerListRowDragFromMouse(void);
+    void applyLayerPanelReorder(int sourceDisplayIndex, int targetDisplayIndex);
+    void drawInvalidAssetPanel(
+        const SDL_FRect& panelRect,
+        const char* title,
+        const std::vector<InvalidAssetEntry>& entries,
+        int scrollOffset) const;
+    bool handleInvalidAssetPanelClick(
+        float x,
+        float y,
+        const SDL_FRect& panelRect,
+        int itemCount,
+        int* scrollOffset,
+        bool* dragActive,
+        float* dragGrabOffsetY);
+    void handleInvalidAssetPanelScrollDragFromMouse(
+        const SDL_FRect& panelRect,
+        int itemCount,
+        int* scrollOffset,
+        bool* dragActive,
+        float* dragGrabOffsetY);
 
     void openImportShipFolderDialog(void);
     void openImportSfxFolderDialog(void);
@@ -278,6 +409,7 @@ private:
 
     void spawnSelectedSfxAtShipCenter(void);
     void setSelectedVfxInstanceIndex(int index);
+    void rebuildVfxLayerLabelsFromCurrentInstances(void);
     void removeSelectedVfxInstance(void);
     void centerSelectedVfxInstance(void);
     void moveSelectedVfxInstance(float deltaX, float deltaY);
@@ -289,10 +421,9 @@ private:
     void adjustShipDrawOrder(int delta);
     void normalizeShipVfxDrawOrders(void);
     int findTopmostVfxInstanceIndexAtPoint(float x, float y) const;
-    bool applyVfxFpsInput(void);
     bool applyLoosePreviewFpsInput(void);
     float getLoosePreviewFpsOrDefault(void) const;
-    bool handleVfxFpsInputKey(
+    bool handleLayerNameInputKey(
         const char* key,
         SDL_Scancode scancode,
         SDL_Keycode keycode,
@@ -320,9 +451,12 @@ private:
     void drawLoosePlacementPreview(void) const;
     void drawLooseExportNamePopup(void) const;
     void drawHud(void) const;
+    int getSelectedLayerRowIndexForDisplay(const std::vector<int>& orderedInstanceIndices) const;
+    std::vector<int> getOrderedVfxInstanceIndicesForLayerPanel(void) const;
 
     bool handleShipListClick(float x, float y);
     bool handleSfxListClick(float x, float y);
+    bool handleLayerListClick(float x, float y);
     bool handleLooseListClick(float x, float y);
     bool handleToolbarClick(float x, float y);
     bool handlePreviewClick(float x, float y, RC2D_MouseButton button);
@@ -343,6 +477,15 @@ public:
     void draw(void) override;
     void keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID) override;
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) override;
+    void mousewheelmoved(
+        RC2D_MouseWheelDirection direction,
+        float x,
+        float y,
+        Sint32 integer_x,
+        Sint32 integer_y,
+        float mouse_x,
+        float mouse_y,
+        SDL_MouseID mouseID) override;
 };
 
 #endif // GAME_ENV_DEV
