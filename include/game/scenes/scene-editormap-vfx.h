@@ -91,6 +91,8 @@ private:
         bool locked;
         bool behindShip;
         bool followShip;
+        /** Editor: mode TILE + clic carte ; fantome sur la tuile sous le curseur (meme si d'autres VFX a l'ecran). */
+        bool placementSnapClickToTile;
         bool sharedForAllDirections;
         bool sharedForAllStates;
         std::array<DirectionOverride, 4> directionOverrides;
@@ -160,10 +162,14 @@ private:
     SDL_FPoint previewShipTile;
     int previewDirectionIndex;
     int previewShipStateIndex;
+    /** Opacite preview navire 0..100 (pas de 10), appliquee via setDrawAlpha. */
+    int previewShipOpacityPercent;
     bool shipLayerVisible;
     bool shipLayerLocked;
     bool shipLayerSelected;
     bool shipDebugBoundsVisible;
+    /** Debug : grille iso 10x10 au sol sous le navire preview. */
+    bool previewIsoGridVisible;
     int shipDrawOrder;
     RC2D_Image looseReferenceGuildIslandImage;
     RC2D_Image looseReferenceTowerLevel1Image;
@@ -181,6 +187,8 @@ private:
     std::string layerNameInput;
     bool layerNameInputFocused;
     bool vfxDragActive;
+    /** Mode cadran ROT (panneau layers) : cercle autour du navire + ligne vers le curseur. */
+    bool vfxRotationDialActive;
     float vfxDragStartMouseX;
     float vfxDragStartMouseY;
     float vfxDragStartOffsetX;
@@ -241,26 +249,22 @@ private:
     SDL_FRect buttonDirectionPrevRect;
     SDL_FRect buttonDirectionNextRect;
     SDL_FRect buttonShipStateToggleRect;
+    SDL_FRect buttonShipOpacityMinusRect;
+    SDL_FRect buttonShipOpacityPlusRect;
+    SDL_FRect buttonPreviewIsoGridRect;
     SDL_FRect buttonShipOrderMinusRect;
     SDL_FRect buttonShipOrderPlusRect;
     SDL_FRect buttonLayerOrderMinusRect;
     SDL_FRect buttonLayerOrderPlusRect;
     SDL_FRect buttonVfxOrderMinusRect;
     SDL_FRect buttonVfxOrderPlusRect;
-    SDL_FRect buttonRotateMinusRect;
-    SDL_FRect buttonRotatePlusRect;
-    SDL_FRect buttonFlipHorizontalRect;
-    SDL_FRect buttonFlipVerticalRect;
     SDL_FRect buttonVisibleRect;
     SDL_FRect buttonLockedRect;
     SDL_FRect buttonBehindShipRect;
     SDL_FRect buttonFollowShipRect;
     SDL_FRect buttonRemoveVfxRect;
     SDL_FRect buttonDuplicateVfxRect;
-    SDL_FRect buttonCenterVfxRect;
     SDL_FRect buttonLayerNameInputRect;
-    SDL_FRect buttonSharedDirectionsRect;
-    SDL_FRect buttonDirectionOverrideRect;
     SDL_FRect buttonResetTransformRect;
     SDL_FRect buttonMoveULRect;
     SDL_FRect buttonMoveUpRect;
@@ -329,6 +333,8 @@ private:
     void setPreviewDirectionIndex(int directionIndex);
     void cyclePreviewDirection(int delta);
     void cyclePreviewShipState(int delta);
+    void applyPreviewShipOpacityPercentToShip(void);
+    void adjustPreviewShipOpacityPercentStep(int deltaPercent);
     const char* getPreviewDirectionLabel(void) const;
     const char* getPreviewShipStateLabel(void) const;
     void markShipVfxDirty(void);
@@ -430,15 +436,24 @@ private:
     void rebuildVfxLayerLabelsFromCurrentInstances(void);
     void removeSelectedVfxInstance(void);
     void centerSelectedVfxInstance(void);
+    void snapSelectedVfxCenterToNearestTileAtScreen(float screenX, float screenY);
     void moveSelectedVfxInstance(float deltaX, float deltaY);
     void adjustSelectedVfxRotation(float deltaDegrees);
+    void applySelectedVfxRotationFromScreenPointer(float pointerX, float pointerY);
     void toggleSelectedVfxFlipHorizontal(void);
     void toggleSelectedVfxFlipVertical(void);
+    void toggleVfxInstanceFlipHorizontalAtIndex(int instanceIndex);
+    void toggleVfxInstanceFlipVerticalAtIndex(int instanceIndex);
     void toggleSelectedVfxFollowShip(void);
     void adjustSelectedVfxDrawOrder(int delta);
     void adjustShipDrawOrder(int delta);
     void normalizeShipVfxDrawOrders(void);
     int findTopmostVfxInstanceIndexAtPoint(float x, float y) const;
+    /** Comme findTopmost, mais ignore une instance (index a exclure, ou -1). */
+    int findTopmostVfxInstanceIndexAtPointExcluding(float x, float y, int excludeInstanceIndex) const;
+    /** Tuile logique sous le centre ecran du VFX selectionne (pour comparer au curseur). */
+    bool tryGetScreenTileNearestForSelectedVfxCenter(SDL_Point* outTile) const;
+    void drawShipVfxTilePlacementGhost(void) const;
     bool applyLoosePreviewFpsInput(void);
     float getLoosePreviewFpsOrDefault(void) const;
     bool handleLayerNameInputKey(
@@ -463,7 +478,9 @@ private:
     bool exportShipVfxJsonToFolder(const char* absoluteFolderPath);
     bool exportLooseFolderScaledToFolder(const char* absoluteFolderPath, const std::string& animationName);
 
+    void drawShipVfxDebugIsoGrid(void) const;
     void drawShipVfxPreview(void) const;
+    void drawShipVfxRotationDialOverlay(void) const;
     void drawLooseReferencePreview(void) const;
     void drawLooseSpritesPreview(void) const;
     void drawLoosePlacementPreview(void) const;

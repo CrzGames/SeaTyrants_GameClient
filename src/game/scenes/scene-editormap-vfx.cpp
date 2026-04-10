@@ -16,6 +16,7 @@
 
 #include <RC2D/RC2D_filedialog.h>
 #include <RC2D/RC2D_storage.h>
+#include <RC2D/RC2D.h>
 #include <SDL3/SDL_surface.h>
 #include <cJSON.h>
 
@@ -42,6 +43,14 @@ struct RenderItem
 constexpr int kShipSpriteCount = 8;
 constexpr float kListScrollBarWidth = 10.0f;
 constexpr int kVisibleListRows = 10;
+/** Cote de la grille iso debug (tuiles) centree sur le navire preview. */
+constexpr int kShipVfxDebugIsoGridTiles = 20;
+/** Largeur du bouton TILE/PIXEL (panneau layers), a gauche de DEBUG. */
+constexpr float kLayerRowVfxPlaceModeButtonW = 58.0f;
+/** Largeur du bouton ROT (cadran rotation), a gauche de TILE. */
+constexpr float kLayerRowVfxRotateDialButtonW = 52.0f;
+/** Largeur des boutons FLIP V / FLIP H (panneau layers), a gauche de ROT. */
+constexpr float kLayerRowFlipButtonW = 56.0f;
 constexpr int kInvalidVisibleRows = 3;
 constexpr float kInvalidPanelPadding = 8.0f;
 constexpr float kInvalidPanelHeaderHeight = 22.0f;
@@ -792,13 +801,11 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonShipOrderPlusRect{},
       buttonVfxOrderMinusRect{},
       buttonVfxOrderPlusRect{},
-      buttonRotateMinusRect{},
-      buttonRotatePlusRect{},
-      buttonFlipHorizontalRect{},
-      buttonFlipVerticalRect{},
+      buttonShipOpacityMinusRect{},
+      buttonShipOpacityPlusRect{},
+      buttonPreviewIsoGridRect{},
       buttonFollowShipRect{},
       buttonRemoveVfxRect{},
-      buttonCenterVfxRect{},
       buttonMoveULRect{},
       buttonMoveUpRect{},
       buttonMoveURRect{},
@@ -835,13 +842,16 @@ EditorMapVfxScene::EditorMapVfxScene(void)
 {
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
+    this->previewShipOpacityPercent = 100;
     this->shipLayerVisible = true;
     this->shipLayerLocked = false;
     this->shipLayerSelected = false;
     this->shipDebugBoundsVisible = true;
+    this->previewIsoGridVisible = false;
     this->layerNameInput.clear();
     this->layerNameInputFocused = false;
     this->vfxDragActive = false;
+    this->vfxRotationDialActive = false;
     this->vfxDragStartMouseX = 0.0f;
     this->vfxDragStartMouseY = 0.0f;
     this->vfxDragStartOffsetX = 0.0f;
@@ -854,6 +864,8 @@ EditorMapVfxScene::EditorMapVfxScene(void)
     this->buttonDirectionPrevRect = SDL_FRect{};
     this->buttonDirectionNextRect = SDL_FRect{};
     this->buttonShipStateToggleRect = SDL_FRect{};
+    this->buttonShipOpacityMinusRect = SDL_FRect{};
+    this->buttonShipOpacityPlusRect = SDL_FRect{};
     this->buttonLayerOrderMinusRect = SDL_FRect{};
     this->buttonLayerOrderPlusRect = SDL_FRect{};
     this->buttonVisibleRect = SDL_FRect{};
@@ -861,8 +873,6 @@ EditorMapVfxScene::EditorMapVfxScene(void)
     this->buttonBehindShipRect = SDL_FRect{};
     this->buttonDuplicateVfxRect = SDL_FRect{};
     this->buttonLayerNameInputRect = SDL_FRect{};
-    this->buttonSharedDirectionsRect = SDL_FRect{};
-    this->buttonDirectionOverrideRect = SDL_FRect{};
     this->buttonResetTransformRect = SDL_FRect{};
     this->layerListRect = SDL_FRect{};
     this->layerListScrollOffset = 0;
@@ -909,10 +919,12 @@ void EditorMapVfxScene::resetEditorState(void)
     this->loadedShipFolderAbsolute.clear();
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
+    this->previewShipOpacityPercent = 100;
     this->shipLayerVisible = true;
     this->shipLayerLocked = false;
     this->shipLayerSelected = false;
     this->shipDebugBoundsVisible = true;
+    this->previewIsoGridVisible = false;
     this->previewShipTile = SDL_FPoint{0.0f, 0.0f};
     this->shipDrawOrder = 0;
     this->shipVfxInstances.clear();
@@ -921,6 +933,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->layerNameInput.clear();
     this->layerNameInputFocused = false;
     this->vfxDragActive = false;
+    this->vfxRotationDialActive = false;
     this->vfxDragStartMouseX = 0.0f;
     this->vfxDragStartMouseY = 0.0f;
     this->vfxDragStartOffsetX = 0.0f;
@@ -969,6 +982,7 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->layerNameInputFocused = false;
     this->loosePreviewFpsInputFocused = false;
     this->vfxDragActive = false;
+    this->vfxRotationDialActive = false;
     this->layerRowDragActive = false;
     this->layerRowDragMoved = false;
     this->layerRowDragSourceDisplayIndex = -1;
@@ -1334,6 +1348,27 @@ void EditorMapVfxScene::cyclePreviewShipState(int delta)
     this->previewShip.setHealthVisual((index == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
 }
 
+void EditorMapVfxScene::applyPreviewShipOpacityPercentToShip(void)
+{
+    const int p = std::clamp(this->previewShipOpacityPercent, 0, 100);
+    const int alpha = (p * 255 + 50) / 100;
+    this->previewShip.setDrawAlpha(static_cast<Uint8>(alpha));
+}
+
+void EditorMapVfxScene::adjustPreviewShipOpacityPercentStep(int deltaPercent)
+{
+    if (!this->previewShipLoaded)
+    {
+        this->statusMessage = "Chargez un navire pour regler l'opacite.";
+        return;
+    }
+    this->previewShipOpacityPercent = std::clamp(this->previewShipOpacityPercent + deltaPercent, 0, 100);
+    this->applyPreviewShipOpacityPercentToShip();
+    char buf[72] = {};
+    SDL_snprintf(buf, sizeof(buf), "Opacite navire: %d%%", this->previewShipOpacityPercent);
+    this->statusMessage = buf;
+}
+
 const char* EditorMapVfxScene::getPreviewDirectionLabel(void) const
 {
     switch (this->previewDirectionIndex)
@@ -1353,9 +1388,10 @@ const char* EditorMapVfxScene::getPreviewDirectionLabel(void) const
 
 const char* EditorMapVfxScene::getPreviewShipStateLabel(void) const
 {
+    // Libelle court pour la barre d'outils (le bandeau info garde le detail via ce meme texte).
     return (this->previewShipStateIndex == 1)
-        ? "SPRITES NAVIRE - LOW HP (5-8)"
-        : "SPRITES NAVIRE - FULL HP (1-4)";
+        ? "SPRITES 5-8 (HP BAS)"
+        : "SPRITES 1-4 (HP PLEIN)";
 }
 
 void EditorMapVfxScene::markShipVfxDirty(void)
@@ -1703,15 +1739,28 @@ bool EditorMapVfxScene::applyLayerNameInput(void)
 void EditorMapVfxScene::updateToolbarLayout(void)
 {
     const Map& map = GetCurrentMap();
+    const SDL_FRect& gs = GetGameScreen().rect;
     const float startX = 12.0f;
-    const float topY = map.rect.y - 24.0f;
-    const float row1Y = map.rect.y + map.rect.h + 4.0f;
-    const float row2Y = row1Y + 30.0f;
-    const float shipRow1Y = row1Y - 26.0f;
-    const float shipRow2Y = shipRow1Y + 30.0f;
-    const float shipRow3Y = shipRow2Y + 30.0f;
-    const float h = 24.0f;
+    constexpr float h = 24.0f;
     const float gap = 8.0f;
+
+    // Reference = game screen (zone logique). Marges map = bandes GUI hors ocean.
+    const float topMargin = Map::MAP_TOP_UI_MARGIN_PX;
+    const float bottomMargin = Map::MAP_BOTTOM_UI_MARGIN_PX;
+    const float topToolbarY = gs.y + std::floor((std::max)(0.0f, topMargin - h) * 0.5f);
+
+    const float bottomStripTop = gs.y + gs.h - bottomMargin;
+    constexpr float bottomPad = 5.0f;
+    constexpr float bottomInterRowGap = 5.0f;
+    const float guiBottomRow0Y = bottomStripTop + bottomPad;
+    const float guiBottomRow1Y = guiBottomRow0Y + h + bottomInterRowGap;
+
+    // Mode loose : deux lignes dans la bande basse 65px (alignees sur le game screen).
+    const float row1Y = guiBottomRow0Y;
+    const float row2Y = guiBottomRow1Y;
+
+    // Mode ship : une seule ligne basse pour les controles navire (FLIP / SHARED / OVERRIDE / CENTER : panneau Layers).
+    const float shipRow1Y = guiBottomRow0Y;
 
     auto setNextButton = [h, gap](SDL_FRect* rect, float* x, float y, float w) {
         rect->x = *x;
@@ -1720,19 +1769,22 @@ void EditorMapVfxScene::updateToolbarLayout(void)
         rect->h = h;
         *x += w + gap;
     };
-    float x = startX;
-    setNextButton(&this->buttonModeShipVfxRect, &x, topY, 210.0f);
-    setNextButton(&this->buttonModeLooseSpritesRect, &x, topY, 460.0f);
-    setNextButton(&this->buttonExportRect, &x, topY, 126.0f);
-    setNextButton(&this->buttonReloadAssetsRect, &x, topY, 136.0f);
-    setNextButton(&this->buttonOceanPrevRect, &x, topY, 92.0f);
-    setNextButton(&this->buttonOceanNextRect, &x, topY, 92.0f);
+    float x = gs.x + startX;
+    setNextButton(&this->buttonModeShipVfxRect, &x, topToolbarY, 210.0f);
+    setNextButton(&this->buttonModeLooseSpritesRect, &x, topToolbarY, 460.0f);
+    setNextButton(&this->buttonExportRect, &x, topToolbarY, 126.0f);
+    setNextButton(&this->buttonReloadAssetsRect, &x, topToolbarY, 136.0f);
+    setNextButton(&this->buttonOceanPrevRect, &x, topToolbarY, 92.0f);
+    setNextButton(&this->buttonOceanNextRect, &x, topToolbarY, 92.0f);
 
-    // Ligne 1 (gauche): controles navire.
-    x = startX;
-    setNextButton(&this->buttonDirectionPrevRect, &x, shipRow1Y, 240.0f);
-    setNextButton(&this->buttonDirectionNextRect, &x, shipRow1Y, 240.0f);
-    setNextButton(&this->buttonShipStateToggleRect, &x, shipRow1Y, 320.0f);
+    // Ligne 1 (gauche): controles navire (largeurs alignees sur le texte + opacite).
+    x = gs.x + startX;
+    setNextButton(&this->buttonDirectionPrevRect, &x, shipRow1Y, 158.0f);
+    setNextButton(&this->buttonDirectionNextRect, &x, shipRow1Y, 158.0f);
+    setNextButton(&this->buttonShipStateToggleRect, &x, shipRow1Y, 268.0f);
+    setNextButton(&this->buttonShipOpacityMinusRect, &x, shipRow1Y, 88.0f);
+    setNextButton(&this->buttonShipOpacityPlusRect, &x, shipRow1Y, 88.0f);
+    setNextButton(&this->buttonPreviewIsoGridRect, &x, shipRow1Y, 152.0f);
 
     // Mode downscale: tout sur la meme ligne (gauche zoom+repere, centre import, droite scale).
     const float looseZoomW = 110.0f;
@@ -1741,14 +1793,14 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     const float looseImportPreferredW = 500.0f;
     const float looseImportMinW = 180.0f;
 
-    float looseLeftX = startX;
+    float looseLeftX = gs.x + startX;
     setNextButton(&this->buttonLooseZoomMinusRect, &looseLeftX, row1Y, looseZoomW);
     setNextButton(&this->buttonLooseZoomPlusRect, &looseLeftX, row1Y, looseZoomW);
     setNextButton(&this->buttonLooseReferencePreviewRect, &looseLeftX, row1Y, looseReferenceW);
     const float looseLeftEnd = looseLeftX - gap;
 
     const float looseRightGroupW = (looseScaleW * 2.0f) + gap;
-    const float looseRightStart = map.rect.x + map.rect.w - startX - looseRightGroupW;
+    const float looseRightStart = gs.x + gs.w - startX - looseRightGroupW;
     this->buttonLooseScaleMinusRect = SDL_FRect{looseRightStart, row1Y, looseScaleW, h};
     this->buttonLooseScalePlusRect = SDL_FRect{looseRightStart + looseScaleW + gap, row1Y, looseScaleW, h};
 
@@ -1759,7 +1811,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
         looseImportW = (std::max)(0.0f, looseImportAvailableW);
     }
 
-    float looseImportX = map.rect.x + ((map.rect.w - looseImportW) * 0.5f);
+    float looseImportX = gs.x + ((gs.w - looseImportW) * 0.5f);
     const float looseImportMinX = looseLeftEnd + gap;
     const float looseImportMaxX = looseRightStart - gap - looseImportW;
     if (looseImportMaxX >= looseImportMinX)
@@ -1772,7 +1824,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     }
     this->buttonImportLooseRect = SDL_FRect{looseImportX, row1Y, looseImportW, h};
 
-    float looseRow2X = startX;
+    float looseRow2X = gs.x + startX;
     setNextButton(&this->buttonLoosePreviewModeRect, &looseRow2X, row2Y, 280.0f);
     setNextButton(&this->buttonLoosePreviewFpsInputRect, &looseRow2X, row2Y, 240.0f);
     setNextButton(&this->buttonLooseClearAllVfxRect, &looseRow2X, row2Y, 170.0f);
@@ -1785,112 +1837,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
         this->buttonLoosePreviewPlacementSnapRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    auto setPrevButtonFromRightWithGap = [h](SDL_FRect* rect, float* rightX, float y, float w, float customGap) {
-        *rightX -= w;
-        rect->x = *rightX;
-        rect->y = y;
-        rect->w = w;
-        rect->h = h;
-        *rightX -= customGap;
-    };
-
-    auto computeAdaptiveWidths = [gap](const std::vector<float>& preferred, const std::vector<float>& minimum, float availableWidth, float* outGap) {
-        std::vector<float> widths = preferred;
-        const size_t count = preferred.size();
-        if (count == 0U)
-        {
-            if (outGap != nullptr)
-            {
-                *outGap = 0.0f;
-            }
-            return widths;
-        }
-
-        const float minGapFloor = 4.0f;
-        float preferredButtonsTotal = 0.0f;
-        float minimumButtonsTotal = 0.0f;
-        for (size_t i = 0; i < count; ++i)
-        {
-            preferredButtonsTotal += preferred[i];
-            minimumButtonsTotal += minimum[i];
-        }
-
-        float workingGap = gap;
-        if (count > 1U)
-        {
-            const float maxGapFromMinWidth = (std::max)(0.0f, availableWidth - minimumButtonsTotal) / static_cast<float>(count - 1U);
-            if (maxGapFromMinWidth < minGapFloor)
-            {
-                workingGap = (std::max)(0.0f, maxGapFromMinWidth);
-            }
-            else
-            {
-                workingGap = std::clamp(gap, minGapFloor, maxGapFromMinWidth);
-            }
-        }
-
-        float availableButtonsWidth = availableWidth - (workingGap * static_cast<float>((count > 1U) ? (count - 1U) : 0U));
-        availableButtonsWidth = (std::max)(0.0f, availableButtonsWidth);
-
-        if (availableButtonsWidth >= preferredButtonsTotal)
-        {
-            widths = preferred;
-        }
-        else if (availableButtonsWidth <= 0.0f)
-        {
-            std::fill(widths.begin(), widths.end(), 0.0f);
-        }
-        else if (availableButtonsWidth <= minimumButtonsTotal)
-        {
-            const float ratio = availableButtonsWidth / (std::max)(minimumButtonsTotal, 1.0f);
-            for (size_t i = 0; i < count; ++i)
-            {
-                widths[i] = minimum[i] * ratio;
-            }
-        }
-        else
-        {
-            const float ratio = (availableButtonsWidth - minimumButtonsTotal) /
-                (std::max)(preferredButtonsTotal - minimumButtonsTotal, 0.001f);
-            for (size_t i = 0; i < count; ++i)
-            {
-                widths[i] = minimum[i] + ((preferred[i] - minimum[i]) * ratio);
-            }
-        }
-
-        if (outGap != nullptr)
-        {
-            *outGap = workingGap;
-        }
-        return widths;
-    };
-
-    const float availableBottomWidth = (std::max)(0.0f, map.rect.w - (startX * 2.0f));
-
-    // Ligne 2 (droite): outils VFX principaux.
-    float row2Gap = gap;
-    const std::vector<float> row2Widths = computeAdaptiveWidths(
-        std::vector<float>{220.0f, 220.0f, 320.0f},
-        std::vector<float>{120.0f, 120.0f, 180.0f},
-        availableBottomWidth,
-        &row2Gap);
-    float rightX = map.rect.x + map.rect.w - startX;
-    setPrevButtonFromRightWithGap(&this->buttonRotatePlusRect, &rightX, shipRow2Y, row2Widths[0], row2Gap);
-    setPrevButtonFromRightWithGap(&this->buttonRotateMinusRect, &rightX, shipRow2Y, row2Widths[1], row2Gap);
-    setPrevButtonFromRightWithGap(&this->buttonFlipHorizontalRect, &rightX, shipRow2Y, row2Widths[2], row2Gap);
-
-    // Ligne 3 (droite): outils VFX secondaires.
-    float row3Gap = gap;
-    const std::vector<float> row3Widths = computeAdaptiveWidths(
-        std::vector<float>{200.0f, 180.0f, 250.0f, 360.0f},
-        std::vector<float>{130.0f, 120.0f, 170.0f, 210.0f},
-        availableBottomWidth,
-        &row3Gap);
-    rightX = map.rect.x + map.rect.w - startX;
-    setPrevButtonFromRightWithGap(&this->buttonDirectionOverrideRect, &rightX, shipRow3Y, row3Widths[0], row3Gap);
-    setPrevButtonFromRightWithGap(&this->buttonSharedDirectionsRect, &rightX, shipRow3Y, row3Widths[1], row3Gap);
-    setPrevButtonFromRightWithGap(&this->buttonCenterVfxRect, &rightX, shipRow3Y, row3Widths[2], row3Gap);
-    setPrevButtonFromRightWithGap(&this->buttonFlipVerticalRect, &rightX, shipRow3Y, row3Widths[3], row3Gap);
+    // FLIP V/H, SHARED DIR, OVERRIDE DIR, CENTER VFX : panneau Layers uniquement (plus de ligne 2/3 bas-droite).
     this->buttonLayerNameInputRect = SDL_FRect{};
 
     this->shipListRect.w = 250.0f;
@@ -1903,7 +1850,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
     this->layerListRect = this->shipListRect;
-    this->layerListRect.w = 770.0f;
+    this->layerListRect.w = 840.0f;
     this->layerListRect.h = 360.0f;
     this->layerListRect.x = map.rect.x + 12.0f;
     this->layerListRect.y = map.rect.y + map.rect.h - this->layerListRect.h - 30.0f;
@@ -1950,8 +1897,36 @@ void EditorMapVfxScene::drawToolbarButton(const SDL_FRect& rect, const char* lab
     int textW = 0;
     int textH = 0;
     rc2d_graphics_getTextSize(&text, &textW, &textH);
-    rc2d_graphics_drawText(&text, rect.x + ((rect.w - static_cast<float>(textW)) * 0.5f), rect.y + ((rect.h - static_cast<float>(textH)) * 0.5f));
+
+    constexpr float kPadX = 5.0f;
+    const float innerW = (std::max)(rect.w - (kPadX * 2.0f), 1.0f);
+    float textX = rect.x + kPadX + ((innerW - static_cast<float>(textW)) * 0.5f);
+    if (textX < rect.x + kPadX)
+    {
+        textX = rect.x + kPadX;
+    }
+    const float textY = rect.y + ((rect.h - static_cast<float>(textH)) * 0.5f);
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer != nullptr)
+    {
+        SDL_Rect clipRect{};
+        clipRect.x = static_cast<int>(std::floor(rect.x));
+        clipRect.y = static_cast<int>(std::floor(rect.y));
+        const int clipR = static_cast<int>(std::ceil(rect.x + rect.w));
+        const int clipB = static_cast<int>(std::ceil(rect.y + rect.h));
+        clipRect.w = (std::max)(clipR - clipRect.x, 1);
+        clipRect.h = (std::max)(clipB - clipRect.y, 1);
+        SDL_SetRenderClipRect(renderer, &clipRect);
+    }
+
+    rc2d_graphics_drawText(&text, textX, textY);
     rc2d_graphics_destroyText(&text);
+
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
 }
 
 bool EditorMapVfxScene::pointInRect(float x, float y, const SDL_FRect& rect) const
@@ -2465,6 +2440,8 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         bool debugBoundsVisible = this->shipDebugBoundsVisible;
         bool locked = this->shipLayerLocked;
         std::string label = "SHIP";
+        bool flipHResolved = false;
+        bool flipVResolved = false;
 
         if (!isShipRow)
         {
@@ -2475,6 +2452,8 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             debugBoundsVisible = instance.debugBoundsVisible;
             locked = instance.locked;
             label = instance.label;
+            flipHResolved = (override != nullptr) ? override->flipHorizontal : instance.flipHorizontal;
+            flipVResolved = (override != nullptr) ? override->flipVertical : instance.flipVertical;
         }
 
         const bool isDraggedRow = this->layerRowDragActive && (displayIndex == this->layerRowDragSourceDisplayIndex);
@@ -2538,6 +2517,30 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         debugRect.x = resetRect.x - debugRect.w - 4.0f;
         debugRect.y = lockRect.y;
 
+        SDL_FRect vfxPlaceModeRect{};
+        vfxPlaceModeRect.w = kLayerRowVfxPlaceModeButtonW;
+        vfxPlaceModeRect.h = lockRect.h;
+        vfxPlaceModeRect.x = debugRect.x - vfxPlaceModeRect.w - 4.0f;
+        vfxPlaceModeRect.y = lockRect.y;
+
+        SDL_FRect layerRotateDialRect{};
+        layerRotateDialRect.w = kLayerRowVfxRotateDialButtonW;
+        layerRotateDialRect.h = lockRect.h;
+        layerRotateDialRect.x = vfxPlaceModeRect.x - layerRotateDialRect.w - 4.0f;
+        layerRotateDialRect.y = lockRect.y;
+
+        SDL_FRect layerFlipHRowRect{};
+        layerFlipHRowRect.w = kLayerRowFlipButtonW;
+        layerFlipHRowRect.h = lockRect.h;
+        layerFlipHRowRect.x = layerRotateDialRect.x - layerFlipHRowRect.w - 4.0f;
+        layerFlipHRowRect.y = lockRect.y;
+
+        SDL_FRect layerFlipVRowRect{};
+        layerFlipVRowRect.w = kLayerRowFlipButtonW;
+        layerFlipVRowRect.h = lockRect.h;
+        layerFlipVRowRect.x = layerFlipHRowRect.x - layerFlipVRowRect.w - 4.0f;
+        layerFlipVRowRect.y = lockRect.y;
+
         rc2d_graphics_setColor(visible ? RC2D_Color{74, 122, 92, 220} : RC2D_Color{92, 66, 66, 220});
         rc2d_graphics_rectangle("fill", &visRect);
         rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
@@ -2574,6 +2577,43 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         rc2d_graphics_rectangle("fill", &resetRect);
         rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
         rc2d_graphics_rectangle("line", &resetRect);
+
+        const bool vfxPlaceTileMode =
+            !isShipRow && this->shipVfxInstances[static_cast<size_t>(instanceIndex)].placementSnapClickToTile;
+        const bool rotDialRowActive =
+            !isShipRow && this->vfxRotationDialActive &&
+            (instanceIndex == this->selectedVfxInstanceIndex);
+        rc2d_graphics_setColor(
+            isShipRow
+                ? RC2D_Color{50, 58, 68, 220}
+                : (flipVResolved ? RC2D_Color{96, 112, 84, 220} : RC2D_Color{52, 62, 74, 220}));
+        rc2d_graphics_rectangle("fill", &layerFlipVRowRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &layerFlipVRowRect);
+
+        rc2d_graphics_setColor(
+            isShipRow
+                ? RC2D_Color{50, 58, 68, 220}
+                : (flipHResolved ? RC2D_Color{96, 112, 84, 220} : RC2D_Color{52, 62, 74, 220}));
+        rc2d_graphics_rectangle("fill", &layerFlipHRowRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &layerFlipHRowRect);
+
+        rc2d_graphics_setColor(
+            isShipRow
+                ? RC2D_Color{50, 58, 68, 220}
+                : (rotDialRowActive ? RC2D_Color{88, 108, 138, 220} : RC2D_Color{56, 70, 88, 220}));
+        rc2d_graphics_rectangle("fill", &layerRotateDialRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &layerRotateDialRect);
+
+        rc2d_graphics_setColor(
+            isShipRow
+                ? RC2D_Color{50, 58, 68, 220}
+                : (vfxPlaceTileMode ? RC2D_Color{72, 108, 128, 220} : RC2D_Color{56, 62, 72, 220}));
+        rc2d_graphics_rectangle("fill", &vfxPlaceModeRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &vfxPlaceModeRect);
 
         const bool debugActive = debugBoundsVisible;
         rc2d_graphics_setColor(
@@ -2649,6 +2689,58 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 resetRect.y + ((resetRect.h - static_cast<float>(resetH)) * 0.5f));
             rc2d_graphics_destroyText(&resetText);
 
+            const char* placeLabel = isShipRow ? "-" : (vfxPlaceTileMode ? "TILE" : "PIXEL");
+            RC2D_Text placeText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), placeLabel);
+            placeText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&placeText);
+            int placeW = 0;
+            int placeH = 0;
+            rc2d_graphics_getTextSize(&placeText, &placeW, &placeH);
+            rc2d_graphics_drawText(
+                &placeText,
+                vfxPlaceModeRect.x + ((vfxPlaceModeRect.w - static_cast<float>(placeW)) * 0.5f),
+                vfxPlaceModeRect.y + ((vfxPlaceModeRect.h - static_cast<float>(placeH)) * 0.5f));
+            rc2d_graphics_destroyText(&placeText);
+
+            const char* rotLabel = isShipRow ? "-" : "ROT";
+            RC2D_Text rotText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), rotLabel);
+            rotText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&rotText);
+            int rotW = 0;
+            int rotH = 0;
+            rc2d_graphics_getTextSize(&rotText, &rotW, &rotH);
+            rc2d_graphics_drawText(
+                &rotText,
+                layerRotateDialRect.x + ((layerRotateDialRect.w - static_cast<float>(rotW)) * 0.5f),
+                layerRotateDialRect.y + ((layerRotateDialRect.h - static_cast<float>(rotH)) * 0.5f));
+            rc2d_graphics_destroyText(&rotText);
+
+            const char* flipVLabel = isShipRow ? "-" : "FLIP V";
+            RC2D_Text flipVText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), flipVLabel);
+            flipVText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&flipVText);
+            int flipVW = 0;
+            int flipVH = 0;
+            rc2d_graphics_getTextSize(&flipVText, &flipVW, &flipVH);
+            rc2d_graphics_drawText(
+                &flipVText,
+                layerFlipVRowRect.x + ((layerFlipVRowRect.w - static_cast<float>(flipVW)) * 0.5f),
+                layerFlipVRowRect.y + ((layerFlipVRowRect.h - static_cast<float>(flipVH)) * 0.5f));
+            rc2d_graphics_destroyText(&flipVText);
+
+            const char* flipHLabel = isShipRow ? "-" : "FLIP H";
+            RC2D_Text flipHText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), flipHLabel);
+            flipHText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&flipHText);
+            int flipHW = 0;
+            int flipHH = 0;
+            rc2d_graphics_getTextSize(&flipHText, &flipHW, &flipHH);
+            rc2d_graphics_drawText(
+                &flipHText,
+                layerFlipHRowRect.x + ((layerFlipHRowRect.w - static_cast<float>(flipHW)) * 0.5f),
+                layerFlipHRowRect.y + ((layerFlipHRowRect.h - static_cast<float>(flipHH)) * 0.5f));
+            rc2d_graphics_destroyText(&flipHText);
+
             const char* debugLabel = "DEBUG";
             RC2D_Text debugText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), debugLabel);
             debugText.color = kHudTextColor;
@@ -2665,7 +2757,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             const bool behind = (drawOrder < this->shipDrawOrder);
             const float indent = isShipRow ? 18.0f : (behind ? 8.0f : 34.0f);
             const float labelX = rowRect.x + indent;
-            const float labelWidth = (debugRect.x - 6.0f) - labelX;
+            const float labelWidth = (layerFlipVRowRect.x - 6.0f) - labelX;
             const int maxChars = std::clamp(static_cast<int>(labelWidth / 6.6f), 12, 72);
             std::string rowLabel = std::string("z=") + std::to_string(drawOrder) + " | " + label;
 
@@ -3727,7 +3819,8 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
     this->previewShip.setSpeedTilesPerSecond(4.0f);
     this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
     this->applyPreviewDirectionToShip();
-    this->previewShip.setDrawAlpha(255);
+    this->previewShipOpacityPercent = 100;
+    this->applyPreviewShipOpacityPercentToShip();
     this->previewShip.setPositionTile(this->previewShipTile.x, this->previewShipTile.y);
     this->previewShipLoaded = true;
     this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
@@ -4458,6 +4551,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     instance.followShip = true;
     instance.sharedForAllDirections = true;
     instance.sharedForAllStates = true;
+    instance.placementSnapClickToTile = false;
     for (DirectionOverride& override : instance.directionOverrides)
     {
         override.enabled = false;
@@ -4645,6 +4739,65 @@ void EditorMapVfxScene::moveSelectedVfxInstance(float deltaX, float deltaY)
     this->markShipVfxDirty();
 }
 
+void EditorMapVfxScene::snapSelectedVfxCenterToNearestTileAtScreen(float screenX, float screenY)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    if (instance->locked)
+    {
+        this->statusMessage = "Instance VFX verrouillee.";
+        return;
+    }
+    if (!this->previewShipLoaded)
+    {
+        this->statusMessage = "Navire preview non charge.";
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    const SDL_Point tile = map.screenToTileNearest(screenX, screenY);
+    const SDL_FPoint tileCenter = map.tileToScreenCenterFloat(static_cast<float>(tile.x), static_cast<float>(tile.y));
+
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
+
+    const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float newOffsetX = (tileCenter.x - shipCenter.x) / zoom;
+    const float newOffsetY = (tileCenter.y - shipCenter.y) / zoom;
+
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    if (override != nullptr)
+    {
+        override->offsetX = newOffsetX;
+        override->offsetY = newOffsetY;
+    }
+    else
+    {
+        instance->offsetX = newOffsetX;
+        instance->offsetY = newOffsetY;
+    }
+    this->markShipVfxDirty();
+
+    char buf[128] = {};
+    SDL_snprintf(
+        buf,
+        sizeof(buf),
+        "VFX centre sur tuile (%d, %d) (offsets mis a jour).",
+        tile.x,
+        tile.y);
+    this->statusMessage = buf;
+}
+
 void EditorMapVfxScene::adjustSelectedVfxRotation(float deltaDegrees)
 {
     ShipVfxInstance* instance = this->getSelectedVfxInstance();
@@ -4670,6 +4823,63 @@ void EditorMapVfxScene::adjustSelectedVfxRotation(float deltaDegrees)
     {
         *rotation -= 360.0f;
     }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::applySelectedVfxRotationFromScreenPointer(float pointerX, float pointerY)
+{
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        return;
+    }
+    if (instance->locked)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
+
+    const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const DirectionOverride* resolved = this->getResolvedDirectionOverride(instance);
+    const float offsetX = (resolved != nullptr) ? resolved->offsetX : instance->offsetX;
+    const float offsetY = (resolved != nullptr) ? resolved->offsetY : instance->offsetY;
+    const float pivotX = shipCenter.x + (offsetX * scale);
+    const float pivotY = shipCenter.y + (offsetY * scale);
+
+    const float dx = pointerX - pivotX;
+    const float dy = pointerY - pivotY;
+    if ((dx * dx) + (dy * dy) < 4.0f)
+    {
+        return;
+    }
+
+    // Degres horaire depuis le haut ecran (0 deg = vers le haut), aligne sur l'usage ecran Y vers le bas.
+    float deg = std::atan2f(dx, -dy) * (180.0f / 3.14159265f);
+    while (deg < 0.0f)
+    {
+        deg += 360.0f;
+    }
+    while (deg >= 360.0f)
+    {
+        deg -= 360.0f;
+    }
+
+    DirectionOverride* override = this->getEditableDirectionOverride(instance);
+    float* rotation = (override != nullptr) ? &override->rotationDeg : &instance->rotationDeg;
+    if (std::fabs(*rotation - deg) < 0.02f)
+    {
+        return;
+    }
+    *rotation = deg;
     this->markShipVfxDirty();
 }
 
@@ -4719,6 +4929,54 @@ void EditorMapVfxScene::toggleSelectedVfxFlipVertical(void)
     else
     {
         instance->flipVertical = !instance->flipVertical;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleVfxInstanceFlipHorizontalAtIndex(int instanceIndex)
+{
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    {
+        return;
+    }
+    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+    if (instance.locked)
+    {
+        this->statusMessage = "Layer verrouille : FLIP H refuse.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(&instance);
+    if (override != nullptr)
+    {
+        override->flipHorizontal = !override->flipHorizontal;
+    }
+    else
+    {
+        instance.flipHorizontal = !instance.flipHorizontal;
+    }
+    this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleVfxInstanceFlipVerticalAtIndex(int instanceIndex)
+{
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    {
+        return;
+    }
+    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+    if (instance.locked)
+    {
+        this->statusMessage = "Layer verrouille : FLIP V refuse.";
+        return;
+    }
+    DirectionOverride* override = this->getEditableDirectionOverride(&instance);
+    if (override != nullptr)
+    {
+        override->flipVertical = !override->flipVertical;
+    }
+    else
+    {
+        instance.flipVertical = !instance.flipVertical;
     }
     this->markShipVfxDirty();
 }
@@ -5110,7 +5368,7 @@ bool EditorMapVfxScene::handleLooseExportNameInputKey(
     return appendIfRoom(key[0]);
 }
 
-int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) const
+int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, float y, int excludeInstanceIndex) const
 {
     if (!this->previewShipLoaded)
     {
@@ -5154,6 +5412,11 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     for (const auto& candidate : candidates)
     {
+        if (excludeInstanceIndex >= 0 && candidate.first == excludeInstanceIndex)
+        {
+            continue;
+        }
+
         const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(candidate.first)];
         if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
         {
@@ -5187,6 +5450,36 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) cons
     }
 
     return -1;
+}
+
+int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPoint(float x, float y) const
+{
+    return this->findTopmostVfxInstanceIndexAtPointExcluding(x, y, -1);
+}
+
+bool EditorMapVfxScene::tryGetScreenTileNearestForSelectedVfxCenter(SDL_Point* outTile) const
+{
+    if (outTile == nullptr || !this->previewShipLoaded || !this->hasSelectedVfxInstance())
+    {
+        return false;
+    }
+
+    const Map& map = GetCurrentMap();
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
+    const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+    const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
+    const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+    *outTile = map.screenToTileNearest(shipCenter.x + offsetX, shipCenter.y + offsetY);
+    return true;
 }
 
 bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath)
@@ -5386,6 +5679,9 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         instance.locked = cJSON_IsBool(lockedNode) ? cJSON_IsTrue(lockedNode) : false;
         instance.behindShip = cJSON_IsBool(behindNode) ? cJSON_IsTrue(behindNode) : (instance.drawOrder < this->shipDrawOrder);
         instance.followShip = true;
+        const cJSON* placementSnapNode = cJSON_GetObjectItemCaseSensitive(node, "placementSnapClickToTile");
+        instance.placementSnapClickToTile =
+            cJSON_IsBool(placementSnapNode) ? cJSON_IsTrue(placementSnapNode) : false;
 
         for (DirectionOverride& override : instance.directionOverrides)
         {
@@ -5616,6 +5912,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddNumberToObject(item, "drawOrder", instance.drawOrder);
         cJSON_AddBoolToObject(item, "visible", instance.visible);
         cJSON_AddBoolToObject(item, "debugBoundsVisible", instance.debugBoundsVisible);
+        cJSON_AddBoolToObject(item, "placementSnapClickToTile", instance.placementSnapClickToTile);
         cJSON_AddBoolToObject(item, "locked", instance.locked);
         cJSON_AddBoolToObject(item, "behindShip", instance.behindShip);
         cJSON_AddBoolToObject(item, "followShip", instance.followShip);
@@ -6229,6 +6526,54 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     return true;
 }
 
+void EditorMapVfxScene::drawShipVfxDebugIsoGrid(void) const
+{
+    if (!this->previewIsoGridVisible || !this->previewShipLoaded)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    const int cx = static_cast<int>(std::lround(static_cast<double>(this->previewShipTile.x)));
+    const int cy = static_cast<int>(std::lround(static_cast<double>(this->previewShipTile.y)));
+    static_assert(kShipVfxDebugIsoGridTiles % 2 == 0, "grille paire pour centrage entier");
+    const int half = kShipVfxDebugIsoGridTiles / 2;
+    const int baseX = cx - half;
+    const int baseY = cy - half;
+
+    const float hw = map.getTileWidth() * 0.5f;
+    const float hh = map.getTileHeight() * 0.5f;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{120, 200, 255, 185});
+    for (int iy = 0; iy < kShipVfxDebugIsoGridTiles; ++iy)
+    {
+        for (int ix = 0; ix < kShipVfxDebugIsoGridTiles; ++ix)
+        {
+            const int tx = baseX + ix;
+            const int ty = baseY + iy;
+            if (!map.isInside(tx, ty))
+            {
+                continue;
+            }
+            const SDL_FPoint c = map.tileToScreenCenter(tx, ty);
+            const float xTop = c.x;
+            const float yTop = c.y - hh;
+            const float xRight = c.x + hw;
+            const float yRight = c.y;
+            const float xBot = c.x;
+            const float yBot = c.y + hh;
+            const float xLeft = c.x - hw;
+            const float yLeft = c.y;
+            rc2d_graphics_line(xTop, yTop, xRight, yRight);
+            rc2d_graphics_line(xRight, yRight, xBot, yBot);
+            rc2d_graphics_line(xBot, yBot, xLeft, yLeft);
+            rc2d_graphics_line(xLeft, yLeft, xTop, yTop);
+        }
+    }
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
 void EditorMapVfxScene::drawShipVfxPreview(void) const
 {
     const Map& map = GetCurrentMap();
@@ -6360,36 +6705,202 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
     if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
     {
         const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
-        if (!instance.debugBoundsVisible)
+        if (instance.debugBoundsVisible)
         {
-            return;
-        }
-        const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
-        if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
-        {
-            const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
-            if (!imported.frames.empty())
+            const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
+            if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
             {
-                const int frameCount = static_cast<int>(imported.frames.size());
-                const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
-                const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
-                const float sourceW = frame.w;
-                const float sourceH = frame.h;
-                const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
-                const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
-                SDL_FRect bounds{};
-                bounds.x = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
-                bounds.y = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
-                bounds.w = sourceW * scale;
-                bounds.h = sourceH * scale;
+                const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
+                if (!imported.frames.empty())
+                {
+                    const int frameCount = static_cast<int>(imported.frames.size());
+                    const int frameIndex =
+                        static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+                    const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+                    const float sourceW = frame.w;
+                    const float sourceH = frame.h;
+                    const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
+                    const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+                    SDL_FRect bounds{};
+                    bounds.x = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
+                    bounds.y = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
+                    bounds.w = sourceW * scale;
+                    bounds.h = sourceH * scale;
 
-                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-                rc2d_graphics_setColor(RC2D_Color{255, 220, 120, 220});
-                rc2d_graphics_rectangle("line", &bounds);
-                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+                    rc2d_graphics_setColor(RC2D_Color{255, 220, 120, 220});
+                    rc2d_graphics_rectangle("line", &bounds);
+                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+                }
             }
         }
     }
+}
+
+void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
+{
+    if (!this->vfxRotationDialActive || !this->previewShipLoaded || !this->hasSelectedVfxInstance())
+    {
+        return;
+    }
+    const ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr || instance->locked)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
+
+    float shipSpriteW = 0.0f;
+    float shipSpriteH = 0.0f;
+    if (!this->previewShip.getCurrentSpriteSizePixels(&shipSpriteW, &shipSpriteH))
+    {
+        return;
+    }
+    const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float shipScale = zoom * this->previewShip.getDrawScale();
+    const float halfW = (shipSpriteW * shipScale) * 0.5f;
+    const float halfH = (shipSpriteH * shipScale) * 0.5f;
+    const float circleRadius =
+        (std::sqrt((halfW * halfW) + (halfH * halfH))) + 14.0f;
+
+    const DirectionOverride* resolved = this->getResolvedDirectionOverride(instance);
+    const float offsetX = (resolved != nullptr) ? resolved->offsetX : instance->offsetX;
+    const float offsetY = (resolved != nullptr) ? resolved->offsetY : instance->offsetY;
+    const float pivotX = shipCenter.x + (offsetX * zoom);
+    const float pivotY = shipCenter.y + (offsetY * zoom);
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{140, 200, 255, 200});
+
+    constexpr int kCircleSegments = 56;
+    const float twoPi = 3.14159265f * 2.0f;
+    float prevCx = shipCenter.x + circleRadius;
+    float prevCy = shipCenter.y;
+    for (int s = 1; s <= kCircleSegments; ++s)
+    {
+        const float t = (static_cast<float>(s) / static_cast<float>(kCircleSegments)) * twoPi;
+        const float cx = shipCenter.x + (std::cos(t) * circleRadius);
+        const float cy = shipCenter.y + (std::sin(t) * circleRadius);
+        rc2d_graphics_line(prevCx, prevCy, cx, cy);
+        prevCx = cx;
+        prevCy = cy;
+    }
+
+    rc2d_graphics_setColor(RC2D_Color{255, 230, 150, 235});
+    rc2d_graphics_line(pivotX, pivotY, mouseX, mouseY);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapVfxScene::drawShipVfxTilePlacementGhost(void) const
+{
+    if (this->vfxDragActive || !this->previewShipLoaded || this->selectedVfxInstanceIndex < 0 ||
+        this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    {
+        return;
+    }
+
+    const ShipVfxInstance& ghostInst = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    if (!ghostInst.placementSnapClickToTile || ghostInst.locked)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    float mx = 0.0f;
+    float my = 0.0f;
+    if (!this->getMouseRenderPosition(&mx, &my) || !this->pointInRect(mx, my, map.rect))
+    {
+        return;
+    }
+    SDL_Point placedTile{};
+    if (!this->tryGetScreenTileNearestForSelectedVfxCenter(&placedTile))
+    {
+        return;
+    }
+
+    const SDL_Point hoverTile = map.screenToTileNearest(mx, my);
+    if (hoverTile.x == placedTile.x && hoverTile.y == placedTile.y)
+    {
+        return;
+    }
+
+    if (ghostInst.importedSfxIndex < 0 || ghostInst.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return;
+    }
+
+    const ImportedSfx& gImported = this->importedSfx[static_cast<size_t>(ghostInst.importedSfxIndex)];
+    if (gImported.image.sdl_texture == nullptr || gImported.frames.empty())
+    {
+        return;
+    }
+
+    const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const DirectionOverride* gOverride = this->getResolvedDirectionOverride(&ghostInst);
+    const float gRot = (gOverride != nullptr) ? gOverride->rotationDeg : ghostInst.rotationDeg;
+    const bool gFh = (gOverride != nullptr) ? gOverride->flipHorizontal : ghostInst.flipHorizontal;
+    const bool gFv = (gOverride != nullptr) ? gOverride->flipVertical : ghostInst.flipVertical;
+    const SDL_FPoint gTileCenter = map.tileToScreenCenterFloat(
+        static_cast<float>(hoverTile.x),
+        static_cast<float>(hoverTile.y));
+    const int gFrameCount = static_cast<int>(gImported.frames.size());
+    const int gFrameIndex =
+        static_cast<int>(std::floor(timeSeconds * (std::max)(gImported.defaultFps, 1.0f))) % gFrameCount;
+    const ImportedSfxFrame& gFrame = gImported.frames[static_cast<size_t>(gFrameIndex)];
+    const float gSourceW = gFrame.w;
+    const float gSourceH = gFrame.h;
+    const float gDrawX = gTileCenter.x - ((gSourceW * scale) * 0.5f);
+    const float gDrawY = gTileCenter.y - ((gSourceH * scale) * 0.5f);
+    const RC2D_Quad gQuad = rc2d_graphics_newQuad(
+        const_cast<RC2D_Image*>(&gImported.image),
+        gFrame.x,
+        gFrame.y,
+        gFrame.w,
+        gFrame.h);
+    Uint8 prevAlpha = 255;
+    SDL_GetTextureAlphaMod(gImported.image.sdl_texture, &prevAlpha);
+    SDL_SetTextureAlphaMod(gImported.image.sdl_texture, 150);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_drawQuad(
+        const_cast<RC2D_Image*>(&gImported.image),
+        &gQuad,
+        gDrawX,
+        gDrawY,
+        gRot,
+        scale,
+        scale,
+        gSourceW * 0.5f,
+        gSourceH * 0.5f,
+        gFh,
+        gFv);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    SDL_SetTextureAlphaMod(gImported.image.sdl_texture, prevAlpha);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{120, 200, 255, 200});
+    constexpr float crossHalf = 6.0f;
+    SDL_FRect hLine{gTileCenter.x - crossHalf, gTileCenter.y - 1.0f, crossHalf * 2.0f, 2.0f};
+    SDL_FRect vLine{gTileCenter.x - 1.0f, gTileCenter.y - crossHalf, 2.0f, crossHalf * 2.0f};
+    rc2d_graphics_rectangle("fill", &hLine);
+    rc2d_graphics_rectangle("fill", &vLine);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
 void EditorMapVfxScene::drawLooseReferencePreview(void) const
@@ -6844,25 +7355,15 @@ void EditorMapVfxScene::drawHud(void) const
 
     if (shipMode)
     {
-        const ShipVfxInstance* selectedInstance =
-            (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
-            ? &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)]
-            : nullptr;
-        const DirectionOverride* selectedOverride = this->getResolvedDirectionOverride(selectedInstance);
-        const bool selectedSharedDirection = (selectedInstance != nullptr) ? selectedInstance->sharedForAllDirections : true;
-        const bool selectedOverrideEnabled = (selectedInstance != nullptr) && (selectedOverride != nullptr) && selectedOverride->enabled;
-
-        this->drawToolbarButton(this->buttonDirectionPrevRect, "SPRITE NAVIRE DIRECTION -", false);
-        this->drawToolbarButton(this->buttonDirectionNextRect, "SPRITE NAVIRE DIRECTION +", false);
+        this->drawToolbarButton(this->buttonDirectionPrevRect, "NAV DIRECTION -", false);
+        this->drawToolbarButton(this->buttonDirectionNextRect, "NAV DIRECTION +", false);
         this->drawToolbarButton(this->buttonShipStateToggleRect, this->getPreviewShipStateLabel(), this->previewShipStateIndex == 1);
-        this->drawToolbarButton(this->buttonRotateMinusRect, "ROT -", false);
-        this->drawToolbarButton(this->buttonRotatePlusRect, "ROT +", false);
-
-        this->drawToolbarButton(this->buttonFlipHorizontalRect, "FLIP H", false);
-        this->drawToolbarButton(this->buttonFlipVerticalRect, "FLIP V", false);
-        this->drawToolbarButton(this->buttonSharedDirectionsRect, "SHARED DIR", selectedSharedDirection);
-        this->drawToolbarButton(this->buttonDirectionOverrideRect, "OVERRIDE DIR", selectedOverrideEnabled);
-        this->drawToolbarButton(this->buttonCenterVfxRect, "CENTER VFX ON SHIP", false);
+        this->drawToolbarButton(this->buttonShipOpacityMinusRect, "OPA -10%", false);
+        this->drawToolbarButton(this->buttonShipOpacityPlusRect, "OPA +10%", false);
+        this->drawToolbarButton(
+            this->buttonPreviewIsoGridRect,
+            "GRILLE ISO 20x20",
+            this->previewIsoGridVisible);
 
         std::vector<std::string> shipLabels;
         shipLabels.reserve(this->importedShips.size());
@@ -7251,6 +7752,30 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
     debugRect.x = resetRect.x - debugRect.w - 4.0f;
     debugRect.y = lockRect.y;
 
+    SDL_FRect vfxPlaceModeRect{};
+    vfxPlaceModeRect.w = kLayerRowVfxPlaceModeButtonW;
+    vfxPlaceModeRect.h = lockRect.h;
+    vfxPlaceModeRect.x = debugRect.x - vfxPlaceModeRect.w - 4.0f;
+    vfxPlaceModeRect.y = lockRect.y;
+
+    SDL_FRect layerRotateDialRect{};
+    layerRotateDialRect.w = kLayerRowVfxRotateDialButtonW;
+    layerRotateDialRect.h = lockRect.h;
+    layerRotateDialRect.x = vfxPlaceModeRect.x - layerRotateDialRect.w - 4.0f;
+    layerRotateDialRect.y = lockRect.y;
+
+    SDL_FRect layerFlipHRowRect{};
+    layerFlipHRowRect.w = kLayerRowFlipButtonW;
+    layerFlipHRowRect.h = lockRect.h;
+    layerFlipHRowRect.x = layerRotateDialRect.x - layerFlipHRowRect.w - 4.0f;
+    layerFlipHRowRect.y = lockRect.y;
+
+    SDL_FRect layerFlipVRowRect{};
+    layerFlipVRowRect.w = kLayerRowFlipButtonW;
+    layerFlipVRowRect.h = lockRect.h;
+    layerFlipVRowRect.x = layerFlipHRowRect.x - layerFlipVRowRect.w - 4.0f;
+    layerFlipVRowRect.y = lockRect.y;
+
     auto clearLayerDragState = [this]() {
         this->layerRowDragActive = false;
         this->layerRowDragMoved = false;
@@ -7284,6 +7809,82 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         (!clickedIsShipRow && clickedIndex >= 0 && clickedIndex < static_cast<int>(orderedLayerIndices.size()))
         ? orderedLayerIndices[static_cast<size_t>(clickedIndex)]
         : -1;
+
+    if (this->pointInRect(x, y, layerFlipVRowRect))
+    {
+        selectClickedRow();
+        clearLayerDragState();
+        if (clickedIsShipRow)
+        {
+            this->statusMessage = "FLIP V : option des layers VFX uniquement (SHIP affiche -).";
+            return true;
+        }
+        this->toggleVfxInstanceFlipVerticalAtIndex(clickedInstanceIndex);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, layerFlipHRowRect))
+    {
+        selectClickedRow();
+        clearLayerDragState();
+        if (clickedIsShipRow)
+        {
+            this->statusMessage = "FLIP H : option des layers VFX uniquement (SHIP affiche -).";
+            return true;
+        }
+        this->toggleVfxInstanceFlipHorizontalAtIndex(clickedInstanceIndex);
+        return true;
+    }
+
+    if (this->pointInRect(x, y, layerRotateDialRect))
+    {
+        const int prevSelectedVfx = this->selectedVfxInstanceIndex;
+        selectClickedRow();
+        clearLayerDragState();
+        if (clickedIsShipRow)
+        {
+            this->vfxRotationDialActive = false;
+            this->statusMessage = "ROT : disponible pour les layers VFX (pas SHIP).";
+            return true;
+        }
+        const ShipVfxInstance& rotTarget = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        if (rotTarget.locked)
+        {
+            this->vfxRotationDialActive = false;
+            this->statusMessage = "Layer verrouille : ROT refuse.";
+            return true;
+        }
+        if (this->vfxRotationDialActive && prevSelectedVfx == clickedInstanceIndex)
+        {
+            this->vfxRotationDialActive = false;
+            this->statusMessage = "Mode ROT desactive.";
+        }
+        else
+        {
+            this->vfxRotationDialActive = true;
+            this->statusMessage =
+                "Mode ROT : orientez avec la souris, puis clic gauche sur la carte pour valider et masquer le cadran. "
+                "ECHAP ou reclic ROT sur ce layer : fermer le cadran.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, vfxPlaceModeRect))
+    {
+        selectClickedRow();
+        clearLayerDragState();
+        if (clickedIsShipRow)
+        {
+            this->statusMessage = "Placement TILE/PIXEL : option des layers VFX uniquement (SHIP affiche -).";
+            return true;
+        }
+        ShipVfxInstance& placeInstance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        placeInstance.placementSnapClickToTile = !placeInstance.placementSnapClickToTile;
+        this->statusMessage = placeInstance.placementSnapClickToTile
+            ? "Layer: TILE — fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
+            : "Layer: PIXEL — pas de snap tuile au clic.";
+        return true;
+    }
 
     if (this->pointInRect(x, y, debugRect))
     {
@@ -7564,39 +8165,22 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->cyclePreviewShipState(1);
             return true;
         }
-        if (this->pointInRect(x, y, this->buttonRotateMinusRect))
+        if (this->pointInRect(x, y, this->buttonShipOpacityMinusRect))
         {
-            this->adjustSelectedVfxRotation(-15.0f);
+            this->adjustPreviewShipOpacityPercentStep(-10);
             return true;
         }
-        if (this->pointInRect(x, y, this->buttonRotatePlusRect))
+        if (this->pointInRect(x, y, this->buttonShipOpacityPlusRect))
         {
-            this->adjustSelectedVfxRotation(15.0f);
+            this->adjustPreviewShipOpacityPercentStep(10);
             return true;
         }
-        if (this->pointInRect(x, y, this->buttonFlipHorizontalRect))
+        if (this->pointInRect(x, y, this->buttonPreviewIsoGridRect))
         {
-            this->toggleSelectedVfxFlipHorizontal();
-            return true;
-        }
-        if (this->pointInRect(x, y, this->buttonFlipVerticalRect))
-        {
-            this->toggleSelectedVfxFlipVertical();
-            return true;
-        }
-        if (this->pointInRect(x, y, this->buttonSharedDirectionsRect))
-        {
-            this->toggleSelectedVfxSharedForAllDirections();
-            return true;
-        }
-        if (this->pointInRect(x, y, this->buttonDirectionOverrideRect))
-        {
-            this->toggleSelectedVfxDirectionOverride();
-            return true;
-        }
-        if (this->pointInRect(x, y, this->buttonCenterVfxRect))
-        {
-            this->centerSelectedVfxInstance();
+            this->previewIsoGridVisible = !this->previewIsoGridVisible;
+            this->statusMessage = this->previewIsoGridVisible
+                ? "Grille isometrique 20x20 (debug) affichee sous le navire."
+                : "Grille isometrique debug masquee.";
             return true;
         }
     }
@@ -7798,8 +8382,28 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         {
             return true;
         }
+        if (this->vfxRotationDialActive)
+        {
+            this->vfxDragActive = false;
+            this->applySelectedVfxRotationFromScreenPointer(x, y);
+            this->vfxRotationDialActive = false;
+            this->statusMessage = "Rotation validee (clic gauche sur la carte).";
+            return true;
+        }
 
         int hitIndex = this->findTopmostVfxInstanceIndexAtPoint(x, y);
+        const ShipVfxInstance* snapCandidate = this->getSelectedVfxInstance();
+        const Map& clickMap = GetCurrentMap();
+        SDL_Point placedCenterTile{};
+        const bool havePlacedTile = this->tryGetScreenTileNearestForSelectedVfxCenter(&placedCenterTile);
+        const SDL_Point clickTile = clickMap.screenToTileNearest(x, y);
+        if (snapCandidate != nullptr && snapCandidate->placementSnapClickToTile && !snapCandidate->locked &&
+            havePlacedTile &&
+            (clickTile.x != placedCenterTile.x || clickTile.y != placedCenterTile.y))
+        {
+            this->snapSelectedVfxCenterToNearestTileAtScreen(x, y);
+            return true;
+        }
         if (this->hasSelectedVfxInstance() &&
             isPointInsideInstanceBounds(this->selectedVfxInstanceIndex))
         {
@@ -8055,6 +8659,7 @@ void EditorMapVfxScene::unload(void)
     this->layerNameInput.clear();
     this->layerNameInputFocused = false;
     this->vfxDragActive = false;
+    this->vfxRotationDialActive = false;
     this->shipVfxDirty = false;
     this->loadedShipVfxConfigPath.clear();
     this->invalidShipFolders.clear();
@@ -8180,6 +8785,31 @@ void EditorMapVfxScene::update(double dt)
             }
         }
 
+        if (this->vfxRotationDialActive)
+        {
+            if (!this->previewShipLoaded || !this->hasSelectedVfxInstance())
+            {
+                this->vfxRotationDialActive = false;
+            }
+            else
+            {
+                ShipVfxInstance* dialInstance = this->getSelectedVfxInstance();
+                if (dialInstance == nullptr || dialInstance->locked)
+                {
+                    this->vfxRotationDialActive = false;
+                }
+                else
+                {
+                    float dialMx = 0.0f;
+                    float dialMy = 0.0f;
+                    if (this->getMouseRenderPosition(&dialMx, &dialMy))
+                    {
+                        this->applySelectedVfxRotationFromScreenPointer(dialMx, dialMy);
+                    }
+                }
+            }
+        }
+
     }
     else
     {
@@ -8246,7 +8876,12 @@ void EditorMapVfxScene::draw(void)
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        if (this->previewIsoGridVisible && this->previewShipLoaded)
+        {
+            this->drawShipVfxDebugIsoGrid();
+        }
         this->drawShipVfxPreview();
+        this->drawShipVfxRotationDialOverlay();
     }
     else
     {
@@ -8262,6 +8897,13 @@ void EditorMapVfxScene::draw(void)
     }
 
     WorldRenderClip::end(renderer);
+
+    if (this->editorMode == EditorMode::SHIP_VFX)
+    {
+        // Fantome placement tuile : hors clip map.rect pour les gros sprites pres des bords.
+        this->drawShipVfxTilePlacementGhost();
+    }
+
     this->drawHud();
 }
 
@@ -8291,6 +8933,12 @@ void EditorMapVfxScene::keypressed(
 
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
+        if (this->vfxRotationDialActive)
+        {
+            this->vfxRotationDialActive = false;
+            this->statusMessage = "Mode ROT desactive.";
+            return;
+        }
         this->layerNameInputFocused = false;
         this->loosePreviewFpsInputFocused = false;
         return;
@@ -8461,16 +9109,6 @@ void EditorMapVfxScene::keypressed(
             {
                 this->adjustSelectedVfxDrawOrder(1);
             }
-            return;
-        }
-        if (!isrepeat && scancode == SDL_SCANCODE_COMMA)
-        {
-            this->adjustSelectedVfxRotation(-15.0f);
-            return;
-        }
-        if (!isrepeat && scancode == SDL_SCANCODE_PERIOD)
-        {
-            this->adjustSelectedVfxRotation(15.0f);
             return;
         }
         if (scancode == SDL_SCANCODE_UP ||
@@ -8748,6 +9386,8 @@ void EditorMapVfxScene::mousewheelmoved(
     (void)x;
     (void)y;
     (void)integer_x;
+    (void)mouse_x;
+    (void)mouse_y;
     (void)mouseID;
 
     int delta = static_cast<int>(integer_y);
@@ -8778,25 +9418,13 @@ void EditorMapVfxScene::mousewheelmoved(
         return;
     }
 
-    float eventMouseX = mouse_x;
-    float eventMouseY = mouse_y;
-    float eventMouseRenderX = mouse_x;
-    float eventMouseRenderY = mouse_y;
-    this->convertWindowToRender(mouse_x, mouse_y, &eventMouseRenderX, &eventMouseRenderY);
+    // Meme espace que mousepressed / handleListPanelClick : coordonnees rendu SDL.
+    float wheelMx = 0.0f;
+    float wheelMy = 0.0f;
+    this->getMouseRenderPosition(&wheelMx, &wheelMy);
 
-    float currentMouseX = 0.0f;
-    float currentMouseY = 0.0f;
-    rc2d_mouse_getPosition(&currentMouseX, &currentMouseY);
-    float currentMouseRenderX = currentMouseX;
-    float currentMouseRenderY = currentMouseY;
-    this->convertWindowToRender(currentMouseX, currentMouseY, &currentMouseRenderX, &currentMouseRenderY);
-
-    auto isMouseInsidePanel = [this, eventMouseX, eventMouseY, eventMouseRenderX, eventMouseRenderY, currentMouseX, currentMouseY, currentMouseRenderX, currentMouseRenderY](const SDL_FRect& panelRect) -> bool {
-        return
-            this->pointInRect(eventMouseX, eventMouseY, panelRect) ||
-            this->pointInRect(eventMouseRenderX, eventMouseRenderY, panelRect) ||
-            this->pointInRect(currentMouseX, currentMouseY, panelRect) ||
-            this->pointInRect(currentMouseRenderX, currentMouseRenderY, panelRect);
+    auto isMouseInsidePanel = [this, wheelMx, wheelMy](const SDL_FRect& panelRect) -> bool {
+        return this->pointInRect(wheelMx, wheelMy, panelRect);
     };
 
     auto scrollListPanel = [&](const SDL_FRect& panelRect, int itemCount, int* scrollOffset) -> bool {
@@ -8831,6 +9459,7 @@ void EditorMapVfxScene::mousewheelmoved(
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
         const int layerItemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
+        // Ordre aligne sur mousepressed : ignores, calques, puis listes navire / VFX.
         if (scrollInvalidPanel(this->invalidVfxListRect, static_cast<int>(this->invalidVfxFolders.size()), &this->invalidVfxListScrollOffset))
         {
             return;
@@ -8839,15 +9468,15 @@ void EditorMapVfxScene::mousewheelmoved(
         {
             return;
         }
+        if (scrollListPanel(this->layerListRect, layerItemCount, &this->layerListScrollOffset))
+        {
+            return;
+        }
         if (scrollListPanel(this->shipListRect, static_cast<int>(this->importedShips.size()), &this->shipListScrollOffset))
         {
             return;
         }
         if (scrollListPanel(this->sfxListRect, static_cast<int>(this->importedSfx.size()), &this->sfxListScrollOffset))
-        {
-            return;
-        }
-        if (scrollListPanel(this->layerListRect, layerItemCount, &this->layerListScrollOffset))
         {
             return;
         }
