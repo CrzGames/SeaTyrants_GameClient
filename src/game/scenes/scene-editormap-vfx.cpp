@@ -175,6 +175,11 @@ constexpr RC2D_FileDialogFilter kFolderFilters[] = {
     {"Dossier", "*"},
 };
 
+constexpr RC2D_FileDialogFilter kJsonFileFilters[] = {
+    {"JSON", "json"},
+    {"Tous les fichiers", "*"},
+};
+
 static std::string trimAscii(const std::string& value)
 {
     size_t start = 0;
@@ -337,6 +342,54 @@ static std::string makePathKeyLower(const std::string& path)
         return static_cast<char>(std::tolower(c));
     });
     return key;
+}
+
+static std::string extractAssetsRelativePath(const std::string& sourcePath)
+{
+    const std::string normalized = normalizePathSlashes(trimAscii(sourcePath));
+    if (normalized.empty())
+    {
+        return {};
+    }
+
+    const std::string lowered = makePathKeyLower(normalized);
+    const size_t assetsPos = lowered.find("/assets/");
+    if (assetsPos != std::string::npos)
+    {
+        return normalized.substr(assetsPos + 1U);
+    }
+    if (lowered.rfind("assets/", 0U) == 0U)
+    {
+        return normalized;
+    }
+
+    return {};
+}
+
+static std::string buildAssetsRelativePathForExport(const std::string& sourcePath, const std::string& fallbackName)
+{
+    const std::string relativePath = extractAssetsRelativePath(sourcePath);
+    if (!relativePath.empty())
+    {
+        return relativePath;
+    }
+
+    const std::string fileName = extractFileName(fallbackName.empty() ? sourcePath : fallbackName);
+    if (fileName.empty())
+    {
+        return "assets/unknown";
+    }
+    return "assets/" + fileName;
+}
+
+static std::string makeComparableSourcePathKey(const std::string& sourcePath)
+{
+    const std::string relativePath = extractAssetsRelativePath(sourcePath);
+    if (!relativePath.empty())
+    {
+        return makePathKeyLower(relativePath);
+    }
+    return makePathKeyLower(sourcePath);
 }
 
 static std::string stripListPrefix(const std::string& rawName, const char* expectedPrefix)
@@ -854,6 +907,10 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       pendingExportFolderAbsolute{},
       pendingExportMode(EditorMode::SHIP_VFX),
       pendingExportFolderMutex{},
+      pendingShipVfxConfigDialogCompleted(false),
+      pendingShipVfxConfigDialogCanceled(false),
+      pendingShipVfxConfigAbsolutePath{},
+      pendingShipVfxConfigMutex{},
       buttonModeShipVfxRect{},
       buttonModeLooseSpritesRect{},
       buttonImportShipRect{},
@@ -1086,6 +1143,9 @@ void EditorMapVfxScene::resetEditorState(void)
     this->unloadLooseReferencePreviewAssets();
     this->importedSfxCounter = 0U;
     this->importedLooseFolderCounter = 0U;
+    this->pendingShipVfxConfigDialogCompleted = false;
+    this->pendingShipVfxConfigDialogCanceled = false;
+    this->pendingShipVfxConfigAbsolutePath.clear();
     this->statusMessage = "Editor VFX pret.";
 }
 
@@ -2147,6 +2207,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     setNextButton(&this->buttonModeShipVfxRect, &x, topToolbarY, 210.0f);
     setNextButton(&this->buttonModeLooseSpritesRect, &x, topToolbarY, 460.0f);
     setNextButton(&this->buttonExportRect, &x, topToolbarY, 126.0f);
+    setNextButton(&this->buttonImportShipRect, &x, topToolbarY, 312.0f);
     setNextButton(&this->buttonReloadAssetsRect, &x, topToolbarY, 136.0f);
     setNextButton(&this->buttonOceanPrevRect, &x, topToolbarY, 92.0f);
     setNextButton(&this->buttonOceanNextRect, &x, topToolbarY, 92.0f);
@@ -3832,6 +3893,20 @@ void EditorMapVfxScene::openImportSfxFolderDialog(void)
     rc2d_filedialog_openFolder(&EditorMapVfxScene::onImportSfxFolderDialogResult, this, &options);
 }
 
+void EditorMapVfxScene::openImportShipVfxConfigDialog(void)
+{
+    RC2D_FileDialogOptions options{};
+    options.window = rc2d_window_getWindow();
+    options.filters = kJsonFileFilters;
+    options.num_filters = static_cast<int>(std::size(kJsonFileFilters));
+    options.default_location = nullptr;
+    options.allow_many = false;
+    options.title = "Importer JSON VFX/Ship existant";
+    options.accept_label = "Importer";
+    options.cancel_label = "Annuler";
+    rc2d_filedialog_openFile(&EditorMapVfxScene::onImportShipVfxConfigDialogResult, this, &options);
+}
+
 void EditorMapVfxScene::openImportLooseFolderDialog(void)
 {
     RC2D_FileDialogOptions options{};
@@ -3942,6 +4017,43 @@ void EditorMapVfxScene::processPendingSfxFolderRequest(void)
     }
 
     this->importSfxFromRootFolderAbsolutePath(folder.c_str());
+}
+
+void EditorMapVfxScene::processPendingShipVfxConfigRequest(void)
+{
+    bool hasResult = false;
+    bool canceled = false;
+    std::string jsonPath;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingShipVfxConfigMutex);
+        hasResult = this->pendingShipVfxConfigDialogCompleted;
+        if (hasResult)
+        {
+            canceled = this->pendingShipVfxConfigDialogCanceled;
+            jsonPath.swap(this->pendingShipVfxConfigAbsolutePath);
+            this->pendingShipVfxConfigDialogCompleted = false;
+            this->pendingShipVfxConfigDialogCanceled = false;
+        }
+    }
+
+    if (!hasResult)
+    {
+        return;
+    }
+    if (canceled || jsonPath.empty())
+    {
+        this->statusMessage = "Import JSON VFX/Ship annule.";
+        return;
+    }
+
+    if (!this->importShipVfxConfigFromPath(jsonPath.c_str()))
+    {
+        this->statusMessage = "Import JSON VFX/Ship invalide: " + jsonPath;
+        return;
+    }
+
+    this->loadedShipVfxConfigPath = normalizePathSlashes(jsonPath);
+    this->statusMessage = "Configuration VFX importee: " + this->loadedShipVfxConfigPath;
 }
 
 void EditorMapVfxScene::processPendingLooseFolderRequest(void)
@@ -6055,8 +6167,85 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         return false;
     }
 
-    const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(root, "format");
-    const cJSON* versionNode = cJSON_GetObjectItemCaseSensitive(root, "version");
+    const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(root, "editor");
+    const cJSON* parseRoot = cJSON_IsObject(editorNode) ? editorNode : root;
+
+    auto trySelectShipFromJson = [this, parseRoot]() {
+        const cJSON* shipNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "ship");
+        if (!cJSON_IsObject(shipNode))
+        {
+            return;
+        }
+
+        std::string shipPathFromJson;
+        const cJSON* shipFolderPathNode = cJSON_GetObjectItemCaseSensitive(shipNode, "folderPath");
+        const cJSON* shipFolderAbsoluteNode = cJSON_GetObjectItemCaseSensitive(shipNode, "folderAbsolutePath");
+        if (cJSON_IsString(shipFolderPathNode) && shipFolderPathNode->valuestring != nullptr)
+        {
+            shipPathFromJson = normalizePathSlashes(shipFolderPathNode->valuestring);
+        }
+        else if (cJSON_IsString(shipFolderAbsoluteNode) && shipFolderAbsoluteNode->valuestring != nullptr)
+        {
+            shipPathFromJson = normalizePathSlashes(shipFolderAbsoluteNode->valuestring);
+        }
+
+        int matchedShipIndex = -1;
+        const std::string shipPathKey = makeComparableSourcePathKey(shipPathFromJson);
+        if (!shipPathKey.empty())
+        {
+            for (size_t i = 0; i < this->importedShips.size(); ++i)
+            {
+                if (makeComparableSourcePathKey(this->importedShips[i].folderAbsolutePath) == shipPathKey)
+                {
+                    matchedShipIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+
+        if (matchedShipIndex < 0)
+        {
+            const cJSON* shipIdNode = cJSON_GetObjectItemCaseSensitive(shipNode, "id");
+            if (cJSON_IsString(shipIdNode) && shipIdNode->valuestring != nullptr)
+            {
+                const std::string shipIdKey = makePathKeyLower(trimAscii(shipIdNode->valuestring));
+                for (size_t i = 0; i < this->importedShips.size(); ++i)
+                {
+                    const std::string importedShipId =
+                        makePathKeyLower(makeShipConfigSlug(this->importedShips[i].displayName));
+                    if (!shipIdKey.empty() && shipIdKey == importedShipId)
+                    {
+                        matchedShipIndex = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (matchedShipIndex < 0 ||
+            matchedShipIndex >= static_cast<int>(this->importedShips.size()))
+        {
+            return;
+        }
+
+        this->selectedShipIndex = matchedShipIndex;
+        this->ensureSelectionVisible(
+            this->selectedShipIndex,
+            &this->shipListScrollOffset,
+            static_cast<int>(this->importedShips.size()));
+
+        const ImportedShip& selectedShip = this->importedShips[static_cast<size_t>(matchedShipIndex)];
+        if (!this->previewShipLoaded ||
+            makeComparableSourcePathKey(this->loadedShipFolderAbsolute) !=
+                makeComparableSourcePathKey(selectedShip.folderAbsolutePath))
+        {
+            this->loadShipFolderFromAbsolutePath(selectedShip.folderAbsolutePath.c_str());
+        }
+    };
+    trySelectShipFromJson();
+
+    const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "format");
+    const cJSON* versionNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "version");
     const bool isNewFormat =
         cJSON_IsString(formatNode) &&
         formatNode->valuestring != nullptr &&
@@ -6064,6 +6253,8 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     const int formatVersion = cJSON_IsNumber(versionNode)
         ? static_cast<int>(std::llround(versionNode->valuedouble))
         : 1;
+    const bool hasLayerPages =
+        cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parseRoot, "layerPages"));
 
     this->clearAllShipVfxLayerPages();
     this->initDefaultShipLayerSettingsAllPages();
@@ -6071,12 +6262,12 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     this->nextVfxInstanceId = 1U;
 
     auto findImportedSfxIndex = [this](const std::string& sourceJsonPath, const std::string& displayName) -> int {
-        const std::string sourceKey = makePathKeyLower(sourceJsonPath);
+        const std::string sourceKey = makeComparableSourcePathKey(sourceJsonPath);
         if (!sourceKey.empty())
         {
             for (size_t i = 0; i < this->importedSfx.size(); ++i)
             {
-                if (makePathKeyLower(this->importedSfx[i].sourceJsonPath) == sourceKey)
+                if (makeComparableSourcePathKey(this->importedSfx[i].sourceJsonPath) == sourceKey)
                 {
                     return static_cast<int>(i);
                 }
@@ -6175,6 +6366,10 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
             instance.label = displayNode->valuestring;
         }
         const cJSON* sourceJsonNode = cJSON_GetObjectItemCaseSensitive(node, "sourceJsonPath");
+        if (!cJSON_IsString(sourceJsonNode))
+        {
+            sourceJsonNode = cJSON_GetObjectItemCaseSensitive(node, "vfxSourceJsonPath");
+        }
         if (cJSON_IsString(sourceJsonNode) && sourceJsonNode->valuestring != nullptr)
         {
             instance.sourceJsonPath = normalizePathSlashes(sourceJsonNode->valuestring);
@@ -6329,11 +6524,11 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         }
     };
 
-    if (isNewFormat && formatVersion >= 3)
+    if ((isNewFormat && formatVersion >= 3) || (!isNewFormat && hasLayerPages))
     {
-        applyPreviewFromJsonRoot(root);
+        applyPreviewFromJsonRoot(parseRoot);
 
-        const cJSON* pagesNode = cJSON_GetObjectItemCaseSensitive(root, "layerPages");
+        const cJSON* pagesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "layerPages");
         if (cJSON_IsArray(pagesNode))
         {
             int pageIdx = 0;
@@ -6367,9 +6562,9 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     }
     else if (isNewFormat && formatVersion >= 2)
     {
-        applyPreviewFromJsonRoot(root);
+        applyPreviewFromJsonRoot(parseRoot);
 
-        const cJSON* shipLayerNode = cJSON_GetObjectItemCaseSensitive(root, "shipLayer");
+        const cJSON* shipLayerNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "shipLayer");
         if (cJSON_IsObject(shipLayerNode))
         {
             applyShipLayerToPage(shipLayerNode, this->getShipVfxLayerPageKey());
@@ -6377,7 +6572,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
 
         const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
         std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
-        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
+        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "vfxInstances");
         if (cJSON_IsArray(instancesNode))
         {
             cJSON* node = nullptr;
@@ -6389,14 +6584,14 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     }
     else
     {
-        const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(root, "shipDrawOrder");
+        const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "shipDrawOrder");
         if (cJSON_IsNumber(shipOrderNode))
         {
             this->activeShipDrawOrder() = static_cast<int>(std::llround(shipOrderNode->valuedouble));
         }
         const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
         std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
-        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
+        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "vfxInstances");
         if (cJSON_IsArray(instancesNode))
         {
             cJSON* node = nullptr;
@@ -6487,36 +6682,103 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
 
     const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
     const std::string shipSlug = makeShipConfigSlug(ship.displayName);
-    const std::filesystem::path jsonPath = folderPath / ("animations_vfx_" + shipSlug + ".json");
 
-    cJSON* root = cJSON_CreateObject();
-    if (root == nullptr)
+    struct ExportAnimationGroup
     {
-        this->statusMessage = "Echec allocation JSON.";
+        std::string key;
+        int importedSfxIndex = -1;
+        std::string displayName;
+        std::string sourceJsonPath;
+        float defaultFps = 12.0f;
+    };
+
+    auto buildInstanceGroupKey = [this](const ShipVfxInstance& instance) -> std::string {
+        if (instance.importedSfxIndex >= 0 &&
+            instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+        {
+            return "idx:" + std::to_string(instance.importedSfxIndex);
+        }
+        const std::string sourcePathKey = makeComparableSourcePathKey(instance.sourceJsonPath);
+        if (!sourcePathKey.empty())
+        {
+            return "path:" + sourcePathKey;
+        }
+        const std::string displayKey = makePathKeyLower(trimAscii(instance.sourceDisplayName));
+        if (!displayKey.empty())
+        {
+            return "name:" + displayKey;
+        }
+        return "id:" + std::to_string(instance.instanceId);
+    };
+
+    std::vector<ExportAnimationGroup> groups;
+    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    {
+        for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+        {
+            const std::string key = buildInstanceGroupKey(instance);
+            auto it = std::find_if(groups.begin(), groups.end(), [&key](const ExportAnimationGroup& group) {
+                return group.key == key;
+            });
+            if (it != groups.end())
+            {
+                continue;
+            }
+
+            ExportAnimationGroup group{};
+            group.key = key;
+            group.importedSfxIndex = instance.importedSfxIndex;
+            if (instance.importedSfxIndex >= 0 &&
+                instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+            {
+                const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
+                group.displayName = imported.displayName;
+                group.sourceJsonPath = imported.sourceJsonPath;
+                group.defaultFps = imported.defaultFps;
+            }
+            else
+            {
+                group.displayName = trimAscii(instance.sourceDisplayName);
+                group.sourceJsonPath = instance.sourceJsonPath;
+            }
+
+            if (group.displayName.empty())
+            {
+                group.displayName = trimAscii(instance.label);
+            }
+            if (group.displayName.empty())
+            {
+                group.displayName = "vfx";
+            }
+            groups.push_back(std::move(group));
+        }
+    }
+
+    if (groups.empty())
+    {
+        this->statusMessage = "Aucune instance VFX a exporter.";
         return false;
     }
 
-    cJSON_AddStringToObject(root, "format", "ship_vfx_config");
-    cJSON_AddNumberToObject(root, "version", 3);
-    cJSON_AddStringToObject(root, "mode", "ship_vfx");
+    const std::string shipFolderRelativePath =
+        buildAssetsRelativePathForExport(ship.folderAbsolutePath, ship.displayName);
 
-    cJSON* shipNode = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, "ship", shipNode);
-    cJSON_AddStringToObject(shipNode, "id", shipSlug.c_str());
-    cJSON_AddStringToObject(shipNode, "displayName", ship.displayName.c_str());
-    cJSON_AddStringToObject(shipNode, "folderAbsolutePath", ship.folderAbsolutePath.c_str());
-
-    cJSON* previewNode = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, "preview", previewNode);
-    cJSON_AddStringToObject(previewNode, "direction", getDirectionIdByIndex(this->previewDirectionIndex));
-    cJSON_AddStringToObject(previewNode, "state", (this->previewShipStateIndex == 1) ? "damaged" : "healthy");
-
-    auto addVfxInstanceJson = [](cJSON* instancesArray, const ShipVfxInstance& instance) {
+    auto addEditorInstanceJson = [this](cJSON* instancesArray, const ShipVfxInstance& instance) {
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "instanceId", static_cast<double>(instance.instanceId));
         cJSON_AddStringToObject(item, "label", instance.label.c_str());
         cJSON_AddStringToObject(item, "displayName", instance.sourceDisplayName.c_str());
-        cJSON_AddStringToObject(item, "sourceJsonPath", instance.sourceJsonPath.c_str());
+
+        std::string sourceJsonPath = instance.sourceJsonPath;
+        if (instance.importedSfxIndex >= 0 &&
+            instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+        {
+            sourceJsonPath =
+                this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)].sourceJsonPath;
+        }
+        sourceJsonPath = buildAssetsRelativePathForExport(sourceJsonPath, sourceJsonPath);
+        cJSON_AddStringToObject(item, "sourceJsonPath", sourceJsonPath.c_str());
+
         cJSON_AddNumberToObject(item, "offsetX", instance.offsetX);
         cJSON_AddNumberToObject(item, "offsetY", instance.offsetY);
         cJSON_AddNumberToObject(item, "rotationDeg", instance.rotationDeg);
@@ -6527,7 +6789,6 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddBoolToObject(item, "debugBoundsVisible", instance.debugBoundsVisible);
         cJSON_AddBoolToObject(item, "placementSnapClickToTile", instance.placementSnapClickToTile);
         cJSON_AddBoolToObject(item, "locked", instance.locked);
-        cJSON_AddBoolToObject(item, "behindShip", instance.behindShip);
         cJSON_AddBoolToObject(item, "followShip", instance.followShip);
         cJSON_AddBoolToObject(item, "sharedForAllDirections", instance.sharedForAllDirections);
         cJSON_AddBoolToObject(item, "sharedForAllStates", instance.sharedForAllStates);
@@ -6554,65 +6815,254 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddItemToArray(instancesArray, item);
     };
 
-    cJSON* layerPagesArray = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "layerPages", layerPagesArray);
-    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    std::vector<std::string> usedFileNames;
+    std::vector<std::string> exportedPaths;
+    int failedCount = 0;
+    for (const ExportAnimationGroup& group : groups)
     {
-        cJSON* pageObj = cJSON_CreateObject();
-        cJSON_AddItemToArray(layerPagesArray, pageObj);
-
-        cJSON* shipLayerPage = cJSON_CreateObject();
-        cJSON_AddItemToObject(pageObj, "shipLayer", shipLayerPage);
-        cJSON_AddNumberToObject(shipLayerPage, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
-        cJSON_AddBoolToObject(shipLayerPage, "visible", this->shipLayerVisibleByPage[static_cast<size_t>(p)]);
-        cJSON_AddBoolToObject(shipLayerPage, "locked", this->shipLayerLockedByPage[static_cast<size_t>(p)]);
-        cJSON_AddBoolToObject(shipLayerPage, "debugBoundsVisible", this->shipDebugBoundsVisibleByPage[static_cast<size_t>(p)]);
-        cJSON_AddNumberToObject(
-            shipLayerPage,
-            "spawnAfterVfxInstanceId",
-            static_cast<double>(this->shipSpawnAfterVfxInstanceId[static_cast<size_t>(p)]));
-        cJSON_AddNumberToObject(
-            shipLayerPage,
-            "spawnAfterDelayMs",
-            static_cast<double>(this->shipSpawnAfterDelayMs[static_cast<size_t>(p)]));
-
-        cJSON* instancesArray = cJSON_CreateArray();
-        cJSON_AddItemToObject(pageObj, "vfxInstances", instancesArray);
-        for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+        std::string normalizedVfxName = stripListPrefix(group.displayName, "vfx-");
+        if (trimAscii(normalizedVfxName).empty())
         {
-            addVfxInstanceJson(instancesArray, instance);
+            normalizedVfxName = extractFileName(group.sourceJsonPath);
         }
-    }
+        std::string vfxSlug = makeExportAnimationSlug(normalizedVfxName);
+        if (vfxSlug.empty())
+        {
+            vfxSlug = "vfx";
+        }
+        const std::string vfxId = "fx-" + vfxSlug;
+        std::string fileStem = vfxId + "_" + shipSlug;
+        std::string fileName = fileStem + ".json";
+        int suffix = 2;
+        while (std::find(usedFileNames.begin(), usedFileNames.end(), makePathKeyLower(fileName)) != usedFileNames.end())
+        {
+            fileName = fileStem + "-" + std::to_string(suffix) + ".json";
+            suffix += 1;
+        }
+        usedFileNames.push_back(makePathKeyLower(fileName));
 
-    char* jsonText = cJSON_Print(root);
-    cJSON_Delete(root);
-    if (jsonText == nullptr)
-    {
-        this->statusMessage = "Echec serialisation JSON.";
-        return false;
-    }
+        const std::filesystem::path jsonPath = folderPath / fileName;
+        cJSON* root = cJSON_CreateObject();
+        if (root == nullptr)
+        {
+            failedCount += 1;
+            continue;
+        }
 
-    std::ofstream output(jsonPath, std::ios::binary | std::ios::trunc);
-    if (!output.is_open())
-    {
+        cJSON* editorJson = cJSON_CreateObject();
+        cJSON_AddItemToObject(root, "editor", editorJson);
+        cJSON_AddStringToObject(editorJson, "schema", "scene-editormap-vfx");
+        cJSON_AddNumberToObject(editorJson, "schemaVersion", 1);
+
+        cJSON* shipNode = cJSON_CreateObject();
+        cJSON_AddItemToObject(editorJson, "ship", shipNode);
+        cJSON_AddStringToObject(shipNode, "displayName", ship.displayName.c_str());
+        cJSON_AddStringToObject(shipNode, "folderPath", shipFolderRelativePath.c_str());
+
+        std::string sourceJsonPathForGroup =
+            buildAssetsRelativePathForExport(group.sourceJsonPath, group.displayName + ".json");
+        std::string vfxFolderPathForGroup = "assets";
+        {
+            const std::filesystem::path sourceJsonPath(sourceJsonPathForGroup);
+            const std::string sourceFolderPath = normalizePathSlashes(sourceJsonPath.parent_path().string());
+            if (!sourceFolderPath.empty())
+            {
+                vfxFolderPathForGroup = sourceFolderPath;
+            }
+        }
+        cJSON* animationNode = cJSON_CreateObject();
+        cJSON_AddItemToObject(editorJson, "animation", animationNode);
+        cJSON_AddStringToObject(animationNode, "displayName", group.displayName.c_str());
+        cJSON_AddStringToObject(animationNode, "sourceJsonPath", sourceJsonPathForGroup.c_str());
+        cJSON_AddNumberToObject(animationNode, "defaultVfxFps", group.defaultFps);
+
+        cJSON* layerPagesArray = cJSON_CreateArray();
+        cJSON_AddItemToObject(editorJson, "layerPages", layerPagesArray);
+
+        std::vector<uint32_t> groupInstanceIds;
+        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        {
+            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            {
+                if (buildInstanceGroupKey(instance) == group.key)
+                {
+                    groupInstanceIds.push_back(instance.instanceId);
+                }
+            }
+        }
+
+        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        {
+            cJSON* pageObj = cJSON_CreateObject();
+            cJSON_AddItemToArray(layerPagesArray, pageObj);
+
+            cJSON* shipLayerPage = cJSON_CreateObject();
+            cJSON_AddItemToObject(pageObj, "shipLayer", shipLayerPage);
+            cJSON_AddNumberToObject(shipLayerPage, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(shipLayerPage, "visible", this->shipLayerVisibleByPage[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(shipLayerPage, "locked", this->shipLayerLockedByPage[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(shipLayerPage, "debugBoundsVisible", this->shipDebugBoundsVisibleByPage[static_cast<size_t>(p)]);
+            cJSON_AddNumberToObject(
+                shipLayerPage,
+                "spawnAfterVfxInstanceId",
+                static_cast<double>(this->shipSpawnAfterVfxInstanceId[static_cast<size_t>(p)]));
+            cJSON_AddNumberToObject(
+                shipLayerPage,
+                "spawnAfterDelayMs",
+                static_cast<double>(this->shipSpawnAfterDelayMs[static_cast<size_t>(p)]));
+
+            cJSON* instancesArray = cJSON_CreateArray();
+            cJSON_AddItemToObject(pageObj, "vfxInstances", instancesArray);
+            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            {
+                if (buildInstanceGroupKey(instance) == group.key)
+                {
+                    addEditorInstanceJson(instancesArray, instance);
+                }
+            }
+        }
+
+        cJSON* gameplayJson = cJSON_CreateObject();
+        cJSON_AddItemToObject(root, "gameplay", gameplayJson);
+        cJSON_AddStringToObject(gameplayJson, "shipFolderPath", shipFolderRelativePath.c_str());
+        cJSON_AddStringToObject(gameplayJson, "vfxFolderPath", vfxFolderPathForGroup.c_str());
+        cJSON_AddNumberToObject(gameplayJson, "defaultVfxFps", group.defaultFps);
+
+        cJSON* gameplayDirectionStatesArray = cJSON_CreateArray();
+        cJSON_AddItemToObject(gameplayJson, "directionStates", gameplayDirectionStatesArray);
+        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        {
+            cJSON* gameplayPageObj = cJSON_CreateObject();
+            cJSON_AddItemToArray(gameplayDirectionStatesArray, gameplayPageObj);
+
+            cJSON* gameplayShipNode = cJSON_CreateObject();
+            cJSON_AddItemToObject(gameplayPageObj, "ship", gameplayShipNode);
+            cJSON_AddStringToObject(gameplayShipNode, "direction", getDirectionIdByIndex(p % 4));
+            cJSON_AddStringToObject(gameplayShipNode, "state", (p >= 4) ? "damaged" : "healthy");
+            cJSON_AddNumberToObject(gameplayShipNode, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
+
+            cJSON* gameplayInstancesArray = cJSON_CreateArray();
+            cJSON_AddItemToObject(gameplayPageObj, "instances", gameplayInstancesArray);
+            const int directionIndex = p % 4;
+            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            {
+                if (buildInstanceGroupKey(instance) != group.key)
+                {
+                    continue;
+                }
+
+                const DirectionOverride* resolvedDirectionOverride = nullptr;
+                if (!instance.sharedForAllDirections)
+                {
+                    const DirectionOverride& directionOverride =
+                        instance.directionOverrides[static_cast<size_t>(directionIndex)];
+                    if (directionOverride.enabled)
+                    {
+                        resolvedDirectionOverride = &directionOverride;
+                    }
+                }
+
+                cJSON* gameplayInstance = cJSON_CreateObject();
+                cJSON_AddItemToArray(gameplayInstancesArray, gameplayInstance);
+                cJSON_AddNumberToObject(gameplayInstance, "instanceId", static_cast<double>(instance.instanceId));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "offsetX",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->offsetX : instance.offsetX);
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "offsetY",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->offsetY : instance.offsetY);
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "rotationDeg",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->rotationDeg : instance.rotationDeg);
+                cJSON_AddBoolToObject(
+                    gameplayInstance,
+                    "flipHorizontal",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->flipHorizontal : instance.flipHorizontal);
+                cJSON_AddBoolToObject(
+                    gameplayInstance,
+                    "flipVertical",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->flipVertical : instance.flipVertical);
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "drawOrder",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->drawOrder : instance.drawOrder);
+                cJSON_AddBoolToObject(
+                    gameplayInstance,
+                    "visible",
+                    (resolvedDirectionOverride != nullptr) ? resolvedDirectionOverride->visible : instance.visible);
+
+                uint32_t spawnAfterInstanceId = instance.spawnAfterInstanceId;
+                if (spawnAfterInstanceId != 0U &&
+                    std::find(groupInstanceIds.begin(), groupInstanceIds.end(), spawnAfterInstanceId) == groupInstanceIds.end())
+                {
+                    spawnAfterInstanceId = 0U;
+                }
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "spawnAfterInstanceId",
+                    static_cast<double>(spawnAfterInstanceId));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "spawnAfterDelayMs",
+                    static_cast<double>(instance.spawnAfterDelayMs));
+            }
+        }
+
+        char* jsonText = cJSON_Print(root);
+        cJSON_Delete(root);
+        if (jsonText == nullptr)
+        {
+            failedCount += 1;
+            continue;
+        }
+
+        std::ofstream output(jsonPath, std::ios::binary | std::ios::trunc);
+        if (!output.is_open())
+        {
+            cJSON_free(jsonText);
+            failedCount += 1;
+            continue;
+        }
+        output.write(jsonText, static_cast<std::streamsize>(std::strlen(jsonText)));
+        const bool ok = output.good();
+        output.close();
         cJSON_free(jsonText);
-        this->statusMessage = "Impossible d'ouvrir le JSON export.";
-        return false;
-    }
-    output.write(jsonText, static_cast<std::streamsize>(std::strlen(jsonText)));
-    const bool ok = output.good();
-    output.close();
-    cJSON_free(jsonText);
 
-    if (!ok)
+        if (!ok)
+        {
+            failedCount += 1;
+            continue;
+        }
+
+        exportedPaths.push_back(normalizePathSlashes(jsonPath.string()));
+    }
+
+    if (exportedPaths.empty())
     {
-        this->statusMessage = "Ecriture JSON export echouee.";
+        this->statusMessage = "Echec export JSON VFX (aucun fichier ecrit).";
         return false;
     }
 
-    this->shipVfxDirty = false;
-    this->loadedShipVfxConfigPath = normalizePathSlashes(jsonPath.string());
-    this->statusMessage = "Export OK: " + this->loadedShipVfxConfigPath;
+    if (failedCount == 0)
+    {
+        this->shipVfxDirty = false;
+    }
+    this->loadedShipVfxConfigPath = exportedPaths.front();
+    if (failedCount == 0)
+    {
+        this->statusMessage =
+            "Export OK: " + std::to_string(static_cast<int>(exportedPaths.size())) +
+            " fichier(s) JSON.";
+    }
+    else
+    {
+        this->statusMessage =
+            "Export partiel: " + std::to_string(static_cast<int>(exportedPaths.size())) +
+            " OK, " + std::to_string(failedCount) + " en echec.";
+    }
     return true;
 }
 
@@ -7989,6 +8439,7 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER", false);
     if (shipMode)
     {
+        this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER VFX / SHIP EXISTANT", false);
         this->drawToolbarButton(this->buttonReloadAssetsRect, "RELOAD ASSETS", false);
     }
     this->drawToolbarButton(this->buttonOceanPrevRect, "OCEAN -", false);
@@ -9203,6 +9654,11 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        if (this->pointInRect(x, y, this->buttonImportShipRect))
+        {
+            this->openImportShipVfxConfigDialog();
+            return true;
+        }
         if (this->pointInRect(x, y, this->buttonReloadAssetsRect))
         {
             this->autoImportAssetsFromDefaultFolders();
@@ -9637,6 +10093,27 @@ void EditorMapVfxScene::onImportSfxFolderDialogResult(void* userdata, const char
     scene->pendingSfxFolderAbsolute = filelist[0];
 }
 
+void EditorMapVfxScene::onImportShipVfxConfigDialogResult(void* userdata, const char* const* filelist, int filter_index)
+{
+    (void)filter_index;
+    EditorMapVfxScene* scene = static_cast<EditorMapVfxScene*>(userdata);
+    if (scene == nullptr || scene != EditorMapVfxScene::activeInstance)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(scene->pendingShipVfxConfigMutex);
+    scene->pendingShipVfxConfigDialogCompleted = true;
+    scene->pendingShipVfxConfigAbsolutePath.clear();
+    if (filelist == nullptr || filelist[0] == nullptr)
+    {
+        scene->pendingShipVfxConfigDialogCanceled = true;
+        return;
+    }
+    scene->pendingShipVfxConfigDialogCanceled = false;
+    scene->pendingShipVfxConfigAbsolutePath = filelist[0];
+}
+
 void EditorMapVfxScene::onImportLooseFolderDialogResult(void* userdata, const char* const* filelist, int filter_index)
 {
     (void)filter_index;
@@ -9721,6 +10198,12 @@ void EditorMapVfxScene::unload(void)
         this->pendingExportFolderAbsolute.clear();
         this->pendingExportMode = EditorMode::SHIP_VFX;
     }
+    {
+        std::lock_guard<std::mutex> lock(this->pendingShipVfxConfigMutex);
+        this->pendingShipVfxConfigDialogCompleted = false;
+        this->pendingShipVfxConfigDialogCanceled = false;
+        this->pendingShipVfxConfigAbsolutePath.clear();
+    }
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
@@ -9757,7 +10240,6 @@ void EditorMapVfxScene::load(void)
     this->scrollBarOverlay.load();
 
     Map& map = GetCurrentMap();
-    Camera& camera = GetCamera();
     map.update();
     this->updateToolbarLayout();
 
@@ -9780,6 +10262,7 @@ void EditorMapVfxScene::update(double dt)
     this->updateToolbarLayout();
     this->processPendingShipFolderRequest();
     this->processPendingSfxFolderRequest();
+    this->processPendingShipVfxConfigRequest();
     this->processPendingLooseFolderRequest();
     this->processPendingExportFolderRequest();
     this->applyPendingOceanColorStep();

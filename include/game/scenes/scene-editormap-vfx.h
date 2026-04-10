@@ -326,6 +326,11 @@ private:
     EditorMode pendingExportMode;
     mutable std::mutex pendingExportFolderMutex;
 
+    bool pendingShipVfxConfigDialogCompleted;
+    bool pendingShipVfxConfigDialogCanceled;
+    std::string pendingShipVfxConfigAbsolutePath;
+    mutable std::mutex pendingShipVfxConfigMutex;
+
     SDL_FRect buttonModeShipVfxRect;
     SDL_FRect buttonModeLooseSpritesRect;
     SDL_FRect buttonImportShipRect;
@@ -528,11 +533,13 @@ private:
 
     void openImportShipFolderDialog(void);
     void openImportSfxFolderDialog(void);
+    void openImportShipVfxConfigDialog(void);
     void openImportLooseFolderDialog(void);
     void openExportFolderDialog(void);
     void openLooseExportNamePopup(void);
     void processPendingShipFolderRequest(void);
     void processPendingSfxFolderRequest(void);
+    void processPendingShipVfxConfigRequest(void);
     void processPendingLooseFolderRequest(void);
     void processPendingExportFolderRequest(void);
 
@@ -615,6 +622,7 @@ private:
 
     static void onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
     static void onImportSfxFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
+    static void onImportShipVfxConfigDialogResult(void* userdata, const char* const* filelist, int filter_index);
     static void onImportLooseFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
     static void onExportFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
 
