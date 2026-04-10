@@ -305,6 +305,14 @@ private:
     static EditorMapVfxScene* activeInstance;
 
     void resetEditorState(void);
+    /** Remet interactions (drag, focus) sans toucher aux imports ni au mode courant. */
+    void clearEditorTransientInteractionState(void);
+    /** Vue caméra + tuile navire comme au chargement (mode Ship / VFX). */
+    void applyShipVfxModeViewportReset(void);
+    /** Recharge le navire preview si decharge, sans vider les calques VFX. */
+    void reloadPreviewShipIfUnloadedKeepVfxLayers(void);
+    /** Etat loose (sous-modes, placements, zoom) remis a zero ; camera centree comme au chargement. */
+    void applyLooseSpritesModeEntryReset(void);
     void ensureUserStorageFolders(void);
     void unloadImportedSfx(void);
     void unloadImportedLooseFolders(void);

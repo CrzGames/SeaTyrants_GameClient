@@ -964,6 +964,96 @@ void EditorMapVfxScene::resetEditorState(void)
     this->statusMessage = "Editor VFX pret.";
 }
 
+void EditorMapVfxScene::clearEditorTransientInteractionState(void)
+{
+    this->layerNameInputFocused = false;
+    this->loosePreviewFpsInputFocused = false;
+    this->vfxDragActive = false;
+    this->layerRowDragActive = false;
+    this->layerRowDragMoved = false;
+    this->layerRowDragSourceDisplayIndex = -1;
+    this->layerRowDragTargetInsertIndex = -1;
+    this->layerRowDragStartMouseY = 0.0f;
+    this->shipListScrollDragActive = false;
+    this->sfxListScrollDragActive = false;
+    this->looseListScrollDragActive = false;
+    this->layerListScrollDragActive = false;
+    this->invalidVfxListScrollDragActive = false;
+    this->invalidShipListScrollDragActive = false;
+}
+
+void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
+{
+    Map& map = GetCurrentMap();
+    Camera& camera = GetCamera();
+    map.update();
+    camera.setZoomFactor(kLoosePreviewZoomDefault);
+    const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
+    camera.centerCameraOnTile(
+        static_cast<float>(centerTile.x),
+        static_cast<float>(centerTile.y),
+        map,
+        map.rect);
+    camera.update(map, map.rect);
+
+    const float shipScreenX = map.rect.x + (map.rect.w * 0.5f) + 250.0f;
+    const float shipScreenY = map.rect.y + (map.rect.h * 0.5f);
+    const SDL_Point shiftedShipTile = map.screenToTileNearest(shipScreenX, shipScreenY);
+    this->previewShipTile = SDL_FPoint{
+        static_cast<float>(shiftedShipTile.x),
+        static_cast<float>(shiftedShipTile.y)};
+
+    if (this->previewShipLoaded)
+    {
+        this->previewShip.setPositionTile(this->previewShipTile.x, this->previewShipTile.y);
+    }
+}
+
+void EditorMapVfxScene::reloadPreviewShipIfUnloadedKeepVfxLayers(void)
+{
+    if (this->previewShipLoaded)
+    {
+        return;
+    }
+    if (this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()))
+    {
+        const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+        this->loadShipFolderFromAbsolutePath(ship.folderAbsolutePath.c_str());
+        return;
+    }
+    if (!this->importedShips.empty())
+    {
+        this->selectImportedShipAtIndex(0);
+    }
+}
+
+void EditorMapVfxScene::applyLooseSpritesModeEntryReset(void)
+{
+    this->loosePreviewMode = LoosePreviewMode::CENTER_SPRITESHEET;
+    this->loosePreviewPlacements.clear();
+    this->nextLoosePreviewPlacementId = 1U;
+    this->loosePreviewPlacementSnapToTile = true;
+    this->looseReferencePreviewVisible = false;
+    this->looseScalePercent = 100;
+    this->loosePreviewZoomFactor = kLoosePreviewZoomDefault;
+    this->looseListScrollOffset = 0;
+    this->looseExportNamePopupVisible = false;
+    this->looseExportNameInput.clear();
+    this->pendingLooseExportAnimationName.clear();
+
+    Map& map = GetCurrentMap();
+    Camera& camera = GetCamera();
+    map.update();
+    camera.setZoomFactor(kLoosePreviewZoomDefault);
+    const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
+    camera.centerCameraOnTile(
+        static_cast<float>(centerTile.x),
+        static_cast<float>(centerTile.y),
+        map,
+        map.rect);
+    camera.update(map, map.rect);
+}
+
 void EditorMapVfxScene::ensureUserStorageFolders(void)
 {
     rc2d_storage_userMkdir("editor-vfx-ship");
@@ -7408,24 +7498,24 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
 {
     if (this->pointInRect(x, y, this->buttonModeShipVfxRect))
     {
-        this->editorMode = EditorMode::SHIP_VFX;
-        this->loosePreviewFpsInputFocused = false;
-        this->layerRowDragActive = false;
-        this->layerRowDragMoved = false;
-        this->layerRowDragSourceDisplayIndex = -1;
-        this->layerRowDragTargetInsertIndex = -1;
-        this->layerRowDragStartMouseY = 0.0f;
+        if (this->editorMode != EditorMode::SHIP_VFX)
+        {
+            this->editorMode = EditorMode::SHIP_VFX;
+            this->clearEditorTransientInteractionState();
+            this->applyShipVfxModeViewportReset();
+            this->reloadPreviewShipIfUnloadedKeepVfxLayers();
+        }
         this->statusMessage = "Mode Ship / VFX actif.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonModeLooseSpritesRect))
     {
-        this->editorMode = EditorMode::LOOSE_SPRITES;
-        this->layerRowDragActive = false;
-        this->layerRowDragMoved = false;
-        this->layerRowDragSourceDisplayIndex = -1;
-        this->layerRowDragTargetInsertIndex = -1;
-        this->layerRowDragStartMouseY = 0.0f;
+        if (this->editorMode != EditorMode::LOOSE_SPRITES)
+        {
+            this->editorMode = EditorMode::LOOSE_SPRITES;
+            this->clearEditorTransientInteractionState();
+            this->applyLooseSpritesModeEntryReset();
+        }
         this->statusMessage = "Mode Downscale Sprites VFX actif.";
         return true;
     }
@@ -7998,25 +8088,7 @@ void EditorMapVfxScene::load(void)
     map.update();
     this->updateToolbarLayout();
 
-    camera.setZoomFactor(kLoosePreviewZoomDefault);
-    const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
-    this->previewShipTile = SDL_FPoint{
-        static_cast<float>(centerTile.x),
-        static_cast<float>(centerTile.y)};
-
-    camera.centerCameraOnTile(
-        static_cast<float>(centerTile.x),
-        static_cast<float>(centerTile.y),
-        map,
-        map.rect);
-    camera.update(map, map.rect);
-
-    const float shipScreenX = map.rect.x + (map.rect.w * 0.5f) + 250.0f;
-    const float shipScreenY = map.rect.y + (map.rect.h * 0.5f);
-    const SDL_Point shiftedShipTile = map.screenToTileNearest(shipScreenX, shipScreenY);
-    this->previewShipTile = SDL_FPoint{
-        static_cast<float>(shiftedShipTile.x),
-        static_cast<float>(shiftedShipTile.y)};
+    this->applyShipVfxModeViewportReset();
 
     this->loadLooseReferencePreviewAssets();
     this->applySelectedOceanColor();
@@ -8229,11 +8301,18 @@ void EditorMapVfxScene::keypressed(
         this->editorMode = (this->editorMode == EditorMode::SHIP_VFX)
             ? EditorMode::LOOSE_SPRITES
             : EditorMode::SHIP_VFX;
-        this->layerNameInputFocused = false;
-        this->loosePreviewFpsInputFocused = false;
-        this->statusMessage = (this->editorMode == EditorMode::SHIP_VFX)
-            ? "Mode Ship / VFX actif."
-            : "Mode Downscale Sprites VFX actif.";
+        this->clearEditorTransientInteractionState();
+        if (this->editorMode == EditorMode::SHIP_VFX)
+        {
+            this->applyShipVfxModeViewportReset();
+            this->reloadPreviewShipIfUnloadedKeepVfxLayers();
+            this->statusMessage = "Mode Ship / VFX actif.";
+        }
+        else
+        {
+            this->applyLooseSpritesModeEntryReset();
+            this->statusMessage = "Mode Downscale Sprites VFX actif.";
+        }
         return;
     }
 
