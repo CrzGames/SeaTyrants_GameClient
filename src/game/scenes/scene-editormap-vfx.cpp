@@ -129,6 +129,8 @@ constexpr float kLoosePreviewZoomMin = 0.40f;
 constexpr float kLoosePreviewZoomMax = 1.00f;
 constexpr float kLoosePreviewZoomDefault = 1.00f;
 constexpr float kLoosePreviewFpsDefault = 12.0f;
+/** Opacite du VFX sous le curseur (preview non pose) vs instances placees (255). */
+constexpr Uint8 kLoosePlacementCursorPreviewAlpha = 168;
 
 constexpr std::array<OceanColorEntry, 27> kOceanColors = {{
     {OceanShader::WaterColor::BLUE, "BLUE"},
@@ -7798,7 +7800,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
         }
     }
 
-    auto drawAnimatedAtTile = [&](float tileX, float tileY, float fps) {
+    auto drawAnimatedAtTile = [&](float tileX, float tileY, float fps, Uint8 textureAlpha255) {
         if (frameCount <= 0)
         {
             return;
@@ -7860,6 +7862,16 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
 
         const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(spriteImage, subX, subY, subW, subH);
 
+        Uint8 prevTexAlpha = 255;
+        const bool applyAlphaMod =
+            textureAlpha255 < 255 && spriteImage->sdl_texture != nullptr;
+        if (applyAlphaMod)
+        {
+            SDL_GetTextureAlphaMod(spriteImage->sdl_texture, &prevTexAlpha);
+            SDL_SetTextureAlphaMod(spriteImage->sdl_texture, textureAlpha255);
+        }
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
         rc2d_graphics_drawQuad(
             spriteImage,
             &sourceQuad,
@@ -7872,11 +7884,17 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
             0.0f,
             false,
             false);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        if (applyAlphaMod)
+        {
+            SDL_SetTextureAlphaMod(spriteImage->sdl_texture, prevTexAlpha);
+        }
     };
 
     for (const LoosePreviewPlacement& placement : this->loosePreviewPlacements)
     {
-        drawAnimatedAtTile(placement.tileX, placement.tileY, placement.fps);
+        drawAnimatedAtTile(placement.tileX, placement.tileY, placement.fps, 255);
     }
 
     float mouseX = 0.0f;
@@ -7889,12 +7907,17 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
             drawAnimatedAtTile(
                 static_cast<float>(hoveredTile.x),
                 static_cast<float>(hoveredTile.y),
-                this->getLoosePreviewFpsOrDefault());
+                this->getLoosePreviewFpsOrDefault(),
+                kLoosePlacementCursorPreviewAlpha);
         }
         else
         {
             const SDL_FPoint hoveredTileF = map.screenToTile(mouseX, mouseY);
-            drawAnimatedAtTile(hoveredTileF.x, hoveredTileF.y, this->getLoosePreviewFpsOrDefault());
+            drawAnimatedAtTile(
+                hoveredTileF.x,
+                hoveredTileF.y,
+                this->getLoosePreviewFpsOrDefault(),
+                kLoosePlacementCursorPreviewAlpha);
         }
     }
 }
