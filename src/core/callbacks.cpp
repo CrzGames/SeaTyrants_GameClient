@@ -18,6 +18,7 @@
 #if GAME_ENV_DEV
 #include "game/scenes/scene-editormap-anchorship.h"
 #include "game/scenes/scene-editormap-creatormap.h"
+#include "game/scenes/scene-editormap-vfx.h"
 #endif
 
 SceneManager sceneManager;
@@ -60,6 +61,7 @@ void rc2d_load(void)
 #if GAME_ENV_DEV
     sceneManager.addScene("editormap-creatormap", new EditorMapCreateMapScene());
     sceneManager.addScene("editormap-anchorship", new EditorMapAnchorShipScene());
+    sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
 #endif
     //sceneManager.addScene("splashscreen", new SplashScreenScene());
     sceneManager.addScene("game", new GameScene());
@@ -185,6 +187,12 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
     if (!isrepeat && scancode == SDL_SCANCODE_F10)
     {
         sceneManager.changeScene("editormap-anchorship");
+        return;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_F11)
+    {
+        sceneManager.changeScene("editormap-vfx");
         return;
     }
 #endif
