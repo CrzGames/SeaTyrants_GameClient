@@ -4,6 +4,7 @@
 
 #include <RC2D/RC2D.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <mutex>
@@ -164,13 +165,14 @@ private:
     int previewShipStateIndex;
     /** Opacite preview navire 0..100 (pas de 10), appliquee via setDrawAlpha. */
     int previewShipOpacityPercent;
-    bool shipLayerVisible;
-    bool shipLayerLocked;
+    /** Une entree par page calques (direction x etat HP), cle = previewDirectionIndex + previewShipStateIndex * 4. */
+    std::array<int, 8> shipDrawOrderByPage{};
+    std::array<bool, 8> shipLayerVisibleByPage{{true, true, true, true, true, true, true, true}};
+    std::array<bool, 8> shipLayerLockedByPage{};
+    std::array<bool, 8> shipDebugBoundsVisibleByPage{{true, true, true, true, true, true, true, true}};
     bool shipLayerSelected;
-    bool shipDebugBoundsVisible;
     /** Debug : grille iso 10x10 au sol sous le navire preview. */
     bool previewIsoGridVisible;
-    int shipDrawOrder;
     RC2D_Image looseReferenceGuildIslandImage;
     RC2D_Image looseReferenceTowerLevel1Image;
     RC2D_Image looseReferenceTowerLevel2Image;
@@ -181,7 +183,66 @@ private:
     bool looseReferencePreviewVisible;
     bool looseReferencePreviewLoaded;
 
-    std::vector<ShipVfxInstance> shipVfxInstances;
+    std::array<std::vector<ShipVfxInstance>, 8> shipVfxLayerPages{};
+    bool shipVfxLayerPagePickerOpen = false;
+
+    int getShipVfxLayerPageKey(void) const
+    {
+        const int dir = std::clamp(this->previewDirectionIndex, 0, 3);
+        const int st = std::clamp(this->previewShipStateIndex, 0, 1);
+        return dir + st * 4;
+    }
+
+    std::vector<ShipVfxInstance>& currentShipVfxLayers(void)
+    {
+        return this->shipVfxLayerPages[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const std::vector<ShipVfxInstance>& currentShipVfxLayers(void) const
+    {
+        return this->shipVfxLayerPages[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    int& activeShipDrawOrder(void)
+    {
+        return this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const int& activeShipDrawOrder(void) const
+    {
+        return this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    bool& activeShipLayerVisible(void)
+    {
+        return this->shipLayerVisibleByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const bool& activeShipLayerVisible(void) const
+    {
+        return this->shipLayerVisibleByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    bool& activeShipLayerLocked(void)
+    {
+        return this->shipLayerLockedByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const bool& activeShipLayerLocked(void) const
+    {
+        return this->shipLayerLockedByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    bool& activeShipDebugBoundsVisible(void)
+    {
+        return this->shipDebugBoundsVisibleByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const bool& activeShipDebugBoundsVisible(void) const
+    {
+        return this->shipDebugBoundsVisibleByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
     int selectedVfxInstanceIndex;
     uint32_t nextVfxInstanceId;
     std::string layerNameInput;
@@ -198,6 +259,8 @@ private:
 
     int looseScalePercent;
     float loosePreviewZoomFactor;
+    /** Zoom camera mode Ship/VFX (meme plage que le downscale : 0.40..1.00). */
+    float shipVfxPreviewZoomFactor;
     LoosePreviewMode loosePreviewMode;
     /** Si true, le clic preview ancre sur le centre de la tuile la plus proche ; sinon tuile flottante (sous-pixel). */
     bool loosePreviewPlacementSnapToTile;
@@ -252,6 +315,8 @@ private:
     SDL_FRect buttonShipOpacityMinusRect;
     SDL_FRect buttonShipOpacityPlusRect;
     SDL_FRect buttonPreviewIsoGridRect;
+    SDL_FRect buttonShipVfxZoomMinusRect;
+    SDL_FRect buttonShipVfxZoomPlusRect;
     SDL_FRect buttonShipOrderMinusRect;
     SDL_FRect buttonShipOrderPlusRect;
     SDL_FRect buttonLayerOrderMinusRect;
@@ -323,6 +388,7 @@ private:
     void loadLooseReferencePreviewAssets(void);
     void unloadLooseReferencePreviewAssets(void);
     void adjustLoosePreviewZoom(float delta);
+    void adjustShipVfxPreviewZoom(float delta);
     void applySelectedOceanColor(void);
     void requestOceanColorStep(int delta);
     void applyPendingOceanColorStep(void);
@@ -338,6 +404,10 @@ private:
     const char* getPreviewDirectionLabel(void) const;
     const char* getPreviewShipStateLabel(void) const;
     void markShipVfxDirty(void);
+    void initDefaultShipLayerSettingsAllPages(void);
+    void clearAllShipVfxLayerPages(void);
+    void clearShipVfxLayerUiTransientStateForPageChange(void);
+    void applyShipVfxLayerPageIndex(int pageIndex);
     int getActiveDirectionIndexForOverrides(void) const;
     bool hasSelectedVfxInstance(void) const;
     ShipVfxInstance* getSelectedVfxInstance(void);

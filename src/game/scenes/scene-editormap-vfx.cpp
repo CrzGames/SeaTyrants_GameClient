@@ -43,6 +43,66 @@ struct RenderItem
 constexpr int kShipSpriteCount = 8;
 constexpr float kListScrollBarWidth = 10.0f;
 constexpr int kVisibleListRows = 10;
+constexpr int kShipVfxLayerPageCount = 8;
+
+struct ShipVfxLayerPagePickerLayout
+{
+    SDL_FRect pageButtonRect{};
+    SDL_FRect popupRect{};
+    SDL_FRect pageRowRects[kShipVfxLayerPageCount]{};
+};
+
+static ShipVfxLayerPagePickerLayout buildShipVfxLayerPagePickerLayout(
+    const SDL_FRect& layerListRect,
+    float panelPadding,
+    float headerHeight,
+    bool pickerOpen)
+{
+    ShipVfxLayerPagePickerLayout out{};
+    const float rowsWidth = layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+    constexpr float kPageBtnW = 56.0f;
+    out.pageButtonRect.x = layerListRect.x + panelPadding + rowsWidth - kPageBtnW;
+    out.pageButtonRect.y = layerListRect.y + 1.0f;
+    out.pageButtonRect.w = kPageBtnW;
+    out.pageButtonRect.h = headerHeight + 2.0f;
+
+    if (!pickerOpen)
+    {
+        return out;
+    }
+
+    const float popPad = 4.0f;
+    const float rowH = 16.0f;
+    const float rowGap = 2.0f;
+    const float popW = (std::min)(layerListRect.w - (panelPadding * 2.0f), 420.0f);
+    const float popH = popPad * 2.0f + (rowH * static_cast<float>(kShipVfxLayerPageCount)) +
+        (rowGap * static_cast<float>(kShipVfxLayerPageCount - 1));
+    out.popupRect.x = layerListRect.x + panelPadding;
+    out.popupRect.y = layerListRect.y + panelPadding + headerHeight + 2.0f;
+    out.popupRect.w = popW;
+    out.popupRect.h = popH;
+
+    float y = out.popupRect.y + popPad;
+    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    {
+        out.pageRowRects[i].x = out.popupRect.x + popPad;
+        out.pageRowRects[i].y = y;
+        out.pageRowRects[i].w = out.popupRect.w - (popPad * 2.0f);
+        out.pageRowRects[i].h = rowH;
+        y += rowH + rowGap;
+    }
+    return out;
+}
+
+static void shipVfxLayerPageLabelUtf8(int pageIndex, char* buf, size_t bufSize)
+{
+    static const char* kDir[] = {"Bas-Gauche", "Haut-Droite", "Haut-Gauche", "Bas-Droite"};
+    const int dir = pageIndex % 4;
+    const int st = pageIndex / 4;
+    const char* hp = (st == 0) ? "HP PLEIN" : "HP BAS";
+    SDL_snprintf(buf, bufSize, "%d/8  %s  |  %s", pageIndex + 1, kDir[dir], hp);
+}
+
 /** Cote de la grille iso debug (tuiles) centree sur le navire preview. */
 constexpr int kShipVfxDebugIsoGridTiles = 20;
 /** Largeur du bouton TILE/PIXEL (panneau layers), a gauche de DEBUG. */
@@ -745,7 +805,6 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       previewShipLoaded(false),
       loadedShipFolderAbsolute{},
       previewShipTile{0.0f, 0.0f},
-      shipDrawOrder(0),
       looseReferenceGuildIslandImage{},
       looseReferenceTowerLevel1Image{},
       looseReferenceTowerLevel2Image{},
@@ -755,11 +814,11 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       looseReferenceShipRightImage{},
       looseReferencePreviewVisible(false),
       looseReferencePreviewLoaded(false),
-      shipVfxInstances{},
       selectedVfxInstanceIndex(-1),
       nextVfxInstanceId(1U),
       looseScalePercent(100),
       loosePreviewZoomFactor(kLoosePreviewZoomDefault),
+      shipVfxPreviewZoomFactor(kLoosePreviewZoomDefault),
       loosePreviewMode(LoosePreviewMode::CENTER_SPRITESHEET),
       loosePreviewPlacementSnapToTile(true),
       loosePreviewPlacements{},
@@ -804,6 +863,8 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonShipOpacityMinusRect{},
       buttonShipOpacityPlusRect{},
       buttonPreviewIsoGridRect{},
+      buttonShipVfxZoomMinusRect{},
+      buttonShipVfxZoomPlusRect{},
       buttonFollowShipRect{},
       buttonRemoveVfxRect{},
       buttonMoveULRect{},
@@ -843,10 +904,8 @@ EditorMapVfxScene::EditorMapVfxScene(void)
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
     this->previewShipOpacityPercent = 100;
-    this->shipLayerVisible = true;
-    this->shipLayerLocked = false;
+    this->initDefaultShipLayerSettingsAllPages();
     this->shipLayerSelected = false;
-    this->shipDebugBoundsVisible = true;
     this->previewIsoGridVisible = false;
     this->layerNameInput.clear();
     this->layerNameInputFocused = false;
@@ -897,6 +956,52 @@ EditorMapVfxScene::~EditorMapVfxScene(void)
 {
 }
 
+void EditorMapVfxScene::initDefaultShipLayerSettingsAllPages(void)
+{
+    for (size_t i = 0; i < this->shipDrawOrderByPage.size(); ++i)
+    {
+        this->shipDrawOrderByPage[i] = 0;
+        this->shipLayerVisibleByPage[i] = true;
+        this->shipLayerLockedByPage[i] = false;
+        this->shipDebugBoundsVisibleByPage[i] = true;
+    }
+}
+
+void EditorMapVfxScene::clearAllShipVfxLayerPages(void)
+{
+    for (std::vector<ShipVfxInstance>& page : this->shipVfxLayerPages)
+    {
+        page.clear();
+    }
+}
+
+void EditorMapVfxScene::clearShipVfxLayerUiTransientStateForPageChange(void)
+{
+    this->selectedVfxInstanceIndex = -1;
+    this->shipLayerSelected = false;
+    this->layerNameInput.clear();
+    this->layerNameInputFocused = false;
+    this->vfxDragActive = false;
+    this->vfxRotationDialActive = false;
+    this->layerRowDragActive = false;
+    this->layerRowDragMoved = false;
+    this->layerRowDragSourceDisplayIndex = -1;
+    this->layerRowDragTargetInsertIndex = -1;
+    this->layerRowDragStartMouseY = 0.0f;
+}
+
+void EditorMapVfxScene::applyShipVfxLayerPageIndex(int pageIndex)
+{
+    const int p = std::clamp(pageIndex, 0, 7);
+    this->previewDirectionIndex = p % 4;
+    this->previewShipStateIndex = p / 4;
+    this->applyPreviewDirectionToShip();
+    this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+    this->clearShipVfxLayerUiTransientStateForPageChange();
+    this->shipVfxLayerPagePickerOpen = false;
+    this->markShipVfxDirty();
+}
+
 void EditorMapVfxScene::resetEditorState(void)
 {
     this->editorMode = EditorMode::SHIP_VFX;
@@ -920,14 +1025,11 @@ void EditorMapVfxScene::resetEditorState(void)
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
     this->previewShipOpacityPercent = 100;
-    this->shipLayerVisible = true;
-    this->shipLayerLocked = false;
+    this->initDefaultShipLayerSettingsAllPages();
     this->shipLayerSelected = false;
-    this->shipDebugBoundsVisible = true;
     this->previewIsoGridVisible = false;
     this->previewShipTile = SDL_FPoint{0.0f, 0.0f};
-    this->shipDrawOrder = 0;
-    this->shipVfxInstances.clear();
+    this->clearAllShipVfxLayerPages();
     this->selectedVfxInstanceIndex = -1;
     this->nextVfxInstanceId = 1U;
     this->layerNameInput.clear();
@@ -938,6 +1040,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->vfxDragStartMouseY = 0.0f;
     this->vfxDragStartOffsetX = 0.0f;
     this->vfxDragStartOffsetY = 0.0f;
+    this->shipVfxLayerPagePickerOpen = false;
     this->shipVfxDirty = false;
     this->loadedShipVfxConfigPath.clear();
     this->invalidShipFolders.clear();
@@ -958,6 +1061,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->invalidShipListScrollDragGrabOffsetY = 0.0f;
     this->looseScalePercent = 100;
     this->loosePreviewZoomFactor = kLoosePreviewZoomDefault;
+    this->shipVfxPreviewZoomFactor = kLoosePreviewZoomDefault;
     this->loosePreviewMode = LoosePreviewMode::CENTER_SPRITESHEET;
     this->loosePreviewPlacementSnapToTile = true;
     this->loosePreviewPlacements.clear();
@@ -994,6 +1098,7 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->layerListScrollDragActive = false;
     this->invalidVfxListScrollDragActive = false;
     this->invalidShipListScrollDragActive = false;
+    this->shipVfxLayerPagePickerOpen = false;
 }
 
 void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
@@ -1001,6 +1106,7 @@ void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
     map.update();
+    this->shipVfxPreviewZoomFactor = kLoosePreviewZoomDefault;
     camera.setZoomFactor(kLoosePreviewZoomDefault);
     const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
     camera.centerCameraOnTile(
@@ -1194,6 +1300,25 @@ void EditorMapVfxScene::adjustLoosePreviewZoom(float delta)
     this->statusMessage = status;
 }
 
+void EditorMapVfxScene::adjustShipVfxPreviewZoom(float delta)
+{
+    if (this->editorMode != EditorMode::SHIP_VFX)
+    {
+        return;
+    }
+    const float currentZoom = this->shipVfxPreviewZoomFactor;
+    const float nextZoom = std::clamp(currentZoom + delta, kLoosePreviewZoomMin, kLoosePreviewZoomMax);
+    this->shipVfxPreviewZoomFactor = nextZoom;
+    Camera& camera = GetCamera();
+    Map& map = GetCurrentMap();
+    camera.setZoomFactor(nextZoom);
+    camera.update(map, map.rect);
+
+    char status[128] = {};
+    SDL_snprintf(status, sizeof(status), "Zoom Ship/VFX: %.2f", nextZoom);
+    this->statusMessage = status;
+}
+
 void EditorMapVfxScene::applySelectedOceanColor(void)
 {
     if (this->selectedOceanColorIndex < 0)
@@ -1261,13 +1386,10 @@ void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
     this->previewShip.unloadSprites();
     this->previewShipLoaded = false;
     this->loadedShipFolderAbsolute.clear();
-    this->shipVfxInstances.clear();
+    this->clearAllShipVfxLayerPages();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
-    this->shipLayerVisible = true;
-    this->shipLayerLocked = false;
-    this->shipDebugBoundsVisible = true;
-    this->shipDrawOrder = 0;
+    this->initDefaultShipLayerSettingsAllPages();
     this->importedShips.clear();
     this->unloadImportedSfx();
     this->selectedShipIndex = -1;
@@ -1315,6 +1437,7 @@ void EditorMapVfxScene::setPreviewDirectionIndex(int directionIndex)
 {
     this->previewDirectionIndex = std::clamp(directionIndex, 0, 3);
     this->applyPreviewDirectionToShip();
+    this->clearShipVfxLayerUiTransientStateForPageChange();
 }
 
 void EditorMapVfxScene::cyclePreviewDirection(int delta)
@@ -1346,6 +1469,7 @@ void EditorMapVfxScene::cyclePreviewShipState(int delta)
     }
     this->previewShipStateIndex = index;
     this->previewShip.setHealthVisual((index == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+    this->clearShipVfxLayerUiTransientStateForPageChange();
 }
 
 void EditorMapVfxScene::applyPreviewShipOpacityPercentToShip(void)
@@ -1407,7 +1531,7 @@ int EditorMapVfxScene::getActiveDirectionIndexForOverrides(void) const
 bool EditorMapVfxScene::hasSelectedVfxInstance(void) const
 {
     return this->selectedVfxInstanceIndex >= 0 &&
-        this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size());
+        this->selectedVfxInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size());
 }
 
 EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInstance(void)
@@ -1416,7 +1540,7 @@ EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInstance(vo
     {
         return nullptr;
     }
-    return &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    return &this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
 }
 
 const EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInstance(void) const
@@ -1425,7 +1549,7 @@ const EditorMapVfxScene::ShipVfxInstance* EditorMapVfxScene::getSelectedVfxInsta
     {
         return nullptr;
     }
-    return &this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    return &this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
 }
 
 EditorMapVfxScene::DirectionOverride* EditorMapVfxScene::getEditableDirectionOverride(EditorMapVfxScene::ShipVfxInstance* instance)
@@ -1543,13 +1667,13 @@ void EditorMapVfxScene::toggleSelectedVfxBehindShip(void)
     instance->behindShip = !instance->behindShip;
     DirectionOverride* override = this->getEditableDirectionOverride(instance);
     int* drawOrder = (override != nullptr) ? &override->drawOrder : &instance->drawOrder;
-    if (instance->behindShip && *drawOrder >= this->shipDrawOrder)
+    if (instance->behindShip && *drawOrder >= this->activeShipDrawOrder())
     {
-        *drawOrder = this->shipDrawOrder - 1;
+        *drawOrder = this->activeShipDrawOrder() - 1;
     }
-    if (!instance->behindShip && *drawOrder <= this->shipDrawOrder)
+    if (!instance->behindShip && *drawOrder <= this->activeShipDrawOrder())
     {
-        *drawOrder = this->shipDrawOrder + 1;
+        *drawOrder = this->activeShipDrawOrder() + 1;
     }
     this->markShipVfxDirty();
 }
@@ -1650,7 +1774,7 @@ void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
     ShipVfxInstance duplicate = *instance;
     duplicate.instanceId = this->nextVfxInstanceId++;
     int sourceInstanceNumber = 1;
-    for (const ShipVfxInstance& existing : this->shipVfxInstances)
+    for (const ShipVfxInstance& existing : this->currentShipVfxLayers())
     {
         if (existing.importedSfxIndex == duplicate.importedSfxIndex)
         {
@@ -1661,8 +1785,8 @@ void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
     duplicate.label = makeDefaultVfxLayerLabel(duplicate.sourceDisplayName, sourceNumber, sourceInstanceNumber);
     duplicate.offsetX += 12.0f;
     duplicate.offsetY += 12.0f;
-    this->shipVfxInstances.push_back(std::move(duplicate));
-    const int duplicatedIndex = static_cast<int>(this->shipVfxInstances.size()) - 1;
+    this->currentShipVfxLayers().push_back(std::move(duplicate));
+    const int duplicatedIndex = static_cast<int>(this->currentShipVfxLayers().size()) - 1;
     this->rebuildVfxLayerLabelsFromCurrentInstances();
     this->setSelectedVfxInstanceIndex(duplicatedIndex);
     this->markShipVfxDirty();
@@ -1690,11 +1814,11 @@ void EditorMapVfxScene::moveSelectedLayerOrder(int delta)
     DirectionOverride* override = this->getEditableDirectionOverride(instance);
     int* drawOrder = (override != nullptr) ? &override->drawOrder : &instance->drawOrder;
     *drawOrder += delta;
-    if (*drawOrder == this->shipDrawOrder)
+    if (*drawOrder == this->activeShipDrawOrder())
     {
         *drawOrder += (delta >= 0) ? 1 : -1;
     }
-    instance->behindShip = (*drawOrder < this->shipDrawOrder);
+    instance->behindShip = (*drawOrder < this->activeShipDrawOrder());
     this->markShipVfxDirty();
 }
 
@@ -1709,11 +1833,11 @@ bool EditorMapVfxScene::applyLayerNameInput(void)
     std::string trimmed = trimAscii(this->layerNameInput);
     if (trimmed.empty())
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
         int sourceInstanceNumber = 0;
-        for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+        for (size_t i = 0; i < this->currentShipVfxLayers().size(); ++i)
         {
-            const ShipVfxInstance& candidate = this->shipVfxInstances[i];
+            const ShipVfxInstance& candidate = this->currentShipVfxLayers()[i];
             if (candidate.importedSfxIndex == instance.importedSfxIndex)
             {
                 sourceInstanceNumber += 1;
@@ -1730,7 +1854,7 @@ bool EditorMapVfxScene::applyLayerNameInput(void)
         const int sourceNumber = (std::max)(1, instance.importedSfxIndex + 1);
         trimmed = makeDefaultVfxLayerLabel(instance.sourceDisplayName, sourceNumber, sourceInstanceNumber);
     }
-    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label = trimmed;
+    this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].label = trimmed;
     this->layerNameInput = trimmed;
     this->markShipVfxDirty();
     return true;
@@ -1785,6 +1909,9 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     setNextButton(&this->buttonShipOpacityMinusRect, &x, shipRow1Y, 88.0f);
     setNextButton(&this->buttonShipOpacityPlusRect, &x, shipRow1Y, 88.0f);
     setNextButton(&this->buttonPreviewIsoGridRect, &x, shipRow1Y, 152.0f);
+    const float shipVfxZoomToolbarW = 110.0f;
+    setNextButton(&this->buttonShipVfxZoomMinusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
+    setNextButton(&this->buttonShipVfxZoomPlusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
 
     // Mode downscale: tout sur la meme ligne (gauche zoom+repere, centre import, droite scale).
     const float looseZoomW = 110.0f;
@@ -2377,6 +2504,21 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         rc2d_graphics_destroyText(&headerText);
     }
 
+    const ShipVfxLayerPagePickerLayout pagePickHeader =
+        buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, false);
+    rc2d_graphics_setColor(RC2D_Color{48, 56, 68, 230});
+    rc2d_graphics_rectangle("fill", &pagePickHeader.pageButtonRect);
+    rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+    rc2d_graphics_rectangle("line", &pagePickHeader.pageButtonRect);
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text pagesBtnText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "PAGES");
+        pagesBtnText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&pagesBtnText);
+        rc2d_graphics_drawText(&pagesBtnText, pagePickHeader.pageButtonRect.x + 6.0f, pagePickHeader.pageButtonRect.y + 1.0f);
+        rc2d_graphics_destroyText(&pagesBtnText);
+    }
+
     SDL_FRect scrollTrackRect{};
     scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
     scrollTrackRect.y = rowsTopY;
@@ -2435,17 +2577,17 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
 
         const int instanceIndex = orderedLayerIndices[static_cast<size_t>(displayIndex)];
         const bool isShipRow = (instanceIndex < 0);
-        int drawOrder = this->shipDrawOrder;
-        bool visible = this->shipLayerVisible;
-        bool debugBoundsVisible = this->shipDebugBoundsVisible;
-        bool locked = this->shipLayerLocked;
+        int drawOrder = this->activeShipDrawOrder();
+        bool visible = this->activeShipLayerVisible();
+        bool debugBoundsVisible = this->activeShipDebugBoundsVisible();
+        bool locked = this->activeShipLayerLocked();
         std::string label = "SHIP";
         bool flipHResolved = false;
         bool flipVResolved = false;
 
         if (!isShipRow)
         {
-            const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+            const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
             const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
             drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
             visible = (override != nullptr) ? override->visible : instance.visible;
@@ -2579,7 +2721,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         rc2d_graphics_rectangle("line", &resetRect);
 
         const bool vfxPlaceTileMode =
-            !isShipRow && this->shipVfxInstances[static_cast<size_t>(instanceIndex)].placementSnapClickToTile;
+            !isShipRow && this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)].placementSnapClickToTile;
         const bool rotDialRowActive =
             !isShipRow && this->vfxRotationDialActive &&
             (instanceIndex == this->selectedVfxInstanceIndex);
@@ -2754,7 +2896,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 debugRect.y + ((debugRect.h - static_cast<float>(debugH)) * 0.5f));
             rc2d_graphics_destroyText(&debugText);
 
-            const bool behind = (drawOrder < this->shipDrawOrder);
+            const bool behind = (drawOrder < this->activeShipDrawOrder());
             const float indent = isShipRow ? 18.0f : (behind ? 8.0f : 34.0f);
             const float labelX = rowRect.x + indent;
             const float labelWidth = (layerFlipVRowRect.x - 6.0f) - labelX;
@@ -2797,6 +2939,35 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 2.0f};
             rc2d_graphics_setColor(RC2D_Color{228, 210, 86, 240});
             rc2d_graphics_rectangle("fill", &insertLine);
+        }
+    }
+
+    if (this->shipVfxLayerPagePickerOpen)
+    {
+        const ShipVfxLayerPagePickerLayout pagePick =
+            buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, true);
+        rc2d_graphics_setColor(RC2D_Color{10, 14, 18, 240});
+        rc2d_graphics_rectangle("fill", &pagePick.popupRect);
+        rc2d_graphics_setColor(RC2D_Color{150, 165, 182, 240});
+        rc2d_graphics_rectangle("line", &pagePick.popupRect);
+        const int curPage = this->getShipVfxLayerPageKey();
+        for (int pi = 0; pi < kShipVfxLayerPageCount; ++pi)
+        {
+            const bool isActive = (pi == curPage);
+            rc2d_graphics_setColor(isActive ? RC2D_Color{72, 108, 152, 235} : RC2D_Color{38, 48, 60, 220});
+            rc2d_graphics_rectangle("fill", &pagePick.pageRowRects[pi]);
+            rc2d_graphics_setColor(RC2D_Color{120, 135, 152, 230});
+            rc2d_graphics_rectangle("line", &pagePick.pageRowRects[pi]);
+            if (this->overlayFont.sdl_font != nullptr)
+            {
+                char rowBuf[160] = {};
+                shipVfxLayerPageLabelUtf8(pi, rowBuf, sizeof(rowBuf));
+                RC2D_Text rowPickText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), rowBuf);
+                rowPickText.color = kHudTextColor;
+                rc2d_graphics_setTextColor(&rowPickText);
+                rc2d_graphics_drawText(&rowPickText, pagePick.pageRowRects[pi].x + 4.0f, pagePick.pageRowRects[pi].y + 1.0f);
+                rc2d_graphics_destroyText(&rowPickText);
+            }
         }
     }
 
@@ -2938,7 +3109,7 @@ void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targe
         return;
     }
     const int shipDisplayIndex = static_cast<int>(std::distance(rowToInstanceIndex.begin(), shipIt));
-    this->shipDrawOrder = 0;
+    this->activeShipDrawOrder() = 0;
 
     for (int i = 0; i < static_cast<int>(rowToInstanceIndex.size()); ++i)
     {
@@ -2954,7 +3125,7 @@ void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targe
             drawOrder = (i > shipDisplayIndex) ? 1 : -1;
         }
 
-        ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+        ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
         DirectionOverride* override = this->getEditableDirectionOverride(&instance);
         if (override != nullptr)
         {
@@ -2966,11 +3137,11 @@ void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targe
         }
     }
 
-    for (ShipVfxInstance& instance : this->shipVfxInstances)
+    for (ShipVfxInstance& instance : this->currentShipVfxLayers())
     {
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const int effectiveOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
-        instance.behindShip = (effectiveOrder < this->shipDrawOrder);
+        instance.behindShip = (effectiveOrder < this->activeShipDrawOrder());
     }
 
     const int selectedRow = this->getSelectedLayerRowIndexForDisplay(this->getOrderedVfxInstanceIndicesForLayerPanel());
@@ -3825,9 +3996,7 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
     this->previewShipLoaded = true;
     this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
     this->shipLayerSelected = true;
-    this->shipLayerVisible = true;
-    this->shipLayerLocked = false;
-    this->shipDebugBoundsVisible = true;
+    this->initDefaultShipLayerSettingsAllPages();
     this->statusMessage = "Navire preview charge (8 sprites + anchor).";
     return true;
 }
@@ -3849,11 +4018,10 @@ bool EditorMapVfxScene::selectImportedShipAtIndex(int shipIndex)
         return false;
     }
 
-    this->shipVfxInstances.clear();
+    this->clearAllShipVfxLayerPages();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
-    this->shipDrawOrder = 0;
-    this->shipDebugBoundsVisible = true;
+    this->initDefaultShipLayerSettingsAllPages();
     this->shipVfxDirty = false;
     this->loadedShipVfxConfigPath = selectedShip.configJsonPath;
     this->loadShipVfxConfigForSelectedShip();
@@ -4526,7 +4694,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     ShipVfxInstance instance{};
     instance.instanceId = this->nextVfxInstanceId++;
     int sourceInstanceNumber = 1;
-    for (const ShipVfxInstance& existing : this->shipVfxInstances)
+    for (const ShipVfxInstance& existing : this->currentShipVfxLayers())
     {
         if (existing.importedSfxIndex == this->selectedSfxIndex)
         {
@@ -4543,11 +4711,11 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     instance.rotationDeg = 0.0f;
     instance.flipHorizontal = false;
     instance.flipVertical = false;
-    instance.drawOrder = static_cast<int>(this->shipVfxInstances.size()) + 1;
+    instance.drawOrder = static_cast<int>(this->currentShipVfxLayers().size()) + 1;
     instance.visible = true;
     instance.debugBoundsVisible = true;
     instance.locked = false;
-    instance.behindShip = (instance.drawOrder < this->shipDrawOrder);
+    instance.behindShip = (instance.drawOrder < this->activeShipDrawOrder());
     instance.followShip = true;
     instance.sharedForAllDirections = true;
     instance.sharedForAllStates = true;
@@ -4563,8 +4731,8 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
         override.drawOrder = instance.drawOrder;
         override.visible = instance.visible;
     }
-    this->shipVfxInstances.push_back(instance);
-    const int spawnedIndex = static_cast<int>(this->shipVfxInstances.size()) - 1;
+    this->currentShipVfxLayers().push_back(instance);
+    const int spawnedIndex = static_cast<int>(this->currentShipVfxLayers().size()) - 1;
     this->rebuildVfxLayerLabelsFromCurrentInstances();
     this->setSelectedVfxInstanceIndex(spawnedIndex);
     this->shipLayerSelected = false;
@@ -4574,7 +4742,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
 
 void EditorMapVfxScene::setSelectedVfxInstanceIndex(int index)
 {
-    if (index < 0 || index >= static_cast<int>(this->shipVfxInstances.size()))
+    if (index < 0 || index >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         this->selectedVfxInstanceIndex = -1;
         this->layerNameInput.clear();
@@ -4584,7 +4752,7 @@ void EditorMapVfxScene::setSelectedVfxInstanceIndex(int index)
 
     this->selectedVfxInstanceIndex = index;
     this->shipLayerSelected = false;
-    this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(index)].label;
+    this->layerNameInput = this->currentShipVfxLayers()[static_cast<size_t>(index)].label;
 }
 
 void EditorMapVfxScene::rebuildVfxLayerLabelsFromCurrentInstances(void)
@@ -4595,9 +4763,6 @@ void EditorMapVfxScene::rebuildVfxLayerLabelsFromCurrentInstances(void)
         int sourceNumber;
         int instanceCount;
     };
-
-    std::vector<SourceCounter> sourceCounters;
-    sourceCounters.reserve(this->shipVfxInstances.size());
 
     auto buildSourceKey = [this](const ShipVfxInstance& instance) -> std::string {
         if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
@@ -4631,51 +4796,58 @@ void EditorMapVfxScene::rebuildVfxLayerLabelsFromCurrentInstances(void)
         return "vfx";
     };
 
-    for (ShipVfxInstance& instance : this->shipVfxInstances)
+    for (std::vector<ShipVfxInstance>& page : this->shipVfxLayerPages)
     {
-        const std::string sourceKey = buildSourceKey(instance);
-        auto counterIt = std::find_if(sourceCounters.begin(), sourceCounters.end(), [&sourceKey](const SourceCounter& value) {
-            return value.key == sourceKey;
-        });
-        if (counterIt == sourceCounters.end())
-        {
-            sourceCounters.push_back(SourceCounter{
-                sourceKey,
-                static_cast<int>(sourceCounters.size()) + 1,
-                0});
-            counterIt = sourceCounters.end() - 1;
-        }
+        std::vector<SourceCounter> sourceCounters;
+        sourceCounters.reserve(page.size());
 
-        counterIt->instanceCount += 1;
-        instance.label = makeDefaultVfxLayerLabel(
-            resolveSourceDisplayName(instance),
-            counterIt->sourceNumber,
-            counterIt->instanceCount);
+        for (ShipVfxInstance& instance : page)
+        {
+            const std::string sourceKey = buildSourceKey(instance);
+            auto counterIt = std::find_if(sourceCounters.begin(), sourceCounters.end(), [&sourceKey](const SourceCounter& value) {
+                return value.key == sourceKey;
+            });
+            if (counterIt == sourceCounters.end())
+            {
+                sourceCounters.push_back(SourceCounter{
+                    sourceKey,
+                    static_cast<int>(sourceCounters.size()) + 1,
+                    0});
+                counterIt = sourceCounters.end() - 1;
+            }
+
+            counterIt->instanceCount += 1;
+            instance.label = makeDefaultVfxLayerLabel(
+                resolveSourceDisplayName(instance),
+                counterIt->sourceNumber,
+                counterIt->instanceCount);
+        }
     }
 
-    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
     {
-        this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
+        this->layerNameInput = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
     }
 }
 
 void EditorMapVfxScene::removeSelectedVfxInstance(void)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
 
-    this->shipVfxInstances.erase(this->shipVfxInstances.begin() + this->selectedVfxInstanceIndex);
+    std::vector<ShipVfxInstance>& layers = this->currentShipVfxLayers();
+    layers.erase(layers.begin() + this->selectedVfxInstanceIndex);
     this->rebuildVfxLayerLabelsFromCurrentInstances();
-    if (this->shipVfxInstances.empty())
+    if (this->currentShipVfxLayers().empty())
     {
         this->setSelectedVfxInstanceIndex(-1);
     }
     else
     {
-        const int nextIndex = std::clamp(this->selectedVfxInstanceIndex, 0, static_cast<int>(this->shipVfxInstances.size()) - 1);
+        const int nextIndex = std::clamp(this->selectedVfxInstanceIndex, 0, static_cast<int>(this->currentShipVfxLayers().size()) - 1);
         this->setSelectedVfxInstanceIndex(nextIndex);
     }
     this->markShipVfxDirty();
@@ -4935,11 +5107,11 @@ void EditorMapVfxScene::toggleSelectedVfxFlipVertical(void)
 
 void EditorMapVfxScene::toggleVfxInstanceFlipHorizontalAtIndex(int instanceIndex)
 {
-    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         return;
     }
-    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+    ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
     if (instance.locked)
     {
         this->statusMessage = "Layer verrouille : FLIP H refuse.";
@@ -4959,11 +5131,11 @@ void EditorMapVfxScene::toggleVfxInstanceFlipHorizontalAtIndex(int instanceIndex
 
 void EditorMapVfxScene::toggleVfxInstanceFlipVerticalAtIndex(int instanceIndex)
 {
-    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         return;
     }
-    ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+    ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
     if (instance.locked)
     {
         this->statusMessage = "Layer verrouille : FLIP V refuse.";
@@ -4983,14 +5155,14 @@ void EditorMapVfxScene::toggleVfxInstanceFlipVerticalAtIndex(int instanceIndex)
 
 void EditorMapVfxScene::toggleSelectedVfxFollowShip(void)
 {
-    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+    if (this->selectedVfxInstanceIndex < 0 || this->selectedVfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
 
-    this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].followShip =
-        !this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].followShip;
+    this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].followShip =
+        !this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].followShip;
 }
 
 void EditorMapVfxScene::adjustSelectedVfxDrawOrder(int delta)
@@ -5006,58 +5178,62 @@ void EditorMapVfxScene::adjustShipDrawOrder(int delta)
 
 void EditorMapVfxScene::normalizeShipVfxDrawOrders(void)
 {
-    this->shipDrawOrder = 0;
-
-    std::vector<size_t> behind;
-    std::vector<size_t> front;
-    behind.reserve(this->shipVfxInstances.size());
-    front.reserve(this->shipVfxInstances.size());
-
-    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+    for (size_t p = 0; p < this->shipVfxLayerPages.size(); ++p)
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[i];
-        const int effectiveOrder = instance.drawOrder;
-        if (effectiveOrder < 0)
-        {
-            behind.push_back(i);
-        }
-        else
-        {
-            front.push_back(i);
-        }
-    }
+        this->shipDrawOrderByPage[p] = 0;
+        std::vector<ShipVfxInstance>& instances = this->shipVfxLayerPages[p];
 
-    std::sort(behind.begin(), behind.end(), [this](size_t a, size_t b) {
-        const ShipVfxInstance& lhs = this->shipVfxInstances[a];
-        const ShipVfxInstance& rhs = this->shipVfxInstances[b];
-        if (lhs.drawOrder != rhs.drawOrder)
-        {
-            return lhs.drawOrder < rhs.drawOrder;
-        }
-        return lhs.instanceId < rhs.instanceId;
-    });
-    std::sort(front.begin(), front.end(), [this](size_t a, size_t b) {
-        const ShipVfxInstance& lhs = this->shipVfxInstances[a];
-        const ShipVfxInstance& rhs = this->shipVfxInstances[b];
-        if (lhs.drawOrder != rhs.drawOrder)
-        {
-            return lhs.drawOrder < rhs.drawOrder;
-        }
-        return lhs.instanceId < rhs.instanceId;
-    });
+        std::vector<size_t> behind;
+        std::vector<size_t> front;
+        behind.reserve(instances.size());
+        front.reserve(instances.size());
 
-    int negativeOrder = -static_cast<int>(behind.size());
-    for (size_t idx : behind)
-    {
-        this->shipVfxInstances[idx].drawOrder = negativeOrder++;
-        this->shipVfxInstances[idx].behindShip = true;
-    }
+        for (size_t i = 0; i < instances.size(); ++i)
+        {
+            const ShipVfxInstance& instance = instances[i];
+            const int effectiveOrder = instance.drawOrder;
+            if (effectiveOrder < 0)
+            {
+                behind.push_back(i);
+            }
+            else
+            {
+                front.push_back(i);
+            }
+        }
 
-    int positiveOrder = 1;
-    for (size_t idx : front)
-    {
-        this->shipVfxInstances[idx].drawOrder = positiveOrder++;
-        this->shipVfxInstances[idx].behindShip = false;
+        std::sort(behind.begin(), behind.end(), [&instances](size_t a, size_t b) {
+            const ShipVfxInstance& lhs = instances[a];
+            const ShipVfxInstance& rhs = instances[b];
+            if (lhs.drawOrder != rhs.drawOrder)
+            {
+                return lhs.drawOrder < rhs.drawOrder;
+            }
+            return lhs.instanceId < rhs.instanceId;
+        });
+        std::sort(front.begin(), front.end(), [&instances](size_t a, size_t b) {
+            const ShipVfxInstance& lhs = instances[a];
+            const ShipVfxInstance& rhs = instances[b];
+            if (lhs.drawOrder != rhs.drawOrder)
+            {
+                return lhs.drawOrder < rhs.drawOrder;
+            }
+            return lhs.instanceId < rhs.instanceId;
+        });
+
+        int negativeOrder = -static_cast<int>(behind.size());
+        for (size_t idx : behind)
+        {
+            instances[idx].drawOrder = negativeOrder++;
+            instances[idx].behindShip = true;
+        }
+
+        int positiveOrder = 1;
+        for (size_t idx : front)
+        {
+            instances[idx].drawOrder = positiveOrder++;
+            instances[idx].behindShip = false;
+        }
     }
 }
 
@@ -5130,7 +5306,7 @@ bool EditorMapVfxScene::handleLayerNameInputKey(
         this->layerNameInputFocused = false;
         if (this->hasSelectedVfxInstance())
         {
-            this->layerNameInput = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
+            this->layerNameInput = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].label;
         }
         return true;
     }
@@ -5387,10 +5563,10 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
 
     std::vector<std::pair<int, RenderItem>> candidates;
-    candidates.reserve(this->shipVfxInstances.size());
-    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+    candidates.reserve(this->currentShipVfxLayers().size());
+    for (size_t i = 0; i < this->currentShipVfxLayers().size(); ++i)
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[i];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[i];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const bool visible = (override != nullptr) ? override->visible : instance.visible;
         if (!visible)
@@ -5417,7 +5593,7 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
             continue;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(candidate.first)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(candidate.first)];
         if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
         {
             continue;
@@ -5474,7 +5650,7 @@ bool EditorMapVfxScene::tryGetScreenTileNearestForSelectedVfxCenter(SDL_Point* o
         shipCenter.y += shipCenterOffsetY;
     }
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
-    const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
     const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
     const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
     const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
@@ -5522,7 +5698,8 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         ? static_cast<int>(std::llround(versionNode->valuedouble))
         : 1;
 
-    this->shipVfxInstances.clear();
+    this->clearAllShipVfxLayerPages();
+    this->initDefaultShipLayerSettingsAllPages();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
 
@@ -5600,7 +5777,10 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         }
     };
 
-    auto pushParsedInstance = [this, &findImportedSfxIndex, &parseDirectionOverride](const cJSON* node) {
+    auto pushParsedInstance = [this, &findImportedSfxIndex, &parseDirectionOverride](
+                                  const cJSON* node,
+                                  std::vector<ShipVfxInstance>& targetVec,
+                                  int shipDrawOrderForPage) {
         if (node == nullptr || !cJSON_IsObject(node))
         {
             return;
@@ -5641,7 +5821,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         if (instance.label.empty())
         {
             int sourceInstanceNumber = 1;
-            for (const ShipVfxInstance& existing : this->shipVfxInstances)
+            for (const ShipVfxInstance& existing : targetVec)
             {
                 if (existing.importedSfxIndex == instance.importedSfxIndex)
                 {
@@ -5677,7 +5857,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         instance.visible = cJSON_IsBool(visibleNode) ? cJSON_IsTrue(visibleNode) : true;
         instance.debugBoundsVisible = cJSON_IsBool(debugBoundsNode) ? cJSON_IsTrue(debugBoundsNode) : true;
         instance.locked = cJSON_IsBool(lockedNode) ? cJSON_IsTrue(lockedNode) : false;
-        instance.behindShip = cJSON_IsBool(behindNode) ? cJSON_IsTrue(behindNode) : (instance.drawOrder < this->shipDrawOrder);
+        instance.behindShip = cJSON_IsBool(behindNode) ? cJSON_IsTrue(behindNode) : (instance.drawOrder < shipDrawOrderForPage);
         instance.followShip = true;
         const cJSON* placementSnapNode = cJSON_GetObjectItemCaseSensitive(node, "placementSnapClickToTile");
         instance.placementSnapClickToTile =
@@ -5707,60 +5887,112 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         }
 
         this->nextVfxInstanceId = (std::max)(this->nextVfxInstanceId, instance.instanceId + 1U);
-        this->shipVfxInstances.push_back(std::move(instance));
+        targetVec.push_back(std::move(instance));
     };
 
-    if (isNewFormat && formatVersion >= 2)
-    {
-        const cJSON* previewNode = cJSON_GetObjectItemCaseSensitive(root, "preview");
-        if (cJSON_IsObject(previewNode))
+    auto applyPreviewFromJsonRoot = [this](const cJSON* r) {
+        const cJSON* previewNode = cJSON_GetObjectItemCaseSensitive(r, "preview");
+        if (!cJSON_IsObject(previewNode))
         {
-            const cJSON* directionNode = cJSON_GetObjectItemCaseSensitive(previewNode, "direction");
-            const cJSON* stateNode = cJSON_GetObjectItemCaseSensitive(previewNode, "state");
-            if (cJSON_IsString(directionNode) && directionNode->valuestring != nullptr)
+            return;
+        }
+        const cJSON* directionNode = cJSON_GetObjectItemCaseSensitive(previewNode, "direction");
+        const cJSON* stateNode = cJSON_GetObjectItemCaseSensitive(previewNode, "state");
+        if (cJSON_IsString(directionNode) && directionNode->valuestring != nullptr)
+        {
+            this->previewDirectionIndex = getDirectionIndexById(directionNode->valuestring);
+            this->applyPreviewDirectionToShip();
+        }
+        if (cJSON_IsString(stateNode) && stateNode->valuestring != nullptr)
+        {
+            this->previewShipStateIndex = (SDL_strcasecmp(stateNode->valuestring, "damaged") == 0) ? 1 : 0;
+            this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+        }
+    };
+
+    auto applyShipLayerToPage = [this](const cJSON* shipLayerNode, int pageIndex) {
+        if (shipLayerNode == nullptr || !cJSON_IsObject(shipLayerNode))
+        {
+            return;
+        }
+        const size_t pi = static_cast<size_t>(std::clamp(pageIndex, 0, 7));
+        const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "drawOrder");
+        const cJSON* shipVisibleNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "visible");
+        const cJSON* shipLockedNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "locked");
+        const cJSON* shipDebugNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "debugBoundsVisible");
+        if (cJSON_IsNumber(shipOrderNode))
+        {
+            this->shipDrawOrderByPage[pi] = static_cast<int>(std::llround(shipOrderNode->valuedouble));
+        }
+        if (cJSON_IsBool(shipVisibleNode))
+        {
+            this->shipLayerVisibleByPage[pi] = cJSON_IsTrue(shipVisibleNode);
+        }
+        if (cJSON_IsBool(shipLockedNode))
+        {
+            this->shipLayerLockedByPage[pi] = cJSON_IsTrue(shipLockedNode);
+        }
+        if (cJSON_IsBool(shipDebugNode))
+        {
+            this->shipDebugBoundsVisibleByPage[pi] = cJSON_IsTrue(shipDebugNode);
+        }
+    };
+
+    if (isNewFormat && formatVersion >= 3)
+    {
+        applyPreviewFromJsonRoot(root);
+
+        const cJSON* pagesNode = cJSON_GetObjectItemCaseSensitive(root, "layerPages");
+        if (cJSON_IsArray(pagesNode))
+        {
+            int pageIdx = 0;
+            cJSON* pageEntry = nullptr;
+            cJSON_ArrayForEach(pageEntry, pagesNode)
             {
-                this->previewDirectionIndex = getDirectionIndexById(directionNode->valuestring);
-                this->applyPreviewDirectionToShip();
-            }
-            if (cJSON_IsString(stateNode) && stateNode->valuestring != nullptr)
-            {
-                this->previewShipStateIndex = (SDL_strcasecmp(stateNode->valuestring, "damaged") == 0) ? 1 : 0;
-                this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
+                if (pageIdx >= kShipVfxLayerPageCount)
+                {
+                    break;
+                }
+                if (cJSON_IsObject(pageEntry))
+                {
+                    const cJSON* pageShipLayer = cJSON_GetObjectItemCaseSensitive(pageEntry, "shipLayer");
+                    applyShipLayerToPage(pageShipLayer, pageIdx);
+
+                    const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(pageIdx)];
+                    std::vector<ShipVfxInstance>& pageVec = this->shipVfxLayerPages[static_cast<size_t>(pageIdx)];
+                    const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(pageEntry, "vfxInstances");
+                    if (cJSON_IsArray(instancesNode))
+                    {
+                        cJSON* instNode = nullptr;
+                        cJSON_ArrayForEach(instNode, instancesNode)
+                        {
+                            pushParsedInstance(instNode, pageVec, shipZ);
+                        }
+                    }
+                }
+                pageIdx += 1;
             }
         }
+    }
+    else if (isNewFormat && formatVersion >= 2)
+    {
+        applyPreviewFromJsonRoot(root);
 
         const cJSON* shipLayerNode = cJSON_GetObjectItemCaseSensitive(root, "shipLayer");
         if (cJSON_IsObject(shipLayerNode))
         {
-            const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "drawOrder");
-            const cJSON* shipVisibleNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "visible");
-            const cJSON* shipLockedNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "locked");
-            const cJSON* shipDebugNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "debugBoundsVisible");
-            if (cJSON_IsNumber(shipOrderNode))
-            {
-                this->shipDrawOrder = static_cast<int>(std::llround(shipOrderNode->valuedouble));
-            }
-            if (cJSON_IsBool(shipVisibleNode))
-            {
-                this->shipLayerVisible = cJSON_IsTrue(shipVisibleNode);
-            }
-            if (cJSON_IsBool(shipLockedNode))
-            {
-                this->shipLayerLocked = cJSON_IsTrue(shipLockedNode);
-            }
-            if (cJSON_IsBool(shipDebugNode))
-            {
-                this->shipDebugBoundsVisible = cJSON_IsTrue(shipDebugNode);
-            }
+            applyShipLayerToPage(shipLayerNode, this->getShipVfxLayerPageKey());
         }
 
+        const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+        std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
         const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
         if (cJSON_IsArray(instancesNode))
         {
             cJSON* node = nullptr;
             cJSON_ArrayForEach(node, instancesNode)
             {
-                pushParsedInstance(node);
+                pushParsedInstance(node, importVec, shipZ);
             }
         }
     }
@@ -5769,22 +6001,24 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(root, "shipDrawOrder");
         if (cJSON_IsNumber(shipOrderNode))
         {
-            this->shipDrawOrder = static_cast<int>(std::llround(shipOrderNode->valuedouble));
+            this->activeShipDrawOrder() = static_cast<int>(std::llround(shipOrderNode->valuedouble));
         }
+        const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+        std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
         const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(root, "vfxInstances");
         if (cJSON_IsArray(instancesNode))
         {
             cJSON* node = nullptr;
             cJSON_ArrayForEach(node, instancesNode)
             {
-                pushParsedInstance(node);
+                pushParsedInstance(node, importVec, shipZ);
             }
         }
     }
 
     cJSON_Delete(root);
     this->normalizeShipVfxDrawOrders();
-    if (!this->shipVfxInstances.empty())
+    if (!this->currentShipVfxLayers().empty())
     {
         this->setSelectedVfxInstanceIndex(0);
     }
@@ -5816,11 +6050,10 @@ bool EditorMapVfxScene::loadShipVfxConfigForSelectedShip(void)
         }
         else
         {
-            this->shipVfxInstances.clear();
+            this->clearAllShipVfxLayerPages();
+            this->initDefaultShipLayerSettingsAllPages();
             this->setSelectedVfxInstanceIndex(-1);
             this->nextVfxInstanceId = 1U;
-            this->shipDrawOrder = 0;
-            this->shipDebugBoundsVisible = true;
             this->shipVfxDirty = false;
             this->loadedShipVfxConfigPath = normalizePathSlashes(configPath);
             return false;
@@ -5873,7 +6106,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
     }
 
     cJSON_AddStringToObject(root, "format", "ship_vfx_config");
-    cJSON_AddNumberToObject(root, "version", 2);
+    cJSON_AddNumberToObject(root, "version", 3);
     cJSON_AddStringToObject(root, "mode", "ship_vfx");
 
     cJSON* shipNode = cJSON_CreateObject();
@@ -5887,18 +6120,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
     cJSON_AddStringToObject(previewNode, "direction", getDirectionIdByIndex(this->previewDirectionIndex));
     cJSON_AddStringToObject(previewNode, "state", (this->previewShipStateIndex == 1) ? "damaged" : "healthy");
 
-    cJSON* shipLayerNode = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, "shipLayer", shipLayerNode);
-    cJSON_AddNumberToObject(shipLayerNode, "drawOrder", this->shipDrawOrder);
-    cJSON_AddBoolToObject(shipLayerNode, "visible", this->shipLayerVisible);
-    cJSON_AddBoolToObject(shipLayerNode, "locked", this->shipLayerLocked);
-    cJSON_AddBoolToObject(shipLayerNode, "debugBoundsVisible", this->shipDebugBoundsVisible);
-
-    cJSON* instancesArray = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "vfxInstances", instancesArray);
-
-    for (const ShipVfxInstance& instance : this->shipVfxInstances)
-    {
+    auto addVfxInstanceJson = [](cJSON* instancesArray, const ShipVfxInstance& instance) {
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "instanceId", static_cast<double>(instance.instanceId));
         cJSON_AddStringToObject(item, "label", instance.label.c_str());
@@ -5937,6 +6159,28 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         }
 
         cJSON_AddItemToArray(instancesArray, item);
+    };
+
+    cJSON* layerPagesArray = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "layerPages", layerPagesArray);
+    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    {
+        cJSON* pageObj = cJSON_CreateObject();
+        cJSON_AddItemToArray(layerPagesArray, pageObj);
+
+        cJSON* shipLayerPage = cJSON_CreateObject();
+        cJSON_AddItemToObject(pageObj, "shipLayer", shipLayerPage);
+        cJSON_AddNumberToObject(shipLayerPage, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
+        cJSON_AddBoolToObject(shipLayerPage, "visible", this->shipLayerVisibleByPage[static_cast<size_t>(p)]);
+        cJSON_AddBoolToObject(shipLayerPage, "locked", this->shipLayerLockedByPage[static_cast<size_t>(p)]);
+        cJSON_AddBoolToObject(shipLayerPage, "debugBoundsVisible", this->shipDebugBoundsVisibleByPage[static_cast<size_t>(p)]);
+
+        cJSON* instancesArray = cJSON_CreateArray();
+        cJSON_AddItemToObject(pageObj, "vfxInstances", instancesArray);
+        for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+        {
+            addVfxInstanceJson(instancesArray, instance);
+        }
     }
 
     char* jsonText = cJSON_Print(root);
@@ -6589,14 +6833,14 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
 
     std::vector<RenderItem> items;
-    items.reserve(this->shipVfxInstances.size() + 1U);
-    if (this->shipLayerVisible)
+    items.reserve(this->currentShipVfxLayers().size() + 1U);
+    if (this->activeShipLayerVisible())
     {
-        items.push_back(RenderItem{true, this->shipDrawOrder, 0U, -1});
+        items.push_back(RenderItem{true, this->activeShipDrawOrder(), 0U, -1});
     }
-    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+    for (size_t i = 0; i < this->currentShipVfxLayers().size(); ++i)
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[i];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[i];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const bool visible = (override != nullptr) ? override->visible : instance.visible;
         if (!visible)
@@ -6626,7 +6870,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
             continue;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(item.instanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(item.instanceIndex)];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const float resolvedOffsetX = (override != nullptr) ? override->offsetX : instance.offsetX;
         const float resolvedOffsetY = (override != nullptr) ? override->offsetY : instance.offsetY;
@@ -6682,7 +6926,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
             resolvedFlipV);
     }
 
-    if (this->shipLayerVisible && this->shipDebugBoundsVisible && this->previewShipLoaded)
+    if (this->activeShipLayerVisible() && this->activeShipDebugBoundsVisible() && this->previewShipLoaded)
     {
         float shipSpriteW = 0.0f;
         float shipSpriteH = 0.0f;
@@ -6702,9 +6946,9 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
         }
     }
 
-    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->shipVfxInstances.size()))
+    if (this->selectedVfxInstanceIndex >= 0 && this->selectedVfxInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
         if (instance.debugBoundsVisible)
         {
             const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
@@ -6810,12 +7054,12 @@ void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
 void EditorMapVfxScene::drawShipVfxTilePlacementGhost(void) const
 {
     if (this->vfxDragActive || !this->previewShipLoaded || this->selectedVfxInstanceIndex < 0 ||
-        this->selectedVfxInstanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+        this->selectedVfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         return;
     }
 
-    const ShipVfxInstance& ghostInst = this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)];
+    const ShipVfxInstance& ghostInst = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
     if (!ghostInst.placementSnapClickToTile || ghostInst.locked)
     {
         return;
@@ -7291,11 +7535,11 @@ std::vector<int> EditorMapVfxScene::getOrderedVfxInstanceIndicesForLayerPanel(vo
     };
 
     std::vector<LayerEntry> entries;
-    entries.reserve(this->shipVfxInstances.size() + 1U);
-    entries.push_back(LayerEntry{-1, this->shipDrawOrder, 0U});
-    for (size_t i = 0; i < this->shipVfxInstances.size(); ++i)
+    entries.reserve(this->currentShipVfxLayers().size() + 1U);
+    entries.push_back(LayerEntry{-1, this->activeShipDrawOrder(), 0U});
+    for (size_t i = 0; i < this->currentShipVfxLayers().size(); ++i)
     {
-        const ShipVfxInstance& instance = this->shipVfxInstances[i];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[i];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const int drawOrder = (override != nullptr) ? override->drawOrder : instance.drawOrder;
         entries.push_back(LayerEntry{static_cast<int>(i), drawOrder, instance.instanceId});
@@ -7364,6 +7608,8 @@ void EditorMapVfxScene::drawHud(void) const
             this->buttonPreviewIsoGridRect,
             "GRILLE ISO 20x20",
             this->previewIsoGridVisible);
+        this->drawToolbarButton(this->buttonShipVfxZoomMinusRect, "ZOOM -", false);
+        this->drawToolbarButton(this->buttonShipVfxZoomPlusRect, "ZOOM +", false);
 
         std::vector<std::string> shipLabels;
         shipLabels.reserve(this->importedShips.size());
@@ -7474,12 +7720,13 @@ void EditorMapVfxScene::drawHud(void) const
         SDL_snprintf(
             infoBuffer,
             sizeof(infoBuffer),
-            "Mode Ship / VFX | Ship: %s | Direction: %s | State: %s | Instances: %d | ShipOrder: %d | Dirty: %s | Ocean: %s",
+            "Mode Ship / VFX | Ship: %s | Direction: %s | State: %s | Zoom: %.2f | Instances: %d | ShipOrder: %d | Dirty: %s | Ocean: %s",
             shipName,
             this->getPreviewDirectionLabel(),
             this->getPreviewShipStateLabel(),
-            static_cast<int>(this->shipVfxInstances.size()),
-            this->shipDrawOrder,
+            this->shipVfxPreviewZoomFactor,
+            static_cast<int>(this->currentShipVfxLayers().size()),
+            this->activeShipDrawOrder(),
             this->shipVfxDirty ? "YES" : "NO",
             oceanLabel);
     }
@@ -7646,6 +7893,41 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
     const float rowHeight = rowsHeight / static_cast<float>(kVisibleListRows);
     const float rowsLeftX = this->layerListRect.x + panelPadding;
     const float rowsWidth = this->layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
+
+    const ShipVfxLayerPagePickerLayout pagePickLayout =
+        buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, this->shipVfxLayerPagePickerOpen);
+
+    if (this->shipVfxLayerPagePickerOpen)
+    {
+        for (int pi = 0; pi < kShipVfxLayerPageCount; ++pi)
+        {
+            if (this->pointInRect(x, y, pagePickLayout.pageRowRects[pi]))
+            {
+                this->applyShipVfxLayerPageIndex(pi);
+                char buf[180] = {};
+                shipVfxLayerPageLabelUtf8(pi, buf, sizeof(buf));
+                this->statusMessage = std::string("Page calques: ") + buf;
+                return true;
+            }
+        }
+        if (this->pointInRect(x, y, pagePickLayout.pageButtonRect))
+        {
+            this->shipVfxLayerPagePickerOpen = false;
+            return true;
+        }
+        if (!this->pointInRect(x, y, pagePickLayout.popupRect))
+        {
+            this->shipVfxLayerPagePickerOpen = false;
+            return true;
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, pagePickLayout.pageButtonRect))
+    {
+        this->shipVfxLayerPagePickerOpen = true;
+        return true;
+    }
 
     SDL_FRect scrollTrackRect{};
     scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
@@ -7847,7 +8129,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             this->statusMessage = "ROT : disponible pour les layers VFX (pas SHIP).";
             return true;
         }
-        const ShipVfxInstance& rotTarget = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        const ShipVfxInstance& rotTarget = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         if (rotTarget.locked)
         {
             this->vfxRotationDialActive = false;
@@ -7878,7 +8160,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             this->statusMessage = "Placement TILE/PIXEL : option des layers VFX uniquement (SHIP affiche -).";
             return true;
         }
-        ShipVfxInstance& placeInstance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        ShipVfxInstance& placeInstance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         placeInstance.placementSnapClickToTile = !placeInstance.placementSnapClickToTile;
         this->statusMessage = placeInstance.placementSnapClickToTile
             ? "Layer: TILE — fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
@@ -7891,14 +8173,14 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         selectClickedRow();
         if (clickedIsShipRow || clickedInstanceIndex < 0)
         {
-            this->shipDebugBoundsVisible = !this->shipDebugBoundsVisible;
+            this->activeShipDebugBoundsVisible() = !this->activeShipDebugBoundsVisible();
             this->markShipVfxDirty();
             clearLayerDragState();
-            this->statusMessage = this->shipDebugBoundsVisible ? "DEBUG SHIP active." : "DEBUG SHIP desactivee.";
+            this->statusMessage = this->activeShipDebugBoundsVisible() ? "DEBUG SHIP active." : "DEBUG SHIP desactivee.";
             return true;
         }
 
-        ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         instance.debugBoundsVisible = !instance.debugBoundsVisible;
         this->markShipVfxDirty();
         clearLayerDragState();
@@ -7916,7 +8198,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             return true;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         if (instance.locked)
         {
             clearLayerDragState();
@@ -7939,7 +8221,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             return true;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         if (instance.locked)
         {
             clearLayerDragState();
@@ -7962,7 +8244,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             return true;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         if (instance.locked)
         {
             clearLayerDragState();
@@ -7980,14 +8262,14 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         selectClickedRow();
         if (clickedIsShipRow)
         {
-            this->shipLayerVisible = !this->shipLayerVisible;
+            this->activeShipLayerVisible() = !this->activeShipLayerVisible();
             this->markShipVfxDirty();
         }
         else
         {
             if (clickedInstanceIndex >= 0)
             {
-                ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+                ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
                 DirectionOverride* override = this->getEditableDirectionOverride(&instance);
                 if (override != nullptr)
                 {
@@ -8009,17 +8291,17 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         selectClickedRow();
         if (clickedIsShipRow)
         {
-            this->shipLayerLocked = !this->shipLayerLocked;
+            this->activeShipLayerLocked() = !this->activeShipLayerLocked();
             this->markShipVfxDirty();
             clearLayerDragState();
-            this->statusMessage = this->shipLayerLocked ? "SHIP lock active." : "SHIP lock desactive.";
+            this->statusMessage = this->activeShipLayerLocked() ? "SHIP lock active." : "SHIP lock desactive.";
             return true;
         }
         else
         {
             if (clickedInstanceIndex >= 0)
             {
-                ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+                ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
                 instance.locked = !instance.locked;
                 this->markShipVfxDirty();
             }
@@ -8033,14 +8315,14 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
     bool canDragRow = true;
     if (clickedIsShipRow)
     {
-        canDragRow = !this->shipLayerLocked;
+        canDragRow = !this->activeShipLayerLocked();
         this->statusMessage = "Layer ship selectionne.";
     }
     else
     {
         if (clickedInstanceIndex >= 0)
         {
-            const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(clickedInstanceIndex)];
+            const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
             canDragRow = !instance.locked;
         }
         this->statusMessage = "Layer VFX selectionne.";
@@ -8183,6 +8465,16 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
                 : "Grille isometrique debug masquee.";
             return true;
         }
+        if (this->pointInRect(x, y, this->buttonShipVfxZoomMinusRect))
+        {
+            this->adjustShipVfxPreviewZoom(-0.05f);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonShipVfxZoomPlusRect))
+        {
+            this->adjustShipVfxPreviewZoom(0.05f);
+            return true;
+        }
     }
 
     if (this->editorMode == EditorMode::LOOSE_SPRITES)
@@ -8310,12 +8602,12 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         {
             return false;
         }
-        if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->shipVfxInstances.size()))
+        if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
         {
             return false;
         }
 
-        const ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(instanceIndex)];
+        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const bool visible = (override != nullptr) ? override->visible : instance.visible;
         if (!visible)
@@ -8365,7 +8657,7 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         {
             this->setSelectedVfxInstanceIndex(hitIndex);
             if (this->hasSelectedVfxInstance() &&
-                this->shipVfxInstances[static_cast<size_t>(this->selectedVfxInstanceIndex)].locked)
+                this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)].locked)
             {
                 this->statusMessage = "Instance verrouillee: suppression refusee.";
             }
@@ -8414,7 +8706,7 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         if (hitIndex >= 0)
         {
             this->shipLayerSelected = false;
-            ShipVfxInstance& instance = this->shipVfxInstances[static_cast<size_t>(hitIndex)];
+            ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(hitIndex)];
             const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
             this->vfxDragStartMouseX = x;
             this->vfxDragStartMouseY = y;
@@ -8732,7 +9024,7 @@ void EditorMapVfxScene::update(double dt)
             &this->sfxListScrollDragGrabOffsetY);
         this->handleListPanelScrollDragFromMouse(
             this->layerListRect,
-            static_cast<int>(this->shipVfxInstances.size()) + 1,
+            static_cast<int>(this->currentShipVfxLayers().size()) + 1,
             &this->layerListScrollOffset,
             &this->layerListScrollDragActive,
             &this->layerListScrollDragGrabOffsetY);
@@ -8846,6 +9138,13 @@ void EditorMapVfxScene::update(double dt)
             kLoosePreviewZoomMin,
             kLoosePreviewZoomMax);
     }
+    if (this->editorMode == EditorMode::SHIP_VFX)
+    {
+        this->shipVfxPreviewZoomFactor = std::clamp(
+            camera.getZoomFactor(),
+            kLoosePreviewZoomMin,
+            kLoosePreviewZoomMax);
+    }
     camera.update(map, map.rect);
 }
 
@@ -8937,6 +9236,11 @@ void EditorMapVfxScene::keypressed(
         {
             this->vfxRotationDialActive = false;
             this->statusMessage = "Mode ROT desactive.";
+            return;
+        }
+        if (this->shipVfxLayerPagePickerOpen)
+        {
+            this->shipVfxLayerPagePickerOpen = false;
             return;
         }
         this->layerNameInputFocused = false;
@@ -9080,6 +9384,28 @@ void EditorMapVfxScene::keypressed(
         if (!isrepeat && scancode == SDL_SCANCODE_C)
         {
             this->centerSelectedVfxInstance();
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_PAGEUP)
+        {
+            this->adjustShipVfxPreviewZoom(0.05f);
+            return;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_PAGEDOWN)
+        {
+            this->adjustShipVfxPreviewZoom(-0.05f);
+            return;
+        }
+        if (!isrepeat &&
+            (scancode == SDL_SCANCODE_MINUS || scancode == SDL_SCANCODE_KP_MINUS))
+        {
+            this->adjustShipVfxPreviewZoom(-0.05f);
+            return;
+        }
+        if (!isrepeat &&
+            (scancode == SDL_SCANCODE_EQUALS || scancode == SDL_SCANCODE_KP_PLUS))
+        {
+            this->adjustShipVfxPreviewZoom(0.05f);
             return;
         }
         if (!isrepeat && (scancode == SDL_SCANCODE_DELETE || scancode == SDL_SCANCODE_BACKSPACE))
@@ -9366,6 +9692,11 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        if (button == RC2D_MOUSE_BUTTON_LEFT && this->shipVfxLayerPagePickerOpen &&
+            !this->pointInRect(x, y, this->layerListRect))
+        {
+            this->shipVfxLayerPagePickerOpen = false;
+        }
         this->handlePreviewClick(x, y, button);
         return;
     }
@@ -9458,6 +9789,7 @@ void EditorMapVfxScene::mousewheelmoved(
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        const Map& wheelMap = GetCurrentMap();
         const int layerItemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
         // Ordre aligne sur mousepressed : ignores, calques, puis listes navire / VFX.
         if (scrollInvalidPanel(this->invalidVfxListRect, static_cast<int>(this->invalidVfxFolders.size()), &this->invalidVfxListScrollOffset))
@@ -9479,6 +9811,11 @@ void EditorMapVfxScene::mousewheelmoved(
         if (scrollListPanel(this->sfxListRect, static_cast<int>(this->importedSfx.size()), &this->sfxListScrollOffset))
         {
             return;
+        }
+        if (this->pointInRect(wheelMx, wheelMy, wheelMap.rect))
+        {
+            constexpr float kShipVfxWheelZoomStep = 0.05f;
+            this->adjustShipVfxPreviewZoom(delta > 0 ? kShipVfxWheelZoomStep : -kShipVfxWheelZoomStep);
         }
         return;
     }
