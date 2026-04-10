@@ -3020,7 +3020,7 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     const ImportedLooseFolder& folder = this->importedLooseFolders[static_cast<size_t>(this->selectedLooseFolderIndex)];
     const int clampedPercent = std::clamp(this->looseScalePercent, kLooseScaleMinPercent, kLooseScaleMaxPercent);
     const std::string exportPrefix = "vfx-" + animationSlug;
-    const std::string exportSpritesFolderName = exportPrefix + "-sprites-" + std::to_string(clampedPercent) + "-percentage";
+    const std::string exportSpritesFolderName = exportPrefix + "-sprites-original-downscale";
     const std::filesystem::path outputFolder =
         std::filesystem::path(absoluteFolderPath) / exportPrefix;
     const std::filesystem::path outputSpritesFolder =
@@ -3035,7 +3035,6 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
 
     struct ExportedScaledFrame {
         int index;
-        std::string fileName;
         int widthPx;
         int heightPx;
         int sheetX;
@@ -3139,7 +3138,6 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
 
         ExportedScaledFrame frame{};
         frame.index = static_cast<int>(orderedIndex);
-        frame.fileName = sprite.fileName;
         frame.widthPx = dstW;
         frame.heightPx = dstH;
         frame.sheetX = 0;
@@ -3459,7 +3457,6 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     {
         cJSON* item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "index", frame.index);
-        cJSON_AddStringToObject(item, "fileName", frame.fileName.c_str());
         cJSON_AddNumberToObject(item, "x", frame.sheetX);
         cJSON_AddNumberToObject(item, "y", frame.sheetY);
         cJSON_AddNumberToObject(item, "w", frame.widthPx);
