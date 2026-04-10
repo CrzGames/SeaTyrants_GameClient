@@ -752,6 +752,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       looseScalePercent(100),
       loosePreviewZoomFactor(kLoosePreviewZoomDefault),
       loosePreviewMode(LoosePreviewMode::CENTER_SPRITESHEET),
+      loosePreviewPlacementSnapToTile(true),
       loosePreviewPlacements{},
       nextLoosePreviewPlacementId(1U),
       loosePreviewFpsInput("12"),
@@ -814,6 +815,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonLoosePreviewModeRect{},
       buttonLoosePreviewFpsInputRect{},
       buttonLooseClearAllVfxRect{},
+      buttonLoosePreviewPlacementSnapRect{},
       shipListRect{},
       sfxListRect{},
       looseListRect{},
@@ -944,6 +946,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->looseScalePercent = 100;
     this->loosePreviewZoomFactor = kLoosePreviewZoomDefault;
     this->loosePreviewMode = LoosePreviewMode::CENTER_SPRITESHEET;
+    this->loosePreviewPlacementSnapToTile = true;
     this->loosePreviewPlacements.clear();
     this->nextLoosePreviewPlacementId = 1U;
     this->loosePreviewFpsInput = "12";
@@ -1683,6 +1686,14 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     setNextButton(&this->buttonLoosePreviewModeRect, &looseRow2X, row2Y, 280.0f);
     setNextButton(&this->buttonLoosePreviewFpsInputRect, &looseRow2X, row2Y, 240.0f);
     setNextButton(&this->buttonLooseClearAllVfxRect, &looseRow2X, row2Y, 170.0f);
+    if (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
+    {
+        setNextButton(&this->buttonLoosePreviewPlacementSnapRect, &looseRow2X, row2Y, 230.0f);
+    }
+    else
+    {
+        this->buttonLoosePreviewPlacementSnapRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    }
 
     auto setPrevButtonFromRightWithGap = [h](SDL_FRect* rect, float* rightX, float y, float w, float customGap) {
         *rightX -= w;
@@ -6550,6 +6561,24 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     const int frameCount = static_cast<int>(folder.sprites.size());
 
+    const bool useUnionCrop =
+        folder.looseUnionCropReady && folder.looseUnionCropW > 0 && folder.looseUnionCropH > 0;
+    float layoutRefW = 1.0f;
+    float layoutRefH = 1.0f;
+    if (useUnionCrop)
+    {
+        layoutRefW = static_cast<float>(folder.looseUnionCropW);
+        layoutRefH = static_cast<float>(folder.looseUnionCropH);
+    }
+    else
+    {
+        for (const ImportedLooseSprite& s : folder.sprites)
+        {
+            layoutRefW = (std::max)(layoutRefW, s.widthPx);
+            layoutRefH = (std::max)(layoutRefH, s.heightPx);
+        }
+    }
+
     auto drawAnimatedAtTile = [&](float tileX, float tileY, float fps) {
         if (frameCount <= 0)
         {
@@ -6562,17 +6591,56 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
         RC2D_Image* spriteImage = const_cast<RC2D_Image*>(&sprite.image);
 
         const SDL_FPoint screenPos = map.tileToScreenCenterFloat(tileX, tileY);
-        const float drawW = sprite.widthPx * previewScale;
-        const float drawH = sprite.heightPx * previewScale;
-        const float drawX = screenPos.x - (drawW * 0.5f);
-        const float drawY = screenPos.y - (drawH * 0.5f);
 
-        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-            spriteImage,
-            0.0f,
-            0.0f,
-            sprite.widthPx,
-            sprite.heightPx);
+        // Boite de reference (union rognee ou max des tailles), centree sur la tuile : meme logique que le
+        // mode spritesheet, pour que le pourcentage ne deplace pas l'anim (centre stable) et que les frames
+        // ne sautent pas quand les PNG ont des tailles differentes.
+        const float boxLeft = screenPos.x - (layoutRefW * previewScale) * 0.5f;
+        const float boxTop = screenPos.y - (layoutRefH * previewScale) * 0.5f;
+
+        float subX = 0.0f;
+        float subY = 0.0f;
+        float subW = sprite.widthPx;
+        float subH = sprite.heightPx;
+        if (useUnionCrop)
+        {
+            const int cropX = folder.looseUnionCropX;
+            const int cropY = folder.looseUnionCropY;
+            const int cropW = folder.looseUnionCropW;
+            const int cropH = folder.looseUnionCropH;
+            const int tw = static_cast<int>(std::lround(sprite.widthPx));
+            const int th = static_cast<int>(std::lround(sprite.heightPx));
+            const int interX1 = (std::max)(cropX, 0);
+            const int interY1 = (std::max)(cropY, 0);
+            const int interX2 = (std::min)(cropX + cropW, tw);
+            const int interY2 = (std::min)(cropY + cropH, th);
+            if (interX2 <= interX1 || interY2 <= interY1)
+            {
+                return;
+            }
+            subX = static_cast<float>(interX1);
+            subY = static_cast<float>(interY1);
+            subW = static_cast<float>(interX2 - interX1);
+            subH = static_cast<float>(interY2 - interY1);
+        }
+
+        float drawX = 0.0f;
+        float drawY = 0.0f;
+        if (useUnionCrop)
+        {
+            const int cropX = folder.looseUnionCropX;
+            const int cropY = folder.looseUnionCropY;
+            drawX = boxLeft + (subX - static_cast<float>(cropX)) * previewScale;
+            drawY = boxTop + (subY - static_cast<float>(cropY)) * previewScale;
+        }
+        else
+        {
+            drawX = boxLeft + ((layoutRefW - sprite.widthPx) * previewScale) * 0.5f;
+            drawY = boxTop + ((layoutRefH - sprite.heightPx) * previewScale) * 0.5f;
+        }
+
+        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(spriteImage, subX, subY, subW, subH);
+
         rc2d_graphics_drawQuad(
             spriteImage,
             &sourceQuad,
@@ -6596,11 +6664,19 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     float mouseY = 0.0f;
     if (this->getMouseRenderPosition(&mouseX, &mouseY) && this->pointInRect(mouseX, mouseY, map.rect))
     {
-        const SDL_Point hoveredTile = map.screenToTileNearest(mouseX, mouseY);
-        drawAnimatedAtTile(
-            static_cast<float>(hoveredTile.x),
-            static_cast<float>(hoveredTile.y),
-            this->getLoosePreviewFpsOrDefault());
+        if (this->loosePreviewPlacementSnapToTile)
+        {
+            const SDL_Point hoveredTile = map.screenToTileNearest(mouseX, mouseY);
+            drawAnimatedAtTile(
+                static_cast<float>(hoveredTile.x),
+                static_cast<float>(hoveredTile.y),
+                this->getLoosePreviewFpsOrDefault());
+        }
+        else
+        {
+            const SDL_FPoint hoveredTileF = map.screenToTile(mouseX, mouseY);
+            drawAnimatedAtTile(hoveredTileF.x, hoveredTileF.y, this->getLoosePreviewFpsOrDefault());
+        }
     }
 }
 
@@ -6776,6 +6852,10 @@ void EditorMapVfxScene::drawHud(void) const
             rc2d_graphics_destroyText(&fpsInputText);
 
             this->drawToolbarButton(this->buttonLooseClearAllVfxRect, "CLEAR ALL VFX", false);
+            this->drawToolbarButton(
+                this->buttonLoosePreviewPlacementSnapRect,
+                this->loosePreviewPlacementSnapToTile ? "PLACEMENT: TUILE" : "PLACEMENT: SOUS-PIXEL",
+                false);
         }
 
         std::vector<std::string> looseLabels;
@@ -7485,6 +7565,16 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->statusMessage = "Toutes les instances preview VFX ont ete supprimees.";
             return true;
         }
+        if (this->pointInRect(x, y, this->buttonLoosePreviewPlacementSnapRect) &&
+            this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
+        {
+            this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewPlacementSnapToTile = !this->loosePreviewPlacementSnapToTile;
+            this->statusMessage = this->loosePreviewPlacementSnapToTile
+                ? "Preview VFX: ancrage centre tuile (sous le curseur)."
+                : "Preview VFX: ancrage sous-pixel (position exacte du curseur).";
+            return true;
+        }
         if (this->pointInRect(x, y, this->buttonLooseScaleMinusRect))
         {
             this->loosePreviewFpsInputFocused = false;
@@ -7676,11 +7766,20 @@ bool EditorMapVfxScene::handleLoosePlacementPreviewClick(float x, float y, RC2D_
             return true;
         }
 
-        const SDL_Point tile = map.screenToTileNearest(x, y);
         LoosePreviewPlacement placement{};
         placement.instanceId = this->nextLoosePreviewPlacementId++;
-        placement.tileX = static_cast<float>(tile.x);
-        placement.tileY = static_cast<float>(tile.y);
+        if (this->loosePreviewPlacementSnapToTile)
+        {
+            const SDL_Point tile = map.screenToTileNearest(x, y);
+            placement.tileX = static_cast<float>(tile.x);
+            placement.tileY = static_cast<float>(tile.y);
+        }
+        else
+        {
+            const SDL_FPoint tileF = map.screenToTile(x, y);
+            placement.tileX = tileF.x;
+            placement.tileY = tileF.y;
+        }
         placement.fps = this->getLoosePreviewFpsOrDefault();
         this->loosePreviewPlacements.push_back(placement);
 

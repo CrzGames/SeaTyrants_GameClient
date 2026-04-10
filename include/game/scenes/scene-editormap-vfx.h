@@ -191,6 +191,8 @@ private:
     int looseScalePercent;
     float loosePreviewZoomFactor;
     LoosePreviewMode loosePreviewMode;
+    /** Si true, le clic preview ancre sur le centre de la tuile la plus proche ; sinon tuile flottante (sous-pixel). */
+    bool loosePreviewPlacementSnapToTile;
     std::vector<LoosePreviewPlacement> loosePreviewPlacements;
     uint32_t nextLoosePreviewPlacementId;
     std::string loosePreviewFpsInput;
@@ -277,6 +279,7 @@ private:
     SDL_FRect buttonLoosePreviewModeRect;
     SDL_FRect buttonLoosePreviewFpsInputRect;
     SDL_FRect buttonLooseClearAllVfxRect;
+    SDL_FRect buttonLoosePreviewPlacementSnapRect;
 
     SDL_FRect shipListRect;
     SDL_FRect sfxListRect;
