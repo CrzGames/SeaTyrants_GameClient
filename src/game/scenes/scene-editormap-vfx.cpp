@@ -560,6 +560,94 @@ static bool tryParseCustomSpritesheetJson(
     outResult->frames = std::move(parsedFrames);
     return true;
 }
+
+static void unionOpaquePixelBounds(SDL_Surface* surface, int* minX, int* minY, int* maxX, int* maxY, bool* anyOpaque)
+{
+    if (surface == nullptr || minX == nullptr || minY == nullptr || maxX == nullptr || maxY == nullptr || anyOpaque == nullptr)
+    {
+        return;
+    }
+
+    const int w = surface->w;
+    const int h = surface->h;
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            Uint8 r = 0;
+            Uint8 g = 0;
+            Uint8 b = 0;
+            Uint8 a = 0;
+            SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a);
+            if (a == 0)
+            {
+                continue;
+            }
+            *anyOpaque = true;
+            *minX = (std::min)(*minX, x);
+            *minY = (std::min)(*minY, y);
+            *maxX = (std::max)(*maxX, x);
+            *maxY = (std::max)(*maxY, y);
+        }
+    }
+}
+
+static SDL_Surface* createCroppedSurfaceFromSource(
+    SDL_Surface* source,
+    int cropX,
+    int cropY,
+    int cropW,
+    int cropH)
+{
+    if (source == nullptr || cropW <= 0 || cropH <= 0)
+    {
+        return nullptr;
+    }
+
+    SDL_Surface* out = SDL_CreateSurface(cropW, cropH, SDL_PIXELFORMAT_RGBA32);
+    if (out == nullptr)
+    {
+        return nullptr;
+    }
+
+    const int srcW = source->w;
+    const int srcH = source->h;
+    for (int cy = 0; cy < cropH; ++cy)
+    {
+        for (int cx = 0; cx < cropW; ++cx)
+        {
+            const int sx = cropX + cx;
+            const int sy = cropY + cy;
+            if (sx < 0 || sy < 0 || sx >= srcW || sy >= srcH)
+            {
+                SDL_WriteSurfacePixel(out, cx, cy, 0, 0, 0, 0);
+            }
+            else
+            {
+                Uint8 r = 0;
+                Uint8 g = 0;
+                Uint8 b = 0;
+                Uint8 a = 0;
+                SDL_ReadSurfacePixel(source, sx, sy, &r, &g, &b, &a);
+                SDL_WriteSurfacePixel(out, cx, cy, r, g, b, a);
+            }
+        }
+    }
+
+    return out;
+}
+
+static void destroySurfaceVector(std::vector<SDL_Surface*>& surfaces)
+{
+    for (SDL_Surface* s : surfaces)
+    {
+        if (s != nullptr)
+        {
+            SDL_DestroySurface(s);
+        }
+    }
+    surfaces.clear();
+}
 } // namespace
 
 EditorMapVfxScene* EditorMapVfxScene::activeInstance = nullptr;
@@ -5377,7 +5465,7 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     const ImportedLooseFolder& folder = this->importedLooseFolders[static_cast<size_t>(this->selectedLooseFolderIndex)];
     const int clampedPercent = std::clamp(this->looseScalePercent, kLooseScaleMinPercent, kLooseScaleMaxPercent);
     const std::string exportPrefix = "vfx-" + animationSlug;
-    const std::string exportSpritesFolderName = exportPrefix + "-sprites-original-downscale";
+    const std::string exportSpritesFolderName = exportPrefix + "-sprites";
     const std::filesystem::path outputFolder =
         std::filesystem::path(absoluteFolderPath) / exportPrefix;
     const std::filesystem::path outputSpritesFolder =
@@ -5443,6 +5531,8 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         return lhsName < rhsName;
     });
 
+    std::vector<SDL_Surface*> sourceSurfaces;
+    sourceSurfaces.reserve(orderedSpriteIndices.size());
     for (size_t orderedIndex = 0; orderedIndex < orderedSpriteIndices.size(); ++orderedIndex)
     {
         const ImportedLooseSprite& sprite =
@@ -5450,19 +5540,80 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
         if (src.sdl_surface == nullptr)
         {
+            destroySurfaceVector(sourceSurfaces);
             cleanupExportedFrames();
             this->statusMessage = "Sprite source manquant pour export.";
             return false;
         }
+        sourceSurfaces.push_back(src.sdl_surface);
+        src.sdl_surface = nullptr;
+        rc2d_graphics_freeImageData(&src);
+    }
 
-        const int srcW = src.sdl_surface->w;
-        const int srcH = src.sdl_surface->h;
+    int maxSourceW = 1;
+    int maxSourceH = 1;
+    for (SDL_Surface* surface : sourceSurfaces)
+    {
+        if (surface != nullptr)
+        {
+            maxSourceW = (std::max)(maxSourceW, surface->w);
+            maxSourceH = (std::max)(maxSourceH, surface->h);
+        }
+    }
+
+    int unionMinX = maxSourceW;
+    int unionMinY = maxSourceH;
+    int unionMaxX = -1;
+    int unionMaxY = -1;
+    bool anyOpaquePixel = false;
+    for (SDL_Surface* surface : sourceSurfaces)
+    {
+        unionOpaquePixelBounds(surface, &unionMinX, &unionMinY, &unionMaxX, &unionMaxY, &anyOpaquePixel);
+    }
+
+    int cropX = 0;
+    int cropY = 0;
+    int cropW = maxSourceW;
+    int cropH = maxSourceH;
+    if (anyOpaquePixel && unionMaxX >= unionMinX && unionMaxY >= unionMinY)
+    {
+        cropX = unionMinX;
+        cropY = unionMinY;
+        cropW = unionMaxX - unionMinX + 1;
+        cropH = unionMaxY - unionMinY + 1;
+    }
+
+    for (size_t orderedIndex = 0; orderedIndex < orderedSpriteIndices.size(); ++orderedIndex)
+    {
+        const ImportedLooseSprite& sprite =
+            folder.sprites[orderedSpriteIndices[orderedIndex]];
+        SDL_Surface* rawSource = sourceSurfaces[orderedIndex];
+        if (rawSource == nullptr)
+        {
+            destroySurfaceVector(sourceSurfaces);
+            cleanupExportedFrames();
+            this->statusMessage = "Sprite source interne manquant pour export.";
+            return false;
+        }
+
+        SDL_Surface* cropped = createCroppedSurfaceFromSource(rawSource, cropX, cropY, cropW, cropH);
+        if (cropped == nullptr)
+        {
+            destroySurfaceVector(sourceSurfaces);
+            cleanupExportedFrames();
+            this->statusMessage = "Rognage export KO.";
+            return false;
+        }
+
+        const int srcW = cropW;
+        const int srcH = cropH;
         const int dstW = (std::max)(1, static_cast<int>(std::lround((static_cast<double>(srcW) * clampedPercent) / 100.0)));
         const int dstH = (std::max)(1, static_cast<int>(std::lround((static_cast<double>(srcH) * clampedPercent) / 100.0)));
         SDL_Surface* dst = SDL_CreateSurface(dstW, dstH, SDL_PIXELFORMAT_RGBA32);
         if (dst == nullptr)
         {
-            rc2d_graphics_freeImageData(&src);
+            SDL_DestroySurface(cropped);
+            destroySurfaceVector(sourceSurfaces);
             cleanupExportedFrames();
             this->statusMessage = "Creation surface export KO.";
             return false;
@@ -5478,16 +5629,17 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
                 Uint8 g = 0;
                 Uint8 b = 0;
                 Uint8 a = 0;
-                SDL_ReadSurfacePixel(src.sdl_surface, srcX, srcY, &r, &g, &b, &a);
+                SDL_ReadSurfacePixel(cropped, srcX, srcY, &r, &g, &b, &a);
                 SDL_WriteSurfacePixel(dst, px, py, r, g, b, a);
             }
         }
-        rc2d_graphics_freeImageData(&src);
+        SDL_DestroySurface(cropped);
 
         const std::filesystem::path dstPath = outputSpritesFolder / sprite.fileName;
         if (!SDL_SavePNG(dst, dstPath.string().c_str()))
         {
             SDL_DestroySurface(dst);
+            destroySurfaceVector(sourceSurfaces);
             cleanupExportedFrames();
             this->statusMessage = "Echec ecriture PNG export.";
             return false;
@@ -5502,6 +5654,8 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         frame.surface = dst;
         exportedFrames.push_back(frame);
     }
+
+    destroySurfaceVector(sourceSurfaces);
 
     if (exportedFrames.empty())
     {
@@ -5788,7 +5942,8 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         }
     }
 
-    const std::filesystem::path sheetPath = outputFolder / (exportPrefix + "-spritesheet.png");
+    const std::string sheetFileName = exportPrefix + "-spritesheet.png";
+    const std::filesystem::path sheetPath = outputFolder / sheetFileName;
     if (!SDL_SavePNG(spriteSheet, sheetPath.string().c_str()))
     {
         SDL_DestroySurface(spriteSheet);
@@ -5807,6 +5962,7 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     }
 
     cJSON_AddNumberToObject(jsonRoot, "fps", this->getLoosePreviewFpsOrDefault());
+    cJSON_AddStringToObject(jsonRoot, "image", sheetFileName.c_str());
 
     cJSON* framesArray = cJSON_CreateArray();
     cJSON_AddItemToObject(jsonRoot, "frames", framesArray);
