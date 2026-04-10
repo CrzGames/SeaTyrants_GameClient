@@ -94,6 +94,7 @@ constexpr RC2D_Color kPanelBorderColor = RC2D_Color{135, 150, 168, 220};
 constexpr RC2D_Color kRowFillColor = RC2D_Color{32, 40, 50, 210};
 constexpr RC2D_Color kRowSelectedFillColor = RC2D_Color{86, 130, 174, 220};
 constexpr RC2D_Color kRowBorderColor = RC2D_Color{115, 128, 146, 210};
+constexpr RC2D_Color kLooseSpritesheetGridColor = RC2D_Color{255, 230, 120, 200};
 
 constexpr RC2D_FileDialogFilter kFolderFilters[] = {
     {"Dossier", "*"},
@@ -635,6 +636,63 @@ static SDL_Surface* createCroppedSurfaceFromSource(
     }
 
     return out;
+}
+
+static void computeOpaqueUnionCropRectFromSurfaces(
+    const std::vector<SDL_Surface*>& surfaces,
+    int* outCropX,
+    int* outCropY,
+    int* outCropW,
+    int* outCropH)
+{
+    if (outCropX == nullptr || outCropY == nullptr || outCropW == nullptr || outCropH == nullptr)
+    {
+        return;
+    }
+    *outCropX = 0;
+    *outCropY = 0;
+    *outCropW = 1;
+    *outCropH = 1;
+    if (surfaces.empty())
+    {
+        return;
+    }
+
+    int maxSourceW = 1;
+    int maxSourceH = 1;
+    for (SDL_Surface* surface : surfaces)
+    {
+        if (surface != nullptr)
+        {
+            maxSourceW = (std::max)(maxSourceW, surface->w);
+            maxSourceH = (std::max)(maxSourceH, surface->h);
+        }
+    }
+
+    int unionMinX = maxSourceW;
+    int unionMinY = maxSourceH;
+    int unionMaxX = -1;
+    int unionMaxY = -1;
+    bool anyOpaquePixel = false;
+    for (SDL_Surface* surface : surfaces)
+    {
+        unionOpaquePixelBounds(surface, &unionMinX, &unionMinY, &unionMaxX, &unionMaxY, &anyOpaquePixel);
+    }
+
+    if (anyOpaquePixel && unionMaxX >= unionMinX && unionMaxY >= unionMinY)
+    {
+        *outCropX = unionMinX;
+        *outCropY = unionMinY;
+        *outCropW = unionMaxX - unionMinX + 1;
+        *outCropH = unionMaxY - unionMinY + 1;
+    }
+    else
+    {
+        *outCropX = 0;
+        *outCropY = 0;
+        *outCropW = maxSourceW;
+        *outCropH = maxSourceH;
+    }
 }
 
 static void destroySurfaceVector(std::vector<SDL_Surface*>& surfaces)
@@ -3930,6 +3988,79 @@ bool EditorMapVfxScene::importSfxFromRootFolderAbsolutePath(const char* rootFold
     return true;
 }
 
+void EditorMapVfxScene::refreshLooseFolderUnionCrop(ImportedLooseFolder& folder)
+{
+    folder.looseUnionCropReady = false;
+    if (folder.sprites.empty())
+    {
+        return;
+    }
+
+    std::vector<size_t> orderedSpriteIndices;
+    orderedSpriteIndices.reserve(folder.sprites.size());
+    for (size_t i = 0; i < folder.sprites.size(); ++i)
+    {
+        orderedSpriteIndices.push_back(i);
+    }
+    std::sort(orderedSpriteIndices.begin(), orderedSpriteIndices.end(), [&folder](size_t lhs, size_t rhs) {
+        const std::string& lhsName = folder.sprites[lhs].fileName;
+        const std::string& rhsName = folder.sprites[rhs].fileName;
+
+        unsigned long long lhsNumericValue = 0;
+        unsigned long long rhsNumericValue = 0;
+        const bool lhsIsNumeric = tryParseNumericFrameName(lhsName, &lhsNumericValue);
+        const bool rhsIsNumeric = tryParseNumericFrameName(rhsName, &rhsNumericValue);
+
+        if (lhsIsNumeric && rhsIsNumeric)
+        {
+            if (lhsNumericValue != rhsNumericValue)
+            {
+                return lhsNumericValue < rhsNumericValue;
+            }
+            return lhsName < rhsName;
+        }
+        if (lhsIsNumeric != rhsIsNumeric)
+        {
+            return lhsIsNumeric;
+        }
+        return lhsName < rhsName;
+    });
+
+    std::vector<SDL_Surface*> sourceSurfaces;
+    sourceSurfaces.reserve(orderedSpriteIndices.size());
+    for (size_t o = 0; o < orderedSpriteIndices.size(); ++o)
+    {
+        const ImportedLooseSprite& sprite = folder.sprites[orderedSpriteIndices[o]];
+        RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
+        if (src.sdl_surface == nullptr)
+        {
+            destroySurfaceVector(sourceSurfaces);
+            return;
+        }
+        sourceSurfaces.push_back(src.sdl_surface);
+        src.sdl_surface = nullptr;
+        rc2d_graphics_freeImageData(&src);
+    }
+
+    int cropX = 0;
+    int cropY = 0;
+    int cropW = 0;
+    int cropH = 0;
+    computeOpaqueUnionCropRectFromSurfaces(sourceSurfaces, &cropX, &cropY, &cropW, &cropH);
+    destroySurfaceVector(sourceSurfaces);
+
+    if (cropW <= 0 || cropH <= 0)
+    {
+        return;
+    }
+
+    folder.looseUnionCropX = cropX;
+    folder.looseUnionCropY = cropY;
+    folder.looseUnionCropW = cropW;
+    folder.looseUnionCropH = cropH;
+    folder.looseUnionCropReady = true;
+}
+
 bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePath)
 {
     if (absolutePath == nullptr || absolutePath[0] == '\0')
@@ -4057,6 +4188,8 @@ bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePa
         this->statusMessage = "Import sprites echoue: aucune image chargeable.";
         return false;
     }
+
+    this->refreshLooseFolderUnionCrop(folder);
 
     this->importedLooseFolders.push_back(std::move(folder));
     this->selectedLooseFolderIndex = static_cast<int>(this->importedLooseFolders.size()) - 1;
@@ -5550,38 +5683,11 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         rc2d_graphics_freeImageData(&src);
     }
 
-    int maxSourceW = 1;
-    int maxSourceH = 1;
-    for (SDL_Surface* surface : sourceSurfaces)
-    {
-        if (surface != nullptr)
-        {
-            maxSourceW = (std::max)(maxSourceW, surface->w);
-            maxSourceH = (std::max)(maxSourceH, surface->h);
-        }
-    }
-
-    int unionMinX = maxSourceW;
-    int unionMinY = maxSourceH;
-    int unionMaxX = -1;
-    int unionMaxY = -1;
-    bool anyOpaquePixel = false;
-    for (SDL_Surface* surface : sourceSurfaces)
-    {
-        unionOpaquePixelBounds(surface, &unionMinX, &unionMinY, &unionMaxX, &unionMaxY, &anyOpaquePixel);
-    }
-
     int cropX = 0;
     int cropY = 0;
-    int cropW = maxSourceW;
-    int cropH = maxSourceH;
-    if (anyOpaquePixel && unionMaxX >= unionMinX && unionMaxY >= unionMinY)
-    {
-        cropX = unionMinX;
-        cropY = unionMinY;
-        cropW = unionMaxX - unionMinX + 1;
-        cropH = unionMaxY - unionMinY + 1;
-    }
+    int cropW = 1;
+    int cropH = 1;
+    computeOpaqueUnionCropRectFromSurfaces(sourceSurfaces, &cropX, &cropY, &cropW, &cropH);
 
     for (size_t orderedIndex = 0; orderedIndex < orderedSpriteIndices.size(); ++orderedIndex)
     {
@@ -6267,12 +6373,24 @@ void EditorMapVfxScene::drawLooseSpritesPreview(void) const
     }
 
     const Map& map = GetCurrentMap();
+    const bool useUnionCropForSpritesheet =
+        this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET && folder.looseUnionCropReady &&
+        folder.looseUnionCropW > 0 && folder.looseUnionCropH > 0;
+
     float maxSpriteW = 1.0f;
     float maxSpriteH = 1.0f;
-    for (const ImportedLooseSprite& sprite : folder.sprites)
+    if (useUnionCropForSpritesheet)
     {
-        maxSpriteW = (std::max)(maxSpriteW, sprite.widthPx);
-        maxSpriteH = (std::max)(maxSpriteH, sprite.heightPx);
+        maxSpriteW = static_cast<float>(folder.looseUnionCropW);
+        maxSpriteH = static_cast<float>(folder.looseUnionCropH);
+    }
+    else
+    {
+        for (const ImportedLooseSprite& sprite : folder.sprites)
+        {
+            maxSpriteW = (std::max)(maxSpriteW, sprite.widthPx);
+            maxSpriteH = (std::max)(maxSpriteH, sprite.heightPx);
+        }
     }
 
     const int spriteCount = static_cast<int>(folder.sprites.size());
@@ -6282,10 +6400,14 @@ void EditorMapVfxScene::drawLooseSpritesPreview(void) const
     const float zoomMultiplier = std::clamp(GetCamera().getZoomFactor(), kLoosePreviewZoomMin, kLoosePreviewZoomMax);
     const float previewScale = requestedScale * zoomMultiplier;
     const float cellPadding = 18.0f * zoomMultiplier;
-    const float cellW = (maxSpriteW * previewScale) + cellPadding;
-    const float cellH = (maxSpriteH * previewScale) + cellPadding;
-    const float gridW = (static_cast<float>(columns) * cellW) - cellPadding;
-    const float gridH = (static_cast<float>(rows) * cellH) - cellPadding;
+    const float contentW = maxSpriteW * previewScale;
+    const float contentH = maxSpriteH * previewScale;
+    const float cellStrideW = contentW + cellPadding;
+    const float cellStrideH = contentH + cellPadding;
+    const int gapCountW = (std::max)(0, columns - 1);
+    const int gapCountH = (std::max)(0, rows - 1);
+    const float gridW = static_cast<float>(columns) * contentW + static_cast<float>(gapCountW) * cellPadding;
+    const float gridH = static_cast<float>(rows) * contentH + static_cast<float>(gapCountH) * cellPadding;
     const SDL_FPoint anchorCenter =
         (this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET)
         ? SDL_FPoint{
@@ -6300,33 +6422,109 @@ void EditorMapVfxScene::drawLooseSpritesPreview(void) const
         const ImportedLooseSprite& sprite = folder.sprites[static_cast<size_t>(i)];
         const int col = i % columns;
         const int row = i / columns;
-        const float cellX = startX + (static_cast<float>(col) * cellW);
-        const float cellY = startY + (static_cast<float>(row) * cellH);
-        const float cellCenterX = cellX + ((maxSpriteW * previewScale) * 0.5f);
-        const float cellCenterY = cellY + ((maxSpriteH * previewScale) * 0.5f);
-        const float drawW = sprite.widthPx * previewScale;
-        const float drawH = sprite.heightPx * previewScale;
-        const float drawX = cellCenterX - (drawW * 0.5f);
-        const float drawY = cellCenterY - (drawH * 0.5f);
+        const float cellX = startX + (static_cast<float>(col) * cellStrideW);
+        const float cellY = startY + (static_cast<float>(row) * cellStrideH);
         RC2D_Image* spriteImage = const_cast<RC2D_Image*>(&sprite.image);
-        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-            spriteImage,
-            0.0f,
-            0.0f,
-            sprite.widthPx,
-            sprite.heightPx);
-        rc2d_graphics_drawQuad(
-            spriteImage,
-            &sourceQuad,
-            drawX,
-            drawY,
-            0.0,
-            previewScale,
-            previewScale,
-            0.0f,
-            0.0f,
-            false,
-            false);
+        if (useUnionCropForSpritesheet)
+        {
+            const int cropX = folder.looseUnionCropX;
+            const int cropY = folder.looseUnionCropY;
+            const int cropW = folder.looseUnionCropW;
+            const int cropH = folder.looseUnionCropH;
+            const int tw = static_cast<int>(std::lround(sprite.widthPx));
+            const int th = static_cast<int>(std::lround(sprite.heightPx));
+            const int interX1 = (std::max)(cropX, 0);
+            const int interY1 = (std::max)(cropY, 0);
+            const int interX2 = (std::min)(cropX + cropW, tw);
+            const int interY2 = (std::min)(cropY + cropH, th);
+            if (interX2 <= interX1 || interY2 <= interY1)
+            {
+                continue;
+            }
+            const float subX = static_cast<float>(interX1);
+            const float subY = static_cast<float>(interY1);
+            const float subW = static_cast<float>(interX2 - interX1);
+            const float subH = static_cast<float>(interY2 - interY1);
+            const float drawX = cellX + (static_cast<float>(interX1 - cropX) * previewScale);
+            const float drawY = cellY + (static_cast<float>(interY1 - cropY) * previewScale);
+            const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(spriteImage, subX, subY, subW, subH);
+            rc2d_graphics_drawQuad(
+                spriteImage,
+                &sourceQuad,
+                drawX,
+                drawY,
+                0.0,
+                previewScale,
+                previewScale,
+                0.0f,
+                0.0f,
+                false,
+                false);
+        }
+        else
+        {
+            const float cellCenterX = cellX + (contentW * 0.5f);
+            const float cellCenterY = cellY + (contentH * 0.5f);
+            const float drawW = sprite.widthPx * previewScale;
+            const float drawH = sprite.heightPx * previewScale;
+            const float drawX = cellCenterX - (drawW * 0.5f);
+            const float drawY = cellCenterY - (drawH * 0.5f);
+            const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+                spriteImage,
+                0.0f,
+                0.0f,
+                sprite.widthPx,
+                sprite.heightPx);
+            rc2d_graphics_drawQuad(
+                spriteImage,
+                &sourceQuad,
+                drawX,
+                drawY,
+                0.0,
+                previewScale,
+                previewScale,
+                0.0f,
+                0.0f,
+                false,
+                false);
+        }
+    }
+
+    if (this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET)
+    {
+        const float linePx = (std::max)(1.0f, zoomMultiplier);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(kLooseSpritesheetGridColor);
+
+        // Cadre exterieur en bandes pleines *autour* de la zone utile (evite le contour "line"
+        // qui mange l'interieur + ne superpose pas les sprites sur les bords).
+        const float outerPad = linePx;
+        const SDL_FRect outerLeft = SDL_FRect{startX - outerPad, startY - outerPad, linePx, gridH + 2.0f * outerPad};
+        const SDL_FRect outerRight = SDL_FRect{startX + gridW, startY - outerPad, linePx, gridH + 2.0f * outerPad};
+        const SDL_FRect outerTop = SDL_FRect{startX - outerPad, startY - outerPad, gridW + 2.0f * outerPad, linePx};
+        const SDL_FRect outerBottom = SDL_FRect{startX - outerPad, startY + gridH, gridW + 2.0f * outerPad, linePx};
+        rc2d_graphics_rectangle("fill", &outerLeft);
+        rc2d_graphics_rectangle("fill", &outerRight);
+        rc2d_graphics_rectangle("fill", &outerTop);
+        rc2d_graphics_rectangle("fill", &outerBottom);
+
+        // Lignes interieures au milieu des gouttieres entre cases (pas sur le bord du contenu).
+        for (int c = 1; c < columns; ++c)
+        {
+            const float vx =
+                startX + static_cast<float>(c) * contentW + (static_cast<float>(c) - 0.5f) * cellPadding;
+            const SDL_FRect vLine = SDL_FRect{vx - linePx * 0.5f, startY, linePx, gridH};
+            rc2d_graphics_rectangle("fill", &vLine);
+        }
+        for (int r = 1; r < rows; ++r)
+        {
+            const float hy =
+                startY + static_cast<float>(r) * contentH + (static_cast<float>(r) - 0.5f) * cellPadding;
+            const SDL_FRect hLine = SDL_FRect{startX, hy - linePx * 0.5f, gridW, linePx};
+            rc2d_graphics_rectangle("fill", &hLine);
+        }
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
     }
 }
 

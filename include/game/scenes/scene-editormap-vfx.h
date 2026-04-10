@@ -114,6 +114,12 @@ private:
         std::string folderAbsolutePath;
         std::string storageFolderPath;
         std::vector<ImportedLooseSprite> sprites;
+        /** Union des pixels opaques (meme logique que l'export), pour preview mode spritesheet. */
+        int looseUnionCropX = 0;
+        int looseUnionCropY = 0;
+        int looseUnionCropW = 0;
+        int looseUnionCropH = 0;
+        bool looseUnionCropReady = false;
     };
 
     struct LoosePreviewPlacement {
@@ -406,6 +412,7 @@ private:
 
     bool importLooseFolderFromAbsolutePath(const char* absolutePath);
     bool importLooseFoldersFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);
+    void refreshLooseFolderUnionCrop(ImportedLooseFolder& folder);
 
     void spawnSelectedSfxAtShipCenter(void);
     void setSelectedVfxInstanceIndex(int index);
