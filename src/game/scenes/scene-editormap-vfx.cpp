@@ -43,6 +43,8 @@ struct RenderItem
 constexpr int kShipSpriteCount = 8;
 constexpr float kListScrollBarWidth = 10.0f;
 constexpr int kVisibleListRows = 10;
+/** Espacement vertical entre les lignes du panneau Layers (aligne dessin, clic, drag). */
+constexpr float kLayerListPanelRowGap = 6.0f;
 constexpr int kShipVfxLayerPageCount = 8;
 
 struct ShipVfxLayerPagePickerLayout
@@ -111,6 +113,8 @@ constexpr float kLayerRowVfxPlaceModeButtonW = 58.0f;
 constexpr float kLayerRowVfxRotateDialButtonW = 52.0f;
 /** Largeur des boutons FLIP V / FLIP H (panneau layers), a gauche de ROT. */
 constexpr float kLayerRowFlipButtonW = 56.0f;
+/** Bouton RELATIF (decal spawn / phase), a gauche de FLIP V. */
+constexpr float kLayerRowRelativeButtonW = 78.0f;
 constexpr int kInvalidVisibleRows = 3;
 constexpr float kInvalidPanelPadding = 8.0f;
 constexpr float kInvalidPanelHeaderHeight = 22.0f;
@@ -964,6 +968,8 @@ void EditorMapVfxScene::initDefaultShipLayerSettingsAllPages(void)
         this->shipLayerVisibleByPage[i] = true;
         this->shipLayerLockedByPage[i] = false;
         this->shipDebugBoundsVisibleByPage[i] = true;
+        this->shipSpawnAfterVfxInstanceId[i] = 0U;
+        this->shipSpawnAfterDelayMs[i] = 0;
     }
 }
 
@@ -1099,6 +1105,7 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->invalidVfxListScrollDragActive = false;
     this->invalidShipListScrollDragActive = false;
     this->shipVfxLayerPagePickerOpen = false;
+    this->closeVfxRelativeTimingPopup();
 }
 
 void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
@@ -1523,6 +1530,245 @@ void EditorMapVfxScene::markShipVfxDirty(void)
     this->shipVfxDirty = true;
 }
 
+void EditorMapVfxScene::closeVfxRelativeTimingPopup(void)
+{
+    this->vfxRelativeTimingPopupVisible = false;
+    this->vfxRelativeTimingPopupStep = 0;
+    this->vfxRelativeTimingPopupCandidateIndices.clear();
+    this->vfxRelativeTimingPopupAnchorInstanceId = 0U;
+    this->vfxRelativeTimingPopupDelayMsInput.clear();
+    this->vfxRelativeTimingPopupDelayMsFocused = false;
+}
+
+void EditorMapVfxScene::openVfxRelativeTimingPopup(bool forShipRow, int vfxInstanceIndex)
+{
+    this->vfxRelativeTimingPopupIsShipRow = forShipRow;
+    this->vfxRelativeTimingPopupTargetVfxIndex = forShipRow ? -1 : vfxInstanceIndex;
+    this->vfxRelativeTimingPopupStep = 0;
+    this->vfxRelativeTimingPopupAnchorInstanceId = 0U;
+    this->vfxRelativeTimingPopupDelayMsInput.clear();
+    this->vfxRelativeTimingPopupDelayMsFocused = false;
+    this->vfxRelativeTimingPopupCandidateIndices.clear();
+    this->shipVfxLayerPagePickerOpen = false;
+
+    const auto& layers = this->currentShipVfxLayers();
+    if (forShipRow)
+    {
+        for (int j = 0; j < static_cast<int>(layers.size()); ++j)
+        {
+            this->vfxRelativeTimingPopupCandidateIndices.push_back(j);
+        }
+        if (this->vfxRelativeTimingPopupCandidateIndices.empty())
+        {
+            this->statusMessage = "RELATIF (SHIP) : ajoute au moins une instance VFX sur cette page.";
+            return;
+        }
+    }
+    else
+    {
+        if (vfxInstanceIndex < 0 || vfxInstanceIndex >= static_cast<int>(layers.size()))
+        {
+            return;
+        }
+        const int sfxIdx = layers[static_cast<size_t>(vfxInstanceIndex)].importedSfxIndex;
+        for (int j = 0; j < static_cast<int>(layers.size()); ++j)
+        {
+            if (j == vfxInstanceIndex)
+            {
+                continue;
+            }
+            if (layers[static_cast<size_t>(j)].importedSfxIndex == sfxIdx)
+            {
+                this->vfxRelativeTimingPopupCandidateIndices.push_back(j);
+            }
+        }
+        if (this->vfxRelativeTimingPopupCandidateIndices.empty())
+        {
+            this->statusMessage = "RELATIF : aucune autre instance de cette animation sur la page.";
+            return;
+        }
+    }
+
+    this->vfxRelativeTimingPopupVisible = true;
+    this->statusMessage = forShipRow ? "RELATIF : choisis le VFX de reference pour le navire."
+                                     : "RELATIF : choisis l'instance de reference (meme animation).";
+}
+
+bool EditorMapVfxScene::computeVfxRelativePopupLayout(VfxRelativePopupLayout* out) const
+{
+    if (out == nullptr || !this->vfxRelativeTimingPopupVisible)
+    {
+        return false;
+    }
+    const SDL_FRect mapRect = GetCurrentMap().rect;
+    out->dimFullMap = mapRect;
+    const int totalCandidates = static_cast<int>(this->vfxRelativeTimingPopupCandidateIndices.size());
+    out->candidateCount =
+        (this->vfxRelativeTimingPopupStep == 0) ? (std::min)(totalCandidates, 20) : 0;
+
+    const float popupW = 520.0f;
+    float popupH = 200.0f;
+    if (this->vfxRelativeTimingPopupStep == 0)
+    {
+        popupH = 88.0f + static_cast<float>((std::max)(out->candidateCount, 1)) * 26.0f + 46.0f;
+    }
+    else
+    {
+        popupH = 210.0f;
+    }
+    out->popup = SDL_FRect{
+        mapRect.x + ((mapRect.w - popupW) * 0.5f),
+        mapRect.y + ((mapRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+
+    float cy = out->popup.y + 44.0f;
+    for (int i = 0; i < out->candidateCount; ++i)
+    {
+        out->candidateRows[i] = SDL_FRect{out->popup.x + 14.0f, cy, out->popup.w - 28.0f, 24.0f};
+        cy += 26.0f;
+    }
+
+    const float btnY = out->popup.y + popupH - 36.0f;
+    out->cancelBtn = SDL_FRect{out->popup.x + 14.0f, btnY, 110.0f, 28.0f};
+    out->clearBtn = SDL_FRect{out->popup.x + 134.0f, btnY, 110.0f, 28.0f};
+    out->validateBtn = SDL_FRect{out->popup.x + popupW - 124.0f, btnY, 110.0f, 28.0f};
+    out->delayInputRect = SDL_FRect{out->popup.x + 14.0f, out->popup.y + 102.0f, popupW - 28.0f, 32.0f};
+    return true;
+}
+
+float EditorMapVfxScene::computeVfxPreviewPhaseSecondsInCycle(
+    const ShipVfxInstance& instance,
+    float timeSeconds,
+    const std::vector<ShipVfxInstance>& layerVec,
+    const ImportedSfx& imported,
+    int chainDepth) const
+{
+    const int frameCount = static_cast<int>(imported.frames.size());
+    if (frameCount <= 0)
+    {
+        return 0.0f;
+    }
+    const float fps = (std::max)(imported.defaultFps, 1.0f);
+    const float period = static_cast<float>(frameCount) / fps;
+    if (period <= 0.0001f)
+    {
+        return 0.0f;
+    }
+
+    auto normalizePhase = [period](float p) -> float {
+        float x = std::fmod(p, period);
+        if (x < 0.f)
+        {
+            x += period;
+        }
+        return x;
+    };
+
+    if (instance.spawnAfterInstanceId == 0U || chainDepth > 32)
+    {
+        return normalizePhase(timeSeconds);
+    }
+
+    const ShipVfxInstance* anchor = nullptr;
+    for (const ShipVfxInstance& inst : layerVec)
+    {
+        if (inst.instanceId == instance.spawnAfterInstanceId)
+        {
+            anchor = &inst;
+            break;
+        }
+    }
+    if (anchor == nullptr || anchor->importedSfxIndex != instance.importedSfxIndex)
+    {
+        return normalizePhase(timeSeconds);
+    }
+    if (anchor->importedSfxIndex < 0 || anchor->importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return normalizePhase(timeSeconds);
+    }
+
+    const float anchorPhase = this->computeVfxPreviewPhaseSecondsInCycle(
+        *anchor,
+        timeSeconds,
+        layerVec,
+        imported,
+        chainDepth + 1);
+    float childPhase = anchorPhase - (static_cast<float>(instance.spawnAfterDelayMs) / 1000.f);
+    while (childPhase < 0.f)
+    {
+        childPhase += period;
+    }
+    while (childPhase >= period)
+    {
+        childPhase -= period;
+    }
+    return childPhase;
+}
+
+int EditorMapVfxScene::computeVfxPreviewFrameIndex(
+    const ShipVfxInstance& instance,
+    float timeSeconds,
+    const std::vector<ShipVfxInstance>& layerVec,
+    const ImportedSfx& imported) const
+{
+    const int frameCount = static_cast<int>(imported.frames.size());
+    if (frameCount <= 0)
+    {
+        return 0;
+    }
+    const float fps = (std::max)(imported.defaultFps, 1.0f);
+    const float period = static_cast<float>(frameCount) / fps;
+    if (period <= 0.0001f)
+    {
+        return 0;
+    }
+
+    const float phaseSec = this->computeVfxPreviewPhaseSecondsInCycle(instance, timeSeconds, layerVec, imported, 0);
+    return static_cast<int>(std::floor(phaseSec * fps)) % frameCount;
+}
+
+bool EditorMapVfxScene::shouldPreviewHideShipForRelativeTiming(float timeSeconds) const
+{
+    const size_t page = static_cast<size_t>(this->getShipVfxLayerPageKey());
+    const uint32_t anchorId = this->shipSpawnAfterVfxInstanceId[page];
+    if (anchorId == 0U)
+    {
+        return false;
+    }
+    const auto& layers = this->currentShipVfxLayers();
+    const ShipVfxInstance* anchor = nullptr;
+    for (const ShipVfxInstance& inst : layers)
+    {
+        if (inst.instanceId == anchorId)
+        {
+            anchor = &inst;
+            break;
+        }
+    }
+    if (anchor == nullptr || anchor->importedSfxIndex < 0 ||
+        anchor->importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return false;
+    }
+    const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(anchor->importedSfxIndex)];
+    if (imported.frames.empty())
+    {
+        return false;
+    }
+    const int frameCount = static_cast<int>(imported.frames.size());
+    const float fps = (std::max)(imported.defaultFps, 1.0f);
+    const float period = static_cast<float>(frameCount) / fps;
+    if (period <= 0.0001f)
+    {
+        return false;
+    }
+    const float anchorPhase =
+        this->computeVfxPreviewPhaseSecondsInCycle(*anchor, timeSeconds, layers, imported, 0);
+    const float delaySec = static_cast<float>(this->shipSpawnAfterDelayMs[page]) / 1000.f;
+    return anchorPhase < delaySec;
+}
+
 int EditorMapVfxScene::getActiveDirectionIndexForOverrides(void) const
 {
     return std::clamp(this->previewDirectionIndex, 0, 3);
@@ -1773,6 +2019,8 @@ void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
     }
     ShipVfxInstance duplicate = *instance;
     duplicate.instanceId = this->nextVfxInstanceId++;
+    duplicate.spawnAfterInstanceId = 0U;
+    duplicate.spawnAfterDelayMs = 0;
     int sourceInstanceNumber = 1;
     for (const ShipVfxInstance& existing : this->currentShipVfxLayers())
     {
@@ -1977,7 +2225,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
     this->layerListRect = this->shipListRect;
-    this->layerListRect.w = 840.0f;
+    this->layerListRect.w = 890.0f;
     this->layerListRect.h = 360.0f;
     this->layerListRect.x = map.rect.x + 12.0f;
     this->layerListRect.y = map.rect.y + map.rect.h - this->layerListRect.h - 30.0f;
@@ -2487,7 +2735,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
 
     const float panelPadding = 4.0f;
     const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
+    const float rowGap = kLayerListPanelRowGap;
     const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
     const float rowsHeight =
         this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
@@ -2560,6 +2808,13 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
 
     const int selectedIndex = this->getSelectedLayerRowIndexForDisplay(orderedLayerIndices);
     const int visibleCount = (std::max)((std::min)(kVisibleListRows, itemCount - startIndex), 0);
+
+    float layerRelTooltipMx = 0.0f;
+    float layerRelTooltipMy = 0.0f;
+    const bool layerRelTooltipMouseOk = this->getMouseRenderPosition(&layerRelTooltipMx, &layerRelTooltipMy);
+    std::string layerRelTooltipMsText;
+    SDL_FRect layerRelTooltipButtonRect{};
+    bool layerRelTooltipHave = false;
 
     for (int i = 0; i < kVisibleListRows; ++i)
     {
@@ -2682,6 +2937,25 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         layerFlipVRowRect.h = lockRect.h;
         layerFlipVRowRect.x = layerFlipHRowRect.x - layerFlipVRowRect.w - 4.0f;
         layerFlipVRowRect.y = lockRect.y;
+
+        SDL_FRect layerRelativeRect{};
+        layerRelativeRect.w = kLayerRowRelativeButtonW;
+        layerRelativeRect.h = lockRect.h;
+        layerRelativeRect.x = layerFlipVRowRect.x - layerRelativeRect.w - 4.0f;
+        layerRelativeRect.y = lockRect.y;
+
+        bool relLinkActive = false;
+        if (!isShipRow)
+        {
+            relLinkActive =
+                this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)].spawnAfterInstanceId != 0U;
+        }
+
+        rc2d_graphics_setColor(
+            relLinkActive ? RC2D_Color{72, 96, 72, 220} : RC2D_Color{52, 62, 74, 220});
+        rc2d_graphics_rectangle("fill", &layerRelativeRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &layerRelativeRect);
 
         rc2d_graphics_setColor(visible ? RC2D_Color{74, 122, 92, 220} : RC2D_Color{92, 66, 66, 220});
         rc2d_graphics_rectangle("fill", &visRect);
@@ -2857,6 +3131,56 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 layerRotateDialRect.y + ((layerRotateDialRect.h - static_cast<float>(rotH)) * 0.5f));
             rc2d_graphics_destroyText(&rotText);
 
+            if (isShipRow)
+            {
+                RC2D_Text relShipDash = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "-");
+                relShipDash.color = kHudTextColor;
+                rc2d_graphics_setTextColor(&relShipDash);
+                int sdW = 0;
+                int sdH = 0;
+                rc2d_graphics_getTextSize(&relShipDash, &sdW, &sdH);
+                rc2d_graphics_drawText(
+                    &relShipDash,
+                    layerRelativeRect.x + ((layerRelativeRect.w - static_cast<float>(sdW)) * 0.5f),
+                    layerRelativeRect.y + ((layerRelativeRect.h - static_cast<float>(sdH)) * 0.5f));
+                rc2d_graphics_destroyText(&relShipDash);
+
+                if (layerRelTooltipMouseOk)
+                {
+                    const size_t pk = static_cast<size_t>(this->getShipVfxLayerPageKey());
+                    if (this->shipSpawnAfterVfxInstanceId[pk] != 0U &&
+                        this->pointInRect(layerRelTooltipMx, layerRelTooltipMy, layerRelativeRect))
+                    {
+                        layerRelTooltipMsText = std::to_string(this->shipSpawnAfterDelayMs[pk]) + " ms";
+                        layerRelTooltipButtonRect = layerRelativeRect;
+                        layerRelTooltipHave = true;
+                    }
+                }
+            }
+            else
+            {
+                const ShipVfxInstance& relInst = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
+                RC2D_Text relHdrOnly = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "RELATIF");
+                relHdrOnly.color = kHudTextColor;
+                rc2d_graphics_setTextColor(&relHdrOnly);
+                int hoW = 0;
+                int hoH = 0;
+                rc2d_graphics_getTextSize(&relHdrOnly, &hoW, &hoH);
+                rc2d_graphics_drawText(
+                    &relHdrOnly,
+                    layerRelativeRect.x + ((layerRelativeRect.w - static_cast<float>(hoW)) * 0.5f),
+                    layerRelativeRect.y + ((layerRelativeRect.h - static_cast<float>(hoH)) * 0.5f));
+                rc2d_graphics_destroyText(&relHdrOnly);
+
+                if (layerRelTooltipMouseOk && relInst.spawnAfterInstanceId != 0U &&
+                    this->pointInRect(layerRelTooltipMx, layerRelTooltipMy, layerRelativeRect))
+                {
+                    layerRelTooltipMsText = std::to_string(relInst.spawnAfterDelayMs) + " ms";
+                    layerRelTooltipButtonRect = layerRelativeRect;
+                    layerRelTooltipHave = true;
+                }
+            }
+
             const char* flipVLabel = isShipRow ? "-" : "FLIP V";
             RC2D_Text flipVText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), flipVLabel);
             flipVText.color = kHudTextColor;
@@ -2899,7 +3223,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             const bool behind = (drawOrder < this->activeShipDrawOrder());
             const float indent = isShipRow ? 18.0f : (behind ? 8.0f : 34.0f);
             const float labelX = rowRect.x + indent;
-            const float labelWidth = (layerFlipVRowRect.x - 6.0f) - labelX;
+            const float labelWidth = (layerRelativeRect.x - 6.0f) - labelX;
             const int maxChars = std::clamp(static_cast<int>(labelWidth / 6.6f), 12, 72);
             std::string rowLabel = std::string("z=") + std::to_string(drawOrder) + " | " + label;
 
@@ -2917,6 +3241,47 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 rowRect.y + (std::max)((rowRect.h - static_cast<float>(rowTextH)) * 0.5f, 1.0f));
             rc2d_graphics_destroyText(&rowText);
         }
+    }
+
+    if (layerRelTooltipHave && !layerRelTooltipMsText.empty() && this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text tipText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), layerRelTooltipMsText.c_str());
+        tipText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&tipText);
+        int tipW = 0;
+        int tipH = 0;
+        rc2d_graphics_getTextSize(&tipText, &tipW, &tipH);
+        constexpr float kRelTipPad = 5.0f;
+        SDL_FRect tipBg{};
+        tipBg.w = static_cast<float>(tipW) + kRelTipPad * 2.0f;
+        tipBg.h = static_cast<float>(tipH) + kRelTipPad * 2.0f;
+        tipBg.x = layerRelTooltipButtonRect.x + ((layerRelTooltipButtonRect.w - tipBg.w) * 0.5f);
+        tipBg.y = layerRelTooltipButtonRect.y - tipBg.h - 3.0f;
+        if (tipBg.y < this->layerListRect.y + 2.0f)
+        {
+            tipBg.y = layerRelTooltipButtonRect.y + layerRelTooltipButtonRect.h + 3.0f;
+        }
+        if (tipBg.x < this->layerListRect.x + 2.0f)
+        {
+            tipBg.x = this->layerListRect.x + 2.0f;
+        }
+        if (tipBg.x + tipBg.w > this->layerListRect.x + this->layerListRect.w - 2.0f)
+        {
+            tipBg.x = (this->layerListRect.x + this->layerListRect.w - 2.0f) - tipBg.w;
+        }
+        if (tipBg.y + tipBg.h > this->layerListRect.y + this->layerListRect.h - 2.0f)
+        {
+            tipBg.y = (this->layerListRect.y + this->layerListRect.h - 2.0f) - tipBg.h;
+        }
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{32, 40, 52, 250});
+        rc2d_graphics_rectangle("fill", &tipBg);
+        rc2d_graphics_setColor(RC2D_Color{150, 175, 198, 245});
+        rc2d_graphics_rectangle("line", &tipBg);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        rc2d_graphics_drawText(&tipText, tipBg.x + kRelTipPad, tipBg.y + kRelTipPad);
+        rc2d_graphics_destroyText(&tipText);
     }
 
     if (this->layerRowDragActive && this->layerRowDragMoved && visibleCount > 0)
@@ -3028,7 +3393,7 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
 
     const float panelPadding = 4.0f;
     const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
+    const float rowGap = kLayerListPanelRowGap;
     const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
     const float rowsHeight =
         this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
@@ -5586,6 +5951,7 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
     });
 
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const auto& layerVec = this->currentShipVfxLayers();
     for (const auto& candidate : candidates)
     {
         if (excludeInstanceIndex >= 0 && candidate.first == excludeInstanceIndex)
@@ -5593,7 +5959,7 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
             continue;
         }
 
-        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(candidate.first)];
+        const ShipVfxInstance& instance = layerVec[static_cast<size_t>(candidate.first)];
         if (instance.importedSfxIndex < 0 || instance.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
         {
             continue;
@@ -5605,8 +5971,7 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
             continue;
         }
 
-        const int frameCount = static_cast<int>(imported.frames.size());
-        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, layerVec, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
         const float sourceW = frame.w;
@@ -5863,6 +6228,18 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         instance.placementSnapClickToTile =
             cJSON_IsBool(placementSnapNode) ? cJSON_IsTrue(placementSnapNode) : false;
 
+        const cJSON* spawnAfterIdNode = cJSON_GetObjectItemCaseSensitive(node, "spawnAfterInstanceId");
+        const cJSON* spawnAfterMsNode = cJSON_GetObjectItemCaseSensitive(node, "spawnAfterDelayMs");
+        if (cJSON_IsNumber(spawnAfterIdNode) && std::isfinite(spawnAfterIdNode->valuedouble))
+        {
+            const double v = spawnAfterIdNode->valuedouble;
+            instance.spawnAfterInstanceId = (v <= 0.0) ? 0U : static_cast<uint32_t>(std::llround(v));
+        }
+        if (cJSON_IsNumber(spawnAfterMsNode) && std::isfinite(spawnAfterMsNode->valuedouble))
+        {
+            instance.spawnAfterDelayMs = static_cast<int>(std::llround(spawnAfterMsNode->valuedouble));
+        }
+
         for (DirectionOverride& override : instance.directionOverrides)
         {
             override.enabled = false;
@@ -5920,6 +6297,8 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         const cJSON* shipVisibleNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "visible");
         const cJSON* shipLockedNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "locked");
         const cJSON* shipDebugNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "debugBoundsVisible");
+        const cJSON* shipSpawnAfterIdNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "spawnAfterVfxInstanceId");
+        const cJSON* shipSpawnAfterMsNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "spawnAfterDelayMs");
         if (cJSON_IsNumber(shipOrderNode))
         {
             this->shipDrawOrderByPage[pi] = static_cast<int>(std::llround(shipOrderNode->valuedouble));
@@ -5935,6 +6314,16 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         if (cJSON_IsBool(shipDebugNode))
         {
             this->shipDebugBoundsVisibleByPage[pi] = cJSON_IsTrue(shipDebugNode);
+        }
+        if (cJSON_IsNumber(shipSpawnAfterIdNode) && std::isfinite(shipSpawnAfterIdNode->valuedouble))
+        {
+            const double v = shipSpawnAfterIdNode->valuedouble;
+            this->shipSpawnAfterVfxInstanceId[pi] =
+                (v <= 0.0) ? 0U : static_cast<uint32_t>(std::llround(v));
+        }
+        if (cJSON_IsNumber(shipSpawnAfterMsNode) && std::isfinite(shipSpawnAfterMsNode->valuedouble))
+        {
+            this->shipSpawnAfterDelayMs[pi] = static_cast<int>(std::llround(shipSpawnAfterMsNode->valuedouble));
         }
     };
 
@@ -6140,6 +6529,8 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddBoolToObject(item, "followShip", instance.followShip);
         cJSON_AddBoolToObject(item, "sharedForAllDirections", instance.sharedForAllDirections);
         cJSON_AddBoolToObject(item, "sharedForAllStates", instance.sharedForAllStates);
+        cJSON_AddNumberToObject(item, "spawnAfterInstanceId", static_cast<double>(instance.spawnAfterInstanceId));
+        cJSON_AddNumberToObject(item, "spawnAfterDelayMs", static_cast<double>(instance.spawnAfterDelayMs));
 
         cJSON* directionOverridesNode = cJSON_CreateObject();
         cJSON_AddItemToObject(item, "directionOverrides", directionOverridesNode);
@@ -6174,6 +6565,14 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddBoolToObject(shipLayerPage, "visible", this->shipLayerVisibleByPage[static_cast<size_t>(p)]);
         cJSON_AddBoolToObject(shipLayerPage, "locked", this->shipLayerLockedByPage[static_cast<size_t>(p)]);
         cJSON_AddBoolToObject(shipLayerPage, "debugBoundsVisible", this->shipDebugBoundsVisibleByPage[static_cast<size_t>(p)]);
+        cJSON_AddNumberToObject(
+            shipLayerPage,
+            "spawnAfterVfxInstanceId",
+            static_cast<double>(this->shipSpawnAfterVfxInstanceId[static_cast<size_t>(p)]));
+        cJSON_AddNumberToObject(
+            shipLayerPage,
+            "spawnAfterDelayMs",
+            static_cast<double>(this->shipSpawnAfterDelayMs[static_cast<size_t>(p)]));
 
         cJSON* instancesArray = cJSON_CreateArray();
         cJSON_AddItemToObject(pageObj, "vfxInstances", instancesArray);
@@ -6831,6 +7230,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
     }
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const auto& previewLayers = this->currentShipVfxLayers();
 
     std::vector<RenderItem> items;
     items.reserve(this->currentShipVfxLayers().size() + 1U);
@@ -6863,14 +7263,14 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
     {
         if (item.isShip)
         {
-            if (this->previewShipLoaded)
+            if (this->previewShipLoaded && !this->shouldPreviewHideShipForRelativeTiming(timeSeconds))
             {
                 this->previewShip.draw(map);
             }
             continue;
         }
 
-        const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(item.instanceIndex)];
+        const ShipVfxInstance& instance = previewLayers[static_cast<size_t>(item.instanceIndex)];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
         const float resolvedOffsetX = (override != nullptr) ? override->offsetX : instance.offsetX;
         const float resolvedOffsetY = (override != nullptr) ? override->offsetY : instance.offsetY;
@@ -6888,8 +7288,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
             continue;
         }
 
-        const int frameCount = static_cast<int>(imported.frames.size());
-        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, previewLayers, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
         const float sourceW = frame.w;
@@ -6957,9 +7356,8 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
                 const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
                 if (!imported.frames.empty())
                 {
-                    const int frameCount = static_cast<int>(imported.frames.size());
                     const int frameIndex =
-                        static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+                        this->computeVfxPreviewFrameIndex(instance, timeSeconds, previewLayers, imported);
                     const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
                     const float sourceW = frame.w;
                     const float sourceH = frame.h;
@@ -7003,18 +7401,7 @@ void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
         shipCenter.y += shipCenterOffsetY;
     }
 
-    float shipSpriteW = 0.0f;
-    float shipSpriteH = 0.0f;
-    if (!this->previewShip.getCurrentSpriteSizePixels(&shipSpriteW, &shipSpriteH))
-    {
-        return;
-    }
     const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
-    const float shipScale = zoom * this->previewShip.getDrawScale();
-    const float halfW = (shipSpriteW * shipScale) * 0.5f;
-    const float halfH = (shipSpriteH * shipScale) * 0.5f;
-    const float circleRadius =
-        (std::sqrt((halfW * halfW) + (halfH * halfH))) + 14.0f;
 
     const DirectionOverride* resolved = this->getResolvedDirectionOverride(instance);
     const float offsetX = (resolved != nullptr) ? resolved->offsetX : instance->offsetX;
@@ -7030,22 +7417,6 @@ void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
     }
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-    rc2d_graphics_setColor(RC2D_Color{140, 200, 255, 200});
-
-    constexpr int kCircleSegments = 56;
-    const float twoPi = 3.14159265f * 2.0f;
-    float prevCx = shipCenter.x + circleRadius;
-    float prevCy = shipCenter.y;
-    for (int s = 1; s <= kCircleSegments; ++s)
-    {
-        const float t = (static_cast<float>(s) / static_cast<float>(kCircleSegments)) * twoPi;
-        const float cx = shipCenter.x + (std::cos(t) * circleRadius);
-        const float cy = shipCenter.y + (std::sin(t) * circleRadius);
-        rc2d_graphics_line(prevCx, prevCy, cx, cy);
-        prevCx = cx;
-        prevCy = cy;
-    }
-
     rc2d_graphics_setColor(RC2D_Color{255, 230, 150, 235});
     rc2d_graphics_line(pivotX, pivotY, mouseX, mouseY);
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
@@ -7053,7 +7424,8 @@ void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
 
 void EditorMapVfxScene::drawShipVfxTilePlacementGhost(void) const
 {
-    if (this->vfxDragActive || !this->previewShipLoaded || this->selectedVfxInstanceIndex < 0 ||
+    if (this->vfxRotationDialActive || this->vfxDragActive || !this->previewShipLoaded ||
+        this->selectedVfxInstanceIndex < 0 ||
         this->selectedVfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
         return;
@@ -7104,9 +7476,11 @@ void EditorMapVfxScene::drawShipVfxTilePlacementGhost(void) const
     const SDL_FPoint gTileCenter = map.tileToScreenCenterFloat(
         static_cast<float>(hoverTile.x),
         static_cast<float>(hoverTile.y));
-    const int gFrameCount = static_cast<int>(gImported.frames.size());
-    const int gFrameIndex =
-        static_cast<int>(std::floor(timeSeconds * (std::max)(gImported.defaultFps, 1.0f))) % gFrameCount;
+    const int gFrameIndex = this->computeVfxPreviewFrameIndex(
+        ghostInst,
+        timeSeconds,
+        this->currentShipVfxLayers(),
+        gImported);
     const ImportedSfxFrame& gFrame = gImported.frames[static_cast<size_t>(gFrameIndex)];
     const float gSourceW = gFrame.w;
     const float gSourceH = gFrame.h;
@@ -7766,6 +8140,7 @@ void EditorMapVfxScene::drawHud(void) const
     rc2d_graphics_destroyText(&statusText);
 
     this->drawLooseExportNamePopup();
+    this->drawVfxRelativeTimingPopup();
 }
 
 void EditorMapVfxScene::drawLooseExportNamePopup(void) const
@@ -7826,6 +8201,369 @@ void EditorMapVfxScene::drawLooseExportNamePopup(void) const
     rc2d_graphics_destroyText(&hintText);
 }
 
+void EditorMapVfxScene::drawVfxRelativeTimingPopup(void) const
+{
+    if (!this->vfxRelativeTimingPopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    VfxRelativePopupLayout lay{};
+    if (!this->computeVfxRelativePopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->vfxRelativePopupLastLayout = lay;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 150});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{22, 30, 40, 235});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{145, 168, 194, 245});
+    rc2d_graphics_rectangle("line", &lay.popup);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    const char* title = (this->vfxRelativeTimingPopupStep == 0)
+        ? "RELATIF — choisir l'instance de reference"
+        : "RELATIF — delai apres l'instance choisie (ms)";
+    RC2D_Text titleText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
+    titleText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&titleText);
+    rc2d_graphics_drawText(&titleText, lay.popup.x + 14.0f, lay.popup.y + 12.0f);
+    rc2d_graphics_destroyText(&titleText);
+
+    if (this->vfxRelativeTimingPopupStep == 0)
+    {
+        const auto& layers = this->currentShipVfxLayers();
+        for (int i = 0; i < lay.candidateCount; ++i)
+        {
+            const int idx = this->vfxRelativeTimingPopupCandidateIndices[static_cast<size_t>(i)];
+            if (idx < 0 || idx >= static_cast<int>(layers.size()))
+            {
+                continue;
+            }
+            const ShipVfxInstance& cand = layers[static_cast<size_t>(idx)];
+            char line[192] = {};
+            SDL_snprintf(
+                line,
+                sizeof(line),
+                "id %u  |  %s",
+                static_cast<unsigned int>(cand.instanceId),
+                cand.label.c_str());
+            rc2d_graphics_setColor(RC2D_Color{48, 58, 72, 220});
+            rc2d_graphics_rectangle("fill", &lay.candidateRows[i]);
+            rc2d_graphics_setColor(RC2D_Color{130, 148, 168, 230});
+            rc2d_graphics_rectangle("line", &lay.candidateRows[i]);
+            RC2D_Text rowT = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), line);
+            rowT.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&rowT);
+            rc2d_graphics_drawText(&rowT, lay.candidateRows[i].x + 6.0f, lay.candidateRows[i].y + 4.0f);
+            rc2d_graphics_destroyText(&rowT);
+        }
+    }
+    else
+    {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{40, 54, 70, 245});
+        rc2d_graphics_rectangle("fill", &lay.delayInputRect);
+        rc2d_graphics_setColor(
+            this->vfxRelativeTimingPopupDelayMsFocused ? RC2D_Color{160, 200, 240, 245} : RC2D_Color{124, 186, 236, 245});
+        rc2d_graphics_rectangle("line", &lay.delayInputRect);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        std::string prompt = "SPAWN APRES INSTANCE id ";
+        prompt += std::to_string(static_cast<unsigned long long>(this->vfxRelativeTimingPopupAnchorInstanceId));
+        prompt += "  :  delai (ms)";
+        RC2D_Text pText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), prompt.c_str());
+        pText.color = RC2D_Color{210, 218, 228, 240};
+        rc2d_graphics_setTextColor(&pText);
+        rc2d_graphics_drawText(&pText, lay.popup.x + 14.0f, lay.popup.y + 56.0f);
+        rc2d_graphics_destroyText(&pText);
+
+        const std::string inputShow = this->vfxRelativeTimingPopupDelayMsInput + (this->vfxRelativeTimingPopupDelayMsFocused ? "_" : "");
+        RC2D_Text inText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), inputShow.c_str());
+        inText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&inText);
+        rc2d_graphics_drawText(&inText, lay.delayInputRect.x + 8.0f, lay.delayInputRect.y + 7.0f);
+        rc2d_graphics_destroyText(&inText);
+    }
+
+    auto drawBtn = [this](const SDL_FRect& r, const char* lab) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{56, 72, 92, 230});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(RC2D_Color{150, 170, 190, 235});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lab);
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&t, &tw, &th);
+        rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&t);
+    };
+
+    drawBtn(lay.cancelBtn, "ANNULER");
+    drawBtn(lay.clearBtn, "EFFACER");
+    if (this->vfxRelativeTimingPopupStep == 1)
+    {
+        drawBtn(lay.validateBtn, "VALIDER");
+    }
+}
+
+bool EditorMapVfxScene::handleVfxRelativeTimingPopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->vfxRelativeTimingPopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+
+    VfxRelativePopupLayout lay{};
+    if (!this->computeVfxRelativePopupLayout(&lay))
+    {
+        return true;
+    }
+    this->vfxRelativePopupLastLayout = lay;
+
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        if (this->pointInRect(x, y, lay.dimFullMap))
+        {
+            this->closeVfxRelativeTimingPopup();
+            this->statusMessage = "RELATIF : annule.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeVfxRelativeTimingPopup();
+        this->statusMessage = "RELATIF : annule.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.clearBtn))
+    {
+        const size_t page = static_cast<size_t>(this->getShipVfxLayerPageKey());
+        if (this->vfxRelativeTimingPopupIsShipRow)
+        {
+            this->shipSpawnAfterVfxInstanceId[page] = 0U;
+            this->shipSpawnAfterDelayMs[page] = 0;
+        }
+        else if (this->vfxRelativeTimingPopupTargetVfxIndex >= 0 &&
+                 this->vfxRelativeTimingPopupTargetVfxIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxRelativeTimingPopupTargetVfxIndex)];
+            t.spawnAfterInstanceId = 0U;
+            t.spawnAfterDelayMs = 0;
+        }
+        this->markShipVfxDirty();
+        this->closeVfxRelativeTimingPopup();
+        this->statusMessage = "RELATIF : lien supprime.";
+        return true;
+    }
+
+    if (this->vfxRelativeTimingPopupStep == 1)
+    {
+        if (this->pointInRect(x, y, lay.delayInputRect))
+        {
+            this->vfxRelativeTimingPopupDelayMsFocused = true;
+            return true;
+        }
+        this->vfxRelativeTimingPopupDelayMsFocused = false;
+
+        if (this->pointInRect(x, y, lay.validateBtn))
+        {
+            char* endPtr = nullptr;
+            const long parsed =
+                std::strtol(this->vfxRelativeTimingPopupDelayMsInput.c_str(), &endPtr, 10);
+            int ms = 0;
+            if (endPtr != this->vfxRelativeTimingPopupDelayMsInput.c_str())
+            {
+                ms = static_cast<int>(std::clamp(parsed, 0L, 999999L));
+            }
+            if (this->vfxRelativeTimingPopupIsShipRow)
+            {
+                const size_t pageKey = static_cast<size_t>(this->getShipVfxLayerPageKey());
+                this->shipSpawnAfterVfxInstanceId[pageKey] = this->vfxRelativeTimingPopupAnchorInstanceId;
+                this->shipSpawnAfterDelayMs[pageKey] = ms;
+            }
+            else if (this->vfxRelativeTimingPopupTargetVfxIndex >= 0 &&
+                     this->vfxRelativeTimingPopupTargetVfxIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+            {
+                ShipVfxInstance& tgt =
+                    this->currentShipVfxLayers()[static_cast<size_t>(this->vfxRelativeTimingPopupTargetVfxIndex)];
+                tgt.spawnAfterInstanceId = this->vfxRelativeTimingPopupAnchorInstanceId;
+                tgt.spawnAfterDelayMs = ms;
+            }
+            this->markShipVfxDirty();
+            this->closeVfxRelativeTimingPopup();
+            this->statusMessage = "RELATIF : delai " + std::to_string(ms) + " ms enregistre.";
+            return true;
+        }
+        return true;
+    }
+
+    if (this->vfxRelativeTimingPopupStep == 0)
+    {
+        const auto& layers = this->currentShipVfxLayers();
+        for (int i = 0; i < lay.candidateCount; ++i)
+        {
+            if (this->pointInRect(x, y, lay.candidateRows[i]))
+            {
+                const int idx = this->vfxRelativeTimingPopupCandidateIndices[static_cast<size_t>(i)];
+                if (idx >= 0 && idx < static_cast<int>(layers.size()))
+                {
+                    this->vfxRelativeTimingPopupAnchorInstanceId = layers[static_cast<size_t>(idx)].instanceId;
+                    this->vfxRelativeTimingPopupStep = 1;
+                    this->vfxRelativeTimingPopupDelayMsInput.clear();
+                    this->vfxRelativeTimingPopupDelayMsFocused = true;
+                    if (this->vfxRelativeTimingPopupIsShipRow)
+                    {
+                        const size_t pk = static_cast<size_t>(this->getShipVfxLayerPageKey());
+                        if (this->shipSpawnAfterVfxInstanceId[pk] == this->vfxRelativeTimingPopupAnchorInstanceId)
+                        {
+                            this->vfxRelativeTimingPopupDelayMsInput = std::to_string(this->shipSpawnAfterDelayMs[pk]);
+                        }
+                    }
+                    else if (this->vfxRelativeTimingPopupTargetVfxIndex >= 0 &&
+                             this->vfxRelativeTimingPopupTargetVfxIndex < static_cast<int>(layers.size()))
+                    {
+                        const ShipVfxInstance& t = layers[static_cast<size_t>(this->vfxRelativeTimingPopupTargetVfxIndex)];
+                        if (t.spawnAfterInstanceId == this->vfxRelativeTimingPopupAnchorInstanceId)
+                        {
+                            this->vfxRelativeTimingPopupDelayMsInput = std::to_string(t.spawnAfterDelayMs);
+                        }
+                    }
+                    this->statusMessage = "RELATIF : saisis le delai (ms), puis VALIDER.";
+                }
+                return true;
+            }
+        }
+        this->vfxRelativeTimingPopupDelayMsFocused = false;
+    }
+
+    return true;
+}
+
+bool EditorMapVfxScene::handleVfxRelativeTimingPopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)keycode;
+    (void)mod;
+    if (!this->vfxRelativeTimingPopupVisible)
+    {
+        return false;
+    }
+
+    if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
+    {
+        this->closeVfxRelativeTimingPopup();
+        this->statusMessage = "RELATIF : annule.";
+        return true;
+    }
+
+    if (this->vfxRelativeTimingPopupStep == 1)
+    {
+        if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+        {
+            char* endPtr = nullptr;
+            const long parsed =
+                std::strtol(this->vfxRelativeTimingPopupDelayMsInput.c_str(), &endPtr, 10);
+            int ms = 0;
+            if (endPtr != this->vfxRelativeTimingPopupDelayMsInput.c_str())
+            {
+                ms = static_cast<int>(std::clamp(parsed, 0L, 999999L));
+            }
+            if (this->vfxRelativeTimingPopupIsShipRow)
+            {
+                const size_t pageKey = static_cast<size_t>(this->getShipVfxLayerPageKey());
+                this->shipSpawnAfterVfxInstanceId[pageKey] = this->vfxRelativeTimingPopupAnchorInstanceId;
+                this->shipSpawnAfterDelayMs[pageKey] = ms;
+            }
+            else if (this->vfxRelativeTimingPopupTargetVfxIndex >= 0 &&
+                     this->vfxRelativeTimingPopupTargetVfxIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+            {
+                ShipVfxInstance& tgt =
+                    this->currentShipVfxLayers()[static_cast<size_t>(this->vfxRelativeTimingPopupTargetVfxIndex)];
+                tgt.spawnAfterInstanceId = this->vfxRelativeTimingPopupAnchorInstanceId;
+                tgt.spawnAfterDelayMs = ms;
+            }
+            this->markShipVfxDirty();
+            this->closeVfxRelativeTimingPopup();
+            this->statusMessage = "RELATIF : delai " + std::to_string(ms) + " ms enregistre.";
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_BACKSPACE && !isrepeat)
+        {
+            if (this->vfxRelativeTimingPopupDelayMsFocused && !this->vfxRelativeTimingPopupDelayMsInput.empty())
+            {
+                this->vfxRelativeTimingPopupDelayMsInput.pop_back();
+            }
+            return true;
+        }
+        if (this->vfxRelativeTimingPopupDelayMsFocused && !isrepeat)
+        {
+            auto appendMsDigit = [this](char digit) -> bool {
+                if (this->vfxRelativeTimingPopupDelayMsInput.size() >= 8U)
+                {
+                    return true;
+                }
+                this->vfxRelativeTimingPopupDelayMsInput.push_back(digit);
+                return true;
+            };
+            switch (scancode)
+            {
+            case SDL_SCANCODE_KP_0:
+                return appendMsDigit('0');
+            case SDL_SCANCODE_KP_1:
+                return appendMsDigit('1');
+            case SDL_SCANCODE_KP_2:
+                return appendMsDigit('2');
+            case SDL_SCANCODE_KP_3:
+                return appendMsDigit('3');
+            case SDL_SCANCODE_KP_4:
+                return appendMsDigit('4');
+            case SDL_SCANCODE_KP_5:
+                return appendMsDigit('5');
+            case SDL_SCANCODE_KP_6:
+                return appendMsDigit('6');
+            case SDL_SCANCODE_KP_7:
+                return appendMsDigit('7');
+            case SDL_SCANCODE_KP_8:
+                return appendMsDigit('8');
+            case SDL_SCANCODE_KP_9:
+                return appendMsDigit('9');
+            default:
+                break;
+            }
+        }
+        if (this->vfxRelativeTimingPopupDelayMsFocused && key != nullptr && std::strlen(key) == 1U)
+        {
+            const char c = key[0];
+            if (c >= '0' && c <= '9' && this->vfxRelativeTimingPopupDelayMsInput.size() < 8U)
+            {
+                this->vfxRelativeTimingPopupDelayMsInput.push_back(c);
+                return true;
+            }
+        }
+        return true;
+    }
+
+    return true;
+}
+
 bool EditorMapVfxScene::handleShipListClick(float x, float y)
 {
     int clickedIndex = -1;
@@ -7848,6 +8586,7 @@ bool EditorMapVfxScene::handleShipListClick(float x, float y)
     }
     return true;
 }
+
 
 bool EditorMapVfxScene::handleSfxListClick(float x, float y)
 {
@@ -7886,7 +8625,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
 
     const float panelPadding = 4.0f;
     const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
+    const float rowGap = kLayerListPanelRowGap;
     const float rowsTopY = this->layerListRect.y + panelPadding + headerHeight + 1.0f;
     const float rowsHeight =
         this->layerListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kVisibleListRows - 1) * rowGap));
@@ -8058,6 +8797,12 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
     layerFlipVRowRect.x = layerFlipHRowRect.x - layerFlipVRowRect.w - 4.0f;
     layerFlipVRowRect.y = lockRect.y;
 
+    SDL_FRect layerRelativeRect{};
+    layerRelativeRect.w = kLayerRowRelativeButtonW;
+    layerRelativeRect.h = lockRect.h;
+    layerRelativeRect.x = layerFlipVRowRect.x - layerRelativeRect.w - 4.0f;
+    layerRelativeRect.y = lockRect.y;
+
     auto clearLayerDragState = [this]() {
         this->layerRowDragActive = false;
         this->layerRowDragMoved = false;
@@ -8091,6 +8836,14 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         (!clickedIsShipRow && clickedIndex >= 0 && clickedIndex < static_cast<int>(orderedLayerIndices.size()))
         ? orderedLayerIndices[static_cast<size_t>(clickedIndex)]
         : -1;
+
+    if (this->pointInRect(x, y, layerRelativeRect))
+    {
+        selectClickedRow();
+        clearLayerDragState();
+        this->openVfxRelativeTimingPopup(clickedIsShipRow, clickedInstanceIndex);
+        return true;
+    }
 
     if (this->pointInRect(x, y, layerFlipVRowRect))
     {
@@ -8145,8 +8898,8 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         {
             this->vfxRotationDialActive = true;
             this->statusMessage =
-                "Mode ROT : orientez avec la souris, puis clic gauche sur la carte pour valider et masquer le cadran. "
-                "ECHAP ou reclic ROT sur ce layer : fermer le cadran.";
+                "Mode ROT : orientez avec la souris, puis clic gauche sur la carte pour valider. "
+                "ECHAP ou reclic ROT sur ce layer : quitter le mode.";
         }
         return true;
     }
@@ -8637,8 +9390,8 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
 
         const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
         const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-        const int frameCount = static_cast<int>(imported.frames.size());
-        const int frameIndex = static_cast<int>(std::floor(timeSeconds * (std::max)(imported.defaultFps, 1.0f))) % frameCount;
+        const auto& hitLayers = this->currentShipVfxLayers();
+        const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, hitLayers, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
         const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
         const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
@@ -9217,6 +9970,10 @@ void EditorMapVfxScene::keypressed(
     (void)keycode;
     (void)keyboardID;
 
+    if (this->handleVfxRelativeTimingPopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     if (this->handleLooseExportNameInputKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
@@ -9599,6 +10356,12 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     (void)clicks;
     (void)mouseID;
     Map& map = GetCurrentMap();
+
+    if (this->vfxRelativeTimingPopupVisible)
+    {
+        (void)this->handleVfxRelativeTimingPopupMouseClick(x, y, button);
+        return;
+    }
 
     if (this->looseExportNamePopupVisible)
     {

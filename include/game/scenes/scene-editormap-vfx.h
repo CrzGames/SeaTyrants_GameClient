@@ -96,6 +96,10 @@ private:
         bool placementSnapClickToTile;
         bool sharedForAllDirections;
         bool sharedForAllStates;
+        /** 0 = pas de decalage ; sinon id d'une autre instance (meme animation) sur la page. */
+        uint32_t spawnAfterInstanceId = 0;
+        /** Delai apres la phase de l'instance reference (ms), pour la lecture preview / jeu. */
+        int spawnAfterDelayMs = 0;
         std::array<DirectionOverride, 4> directionOverrides;
     };
 
@@ -170,6 +174,9 @@ private:
     std::array<bool, 8> shipLayerVisibleByPage{{true, true, true, true, true, true, true, true}};
     std::array<bool, 8> shipLayerLockedByPage{};
     std::array<bool, 8> shipDebugBoundsVisibleByPage{{true, true, true, true, true, true, true, true}};
+    /** Par page : navire visible dans la preview seulement apres ce delai (ms) dans le cycle du VFX reference. */
+    std::array<uint32_t, 8> shipSpawnAfterVfxInstanceId{};
+    std::array<int, 8> shipSpawnAfterDelayMs{};
     bool shipLayerSelected;
     /** Debug : grille iso 10x10 au sol sous le navire preview. */
     bool previewIsoGridVisible;
@@ -247,6 +254,26 @@ private:
     uint32_t nextVfxInstanceId;
     std::string layerNameInput;
     bool layerNameInputFocused;
+    struct VfxRelativePopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect delayInputRect{};
+        SDL_FRect validateBtn{};
+        SDL_FRect clearBtn{};
+        SDL_FRect cancelBtn{};
+        int candidateCount = 0;
+        SDL_FRect candidateRows[20]{};
+    };
+    bool vfxRelativeTimingPopupVisible = false;
+    bool vfxRelativeTimingPopupIsShipRow = false;
+    int vfxRelativeTimingPopupTargetVfxIndex = -1;
+    int vfxRelativeTimingPopupStep = 0;
+    std::vector<int> vfxRelativeTimingPopupCandidateIndices;
+    uint32_t vfxRelativeTimingPopupAnchorInstanceId = 0;
+    std::string vfxRelativeTimingPopupDelayMsInput;
+    bool vfxRelativeTimingPopupDelayMsFocused = false;
+    mutable VfxRelativePopupLayout vfxRelativePopupLastLayout;
     bool vfxDragActive;
     /** Mode cadran ROT (panneau layers) : cercle autour du navire + ligne vers le curseur. */
     bool vfxRotationDialActive;
@@ -404,6 +431,25 @@ private:
     const char* getPreviewDirectionLabel(void) const;
     const char* getPreviewShipStateLabel(void) const;
     void markShipVfxDirty(void);
+    void openVfxRelativeTimingPopup(bool forShipRow, int vfxInstanceIndex);
+    void closeVfxRelativeTimingPopup(void);
+    bool computeVfxRelativePopupLayout(VfxRelativePopupLayout* out) const;
+    void drawVfxRelativeTimingPopup(void) const;
+    bool handleVfxRelativeTimingPopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleVfxRelativeTimingPopupKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    int computeVfxPreviewFrameIndex(
+        const ShipVfxInstance& instance,
+        float timeSeconds,
+        const std::vector<ShipVfxInstance>& layerVec,
+        const ImportedSfx& imported) const;
+    /** Phase [0, periode) en secondes pour une instance, en enchainant les RELATIF (A->B->C). */
+    float computeVfxPreviewPhaseSecondsInCycle(
+        const ShipVfxInstance& instance,
+        float timeSeconds,
+        const std::vector<ShipVfxInstance>& layerVec,
+        const ImportedSfx& imported,
+        int chainDepth) const;
+    bool shouldPreviewHideShipForRelativeTiming(float timeSeconds) const;
     void initDefaultShipLayerSettingsAllPages(void);
     void clearAllShipVfxLayerPages(void);
     void clearShipVfxLayerUiTransientStateForPageChange(void);
