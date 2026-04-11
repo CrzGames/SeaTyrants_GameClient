@@ -424,6 +424,36 @@ function(rc2d_configure_ffmpeg target_name)
                   "$<TARGET_FILE_DIR:${target_name}>/${FILE_NAME}"
         )
       endforeach()
+    elseif (RC2D_PLATFORM STREQUAL "STEAMRT4") # Steam Deck / Steam Linux
+      # Copier aussi les libraries dynamique dans le répertoire de l'exécutable
+      file(GLOB_RECURSE FFMPEG_SO
+        "${CRZGAMES_LIBRARIES_PATH}/steamrt4/lib/ffmpeg/${RC2D_ARCH}/*.so"
+        "${CRZGAMES_LIBRARIES_PATH}/steamrt4/lib/ffmpeg/${RC2D_ARCH}/*.so.*"
+      )
+      foreach(FILE IN LISTS FFMPEG_SO)
+        get_filename_component(FILE_NAME "${FILE}" NAME)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                  "${FILE}"
+                  "$<TARGET_FILE_DIR:${target_name}>/${FILE_NAME}"
+          COMMENT "Copy FFmpeg: ${FILE_NAME}"
+        )
+      endforeach()
+    elseif (UNIX AND NOT APPLE AND NOT ANDROID AND NOT (RC2D_PLATFORM STREQUAL "STEAMRT4")) # Linux, Raspberry PI 5 etc.
+      # Copier aussi les libraries dynamique dans le répertoire de l'exécutable
+      file(GLOB_RECURSE FFMPEG_SO
+        "${CRZGAMES_LIBRARIES_PATH}/linux/lib/ffmpeg/${RC2D_ARCH}/*.so"
+        "${CRZGAMES_LIBRARIES_PATH}/linux/lib/ffmpeg/${RC2D_ARCH}/*.so.*"
+      )
+      foreach(FILE IN LISTS FFMPEG_SO)
+        get_filename_component(FILE_NAME "${FILE}" NAME)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                  "${FILE}"
+                  "$<TARGET_FILE_DIR:${target_name}>/${FILE_NAME}"
+          COMMENT "Copy FFmpeg: ${FILE_NAME}"
+        )
+      endforeach()
     endif()
   endif()
 endfunction()
