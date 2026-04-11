@@ -67,7 +67,11 @@ const RC2D_EngineConfig* rc2d_engine_setup(int argc, char* argv[])
     config->callbacks->rc2d_websocket_update = rc2d_websocket_update;
     config->callbacks->rc2d_wake_blocking_threads = rc2d_wake_blocking_threads;
     config->networkClientConfig->channelCount = static_cast<uint32_t>(NetworkChannel::COUNT);
+#if defined(RC2D_PLATFORM_MACOS)
+    config->logicalPresentationMode = RC2D_LOGICAL_PRESENTATION_LETTERBOX;
+#else
     config->logicalPresentationMode = RC2D_LOGICAL_PRESENTATION_OVERSCAN;
+#endif
     config->pixelartMode = false;
     config->appInfo->name = "SeaTyrants";
     config->appInfo->organization = "Crzgames";

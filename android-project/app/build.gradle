@@ -83,8 +83,8 @@ android {
                 *   - armeabi-v7a
                 *   - arm64-v8a
                 */
-                "../../dependencies/Crzgames_RC2D/Crzgames_Libraries/android/lib/ffmpeg",
-                "../../dependencies/Crzgames_RC2D/Crzgames_Libraries/android/lib/onnxruntime"
+                "../../dependencies/Crzgames_RC2D/dependencies/Crzgames_Libraries/android/lib/ffmpeg",
+                "../../dependencies/Crzgames_RC2D/dependencies/Crzgames_Libraries/android/lib/onnxruntime"
             ]
         }
         externalNativeBuild {
