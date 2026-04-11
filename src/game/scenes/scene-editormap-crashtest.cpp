@@ -664,15 +664,15 @@ void EditorMapCrashTestScene::updateToolbarLayout(void)
     setNextButton(&this->buttonOceanPrevRect, &x, rowY, 102.0f);
     setNextButton(&this->buttonOceanNextRect, &x, rowY, 102.0f);
 
-    constexpr float miniMapScale = 0.8f;
+    constexpr float miniMapScale = 2.0f / 3.0f;
     const float miniMapSize = std::clamp(
-        map.rect.h * 0.25f * miniMapScale,
-        135.0f * miniMapScale,
-        240.0f * miniMapScale);
+        map.rect.h * 0.22f * miniMapScale,
+        120.0f * miniMapScale,
+        190.0f * miniMapScale);
     this->miniMapRect.w = miniMapSize;
     this->miniMapRect.h = miniMapSize;
-    this->miniMapRect.x = map.rect.x + map.rect.w - this->miniMapRect.w - 36.0f;
-    this->miniMapRect.y = map.rect.y + 36.0f;
+    this->miniMapRect.x = map.rect.x + map.rect.w - this->miniMapRect.w - 40.0f;
+    this->miniMapRect.y = map.rect.y + 40.0f;
 }
 
 void EditorMapCrashTestScene::drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const
@@ -914,33 +914,9 @@ void EditorMapCrashTestScene::drawMiniMap(void) const
     const float height = this->miniMapRect.h;
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-    rc2d_graphics_setColor(RC2D_Color{16, 22, 30, 225});
+    // Meme fond "eau" que la minimap du creator map.
+    rc2d_graphics_setColor(RC2D_Color{28, 63, 103, 255});
     rc2d_graphics_rectangle("fill", &this->miniMapRect);
-
-    // Grille secteur minimap (pas de 10).
-    rc2d_graphics_setColor(RC2D_Color{50, 74, 98, 140});
-    for (int i = 1; i < Map::NUM_SECTORS_X; ++i)
-    {
-        if ((i % 10) != 0)
-        {
-            continue;
-        }
-
-        const float nx = static_cast<float>(i) / static_cast<float>(Map::NUM_SECTORS_X);
-        const float x = left + (nx * width);
-        rc2d_graphics_line(x, top, x, top + height);
-    }
-    for (int i = 1; i < Map::NUM_SECTORS_Y; ++i)
-    {
-        if ((i % 10) != 0)
-        {
-            continue;
-        }
-
-        const float ny = static_cast<float>(i) / static_cast<float>(Map::NUM_SECTORS_Y);
-        const float y = top + (ny * height);
-        rc2d_graphics_line(left, y, left + width, y);
-    }
 
     rc2d_graphics_setColor(RC2D_Color{135, 150, 168, 235});
     rc2d_graphics_rectangle("line", &this->miniMapRect);
@@ -971,7 +947,7 @@ void EditorMapCrashTestScene::drawMiniMap(void) const
         dot.h = 1.0f;
         dot.x = left + (nx * width) - (dot.w * 0.5f);
         dot.y = top + (ny * height) - (dot.h * 0.5f);
-        rc2d_graphics_setColor(RC2D_Color{255, 45, 45, 255});
+        rc2d_graphics_setColor(RC2D_Color{245, 45, 45, 255});
         rc2d_graphics_rectangle("fill", &dot);
     }
 
