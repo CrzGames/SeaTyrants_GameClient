@@ -76,8 +76,6 @@ constexpr RC2D_Color kAssetRowSelectedFillColor = RC2D_Color{86, 130, 174, 220};
 constexpr RC2D_Color kAssetRowBorderColor = RC2D_Color{115, 128, 146, 210};
 constexpr float kAssetListScrollBarWidth = 10.0f;
 constexpr int kAssetListVisibleRows = 10;
-constexpr float kSfxFpsMin = 1.0f;
-constexpr float kSfxFpsMax = 60.0f;
 // Export minimap:
 // - taille derivee de la map secteurs (pas de taille fixe 1024x1024).
 // - 1 secteur = SECTOR_STEP pixels dans l'image exportee.
@@ -177,20 +175,6 @@ static std::string makeAssetLabel(const std::string& name, int maxChars)
     return name.substr(0, static_cast<size_t>(maxChars - 3)) + "...";
 }
 
-static std::string formatSfxFpsValue(float fps)
-{
-    const float clamped = std::clamp(fps, kSfxFpsMin, kSfxFpsMax);
-    char buffer[32] = {};
-    if (std::fabs(clamped - std::round(clamped)) <= 0.001f)
-    {
-        SDL_snprintf(buffer, sizeof(buffer), "%.0f", clamped);
-    }
-    else
-    {
-        SDL_snprintf(buffer, sizeof(buffer), "%.2f", clamped);
-    }
-    return std::string(buffer);
-}
 
 static std::string normalizePathSlashes(const std::string& path)
 {
@@ -209,65 +193,6 @@ static std::string extractFileName(const std::string& path)
     }
 
     return normalized.substr(slashPos + 1);
-}
-
-static bool tryParseNumericFrameName(const std::string& frameName, unsigned long long* outValue)
-{
-    if (outValue == nullptr)
-    {
-        return false;
-    }
-
-    const std::string fileName = extractFileName(frameName);
-    const size_t dotPos = fileName.find_last_of('.');
-    const std::string stem = (dotPos == std::string::npos) ? fileName : fileName.substr(0, dotPos);
-    if (stem.empty())
-    {
-        return false;
-    }
-
-    unsigned long long value = 0;
-    for (char c : stem)
-    {
-        const unsigned char uc = static_cast<unsigned char>(c);
-        if (!std::isdigit(uc))
-        {
-            return false;
-        }
-        value = (value * 10ULL) + static_cast<unsigned long long>(c - '0');
-    }
-
-    *outValue = value;
-    return true;
-}
-
-static void sortFrameNamesByNumericOrder(std::vector<std::string>* frameNames)
-{
-    if (frameNames == nullptr)
-    {
-        return;
-    }
-
-    std::sort(frameNames->begin(), frameNames->end(), [](const std::string& a, const std::string& b) {
-        unsigned long long aNum = 0;
-        unsigned long long bNum = 0;
-        const bool aIsNumeric = tryParseNumericFrameName(a, &aNum);
-        const bool bIsNumeric = tryParseNumericFrameName(b, &bNum);
-
-        if (aIsNumeric && bIsNumeric)
-        {
-            if (aNum != bNum)
-            {
-                return aNum < bNum;
-            }
-            return a < b;
-        }
-        if (aIsNumeric != bIsNumeric)
-        {
-            return aIsNumeric;
-        }
-        return a < b;
-    });
 }
 
 static std::string buildRuntimeAssetPathFromSource(const std::string& sourcePath, const std::string& fallbackName)
@@ -328,10 +253,8 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       selectedOceanColorIndex(24),
       pendingOceanColorDelta(0),
       selectedAssetIndex(-1),
-      selectedSfxIndex(-1),
       selectedShipIndex(-1),
       assetListScrollOffset(0),
-      sfxListScrollOffset(0),
       shipListScrollOffset(0),
       showGrid(true),
       showBlockedTiles(true),
@@ -339,9 +262,6 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       collisionPaintBlocks(true),
       mapNameInput{},
       mapNameInputFocused(false),
-      sfxFpsInput{},
-      sfxFpsInputFocused(false),
-      sfxLoopEnabled(true),
       blockedBrushRadiusTiles(0),
       assetTransparencyEnabled(true),
       assetOpacityPercent(100),
@@ -355,15 +275,12 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       lastDragPaintTileValid(false),
       lastDragPaintTile{},
       importedAssets{},
-      importedSfx{},
       importedShips{},
       placedAssets{},
-      placedSfx{},
       towerHotspots{},
       historyActions{},
       historyCursor(0),
       importedAssetCounter(0U),
-      importedSfxCounter(0U),
       statusMessage("Editor map pret."),
       pendingImportDialogCompleted(false),
       pendingImportDialogCanceled(false),
@@ -374,19 +291,8 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       importBatchNextIndex(0),
       importBatchImportedCount(0),
       importBatchFailedCount(0),
-      pendingSfxImportDialogCompleted(false),
-      pendingSfxImportDialogCanceled(false),
-      pendingSfxImportFilePaths{},
-      pendingSfxImportMutex{},
-      sfxImportBatchActive(false),
-      sfxImportBatchFilePaths{},
-      sfxImportBatchNextIndex(0),
-      sfxImportBatchImportedCount(0),
-      sfxImportBatchFailedCount(0),
       assetListScrollDragActive(false),
       assetListScrollDragGrabOffsetY(0.0f),
-      sfxListScrollDragActive(false),
-      sfxListScrollDragGrabOffsetY(0.0f),
       shipListScrollDragActive(false),
       shipListScrollDragGrabOffsetY(0.0f),
       clickMarker{},
@@ -405,9 +311,6 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       pendingMapImportAbsolutePath(),
       pendingMapImportMutex{},
       buttonImportRect{},
-      buttonImportSfxRect{},
-      buttonClearSfxRect{},
-      buttonSfxLoopRect{},
       buttonImportMapRect{},
       buttonImportShipRect{},
       buttonExportRect{},
@@ -444,9 +347,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonShipReexportRect{},
       buttonListsVisibilityRect{},
       mapNameInputRect{},
-      sfxFpsInputRect{},
       assetListRect{},
-      sfxListRect{},
       shipListRect{},
       miniMapRect{},
       miniMapDragActive(false),
@@ -466,10 +367,8 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedOceanColorIndex = 24;
     this->pendingOceanColorDelta = 0;
     this->selectedAssetIndex = -1;
-    this->selectedSfxIndex = -1;
     this->selectedShipIndex = -1;
     this->assetListScrollOffset = 0;
-    this->sfxListScrollOffset = 0;
     this->shipListScrollOffset = 0;
     this->showGrid = true;
     this->showBlockedTiles = true;
@@ -477,9 +376,6 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->collisionPaintBlocks = true;
     this->mapNameInput.clear();
     this->mapNameInputFocused = false;
-    this->sfxFpsInput.clear();
-    this->sfxFpsInputFocused = false;
-    this->sfxLoopEnabled = true;
     this->blockedBrushRadiusTiles = 0;
     this->assetTransparencyEnabled = true;
     this->assetOpacityPercent = 100;
@@ -493,10 +389,8 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->historyActions.clear();
     this->historyCursor = 0;
     this->towerHotspots.clear();
-    this->unloadImportedSfx();
     this->importedShips.clear();
     this->importedAssetCounter = 0U;
-    this->importedSfxCounter = 0U;
     this->statusMessage = "Editor map pret.";
     this->pendingImportDialogCompleted = false;
     this->pendingImportDialogCanceled = false;
@@ -509,21 +403,10 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->importBatchNextIndex = 0;
     this->importBatchImportedCount = 0;
     this->importBatchFailedCount = 0;
-    this->pendingSfxImportDialogCompleted = false;
-    this->pendingSfxImportDialogCanceled = false;
     {
-        std::lock_guard<std::mutex> lock(this->pendingSfxImportMutex);
-        this->pendingSfxImportFilePaths.clear();
     }
-    this->sfxImportBatchActive = false;
-    this->sfxImportBatchFilePaths.clear();
-    this->sfxImportBatchNextIndex = 0;
-    this->sfxImportBatchImportedCount = 0;
-    this->sfxImportBatchFailedCount = 0;
     this->assetListScrollDragActive = false;
     this->assetListScrollDragGrabOffsetY = 0.0f;
-    this->sfxListScrollDragActive = false;
-    this->sfxListScrollDragGrabOffsetY = 0.0f;
     this->shipListScrollDragActive = false;
     this->shipListScrollDragGrabOffsetY = 0.0f;
     this->clickMarker.hide();
@@ -552,9 +435,6 @@ void EditorMapCreateMapScene::resetEditorState(void)
         this->pendingMapImportAbsolutePath.clear();
     }
     this->buttonImportRect = SDL_FRect{};
-    this->buttonImportSfxRect = SDL_FRect{};
-    this->buttonClearSfxRect = SDL_FRect{};
-    this->buttonSfxLoopRect = SDL_FRect{};
     this->buttonImportMapRect = SDL_FRect{};
     this->buttonImportShipRect = SDL_FRect{};
     this->buttonExportRect = SDL_FRect{};
@@ -591,9 +471,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonShipReexportRect = SDL_FRect{};
     this->buttonListsVisibilityRect = SDL_FRect{};
     this->mapNameInputRect = SDL_FRect{};
-    this->sfxFpsInputRect = SDL_FRect{};
     this->assetListRect = SDL_FRect{};
-    this->sfxListRect = SDL_FRect{};
     this->shipListRect = SDL_FRect{};
     this->miniMapRect = SDL_FRect{};
     this->miniMapDragActive = false;
@@ -630,28 +508,10 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
     this->assetListScrollDragGrabOffsetY = 0.0f;
 }
 
-void EditorMapCreateMapScene::unloadImportedSfx(void)
-{
-    for (ImportedSfx& sfx : this->importedSfx)
-    {
-        rc2d_tp_freeAtlas(&sfx.atlas);
-        sfx.frameNames.clear();
-    }
-
-    this->importedSfx.clear();
-    this->placedSfx.clear();
-    this->selectedSfxIndex = -1;
-    this->sfxFpsInput.clear();
-    this->sfxFpsInputFocused = false;
-    this->sfxListScrollOffset = 0;
-    this->sfxListScrollDragActive = false;
-    this->sfxListScrollDragGrabOffsetY = 0.0f;
-}
 
 void EditorMapCreateMapScene::ensureUserStorageFolders(void)
 {
     rc2d_storage_userMkdir("editor-assets");
-    rc2d_storage_userMkdir("editor-sfx");
     rc2d_storage_userMkdir("editor-map-ship");
     rc2d_storage_userMkdir("editor-map-ship/current");
 }
@@ -815,49 +675,6 @@ void EditorMapCreateMapScene::updateHoveredTile(void)
     this->hoveredTileValid = false;
 }
 
-void EditorMapCreateMapScene::updatePlacedSfxLifecycle(void)
-{
-    if (this->placedSfx.empty())
-    {
-        return;
-    }
-
-    const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-
-    for (std::size_t i = this->placedSfx.size(); i > 0; --i)
-    {
-        const std::size_t index = i - 1;
-        const PlacedSfx& placed = this->placedSfx[index];
-        if (placed.loop)
-        {
-            continue;
-        }
-
-        if (placed.importedSfxIndex < 0 ||
-            placed.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            this->placedSfx.erase(this->placedSfx.begin() + static_cast<std::ptrdiff_t>(index));
-            continue;
-        }
-
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(placed.importedSfxIndex)];
-        if (imported.frameNames.empty())
-        {
-            this->placedSfx.erase(this->placedSfx.begin() + static_cast<std::ptrdiff_t>(index));
-            continue;
-        }
-
-        const float fps = (std::max)(placed.fps, 1.0f);
-        const float animationDurationSeconds =
-            static_cast<float>(imported.frameNames.size()) / fps;
-        const float elapsedSeconds =
-            (std::max)(nowSeconds - placed.spawnTimeSeconds, 0.0f);
-        if (elapsedSeconds >= animationDurationSeconds)
-        {
-            this->placedSfx.erase(this->placedSfx.begin() + static_cast<std::ptrdiff_t>(index));
-        }
-    }
-}
 
 int EditorMapCreateMapScene::findPlacedAssetIndexAtTile(int tileX, int tileY) const
 {
@@ -1168,14 +985,6 @@ void EditorMapCreateMapScene::handleTilePaintFromMouseDrag(void)
         return;
     }
 
-    // Pendant le drag de la scrollbar VFX, on bloque aussi le paint collision.
-    if (this->sfxListScrollDragActive)
-    {
-        this->dragPaintActive = false;
-        this->lastDragPaintTileValid = false;
-        return;
-    }
-
     // Quand une barre de scroll est active, on bloque tout paint collision.
     if (this->scrollBarOverlay.isInteracting())
     {
@@ -1410,170 +1219,8 @@ void EditorMapCreateMapScene::removeAssetAtMouseTile(void)
     this->statusMessage = "Asset supprime.";
 }
 
-void EditorMapCreateMapScene::placeSelectedSfxAtMouseTile(void)
-{
-    if (this->selectedSfxIndex < 0 ||
-        this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-    {
-        this->statusMessage = "Aucun VFX selectionne.";
-        return;
-    }
 
-    Map& map = GetCurrentMap();
 
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    if (!this->getMouseRenderPosition(&mouseX, &mouseY) || !this->isInsideMapRect(mouseX, mouseY))
-    {
-        return;
-    }
-
-    const SDL_FPoint anchorTile = map.screenToTile(mouseX, mouseY);
-    SDL_Point tile = map.roundTile(anchorTile.x, anchorTile.y);
-    tile = map.clampTile(tile.x, tile.y);
-    const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-
-    for (PlacedSfx& placed : this->placedSfx)
-    {
-        if (placed.tileX == tile.x && placed.tileY == tile.y)
-        {
-            placed.importedSfxIndex = this->selectedSfxIndex;
-            placed.anchorTileX = anchorTile.x;
-            placed.anchorTileY = anchorTile.y;
-            placed.scale = 1.0f;
-            placed.fps = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps;
-            placed.loop = this->sfxLoopEnabled;
-            placed.spawnTimeSeconds = nowSeconds;
-            this->statusMessage = "VFX remplace.";
-            return;
-        }
-    }
-
-    PlacedSfx placed{};
-    placed.importedSfxIndex = this->selectedSfxIndex;
-    placed.tileX = tile.x;
-    placed.tileY = tile.y;
-    placed.anchorTileX = anchorTile.x;
-    placed.anchorTileY = anchorTile.y;
-    placed.scale = 1.0f;
-    placed.fps = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps;
-    placed.loop = this->sfxLoopEnabled;
-    placed.spawnTimeSeconds = nowSeconds;
-    this->placedSfx.push_back(placed);
-    this->statusMessage = "VFX pose.";
-}
-
-int EditorMapCreateMapScene::findPlacedSfxIndexAtScreenPoint(float x, float y) const
-{
-    const Map& map = GetCurrentMap();
-    const float worldZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
-    std::vector<std::pair<size_t, int>> candidates;
-    candidates.reserve(this->placedSfx.size());
-    const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-
-    for (size_t i = 0; i < this->placedSfx.size(); ++i)
-    {
-        const PlacedSfx& placed = this->placedSfx[i];
-        if (placed.importedSfxIndex < 0 ||
-            placed.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            continue;
-        }
-
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(placed.importedSfxIndex)];
-        if (imported.atlas.atlas_image.sdl_texture == nullptr || imported.frameNames.empty())
-        {
-            continue;
-        }
-
-        const float fps = (std::max)(placed.fps, 1.0f);
-        const int frameCount = static_cast<int>(imported.frameNames.size());
-        const float elapsedSeconds =
-            (std::max)(nowSeconds - placed.spawnTimeSeconds, 0.0f);
-        int frameIndex = 0;
-        if (placed.loop)
-        {
-            frameIndex = static_cast<int>(std::floor(elapsedSeconds * fps)) % frameCount;
-        }
-        else
-        {
-            const int oneShotFrame = static_cast<int>(std::floor(elapsedSeconds * fps));
-            frameIndex = std::clamp(oneShotFrame, 0, frameCount - 1);
-        }
-        const std::string& frameName = imported.frameNames[static_cast<size_t>(frameIndex)];
-        const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&imported.atlas, frameName.c_str());
-        if (frame == nullptr)
-        {
-            continue;
-        }
-
-        const SDL_FPoint anchorScreen = map.tileToScreenCenterFloat(placed.anchorTileX, placed.anchorTileY);
-        const float effectiveScale = placed.scale * worldZoom;
-        const float sourceW = (frame->sourceSize.x > 0.0f) ? frame->sourceSize.x : frame->frame.w;
-        const float sourceH = (frame->sourceSize.y > 0.0f) ? frame->sourceSize.y : frame->frame.h;
-        const float drawW = sourceW * effectiveScale;
-        const float drawH = sourceH * effectiveScale;
-
-        if (x < anchorScreen.x || y < anchorScreen.y || x > (anchorScreen.x + drawW) || y > (anchorScreen.y + drawH))
-        {
-            continue;
-        }
-
-        const int depth = placed.tileX + placed.tileY;
-        candidates.emplace_back(i, depth);
-    }
-
-    if (candidates.empty())
-    {
-        return -1;
-    }
-
-    std::sort(candidates.begin(), candidates.end(), [this](const auto& a, const auto& b) {
-        const PlacedSfx& sfxA = this->placedSfx[a.first];
-        const PlacedSfx& sfxB = this->placedSfx[b.first];
-        if (a.second != b.second)
-        {
-            return a.second < b.second;
-        }
-        return sfxA.tileY < sfxB.tileY;
-    });
-    return static_cast<int>(candidates.back().first);
-}
-
-void EditorMapCreateMapScene::removeSfxAtMouseTile(void)
-{
-    Map& map = GetCurrentMap();
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    if (!this->getMouseRenderPosition(&mouseX, &mouseY) || !this->isInsideMapRect(mouseX, mouseY))
-    {
-        return;
-    }
-
-    int removeIndex = this->findPlacedSfxIndexAtScreenPoint(mouseX, mouseY);
-    if (removeIndex < 0)
-    {
-        const SDL_Point tile = map.screenToTileNearest(mouseX, mouseY);
-        for (size_t i = 0; i < this->placedSfx.size(); ++i)
-        {
-            if (this->placedSfx[i].tileX == tile.x && this->placedSfx[i].tileY == tile.y)
-            {
-                removeIndex = static_cast<int>(i);
-                break;
-            }
-        }
-    }
-
-    if (removeIndex < 0 || removeIndex >= static_cast<int>(this->placedSfx.size()))
-    {
-        this->statusMessage = "Aucun VFX a supprimer.";
-        return;
-    }
-
-    this->placedSfx.erase(this->placedSfx.begin() + static_cast<std::ptrdiff_t>(removeIndex));
-    this->statusMessage = "VFX supprime.";
-}
 
 bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePath)
 {
@@ -1711,358 +1358,12 @@ bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePa
     this->importedAssets.push_back(importedAsset);
 
     this->selectedAssetIndex = static_cast<int>(this->importedAssets.size()) - 1;
-    this->selectedSfxIndex = -1;
     this->ensureSelectedAssetVisible();
     this->statusMessage = "Asset importe: " + importedAsset.displayName;
     return true;
 }
 
-bool EditorMapCreateMapScene::importSfxFromAbsolutePath(const char* absolutePath)
-{
-    if (absolutePath == nullptr || absolutePath[0] == '\0')
-    {
-        this->statusMessage = "Dossier VFX invalide.";
-        return false;
-    }
 
-    std::filesystem::path sfxFolder(absolutePath);
-    std::error_code fsError;
-    if (!std::filesystem::exists(sfxFolder, fsError) ||
-        !std::filesystem::is_directory(sfxFolder, fsError))
-    {
-        this->statusMessage = "Dossier VFX introuvable.";
-        return false;
-    }
-
-    const std::filesystem::path jsonSourcePath = sfxFolder / "texturepacker.json";
-    if (!std::filesystem::exists(jsonSourcePath, fsError) ||
-        !std::filesystem::is_regular_file(jsonSourcePath, fsError))
-    {
-        this->statusMessage = "VFX ignore: texturepacker.json manquant.";
-        return false;
-    }
-
-    std::ifstream jsonInput(jsonSourcePath, std::ios::binary | std::ios::ate);
-    if (!jsonInput.is_open())
-    {
-        this->statusMessage = "Lecture texturepacker.json impossible.";
-        return false;
-    }
-    const std::streamsize jsonSize = jsonInput.tellg();
-    if (jsonSize <= 0)
-    {
-        this->statusMessage = "texturepacker.json vide.";
-        return false;
-    }
-    jsonInput.seekg(0, std::ios::beg);
-    std::vector<char> jsonBytes(static_cast<size_t>(jsonSize) + 1U, '\0');
-    if (!jsonInput.read(jsonBytes.data(), jsonSize))
-    {
-        this->statusMessage = "Lecture texturepacker.json echouee.";
-        return false;
-    }
-
-    cJSON* root = cJSON_Parse(jsonBytes.data());
-    if (root == nullptr)
-    {
-        this->statusMessage = "texturepacker.json invalide.";
-        return false;
-    }
-
-    cJSON* meta = cJSON_GetObjectItemCaseSensitive(root, "meta");
-    cJSON* image = (meta != nullptr) ? cJSON_GetObjectItemCaseSensitive(meta, "image") : nullptr;
-    if (!cJSON_IsObject(meta) || !cJSON_IsString(image) || image->valuestring == nullptr)
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: meta.image manquant.";
-        return false;
-    }
-
-    const std::string imageRelativePath = image->valuestring;
-    const std::filesystem::path imageSourcePath = sfxFolder / std::filesystem::path(imageRelativePath);
-    if (!std::filesystem::exists(imageSourcePath, fsError) ||
-        !std::filesystem::is_regular_file(imageSourcePath, fsError))
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: image atlas introuvable.";
-        return false;
-    }
-
-    const std::string imageFileName = extractFileName(imageRelativePath);
-    if (imageFileName.empty())
-    {
-        cJSON_Delete(root);
-        this->statusMessage = "VFX invalide: nom image atlas vide.";
-        return false;
-    }
-
-    cJSON_ReplaceItemInObjectCaseSensitive(meta, "image", cJSON_CreateString(imageFileName.c_str()));
-    char* patchedJson = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (patchedJson == nullptr)
-    {
-        this->statusMessage = "VFX invalide: serialisation JSON impossible.";
-        return false;
-    }
-
-    std::ifstream imageInput(imageSourcePath, std::ios::binary | std::ios::ate);
-    if (!imageInput.is_open())
-    {
-        cJSON_free(patchedJson);
-        this->statusMessage = "Lecture image atlas impossible.";
-        return false;
-    }
-    const std::streamsize imageSize = imageInput.tellg();
-    if (imageSize <= 0)
-    {
-        cJSON_free(patchedJson);
-        this->statusMessage = "Image atlas vide.";
-        return false;
-    }
-    imageInput.seekg(0, std::ios::beg);
-    std::vector<char> imageBytes(static_cast<size_t>(imageSize));
-    if (!imageInput.read(imageBytes.data(), imageSize))
-    {
-        cJSON_free(patchedJson);
-        this->statusMessage = "Lecture image atlas echouee.";
-        return false;
-    }
-
-    this->ensureUserStorageFolders();
-    ++this->importedSfxCounter;
-    char storageFolderPath[256] = {};
-    SDL_snprintf(
-        storageFolderPath,
-        sizeof(storageFolderPath),
-        "editor-sfx/imported-%04u",
-        this->importedSfxCounter);
-    rc2d_storage_userMkdir(storageFolderPath);
-
-    const std::string storageJsonPath = std::string(storageFolderPath) + "/texturepacker.json";
-    const std::string storageImagePath = std::string(storageFolderPath) + "/" + imageFileName;
-
-    const bool wroteJson = rc2d_storage_userWriteFile(
-        storageJsonPath.c_str(),
-        patchedJson,
-        static_cast<Uint64>(std::strlen(patchedJson)));
-    cJSON_free(patchedJson);
-    if (!wroteJson)
-    {
-        this->statusMessage = "Echec copie texturepacker.json en storage user.";
-        return false;
-    }
-
-    if (!rc2d_storage_userWriteFile(
-            storageImagePath.c_str(),
-            imageBytes.data(),
-            static_cast<Uint64>(imageBytes.size())))
-    {
-        this->statusMessage = "Echec copie image atlas en storage user.";
-        return false;
-    }
-
-    RC2D_TP_Atlas atlas = rc2d_tp_loadAtlasFromStorage(storageJsonPath.c_str(), RC2D_STORAGE_USER);
-    if (atlas.atlas_image.sdl_texture == nullptr || atlas.frame_count <= 0)
-    {
-        rc2d_tp_freeAtlas(&atlas);
-        this->statusMessage = "Echec chargement atlas VFX.";
-        return false;
-    }
-
-    std::vector<std::string> frameNames;
-    frameNames.reserve(static_cast<size_t>(atlas.frame_count));
-    for (int i = 0; i < atlas.frame_count; ++i)
-    {
-        if (atlas.frames[i].filename == nullptr || atlas.frames[i].filename[0] == '\0')
-        {
-            continue;
-        }
-        frameNames.emplace_back(atlas.frames[i].filename);
-    }
-    sortFrameNamesByNumericOrder(&frameNames);
-    if (frameNames.empty())
-    {
-        rc2d_tp_freeAtlas(&atlas);
-        this->statusMessage = "Atlas VFX vide (aucune frame exploitable).";
-        return false;
-    }
-
-    ImportedSfx imported{};
-    imported.id = "sfx_" + std::to_string(this->importedSfxCounter);
-    imported.displayName = sfxFolder.filename().string();
-    if (imported.displayName.empty())
-    {
-        imported.displayName = jsonSourcePath.stem().string();
-    }
-    imported.sourceJsonPath = normalizePathSlashes(jsonSourcePath.string());
-    imported.storageJsonPath = storageJsonPath;
-    imported.atlas = atlas;
-    imported.frameNames = std::move(frameNames);
-    imported.defaultFps = 12.0f;
-
-    this->importedSfx.push_back(std::move(imported));
-    this->selectedSfxIndex = static_cast<int>(this->importedSfx.size()) - 1;
-    this->selectedAssetIndex = -1;
-    this->sfxFpsInput = formatSfxFpsValue(
-        this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps);
-    this->ensureSelectedSfxVisible();
-    this->statusMessage =
-        "VFX importe: " +
-        this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].displayName +
-        " (FPS " +
-        formatSfxFpsValue(
-            this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps) +
-        ")";
-    return true;
-}
-
-bool EditorMapCreateMapScene::importSfxFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath)
-{
-    if (rootFolderAbsolutePath == nullptr || rootFolderAbsolutePath[0] == '\0')
-    {
-        this->statusMessage = "Dossier VFX invalide.";
-        return false;
-    }
-
-    std::filesystem::path rootPath(rootFolderAbsolutePath);
-    std::error_code fsError;
-    if (!std::filesystem::exists(rootPath, fsError) ||
-        !std::filesystem::is_directory(rootPath, fsError))
-    {
-        this->statusMessage = "Dossier VFX introuvable.";
-        return false;
-    }
-
-    auto makePathKey = [](const std::string& path) {
-        std::string key = normalizePathSlashes(path);
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return key;
-    };
-
-    std::vector<std::string> knownPathKeys;
-    knownPathKeys.reserve(this->importedSfx.size());
-    for (const ImportedSfx& sfx : this->importedSfx)
-    {
-        knownPathKeys.push_back(makePathKey(sfx.sourceJsonPath));
-    }
-
-    auto isValidSfxFolder = [](const std::filesystem::path& folderPath) -> bool {
-        std::error_code localError;
-        const std::filesystem::path jsonPath = folderPath / "texturepacker.json";
-        if (!std::filesystem::exists(jsonPath, localError) ||
-            !std::filesystem::is_regular_file(jsonPath, localError))
-        {
-            return false;
-        }
-
-        std::ifstream jsonInput(jsonPath, std::ios::binary | std::ios::ate);
-        if (!jsonInput.is_open())
-        {
-            return false;
-        }
-        const std::streamsize size = jsonInput.tellg();
-        if (size <= 0)
-        {
-            return false;
-        }
-        jsonInput.seekg(0, std::ios::beg);
-        std::vector<char> bytes(static_cast<size_t>(size) + 1U, '\0');
-        if (!jsonInput.read(bytes.data(), size))
-        {
-            return false;
-        }
-
-        cJSON* root = cJSON_Parse(bytes.data());
-        if (root == nullptr)
-        {
-            return false;
-        }
-
-        const cJSON* meta = cJSON_GetObjectItemCaseSensitive(root, "meta");
-        const cJSON* image = (meta != nullptr) ? cJSON_GetObjectItemCaseSensitive(meta, "image") : nullptr;
-        bool valid = false;
-        if (cJSON_IsObject(meta) && cJSON_IsString(image) && image->valuestring != nullptr)
-        {
-            const std::filesystem::path imagePath = folderPath / std::filesystem::path(image->valuestring);
-            valid = std::filesystem::exists(imagePath, localError) &&
-                std::filesystem::is_regular_file(imagePath, localError);
-        }
-
-        cJSON_Delete(root);
-        return valid;
-    };
-
-    std::vector<std::filesystem::path> discoveredFolders;
-    discoveredFolders.reserve(64);
-    if (isValidSfxFolder(rootPath))
-    {
-        discoveredFolders.push_back(rootPath);
-    }
-
-    std::filesystem::recursive_directory_iterator it(
-        rootPath,
-        std::filesystem::directory_options::skip_permission_denied,
-        fsError);
-    std::filesystem::recursive_directory_iterator end;
-    while (!fsError && it != end)
-    {
-        const std::filesystem::directory_entry& entry = *it;
-        if (entry.is_directory(fsError) && !fsError)
-        {
-            if (isValidSfxFolder(entry.path()))
-            {
-                discoveredFolders.push_back(entry.path());
-            }
-        }
-        it.increment(fsError);
-    }
-
-    std::sort(discoveredFolders.begin(), discoveredFolders.end(), [](const auto& a, const auto& b) {
-        return normalizePathSlashes(a.string()) < normalizePathSlashes(b.string());
-    });
-
-    int addedCount = 0;
-    int failedCount = 0;
-    for (const std::filesystem::path& folderPath : discoveredFolders)
-    {
-        const std::filesystem::path jsonPath = folderPath / "texturepacker.json";
-        const std::string key = makePathKey(jsonPath.string());
-        const bool alreadyKnown =
-            (std::find(knownPathKeys.begin(), knownPathKeys.end(), key) != knownPathKeys.end());
-        if (alreadyKnown)
-        {
-            continue;
-        }
-
-        if (this->importSfxFromAbsolutePath(folderPath.string().c_str()))
-        {
-            knownPathKeys.push_back(key);
-            addedCount += 1;
-        }
-        else
-        {
-            failedCount += 1;
-        }
-    }
-
-    if (addedCount > 0 && failedCount == 0)
-    {
-        this->statusMessage = std::to_string(addedCount) + " VFX importe(s).";
-        return true;
-    }
-    if (addedCount > 0 && failedCount > 0)
-    {
-        this->statusMessage =
-            std::to_string(addedCount) + " VFX importe(s), " +
-            std::to_string(failedCount) + " en echec.";
-        return true;
-    }
-
-    this->statusMessage = "Aucun dossier VFX valide trouve (texturepacker.json + image atlas).";
-    return false;
-}
 
 int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string& runtimePath)
 {
@@ -2141,63 +1442,6 @@ int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string
     return static_cast<int>(this->importedAssets.size()) - 1;
 }
 
-int EditorMapCreateMapScene::importSfxFromRuntimeStoragePath(const std::string& runtimePath)
-{
-    const std::string normalizedPath = normalizePathSlashes(runtimePath);
-    if (normalizedPath.empty())
-    {
-        return -1;
-    }
-
-    for (size_t i = 0; i < this->importedSfx.size(); ++i)
-    {
-        if (normalizePathSlashes(this->importedSfx[i].storageJsonPath) == normalizedPath)
-        {
-            return static_cast<int>(i);
-        }
-    }
-
-    RC2D_TP_Atlas atlas = rc2d_tp_loadAtlasFromStorage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
-    if (atlas.atlas_image.sdl_texture == nullptr || atlas.frame_count <= 0)
-    {
-        rc2d_tp_freeAtlas(&atlas);
-        atlas = rc2d_tp_loadAtlasFromStorage(normalizedPath.c_str(), RC2D_STORAGE_USER);
-        if (atlas.atlas_image.sdl_texture == nullptr || atlas.frame_count <= 0)
-        {
-            rc2d_tp_freeAtlas(&atlas);
-            return -1;
-        }
-    }
-
-    std::vector<std::string> frameNames;
-    frameNames.reserve(static_cast<size_t>(atlas.frame_count));
-    for (int i = 0; i < atlas.frame_count; ++i)
-    {
-        if (atlas.frames[i].filename == nullptr || atlas.frames[i].filename[0] == '\0')
-        {
-            continue;
-        }
-        frameNames.emplace_back(atlas.frames[i].filename);
-    }
-    sortFrameNamesByNumericOrder(&frameNames);
-    if (frameNames.empty())
-    {
-        rc2d_tp_freeAtlas(&atlas);
-        return -1;
-    }
-
-    ++this->importedSfxCounter;
-    ImportedSfx imported{};
-    imported.id = "sfx_runtime_" + std::to_string(this->importedSfxCounter);
-    imported.displayName = extractFileName(normalizedPath);
-    imported.sourceJsonPath = normalizedPath;
-    imported.storageJsonPath = normalizedPath;
-    imported.atlas = atlas;
-    imported.frameNames = std::move(frameNames);
-    imported.defaultFps = 12.0f;
-    this->importedSfx.push_back(std::move(imported));
-    return static_cast<int>(this->importedSfx.size()) - 1;
-}
 
 bool EditorMapCreateMapScene::isTowerAssetName(const std::string& displayName) const
 {
@@ -2403,36 +1647,6 @@ void EditorMapCreateMapScene::processPendingImportRequests(void)
     this->importBatchFailedCount = 0;
 }
 
-void EditorMapCreateMapScene::processPendingSfxImportRequests(void)
-{
-    std::vector<std::string> selectedPaths;
-    bool hasCompletedDialog = false;
-    bool importCanceled = false;
-    {
-        std::lock_guard<std::mutex> lock(this->pendingSfxImportMutex);
-        hasCompletedDialog = this->pendingSfxImportDialogCompleted;
-        if (hasCompletedDialog)
-        {
-            importCanceled = this->pendingSfxImportDialogCanceled;
-            selectedPaths.swap(this->pendingSfxImportFilePaths);
-            this->pendingSfxImportDialogCompleted = false;
-            this->pendingSfxImportDialogCanceled = false;
-        }
-    }
-
-    if (!hasCompletedDialog)
-    {
-        return;
-    }
-
-    if (importCanceled || selectedPaths.empty())
-    {
-        this->statusMessage = "Import VFX annule.";
-        return;
-    }
-
-    this->importSfxFromRootFolderAbsolutePath(selectedPaths.front().c_str());
-}
 
 bool EditorMapCreateMapScene::renderStyledMiniMapToSurface(SDL_Surface* targetSurface) const
 {
@@ -3053,19 +2267,6 @@ void EditorMapCreateMapScene::openImportAssetDialog(void)
     rc2d_filedialog_openFile(&EditorMapCreateMapScene::onImportAssetDialogResult, this, &options);
 }
 
-void EditorMapCreateMapScene::openImportSfxDialog(void)
-{
-    RC2D_FileDialogOptions options{};
-    options.window = rc2d_window_getWindow();
-    options.filters = kShipFolderFilters;
-    options.num_filters = static_cast<int>(std::size(kShipFolderFilters));
-    options.default_location = nullptr;
-    options.allow_many = false;
-    options.title = "Selectionner le dossier racine des VFX (scan recursif)";
-    options.accept_label = "Ouvrir";
-    options.cancel_label = "Annuler";
-    rc2d_filedialog_openFolder(&EditorMapCreateMapScene::onImportSfxDialogResult, this, &options);
-}
 
 void EditorMapCreateMapScene::openImportMapDialog(void)
 {
@@ -3404,7 +2605,6 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     Map& map = GetCurrentMap();
     map.clearBlockedTiles();
     this->placedAssets.clear();
-    this->placedSfx.clear();
     this->towerHotspots.clear();
     this->historyActions.clear();
     this->historyCursor = 0;
@@ -3521,9 +2721,6 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
             this->placedAssets.push_back(placed);
         }
     }
-
-    // Les VFX editor sont volontairement non persistants dans map.json.
-    // Ils restent uniquement visuels pendant la session en cours.
 
     const cJSON* towerHotspotsJson = cJSON_GetObjectItemCaseSensitive(root, "towerHotspots");
     if (cJSON_IsArray(towerHotspotsJson))
@@ -3894,143 +3091,7 @@ bool EditorMapCreateMapScene::handleMapNameInputKey(
     return appendIfRoom(c);
 }
 
-bool EditorMapCreateMapScene::applySfxFpsInputToSelected(void)
-{
-    if (this->selectedSfxIndex < 0 ||
-        this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-    {
-        this->statusMessage = "Selectionne un VFX pour regler les FPS.";
-        return false;
-    }
 
-    ImportedSfx& selectedSfx = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
-    const std::string rawInput = trimAscii(this->sfxFpsInput);
-    if (rawInput.empty())
-    {
-        this->sfxFpsInput = formatSfxFpsValue(selectedSfx.defaultFps);
-        this->statusMessage = "FPS VFX vide: valeur precedente conservee.";
-        return false;
-    }
-
-    char* endPtr = nullptr;
-    const float parsedFps = std::strtof(rawInput.c_str(), &endPtr);
-    if (endPtr == rawInput.c_str() ||
-        (endPtr != nullptr && endPtr[0] != '\0') ||
-        !std::isfinite(parsedFps))
-    {
-        this->sfxFpsInput = formatSfxFpsValue(selectedSfx.defaultFps);
-        this->statusMessage = "FPS VFX invalide.";
-        return false;
-    }
-
-    const float clampedFps = std::clamp(parsedFps, kSfxFpsMin, kSfxFpsMax);
-    selectedSfx.defaultFps = clampedFps;
-    this->sfxFpsInput = formatSfxFpsValue(clampedFps);
-    for (PlacedSfx& placed : this->placedSfx)
-    {
-        if (placed.importedSfxIndex == this->selectedSfxIndex)
-        {
-            placed.fps = clampedFps;
-        }
-    }
-
-    this->statusMessage =
-        "FPS VFX " + selectedSfx.displayName + ": " + this->sfxFpsInput;
-    return true;
-}
-
-bool EditorMapCreateMapScene::handleSfxFpsInputKey(
-    const char* key,
-    SDL_Scancode scancode,
-    SDL_Keycode keycode,
-    SDL_Keymod mod,
-    bool isrepeat)
-{
-    (void)mod;
-
-    if (!this->sfxFpsInputFocused)
-    {
-        return false;
-    }
-
-    if (scancode == SDL_SCANCODE_ESCAPE)
-    {
-        this->sfxFpsInputFocused = false;
-        if (this->selectedSfxIndex >= 0 &&
-            this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-        {
-            this->sfxFpsInput = formatSfxFpsValue(
-                this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps);
-        }
-        return true;
-    }
-
-    if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER)
-    {
-        this->applySfxFpsInputToSelected();
-        this->sfxFpsInputFocused = false;
-        return true;
-    }
-
-    if (scancode == SDL_SCANCODE_BACKSPACE && !this->sfxFpsInput.empty() && !isrepeat)
-    {
-        this->sfxFpsInput.pop_back();
-        return true;
-    }
-
-    if (scancode == SDL_SCANCODE_DELETE && !this->sfxFpsInput.empty() && !isrepeat)
-    {
-        this->sfxFpsInput.clear();
-        return true;
-    }
-
-    auto appendCharIfAllowed = [this](char c) -> bool {
-        if (this->sfxFpsInput.size() >= 8U)
-        {
-            return true;
-        }
-
-        if (c == ',')
-        {
-            c = '.';
-        }
-        if (c == '.')
-        {
-            if (this->sfxFpsInput.find('.') != std::string::npos)
-            {
-                return true;
-            }
-            if (this->sfxFpsInput.empty())
-            {
-                this->sfxFpsInput = "0";
-            }
-            this->sfxFpsInput.push_back('.');
-            return true;
-        }
-
-        if (c >= '0' && c <= '9')
-        {
-            this->sfxFpsInput.push_back(c);
-        }
-        return true;
-    };
-
-    if (keycode == SDLK_PERIOD || scancode == SDL_SCANCODE_PERIOD)
-    {
-        return appendCharIfAllowed('.');
-    }
-
-    if (key == nullptr || key[0] == '\0')
-    {
-        return true;
-    }
-    if (std::strlen(key) != 1U)
-    {
-        return true;
-    }
-
-    return appendCharIfAllowed(key[0]);
-}
 
 void EditorMapCreateMapScene::spawnTestShipAtTile(int tileX, int tileY)
 {
@@ -4496,133 +3557,6 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
     }
 }
 
-void EditorMapCreateMapScene::drawPlacedSfxOverlay(void) const
-{
-    const Map& map = GetCurrentMap();
-    const float worldZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
-    const float cullMargin = 80.0f;
-    const float mapLeft = map.rect.x - cullMargin;
-    const float mapTop = map.rect.y - cullMargin;
-    const float mapRight = map.rect.x + map.rect.w + cullMargin;
-    const float mapBottom = map.rect.y + map.rect.h + cullMargin;
-    const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-
-    for (const PlacedSfx& placed : this->placedSfx)
-    {
-        if (placed.importedSfxIndex < 0 ||
-            placed.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            continue;
-        }
-
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(placed.importedSfxIndex)];
-        if (imported.atlas.atlas_image.sdl_texture == nullptr || imported.frameNames.empty())
-        {
-            continue;
-        }
-
-        const float fps = (std::max)(placed.fps, 1.0f);
-        const int frameCount = static_cast<int>(imported.frameNames.size());
-        const float elapsedSeconds =
-            (std::max)(timeSeconds - placed.spawnTimeSeconds, 0.0f);
-        int frameIndex = 0;
-        if (placed.loop)
-        {
-            frameIndex = static_cast<int>(std::floor(elapsedSeconds * fps)) % frameCount;
-        }
-        else
-        {
-            const int oneShotFrame = static_cast<int>(std::floor(elapsedSeconds * fps));
-            frameIndex = std::clamp(oneShotFrame, 0, frameCount - 1);
-        }
-        const std::string& frameName = imported.frameNames[static_cast<size_t>(frameIndex)];
-        const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&imported.atlas, frameName.c_str());
-        if (frame == nullptr)
-        {
-            continue;
-        }
-
-        const SDL_FPoint anchorScreen = map.tileToScreenCenterFloat(placed.anchorTileX, placed.anchorTileY);
-        const float effectiveScale = placed.scale * worldZoom;
-        const float sourceW = (frame->sourceSize.x > 0.0f) ? frame->sourceSize.x : frame->frame.w;
-        const float sourceH = (frame->sourceSize.y > 0.0f) ? frame->sourceSize.y : frame->frame.h;
-        const float drawLeft = anchorScreen.x;
-        const float drawTop = anchorScreen.y;
-        const float drawRight = drawLeft + (sourceW * effectiveScale);
-        const float drawBottom = drawTop + (sourceH * effectiveScale);
-        if (drawRight < mapLeft || drawLeft > mapRight || drawBottom < mapTop || drawTop > mapBottom)
-        {
-            continue;
-        }
-
-        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-            const_cast<RC2D_Image*>(&imported.atlas.atlas_image),
-            frame->frame.x,
-            frame->frame.y,
-            frame->frame.w,
-            frame->frame.h);
-        const float drawX = anchorScreen.x + (frame->spriteSourceSize.x * effectiveScale);
-        const float drawY = anchorScreen.y + (frame->spriteSourceSize.y * effectiveScale);
-        rc2d_graphics_drawQuad(
-            const_cast<RC2D_Image*>(&imported.atlas.atlas_image),
-            &sourceQuad,
-            drawX,
-            drawY,
-            0.0,
-            effectiveScale,
-            effectiveScale,
-            0.0f,
-            0.0f,
-            false,
-            false);
-    }
-
-    if (this->editorTool == EditorTool::PLACE_ASSETS &&
-        this->selectedSfxIndex >= 0 &&
-        this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-    {
-        const ImportedSfx& selectedSfx = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
-        if (selectedSfx.atlas.atlas_image.sdl_texture != nullptr && !selectedSfx.frameNames.empty())
-        {
-            float mouseX = 0.0f;
-            float mouseY = 0.0f;
-            if (this->getMouseRenderPosition(&mouseX, &mouseY) && this->isInsideMapRect(mouseX, mouseY))
-            {
-                const int frameIndex =
-                    static_cast<int>(std::floor(timeSeconds * selectedSfx.defaultFps)) %
-                    static_cast<int>(selectedSfx.frameNames.size());
-                const std::string& frameName = selectedSfx.frameNames[static_cast<size_t>(frameIndex)];
-                const RC2D_TP_Frame* frame = rc2d_tp_getFrame(&selectedSfx.atlas, frameName.c_str());
-                if (frame != nullptr)
-                {
-                    const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-                        const_cast<RC2D_Image*>(&selectedSfx.atlas.atlas_image),
-                        frame->frame.x,
-                        frame->frame.y,
-                        frame->frame.w,
-                        frame->frame.h);
-
-                    Uint8 oldAlpha = 255;
-                    SDL_GetTextureAlphaMod(selectedSfx.atlas.atlas_image.sdl_texture, &oldAlpha);
-                    SDL_SetTextureAlphaMod(selectedSfx.atlas.atlas_image.sdl_texture, 180);
-                    rc2d_graphics_drawQuad(
-                        const_cast<RC2D_Image*>(&selectedSfx.atlas.atlas_image),
-                        &sourceQuad,
-                        mouseX + (frame->spriteSourceSize.x * worldZoom),
-                        mouseY + (frame->spriteSourceSize.y * worldZoom),
-                        0.0,
-                        worldZoom,
-                        worldZoom,
-                        0.0f,
-                        0.0f,
-                        false,
-                        false);
-                    SDL_SetTextureAlphaMod(selectedSfx.atlas.atlas_image.sdl_texture, oldAlpha);
-                }
-            }
-        }
-    }
-}
 
 void EditorMapCreateMapScene::updateToolbarLayout(void)
 {
@@ -4693,40 +3627,17 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         278.0f,
         20.0f
     };
+
     const float topGap = 8.0f;
-    this->sfxFpsInputRect = SDL_FRect{
-        this->mapNameInputRect.x - topGap - 152.0f,
-        this->mapNameInputRect.y,
-        152.0f,
-        this->mapNameInputRect.h};
-    this->buttonSfxLoopRect = SDL_FRect{
-        this->sfxFpsInputRect.x - topGap - 86.0f,
-        this->mapNameInputRect.y,
-        86.0f,
-        this->mapNameInputRect.h};
-    this->buttonClearSfxRect = SDL_FRect{
-        this->buttonSfxLoopRect.x - topGap - 110.0f,
-        this->mapNameInputRect.y,
-        110.0f,
-        this->mapNameInputRect.h};
     this->buttonListsVisibilityRect = SDL_FRect{
-        this->buttonClearSfxRect.x - topGap - 120.0f,
+        this->mapNameInputRect.x - topGap - 120.0f,
         this->mapNameInputRect.y,
         120.0f,
-        this->mapNameInputRect.h};
-    this->buttonImportSfxRect = SDL_FRect{
-        this->buttonListsVisibilityRect.x - topGap - 140.0f,
-        this->mapNameInputRect.y,
-        140.0f,
-        this->mapNameInputRect.h};
-    if (this->buttonImportSfxRect.x < (map.rect.x + 12.0f))
+        this->mapNameInputRect.h
+    };
+    if (this->buttonListsVisibilityRect.x < (map.rect.x + 12.0f))
     {
-        const float dx = (map.rect.x + 12.0f) - this->buttonImportSfxRect.x;
-        this->buttonImportSfxRect.x += dx;
-        this->buttonClearSfxRect.x += dx;
-        this->buttonSfxLoopRect.x += dx;
-        this->buttonListsVisibilityRect.x += dx;
-        this->sfxFpsInputRect.x += dx;
+        this->buttonListsVisibilityRect.x = map.rect.x + 12.0f;
     }
 
     // Mini-liste d'assets en bas a droite, dans la zone map.
@@ -4741,13 +3652,6 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     this->shipListRect.x = this->assetListRect.x - this->shipListRect.w - 16.0f;
     this->shipListRect.y = this->assetListRect.y;
     this->shipListRect.x = (std::max)(this->shipListRect.x, map.rect.x + 12.0f);
-
-    // Liste VFX: meme dimensions, placee a gauche de la liste navires.
-    this->sfxListRect.w = this->assetListRect.w;
-    this->sfxListRect.h = this->assetListRect.h;
-    this->sfxListRect.x = this->shipListRect.x - this->sfxListRect.w - 16.0f;
-    this->sfxListRect.y = this->assetListRect.y;
-    this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
     // Minimap maison en haut a droite dans la zone monde.
     // Minimap 1/3 plus petite (largeur + hauteur), tout en gardant le meme
@@ -4937,7 +3841,6 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
         }
 
         this->selectedAssetIndex = assetIndex;
-        this->selectedSfxIndex = -1;
         this->ensureSelectedAssetVisible();
         const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
         this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
@@ -5448,337 +4351,12 @@ void EditorMapCreateMapScene::drawShipListPanel(void) const
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
-int EditorMapCreateMapScene::getSfxListMaxScrollOffset(void) const
-{
-    const int sfxCount = static_cast<int>(this->importedSfx.size());
-    return (std::max)(sfxCount - kAssetListVisibleRows, 0);
-}
 
-void EditorMapCreateMapScene::clampSfxListScrollOffset(void)
-{
-    this->sfxListScrollOffset = std::clamp(this->sfxListScrollOffset, 0, this->getSfxListMaxScrollOffset());
-}
 
-void EditorMapCreateMapScene::ensureSelectedSfxVisible(void)
-{
-    this->clampSfxListScrollOffset();
 
-    if (this->selectedSfxIndex < 0)
-    {
-        return;
-    }
 
-    if (this->selectedSfxIndex < this->sfxListScrollOffset)
-    {
-        this->sfxListScrollOffset = this->selectedSfxIndex;
-        this->clampSfxListScrollOffset();
-        return;
-    }
 
-    const int lastVisibleIndex = this->sfxListScrollOffset + kAssetListVisibleRows - 1;
-    if (this->selectedSfxIndex > lastVisibleIndex)
-    {
-        this->sfxListScrollOffset = this->selectedSfxIndex - (kAssetListVisibleRows - 1);
-        this->clampSfxListScrollOffset();
-    }
-}
 
-int EditorMapCreateMapScene::computeSfxListStartIndex(void) const
-{
-    const int maxOffset = this->getSfxListMaxScrollOffset();
-    return std::clamp(this->sfxListScrollOffset, 0, maxOffset);
-}
-
-bool EditorMapCreateMapScene::handleSfxListClick(float x, float y)
-{
-    if (!this->pointInRect(x, y, this->sfxListRect))
-    {
-        return false;
-    }
-
-    const float panelPadding = 4.0f;
-    const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
-    const float rowsTopY = this->sfxListRect.y + panelPadding + headerHeight + 1.0f;
-    const float rowsHeight =
-        this->sfxListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
-    const float rowHeight = rowsHeight / static_cast<float>(kAssetListVisibleRows);
-    const float rowsLeftX = this->sfxListRect.x + panelPadding;
-    const float rowsWidth = this->sfxListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
-
-    SDL_FRect scrollTrackRect{};
-    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
-    scrollTrackRect.y = rowsTopY;
-    scrollTrackRect.w = kAssetListScrollBarWidth;
-    scrollTrackRect.h = rowsHeight;
-
-    if (this->pointInRect(x, y, scrollTrackRect))
-    {
-        const int sfxCount = static_cast<int>(this->importedSfx.size());
-        const int maxOffset = (std::max)(sfxCount - kAssetListVisibleRows, 0);
-        if (maxOffset <= 0)
-        {
-            this->sfxListScrollDragActive = false;
-            return true;
-        }
-
-        float thumbHeight = scrollTrackRect.h;
-        float thumbY = scrollTrackRect.y;
-        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(sfxCount));
-        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
-        const float ratio = static_cast<float>(this->computeSfxListStartIndex()) / static_cast<float>(maxOffset);
-        thumbY += ratio * thumbTravel;
-
-        SDL_FRect scrollThumbRect{};
-        scrollThumbRect.x = scrollTrackRect.x + 1.0f;
-        scrollThumbRect.y = thumbY;
-        scrollThumbRect.w = scrollTrackRect.w - 2.0f;
-        scrollThumbRect.h = thumbHeight;
-
-        if (this->pointInRect(x, y, scrollThumbRect))
-        {
-            this->sfxListScrollDragActive = true;
-            this->sfxListScrollDragGrabOffsetY = y - scrollThumbRect.y;
-        }
-        else
-        {
-            const float targetThumbY = std::clamp(
-                y - (scrollThumbRect.h * 0.5f),
-                scrollTrackRect.y,
-                scrollTrackRect.y + thumbTravel);
-            const float clickRatio = (thumbTravel > 0.0f)
-                ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
-                : 0.0f;
-            this->sfxListScrollOffset = static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
-            this->clampSfxListScrollOffset();
-
-            this->sfxListScrollDragActive = true;
-            this->sfxListScrollDragGrabOffsetY = scrollThumbRect.h * 0.5f;
-        }
-        return true;
-    }
-
-    this->sfxListScrollDragActive = false;
-
-    if (this->importedSfx.empty())
-    {
-        this->statusMessage = "Aucun VFX importe.";
-        return true;
-    }
-
-    const int startIndex = this->computeSfxListStartIndex();
-    for (int i = 0; i < kAssetListVisibleRows; ++i)
-    {
-        const int sfxIndex = startIndex + i;
-        if (sfxIndex >= static_cast<int>(this->importedSfx.size()))
-        {
-            break;
-        }
-
-        SDL_FRect rowRect{};
-        rowRect.x = rowsLeftX;
-        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
-        rowRect.w = rowsWidth;
-        rowRect.h = rowHeight;
-
-        if (!this->pointInRect(x, y, rowRect))
-        {
-            continue;
-        }
-
-        this->selectedSfxIndex = sfxIndex;
-        this->selectedAssetIndex = -1;
-        this->ensureSelectedSfxVisible();
-        const ImportedSfx& selectedSfx = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
-        this->sfxFpsInput = formatSfxFpsValue(selectedSfx.defaultFps);
-        this->statusMessage =
-            "VFX selectionne: " +
-            selectedSfx.displayName +
-            " (FPS " +
-            formatSfxFpsValue(selectedSfx.defaultFps) +
-            ")";
-        return true;
-    }
-
-    return true;
-}
-
-void EditorMapCreateMapScene::handleSfxListScrollDragFromMouse(void)
-{
-    if (!this->sfxListScrollDragActive)
-    {
-        return;
-    }
-
-    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
-    {
-        this->sfxListScrollDragActive = false;
-        this->sfxListScrollDragGrabOffsetY = 0.0f;
-        return;
-    }
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
-    {
-        return;
-    }
-
-    (void)mouseX;
-
-    const float panelPadding = 4.0f;
-    const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
-    const float rowsTopY = this->sfxListRect.y + panelPadding + headerHeight + 1.0f;
-    const float rowsHeight =
-        this->sfxListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
-    const float rowsLeftX = this->sfxListRect.x + panelPadding;
-    const float rowsWidth = this->sfxListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
-
-    SDL_FRect scrollTrackRect{};
-    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
-    scrollTrackRect.y = rowsTopY;
-    scrollTrackRect.w = kAssetListScrollBarWidth;
-    scrollTrackRect.h = rowsHeight;
-
-    const int sfxCount = static_cast<int>(this->importedSfx.size());
-    const int maxOffset = (std::max)(sfxCount - kAssetListVisibleRows, 0);
-    if (maxOffset <= 0)
-    {
-        this->sfxListScrollDragActive = false;
-        this->sfxListScrollDragGrabOffsetY = 0.0f;
-        return;
-    }
-
-    const float thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(sfxCount));
-    const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
-    const float targetThumbY = std::clamp(
-        mouseY - this->sfxListScrollDragGrabOffsetY,
-        scrollTrackRect.y,
-        scrollTrackRect.y + thumbTravel);
-    const float ratio = (thumbTravel > 0.0f)
-        ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
-        : 0.0f;
-
-    this->sfxListScrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
-    this->clampSfxListScrollOffset();
-}
-
-void EditorMapCreateMapScene::drawSfxListPanel(void) const
-{
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-    rc2d_graphics_setColor(kAssetPanelFillColor);
-    rc2d_graphics_rectangle("fill", &this->sfxListRect);
-    rc2d_graphics_setColor(kAssetPanelBorderColor);
-    rc2d_graphics_rectangle("line", &this->sfxListRect);
-
-    const float panelPadding = 4.0f;
-    const float headerHeight = 14.0f;
-    const float rowGap = 3.0f;
-    const float rowsTopY = this->sfxListRect.y + panelPadding + headerHeight + 1.0f;
-    const float rowsHeight =
-        this->sfxListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAssetListVisibleRows - 1) * rowGap));
-    const float rowHeight = rowsHeight / static_cast<float>(kAssetListVisibleRows);
-    const float rowsLeftX = this->sfxListRect.x + panelPadding;
-    const float rowsWidth = this->sfxListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
-
-    if (this->overlayFont.sdl_font != nullptr)
-    {
-        RC2D_Text headerText =
-            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "VFX charges");
-        headerText.color = kHudTextColor;
-        rc2d_graphics_setTextColor(&headerText);
-        rc2d_graphics_drawText(&headerText, this->sfxListRect.x + panelPadding, this->sfxListRect.y + 1.0f);
-        rc2d_graphics_destroyText(&headerText);
-    }
-
-    SDL_FRect scrollTrackRect{};
-    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
-    scrollTrackRect.y = rowsTopY;
-    scrollTrackRect.w = kAssetListScrollBarWidth;
-    scrollTrackRect.h = rowsHeight;
-    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
-    rc2d_graphics_rectangle("fill", &scrollTrackRect);
-    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
-    rc2d_graphics_rectangle("line", &scrollTrackRect);
-
-    if (this->importedSfx.empty())
-    {
-        if (this->overlayFont.sdl_font != nullptr)
-        {
-            RC2D_Text emptyText =
-                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Aucun VFX");
-            emptyText.color = kHudStatusColor;
-            rc2d_graphics_setTextColor(&emptyText);
-            rc2d_graphics_drawText(&emptyText, this->sfxListRect.x + panelPadding, rowsTopY + 2.0f);
-            rc2d_graphics_destroyText(&emptyText);
-        }
-
-        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-        return;
-    }
-
-    const int sfxCount = static_cast<int>(this->importedSfx.size());
-    const int startIndex = this->computeSfxListStartIndex();
-    const int maxOffset = (std::max)(sfxCount - kAssetListVisibleRows, 0);
-    float thumbHeight = scrollTrackRect.h;
-    float thumbY = scrollTrackRect.y;
-    if (maxOffset > 0)
-    {
-        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(sfxCount));
-        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
-        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
-        thumbY += ratio * thumbTravel;
-    }
-
-    SDL_FRect scrollThumbRect{};
-    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
-    scrollThumbRect.y = thumbY;
-    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
-    scrollThumbRect.h = thumbHeight;
-    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
-    rc2d_graphics_rectangle("fill", &scrollThumbRect);
-    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
-    rc2d_graphics_rectangle("line", &scrollThumbRect);
-
-    for (int i = 0; i < kAssetListVisibleRows; ++i)
-    {
-        const int sfxIndex = startIndex + i;
-        if (sfxIndex >= sfxCount)
-        {
-            break;
-        }
-
-        const bool isSelected = (sfxIndex == this->selectedSfxIndex);
-        SDL_FRect rowRect{};
-        rowRect.x = rowsLeftX;
-        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
-        rowRect.w = rowsWidth;
-        rowRect.h = rowHeight;
-
-        rc2d_graphics_setColor(isSelected ? kAssetRowSelectedFillColor : kAssetRowFillColor);
-        rc2d_graphics_rectangle("fill", &rowRect);
-        rc2d_graphics_setColor(kAssetRowBorderColor);
-        rc2d_graphics_rectangle("line", &rowRect);
-
-        if (this->overlayFont.sdl_font == nullptr)
-        {
-            continue;
-        }
-
-        std::string rowLabel = makeAssetLabel(this->importedSfx[static_cast<size_t>(sfxIndex)].displayName, 24);
-        char textBuffer[256] = {};
-        SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", sfxIndex + 1, rowLabel.c_str());
-
-        RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
-        rowText.color = RC2D_Color{235, 242, 250, 248};
-        rc2d_graphics_setTextColor(&rowText);
-        rc2d_graphics_drawText(&rowText, rowRect.x + 4.0f, rowRect.y + 1.0f);
-        rc2d_graphics_destroyText(&rowText);
-    }
-
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-}
 
 bool EditorMapCreateMapScene::tryBuildMiniMapViewRect(SDL_FRect* outRect) const
 {
@@ -6015,103 +4593,48 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
 {
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
-
     if (this->pointInRect(x, y, this->buttonImportRect))
     {
         this->openImportAssetDialog();
         return true;
     }
-
-    if (this->pointInRect(x, y, this->buttonImportSfxRect))
-    {
-        this->openImportSfxDialog();
-        return true;
-    }
-
-    if (this->pointInRect(x, y, this->buttonClearSfxRect))
-    {
-        const int clearedCount = static_cast<int>(this->placedSfx.size());
-        this->placedSfx.clear();
-        if (clearedCount <= 0)
-        {
-            this->statusMessage = "Aucun VFX a effacer.";
-        }
-        else
-        {
-            this->statusMessage = std::to_string(clearedCount) + " VFX efface(s).";
-        }
-        return true;
-    }
-
-    if (this->pointInRect(x, y, this->buttonSfxLoopRect))
-    {
-        this->sfxLoopEnabled = !this->sfxLoopEnabled;
-        if (this->sfxLoopEnabled)
-        {
-            for (PlacedSfx& placed : this->placedSfx)
-            {
-                placed.loop = true;
-            }
-            this->statusMessage = "VFX LOOP: ON";
-        }
-        else
-        {
-            const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-            for (PlacedSfx& placed : this->placedSfx)
-            {
-                placed.loop = false;
-                placed.spawnTimeSeconds = nowSeconds;
-            }
-            this->statusMessage = "VFX LOOP: OFF (one-shot)";
-        }
-        return true;
-    }
-
     if (this->pointInRect(x, y, this->buttonListsVisibilityRect))
     {
         this->showBottomRightLists = !this->showBottomRightLists;
         this->assetListScrollDragActive = false;
         this->assetListScrollDragGrabOffsetY = 0.0f;
-        this->sfxListScrollDragActive = false;
-        this->sfxListScrollDragGrabOffsetY = 0.0f;
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
         this->statusMessage = this->showBottomRightLists
-            ? "Listes VFX/navires/assets: ON"
-            : "Listes VFX/navires/assets: OFF";
+            ? "Listes navires/assets: ON"
+            : "Listes navires/assets: OFF";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonImportMapRect))
     {
         this->openImportMapDialog();
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonImportShipRect))
     {
         this->openImportShipFolderDialog();
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonExportRect))
     {
         this->openExportMapDialog();
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonUndoRect))
     {
         this->undoHistoryAction();
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonRedoRect))
     {
         this->redoHistoryAction();
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolBlockRect))
     {
         this->editorTool = EditorTool::BLOCK_TILES;
@@ -6119,7 +4642,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         this->statusMessage = "Mode Collision: clic gauche bloque (brush actif).";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolUnblockRect))
     {
         this->editorTool = EditorTool::BLOCK_TILES;
@@ -6127,21 +4649,18 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         this->statusMessage = "Mode Suppression collision: clic gauche debloque (brush actif).";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolPlaceRect))
     {
         this->editorTool = EditorTool::PLACE_ASSETS;
-        this->statusMessage = "Mode Pose visuel: clic gauche pose asset/VFX, clic droit supprime.";
+        this->statusMessage = "Mode Pose visuel: clic gauche pose asset, clic droit supprime.";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolRemoveRect))
     {
         this->editorTool = EditorTool::REMOVE_ASSETS;
-        this->statusMessage = "Mode Suppression visuel: clic gauche supprime asset/VFX.";
+        this->statusMessage = "Mode Suppression visuel: clic gauche supprime asset.";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolShipRect))
     {
         this->editorTool = EditorTool::SPAWN_SHIP;
@@ -6155,7 +4674,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         }
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolShipControlRect))
     {
         this->editorTool = EditorTool::CONTROL_SHIP;
@@ -6173,14 +4691,12 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         }
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonToolHotspotRect))
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
         this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue pour toggle.";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonAssetPrevRect))
     {
         if (this->importedAssets.empty())
@@ -6188,20 +4704,16 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
             this->statusMessage = "Aucun asset importe.";
             return true;
         }
-
         this->selectedAssetIndex -= 1;
         if (this->selectedAssetIndex < 0)
         {
             this->selectedAssetIndex = static_cast<int>(this->importedAssets.size()) - 1;
         }
-        this->selectedSfxIndex = -1;
         this->ensureSelectedAssetVisible();
-
         const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
         this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonAssetNextRect))
     {
         if (this->importedAssets.empty())
@@ -6209,125 +4721,118 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
             this->statusMessage = "Aucun asset importe.";
             return true;
         }
-
         this->selectedAssetIndex += 1;
         if (this->selectedAssetIndex >= static_cast<int>(this->importedAssets.size()))
         {
             this->selectedAssetIndex = 0;
         }
-        this->selectedSfxIndex = -1;
         this->ensureSelectedAssetVisible();
-
         const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
         this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonOceanPrevRect))
     {
         this->requestOceanColorStep(-1);
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonOceanNextRect))
     {
         this->requestOceanColorStep(1);
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonBlockedBrushMinusRect))
     {
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
         this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonBlockedBrushPlusRect))
     {
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
         this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonBlockedColorPrevRect))
     {
         const int count = static_cast<int>(kBlockedTilePalette.size());
         this->selectedBlockedColorIndex = (this->selectedBlockedColorIndex - 1 + count) % count;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonBlockedColorNextRect))
     {
         const int count = static_cast<int>(kBlockedTilePalette.size());
         this->selectedBlockedColorIndex = (this->selectedBlockedColorIndex + 1) % count;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonHotspotColorPrevRect))
     {
         const int count = static_cast<int>(kHotspotPalette.size());
         this->selectedHotspotColorIndex = (this->selectedHotspotColorIndex - 1 + count) % count;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonHotspotColorNextRect))
     {
         const int count = static_cast<int>(kHotspotPalette.size());
         this->selectedHotspotColorIndex = (this->selectedHotspotColorIndex + 1) % count;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonAssetOpacityToggleRect))
     {
         this->assetTransparencyEnabled = !this->assetTransparencyEnabled;
         this->statusMessage = this->assetTransparencyEnabled ? "Opacite assets: ON" : "Opacite assets: OFF";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonAssetOpacityMinusRect))
     {
-        this->setAssetOpacityPercent(this->assetOpacityPercent - 5);
+        this->setAssetOpacityPercent(this->assetOpacityPercent - 10);
+        this->statusMessage = "Opacite assets: " + std::to_string(this->assetOpacityPercent) + "%";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonAssetOpacityPlusRect))
     {
-        this->setAssetOpacityPercent(this->assetOpacityPercent + 5);
+        this->setAssetOpacityPercent(this->assetOpacityPercent + 10);
+        this->statusMessage = "Opacite assets: " + std::to_string(this->assetOpacityPercent) + "%";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonShipScaleMinusRect))
     {
-        this->setShipScalePercent(this->shipScalePercent - 5);
+        this->setShipScalePercent(this->shipScalePercent - 10);
+        this->statusMessage = "Echelle navire: " + std::to_string(this->shipScalePercent) + "%";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonShipScalePlusRect))
     {
-        this->setShipScalePercent(this->shipScalePercent + 5);
+        this->setShipScalePercent(this->shipScalePercent + 10);
+        this->statusMessage = "Echelle navire: " + std::to_string(this->shipScalePercent) + "%";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonShipReexportRect))
     {
-        this->reexportLoadedShipScaled(this->shipScalePercent);
+        if (!this->testShipLoaded)
+        {
+            this->statusMessage = "Aucun navire charge a reexporter.";
+            return true;
+        }
+        if (!this->reexportLoadedShipScaled(this->shipScalePercent))
+        {
+            return true;
+        }
+        this->statusMessage =
+            "Sprites navire reexportes avec echelle " +
+            std::to_string(this->shipScalePercent) + "%";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonGridRect))
     {
         this->showGrid = !this->showGrid;
-        this->statusMessage = this->showGrid ? "Lignes de tuiles: ON" : "Lignes de tuiles: OFF";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonBlockedTilesRect))
     {
         this->showBlockedTiles = !this->showBlockedTiles;
-        this->statusMessage = this->showBlockedTiles ? "Affichage collisions: ON" : "Affichage collisions: OFF";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonCenterRect))
     {
         const SDL_Point centerSectorTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
@@ -6341,7 +4846,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         this->statusMessage = "Camera recadree sur la map.";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonCenterShipRect))
     {
         if (!this->testShipLoaded || !this->testShipSpawned)
@@ -6349,7 +4853,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
             this->statusMessage = "Aucun navire teste/spawn a suivre.";
             return true;
         }
-
         this->testShipCameraFollowEnabled = !this->testShipCameraFollowEnabled;
         const SDL_FPoint shipTile = this->testShip.getPositionTile();
         camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
@@ -6359,46 +4862,36 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
             : "Suivi camera navire: OFF";
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonZoomOutRect))
     {
         camera.setZoomFactor(camera.getZoomFactor() - 0.05f);
         camera.update(map, map.rect);
+        this->testShipCameraFollowEnabled = false;
         return true;
     }
-
     if (this->pointInRect(x, y, this->buttonZoomInRect))
     {
         camera.setZoomFactor(camera.getZoomFactor() + 0.05f);
         camera.update(map, map.rect);
+        this->testShipCameraFollowEnabled = false;
         return true;
     }
-
     if (this->showBottomRightLists && this->handleAssetListClick(x, y))
     {
         return true;
     }
-
     if (this->showBottomRightLists && this->handleShipListClick(x, y))
     {
         return true;
     }
-
-    if (this->showBottomRightLists && this->handleSfxListClick(x, y))
-    {
-        return true;
-    }
-
     return false;
 }
-
 void EditorMapCreateMapScene::drawEditorHud(void) const
 {
     if (this->overlayFont.sdl_font == nullptr)
     {
         return;
     }
-
     auto drawLine = [this](const char* text, float x, float y, RC2D_Color color) {
         RC2D_Text renderedText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), text);
         renderedText.color = color;
@@ -6406,7 +4899,6 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         rc2d_graphics_drawText(&renderedText, x, y);
         rc2d_graphics_destroyText(&renderedText);
     };
-
     const char* toolLabel = "Collision";
     if (this->editorTool == EditorTool::PLACE_ASSETS)
     {
@@ -6429,15 +4921,7 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         toolLabel = "Hotspot tours";
     }
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
-    const bool sfxFpsEditable =
-        (this->selectedSfxIndex >= 0 &&
-         this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()));
-
-    // Barre de boutons cliquables.
     this->drawToolbarButton(this->buttonImportRect, "IMPORTER ASSETS", false);
-    this->drawToolbarButton(this->buttonImportSfxRect, "IMPORTER VFX", false);
-    this->drawToolbarButton(this->buttonClearSfxRect, "CLEAR VFX", false);
-    this->drawToolbarButton(this->buttonSfxLoopRect, "LOOP", this->sfxLoopEnabled);
     this->drawToolbarButton(
         this->buttonListsVisibilityRect,
         this->showBottomRightLists ? "LISTES ON" : "LISTES OFF",
@@ -6481,8 +4965,7 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     this->drawToolbarButton(this->buttonCenterShipRect, "CENTRER NAVIRE", this->testShipCameraFollowEnabled);
     this->drawToolbarButton(this->buttonZoomOutRect, "Zoom-", false);
     this->drawToolbarButton(this->buttonZoomInRect, "Zoom+", false);
-    this->drawToolbarButton(this->buttonBlockedTilesRect, " COLLISION MASK", this->showBlockedTiles);
-
+    this->drawToolbarButton(this->buttonBlockedTilesRect, "COLLISION MASK", this->showBlockedTiles);
     char tileHudText[128] = {};
     if (this->hoveredTileValid)
     {
@@ -6497,26 +4980,6 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         SDL_snprintf(tileHudText, sizeof(tileHudText), "Tile: hors map");
     }
-
-    char line0[1024] = {};
-    SDL_snprintf(
-        line0,
-        sizeof(line0),
-        "EDITOR MAP | Outil:%s | Ocean:%s | Grille:%s | Blocked:%s | %s",
-        toolLabel,
-        oceanLabel,
-        this->showGrid ? "ON" : "OFF",
-        this->showBlockedTiles ? "ON" : "OFF",
-        tileHudText);
-
-    char line1[1024] = {};
-    SDL_snprintf(
-        line1,
-        sizeof(line1),
-        "Status: %s",
-        this->statusMessage.c_str());
-
-    char line2[1024] = {};
     const char* selectedAssetName = "Aucun";
     if (this->selectedAssetIndex >= 0 &&
         this->selectedAssetIndex < static_cast<int>(this->importedAssets.size()))
@@ -6529,26 +4992,33 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         selectedShipName = this->importedShips[static_cast<size_t>(this->selectedShipIndex)].displayName.c_str();
     }
-    const char* selectedSfxName = "Aucun";
-    if (this->selectedSfxIndex >= 0 &&
-        this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-    {
-        selectedSfxName = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].displayName.c_str();
-    }
+    char line0[1024] = {};
+    SDL_snprintf(
+        line0,
+        sizeof(line0),
+        "EDITOR MAP | Outil:%s | Ocean:%s | Grille:%s | Blocked:%s | %s",
+        toolLabel,
+        oceanLabel,
+        this->showGrid ? "ON" : "OFF",
+        this->showBlockedTiles ? "ON" : "OFF",
+        tileHudText);
+    char line1[1024] = {};
+    SDL_snprintf(
+        line1,
+        sizeof(line1),
+        "Status: %s",
+        this->statusMessage.c_str());
+    char line2[1024] = {};
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Assets importes:%d | Assets poses:%d | VFX importes:%d | VFX poses:%d | VFX actif:%s | Hotspots:%d | Selection:%s | Navires:%d | Navire actif:%s",
+        "Assets importes:%d | Assets poses:%d | Hotspots:%d | Selection:%s | Navires:%d | Navire actif:%s",
         static_cast<int>(this->importedAssets.size()),
         static_cast<int>(this->placedAssets.size()),
-        static_cast<int>(this->importedSfx.size()),
-        static_cast<int>(this->placedSfx.size()),
-        selectedSfxName,
         static_cast<int>(this->towerHotspots.size()),
         selectedAssetName,
         static_cast<int>(this->importedShips.size()),
         selectedShipName);
-
     char line3[1024] = {};
     if (!this->testShipLoaded)
     {
@@ -6570,30 +5040,19 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
             this->testShip.isMoving() ? "ON" : "OFF",
             this->testShipCameraFollowEnabled ? "ON" : "OFF");
     }
-
-    const Map& map = GetCurrentMap();
-    const SDL_FRect gameScreenRect = GetGameScreen().rect;
-    // Infos compactes en haut a gauche.
-    drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
     char line4[512] = {};
-    std::string selectedSfxFps = "N/A";
-    if (sfxFpsEditable)
-    {
-        selectedSfxFps =
-            formatSfxFpsValue(this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps);
-    }
     SDL_snprintf(
         line4,
         sizeof(line4),
-        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%% | VFX FPS:%s | LOOP:%s",
+        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%%",
         this->mapNameInput.empty() ? "<vide>" : this->mapNameInput.c_str(),
         (this->blockedBrushRadiusTiles * 2) + 1,
         this->assetOpacityPercent,
         this->assetTransparencyEnabled ? "ON" : "OFF",
-        this->shipScalePercent,
-        selectedSfxFps.c_str(),
-        this->sfxLoopEnabled ? "ON" : "OFF");
-
+        this->shipScalePercent);
+    const Map& map = GetCurrentMap();
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
+    drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
     rc2d_graphics_setColor(this->mapNameInputFocused ? RC2D_Color{58, 88, 122, 210} : RC2D_Color{28, 38, 50, 205});
     rc2d_graphics_rectangle("fill", &this->mapNameInputRect);
@@ -6610,47 +5069,6 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         this->mapNameInputRect.x + 6.0f,
         this->mapNameInputRect.y + 2.0f,
         RC2D_Color{235, 245, 255, 250});
-
-    const RC2D_Color sfxFpsFillColor = this->sfxFpsInputFocused
-        ? RC2D_Color{58, 88, 122, 210}
-        : RC2D_Color{28, 38, 50, 205};
-    const RC2D_Color sfxFpsBorderColor = sfxFpsEditable
-        ? RC2D_Color{170, 198, 225, 235}
-        : RC2D_Color{124, 136, 150, 220};
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-    rc2d_graphics_setColor(sfxFpsFillColor);
-    rc2d_graphics_rectangle("fill", &this->sfxFpsInputRect);
-    rc2d_graphics_setColor(sfxFpsBorderColor);
-    rc2d_graphics_rectangle("line", &this->sfxFpsInputRect);
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-
-    std::string sfxFpsValue;
-    if (this->sfxFpsInputFocused)
-    {
-        sfxFpsValue = this->sfxFpsInput;
-    }
-    else if (sfxFpsEditable)
-    {
-        sfxFpsValue = formatSfxFpsValue(
-            this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps);
-    }
-    else
-    {
-        sfxFpsValue = "N/A";
-    }
-
-    std::string sfxFpsLabel = "VFX FPS/s: " + sfxFpsValue;
-    if (this->sfxFpsInputFocused)
-    {
-        sfxFpsLabel += "_";
-    }
-    drawLine(
-        sfxFpsLabel.c_str(),
-        this->sfxFpsInputRect.x + 6.0f,
-        this->sfxFpsInputRect.y + 2.0f,
-        RC2D_Color{235, 245, 255, 250});
-
-    // Ligne detaillee unique en bas a gauche: assets + status + navire + mapname.
     char lineBottom[3072] = {};
     SDL_snprintf(
         lineBottom,
@@ -6661,19 +5079,13 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         line3,
         line4);
     drawLine(lineBottom, 14.0f, map.rect.y + map.rect.h - 20.0f, kHudTextColor);
-
-    // Minimap maison en haut a droite.
     this->drawMiniMap();
-
-    // Mini-listes VFX + navires + assets cliquables en bas a droite.
     if (this->showBottomRightLists)
     {
-        this->drawSfxListPanel();
         this->drawShipListPanel();
         this->drawAssetListPanel();
     }
 }
-
 void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index)
 {
     (void)filter_index;
@@ -6703,29 +5115,6 @@ void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const ch
     }
 }
 
-void EditorMapCreateMapScene::onImportSfxDialogResult(void* userdata, const char* const* filelist, int filter_index)
-{
-    (void)filter_index;
-
-    EditorMapCreateMapScene* scene = static_cast<EditorMapCreateMapScene*>(userdata);
-    if (scene == nullptr || scene != EditorMapCreateMapScene::activeInstance)
-    {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(scene->pendingSfxImportMutex);
-    scene->pendingSfxImportFilePaths.clear();
-    scene->pendingSfxImportDialogCompleted = true;
-
-    if (filelist == nullptr || filelist[0] == nullptr)
-    {
-        scene->pendingSfxImportDialogCanceled = true;
-        return;
-    }
-
-    scene->pendingSfxImportDialogCanceled = false;
-    scene->pendingSfxImportFilePaths.emplace_back(filelist[0]);
-}
 
 void EditorMapCreateMapScene::onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index)
 {
@@ -6821,13 +5210,6 @@ void EditorMapCreateMapScene::unload(void)
         this->pendingMapImportDialogCanceled = false;
         this->pendingMapImportAbsolutePath.clear();
     }
-    {
-        std::lock_guard<std::mutex> lock(this->pendingSfxImportMutex);
-        this->pendingSfxImportDialogCompleted = false;
-        this->pendingSfxImportDialogCanceled = false;
-        this->pendingSfxImportFilePaths.clear();
-    }
-    this->unloadImportedSfx();
     this->unloadImportedAssets();
     rc2d_graphics_closeFont(&this->overlayFont);
     rc2d_graphics_freeImage(&this->backgroundUiImage);
@@ -6839,7 +5221,6 @@ void EditorMapCreateMapScene::load(void)
 {
     EditorMapCreateMapScene::activeInstance = this;
     this->resetEditorState();
-    this->unloadImportedSfx();
     this->unloadImportedAssets();
     this->ensureUserStorageFolders();
 
@@ -6883,14 +5264,12 @@ void EditorMapCreateMapScene::update(double dt)
 
     // Traite d'abord les imports differees pour rester hors pass de rendu GPU.
     this->processPendingImportRequests();
-    this->processPendingSfxImportRequests();
     this->processPendingShipFolderRequest();
     this->processPendingMapImportRequest();
 
     map.update();
     this->updateToolbarLayout();
     this->clampAssetListScrollOffset();
-    this->clampSfxListScrollOffset();
     this->clampShipListScrollOffset();
     this->applyPendingOceanColorStep();
     GetOceanShader().update(dt);
@@ -6908,20 +5287,16 @@ void EditorMapCreateMapScene::update(double dt)
     if (this->showBottomRightLists)
     {
         this->handleAssetListScrollDragFromMouse();
-        this->handleSfxListScrollDragFromMouse();
         this->handleShipListScrollDragFromMouse();
     }
     else
     {
         this->assetListScrollDragActive = false;
         this->assetListScrollDragGrabOffsetY = 0.0f;
-        this->sfxListScrollDragActive = false;
-        this->sfxListScrollDragGrabOffsetY = 0.0f;
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
     }
     this->updateTestShip(dt);
-    this->updatePlacedSfxLifecycle();
     camera.update(map, map.rect);
 
     this->updateHoveredTile();
@@ -6957,7 +5332,6 @@ void EditorMapCreateMapScene::draw(void)
     this->drawWorldGridAndBlockedTiles();
     this->drawPlacedAssets();
     this->drawTestShip();
-    this->drawPlacedSfxOverlay();
     this->scrollBarOverlay.draw(map.rect, map);
 
     WorldRenderClip::end(renderer);
@@ -6977,27 +5351,18 @@ void EditorMapCreateMapScene::keypressed(
     (void)key;
     (void)keycode;
     (void)keyboardID;
-
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
-
     // Echap desactive dans l'editor pour eviter toute fermeture involontaire.
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
         this->mapNameInputFocused = false;
         return;
     }
-
-    if (this->handleSfxFpsInputKey(key, scancode, keycode, mod, isrepeat))
-    {
-        return;
-    }
-
     if (this->handleMapNameInputKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
     }
-
     const bool ctrlDown = ((mod & SDL_KMOD_CTRL) != 0);
     if (!isrepeat && ctrlDown && scancode == SDL_SCANCODE_Z)
     {
@@ -7009,44 +5374,32 @@ void EditorMapCreateMapScene::keypressed(
         this->redoHistoryAction();
         return;
     }
-
     if (scancode == SDL_SCANCODE_F5 && !isrepeat)
     {
         this->openImportAssetDialog();
         return;
     }
-
     if (scancode == SDL_SCANCODE_F6 && !isrepeat)
     {
         this->openExportMapDialog();
         return;
     }
-
     if (scancode == SDL_SCANCODE_F7 && !isrepeat)
     {
         this->openImportShipFolderDialog();
         return;
     }
-
     if (scancode == SDL_SCANCODE_F8 && !isrepeat)
     {
         this->openImportMapDialog();
         return;
     }
-
-    if (scancode == SDL_SCANCODE_F9 && !isrepeat)
-    {
-        this->openImportSfxDialog();
-        return;
-    }
-
     if (scancode == SDL_SCANCODE_O && !isrepeat)
     {
         const bool reverse = ((mod & SDL_KMOD_SHIFT) != 0);
         this->requestOceanColorStep(reverse ? -1 : 1);
         return;
     }
-
     if (scancode == SDL_SCANCODE_LEFTBRACKET && !isrepeat)
     {
         if (!this->importedAssets.empty())
@@ -7056,9 +5409,7 @@ void EditorMapCreateMapScene::keypressed(
             {
                 this->selectedAssetIndex = static_cast<int>(this->importedAssets.size()) - 1;
             }
-            this->selectedSfxIndex = -1;
             this->ensureSelectedAssetVisible();
-
             const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
             this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
         }
@@ -7068,7 +5419,6 @@ void EditorMapCreateMapScene::keypressed(
         }
         return;
     }
-
     if (scancode == SDL_SCANCODE_RIGHTBRACKET && !isrepeat)
     {
         if (!this->importedAssets.empty())
@@ -7078,9 +5428,7 @@ void EditorMapCreateMapScene::keypressed(
             {
                 this->selectedAssetIndex = 0;
             }
-            this->selectedSfxIndex = -1;
             this->ensureSelectedAssetVisible();
-
             const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
             this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
         }
@@ -7090,21 +5438,18 @@ void EditorMapCreateMapScene::keypressed(
         }
         return;
     }
-
     if (scancode == SDL_SCANCODE_B && !isrepeat)
     {
         this->editorTool = EditorTool::BLOCK_TILES;
         this->statusMessage = "Mode Collision: clic gauche bloque, clic droit debloque.";
         return;
     }
-
     if (scancode == SDL_SCANCODE_P && !isrepeat)
     {
         this->editorTool = EditorTool::PLACE_ASSETS;
-        this->statusMessage = "Mode Pose visuel: clic gauche pose asset/VFX, clic droit supprime.";
+        this->statusMessage = "Mode Pose visuel: clic gauche pose asset, clic droit supprime.";
         return;
     }
-
     if (scancode == SDL_SCANCODE_N && !isrepeat)
     {
         this->editorTool = EditorTool::SPAWN_SHIP;
@@ -7118,7 +5463,6 @@ void EditorMapCreateMapScene::keypressed(
         }
         return;
     }
-
     if (scancode == SDL_SCANCODE_V && !isrepeat)
     {
         this->editorTool = EditorTool::CONTROL_SHIP;
@@ -7136,14 +5480,12 @@ void EditorMapCreateMapScene::keypressed(
         }
         return;
     }
-
     if (scancode == SDL_SCANCODE_T && !isrepeat)
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
         this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue.";
         return;
     }
-
     if (scancode == SDL_SCANCODE_COMMA && !isrepeat)
     {
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
@@ -7154,13 +5496,11 @@ void EditorMapCreateMapScene::keypressed(
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
         return;
     }
-
     if (scancode == SDL_SCANCODE_G && !isrepeat)
     {
         this->showGrid = !this->showGrid;
         return;
     }
-
     if (scancode == SDL_SCANCODE_C && !isrepeat)
     {
         const SDL_Point centerSectorTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
@@ -7174,7 +5514,6 @@ void EditorMapCreateMapScene::keypressed(
         this->statusMessage = "Camera recadree sur la map.";
         return;
     }
-
     if (scancode == SDL_SCANCODE_H && !isrepeat)
     {
         if (!this->testShipLoaded || !this->testShipSpawned)
@@ -7182,7 +5521,6 @@ void EditorMapCreateMapScene::keypressed(
             this->statusMessage = "Aucun navire teste/spawn a suivre.";
             return;
         }
-
         this->testShipCameraFollowEnabled = !this->testShipCameraFollowEnabled;
         const SDL_FPoint shipTile = this->testShip.getPositionTile();
         camera.centerCameraOnTile(shipTile.x, shipTile.y, map, map.rect);
@@ -7192,7 +5530,6 @@ void EditorMapCreateMapScene::keypressed(
             : "Suivi camera navire: OFF";
         return;
     }
-
     if (scancode == SDL_SCANCODE_DELETE && !isrepeat)
     {
         if ((mod & SDL_KMOD_SHIFT) != 0)
@@ -7211,7 +5548,6 @@ void EditorMapCreateMapScene::keypressed(
         }
         return;
     }
-
     bool cameraChanged = false;
     if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
     {
@@ -7223,92 +5559,53 @@ void EditorMapCreateMapScene::keypressed(
         camera.setZoomFactor(camera.getZoomFactor() - 0.05f);
         cameraChanged = true;
     }
-
     if (cameraChanged)
     {
         this->testShipCameraFollowEnabled = false;
         camera.update(map, map.rect);
     }
 }
-
 void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     (void)clicks;
     (void)mouseID;
-
     Map& map = GetCurrentMap();
-
     // RC2D convertit deja les events via SDL_ConvertEventToRenderCoordinates.
     const float renderX = x;
     const float renderY = y;
-    const bool wasSfxFpsInputFocused = this->sfxFpsInputFocused;
     this->mapNameInputFocused = this->pointInRect(renderX, renderY, this->mapNameInputRect);
-    this->sfxFpsInputFocused = this->pointInRect(renderX, renderY, this->sfxFpsInputRect);
     if (this->mapNameInputFocused)
     {
-        this->sfxFpsInputFocused = false;
+        return;
     }
-    if (this->sfxFpsInputFocused)
-    {
-        this->mapNameInputFocused = false;
-    }
-
-    if (wasSfxFpsInputFocused && !this->sfxFpsInputFocused)
-    {
-        this->applySfxFpsInputToSelected();
-    }
-
-    if (this->sfxFpsInputFocused && !wasSfxFpsInputFocused)
-    {
-        if (this->selectedSfxIndex >= 0 &&
-            this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-        {
-            this->sfxFpsInput = formatSfxFpsValue(
-                this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].defaultFps);
-        }
-        else
-        {
-            this->statusMessage = "Selectionne un VFX pour regler les FPS.";
-        }
-    }
-
     if (button == RC2D_MOUSE_BUTTON_LEFT)
     {
         this->assetListScrollDragActive = false;
         this->assetListScrollDragGrabOffsetY = 0.0f;
-        this->sfxListScrollDragActive = false;
-        this->sfxListScrollDragGrabOffsetY = 0.0f;
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
     }
-
     if (this->handleToolbarClick(renderX, renderY))
     {
         return;
     }
-
     if (this->handleMiniMapClick(renderX, renderY, button))
     {
         return;
     }
-
     if (!this->isInsideMapRect(renderX, renderY))
     {
         return;
     }
-
-    // Les barres de scroll consomment le clic gauche dans la zone map.
     if (button == RC2D_MOUSE_BUTTON_LEFT && this->scrollBarOverlay.handleClick(renderX, renderY, map.rect))
     {
         this->testShipCameraFollowEnabled = false;
         return;
     }
-
     if (this->handleShipToolClick(renderX, renderY, button))
     {
         return;
     }
-
     if (this->editorTool == EditorTool::BLOCK_TILES)
     {
         if (button == RC2D_MOUSE_BUTTON_LEFT)
@@ -7321,52 +5618,25 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         }
         return;
     }
-
     if (this->editorTool == EditorTool::PLACE_ASSETS)
     {
         if (button == RC2D_MOUSE_BUTTON_LEFT)
         {
-            if (this->selectedSfxIndex >= 0 &&
-                this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-            {
-                this->placeSelectedSfxAtMouseTile();
-            }
-            else
-            {
-                this->placeSelectedAssetAtMouseTile();
-            }
+            this->placeSelectedAssetAtMouseTile();
         }
         else if (button == RC2D_MOUSE_BUTTON_RIGHT)
         {
-            if (this->selectedSfxIndex >= 0 &&
-                this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-            {
-                this->removeSfxAtMouseTile();
-            }
-            else
-            {
-                this->removeAssetAtMouseTile();
-            }
+            this->removeAssetAtMouseTile();
         }
         return;
     }
-
     if (this->editorTool == EditorTool::REMOVE_ASSETS)
     {
         if (button == RC2D_MOUSE_BUTTON_LEFT || button == RC2D_MOUSE_BUTTON_RIGHT)
         {
-            if (this->selectedSfxIndex >= 0 &&
-                this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
-            {
-                this->removeSfxAtMouseTile();
-            }
-            else
-            {
-                this->removeAssetAtMouseTile();
-            }
+            this->removeAssetAtMouseTile();
         }
     }
-
     if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
     {
         if (button != RC2D_MOUSE_BUTTON_LEFT)
@@ -7383,7 +5653,6 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         return;
     }
 }
-
 #endif // GAME_ENV_DEV
 
 

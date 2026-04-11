@@ -75,20 +75,6 @@ private:
         std::string folderAbsolutePath; /**< Chemin absolu vers le dossier contenant 1.png..8.png. */
     };
     /**
-     * @struct ImportedSfx
-     * @brief Donnees d'un SFX atlas TexturePacker importe.
-     */
-    struct ImportedSfx {
-        std::string id; /**< Identifiant unique interne du SFX. */
-        std::string displayName; /**< Nom affiche dans la liste SFX. */
-        std::string sourceJsonPath; /**< Chemin source absolu du JSON atlas. */
-        std::string storageJsonPath; /**< Chemin JSON en storage user/title. */
-        RC2D_TP_Atlas atlas; /**< Atlas charge via module texturepacker. */
-        std::vector<std::string> frameNames; /**< Noms des frames dans l'ordre d'animation. */
-        float defaultFps; /**< FPS d'animation par defaut a la pose. */
-    };
-
-    /**
      * @struct PlacedAsset
      * @brief Etat d'un asset pose sur la map.
      */
@@ -99,21 +85,6 @@ private:
         float anchorTileX; /**< Ancre sub-tile en X pour un pose precis. */
         float anchorTileY; /**< Ancre sub-tile en Y pour un pose precis. */
         float scale; /**< Echelle logique de pose. */
-    };
-    /**
-     * @struct PlacedSfx
-     * @brief Etat d'un SFX pose sur la map.
-     */
-    struct PlacedSfx {
-        int importedSfxIndex; /**< Index dans importedSfx. */
-        int tileX; /**< Tuile metier (X) de reference. */
-        int tileY; /**< Tuile metier (Y) de reference. */
-        float anchorTileX; /**< Ancre sub-tile en X pour un pose precis. */
-        float anchorTileY; /**< Ancre sub-tile en Y pour un pose precis. */
-        float scale; /**< Echelle logique de pose. */
-        float fps; /**< Vitesse d'animation en frames/sec. */
-        bool loop; /**< true si l'animation tourne en boucle. */
-        float spawnTimeSeconds; /**< Horodatage de spawn (secondes) pour mode one-shot. */
     };
     struct TowerHotspot {
         int tileX; /**< Tuile hotspot X. */
@@ -162,20 +133,15 @@ private:
     int selectedOceanColorIndex; /**< Index couleur ocean active. */
     int pendingOceanColorDelta; /**< Delta ocean en attente d'application. */
     int selectedAssetIndex; /**< Index asset actuellement selectionne. */
-    int selectedSfxIndex; /**< Index SFX actuellement selectionne. */
     int selectedShipIndex; /**< Index navire actuellement selectionne. */
     int assetListScrollOffset; /**< Offset de scroll de la liste assets. */
-    int sfxListScrollOffset; /**< Offset de scroll de la liste SFX. */
     int shipListScrollOffset; /**< Offset de scroll de la liste navires. */
     bool showGrid; /**< Affichage grille isometrique ON/OFF. */
     bool showBlockedTiles; /**< Affichage visuel des tuiles bloquees ON/OFF. */
-    bool showBottomRightLists; /**< Affichage des 3 listes (SFX/navires/assets). */
+    bool showBottomRightLists; /**< Affichage des listes navires/assets. */
     bool collisionPaintBlocks; /**< true=mode peinture collision, false=mode suppression collision. */
     std::string mapNameInput; /**< Nom map saisi dans l'input. */
     bool mapNameInputFocused; /**< true si l'input nom map a le focus clavier. */
-    std::string sfxFpsInput; /**< Valeur texte FPS SFX saisie dans l'input. */
-    bool sfxFpsInputFocused; /**< true si l'input FPS SFX a le focus clavier. */
-    bool sfxLoopEnabled; /**< true si les VFX poses sont en mode boucle. */
     int blockedBrushRadiusTiles; /**< Rayon de paint collision (0 = 1 tuile). */
     bool assetTransparencyEnabled; /**< true si l'opacite globale assets est active. */
     int assetOpacityPercent; /**< Opacite globale assets en pourcentage [10..100]. */
@@ -191,15 +157,12 @@ private:
     SDL_Point lastDragPaintTile; /**< Derniere tuile peinte en drag. */
 
     std::vector<ImportedAsset> importedAssets; /**< Bibliotheque assets importes. */
-    std::vector<ImportedSfx> importedSfx; /**< Bibliotheque SFX importes (atlas). */
     std::vector<ImportedShip> importedShips; /**< Bibliotheque navires importes depuis dossiers. */
     std::vector<PlacedAsset> placedAssets; /**< Assets poses sur la map. */
-    std::vector<PlacedSfx> placedSfx; /**< SFX poses sur la map. */
     std::vector<TowerHotspot> towerHotspots; /**< Hotspots tours poses sur la map. */
     std::vector<HistoryAction> historyActions; /**< Pile d'historique undo/redo. */
     int historyCursor; /**< Curseur courant dans l'historique. */
     unsigned int importedAssetCounter; /**< Compteur auto pour ID d'import. */
-    unsigned int importedSfxCounter; /**< Compteur auto pour ID SFX. */
     std::string statusMessage; /**< Message de statut affichable HUD. */
     bool pendingImportDialogCompleted; /**< true si le callback import a publie un resultat. */
     bool pendingImportDialogCanceled; /**< true si l'utilisateur a annule le dialog import. */
@@ -210,19 +173,8 @@ private:
     size_t importBatchNextIndex; /**< Index du prochain fichier a importer dans le batch. */
     int importBatchImportedCount; /**< Nombre de fichiers importes avec succes dans le batch courant. */
     int importBatchFailedCount; /**< Nombre de fichiers en echec dans le batch courant. */
-    bool pendingSfxImportDialogCompleted; /**< true si callback import SFX a publie un resultat. */
-    bool pendingSfxImportDialogCanceled; /**< true si dialog import SFX annule. */
-    std::vector<std::string> pendingSfxImportFilePaths; /**< Chemins JSON SFX en attente. */
-    mutable std::mutex pendingSfxImportMutex; /**< Mutex callback/import SFX differe. */
-    bool sfxImportBatchActive; /**< true si batch d'import SFX en cours. */
-    std::vector<std::string> sfxImportBatchFilePaths; /**< Queue locale des JSON SFX a importer. */
-    size_t sfxImportBatchNextIndex; /**< Index prochain JSON SFX a traiter. */
-    int sfxImportBatchImportedCount; /**< Nb SFX importes avec succes. */
-    int sfxImportBatchFailedCount; /**< Nb SFX en echec. */
     bool assetListScrollDragActive; /**< true si le drag de la scrollbar assets est actif. */
     float assetListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour un drag precis. */
-    bool sfxListScrollDragActive; /**< true si le drag de la scrollbar SFX est actif. */
-    float sfxListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour drag liste SFX. */
     bool shipListScrollDragActive; /**< true si le drag de la scrollbar navires est actif. */
     float shipListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour drag liste navires. */
     TileClickMarker clickMarker; /**< Marqueur visuel de clic en mode controle navire. */
@@ -242,9 +194,6 @@ private:
     mutable std::mutex pendingMapImportMutex; /**< Mutex callback import map -> thread scene. */
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
-    SDL_FRect buttonImportSfxRect; /**< Bouton "IMPORTER SFX". */
-    SDL_FRect buttonClearSfxRect; /**< Bouton "CLEAR VFX". */
-    SDL_FRect buttonSfxLoopRect; /**< Bouton "LOOP". */
     SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
     SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRES". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
@@ -281,9 +230,7 @@ private:
     SDL_FRect buttonShipReexportRect; /**< Bouton reexport navire scale. */
     SDL_FRect buttonListsVisibilityRect; /**< Bouton ON/OFF affichage des 3 listes. */
     SDL_FRect mapNameInputRect; /**< Champ de saisie nom map. */
-    SDL_FRect sfxFpsInputRect; /**< Champ de saisie FPS SFX. */
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
-    SDL_FRect sfxListRect; /**< Panneau liste SFX (meme format que assets/navires). */
     SDL_FRect shipListRect; /**< Panneau liste navires (meme format que assets). */
     SDL_FRect miniMapRect; /**< Minimap editeur (haut droite). */
     bool miniMapDragActive; /**< true si drag minimap en cours. */
@@ -296,8 +243,6 @@ private:
     void resetEditorState(void);
     /** @brief Libere toutes les textures d'assets importes. */
     void unloadImportedAssets(void);
-    /** @brief Libere tous les atlas SFX importes. */
-    void unloadImportedSfx(void);
     /** @brief Cree les dossiers user requis pour les imports. */
     void ensureUserStorageFolders(void);
     /** @brief Applique la couleur ocean selectionnee sur le shader ocean. */
@@ -332,8 +277,6 @@ private:
     bool tryGetMouseTile(SDL_Point* outTile) const;
     /** @brief Met a jour la tuile survolee par la souris. */
     void updateHoveredTile(void);
-    /** @brief Supprime les VFX one-shot arrives a la fin de leur animation. */
-    void updatePlacedSfxLifecycle(void);
     /** @brief Gere la peinture collision en drag souris. */
     void handleTilePaintFromMouseDrag(void);
     /** @brief Applique une collision avec historique.
@@ -388,19 +331,8 @@ private:
      *  @return true si import ok.
      */
     bool importAssetFromAbsolutePath(const char* absolutePath);
-    /** @brief Importe un SFX atlas TexturePacker depuis un dossier absolu.
-     *  Le dossier doit contenir au minimum un `texturepacker.json` valide
-     *  et l'image referencée dans son `meta.image`.
-     *  @param absolutePath Chemin absolu du dossier SFX.
-     *  @return true si import ok.
-     */
-    bool importSfxFromAbsolutePath(const char* absolutePath);
-    /** @brief Importe recursivement des SFX depuis un dossier racine. */
-    bool importSfxFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);
     /** @brief Traite les imports publies par le callback de file dialog. */
     void processPendingImportRequests(void);
-    /** @brief Traite les imports SFX publies par callback file dialog. */
-    void processPendingSfxImportRequests(void);
     /** @brief Exporte la map JSON vers un chemin absolu.
      *  @param absolutePath Chemin destination.
      *  @return true si export ok.
@@ -424,8 +356,6 @@ private:
     bool renderStyledMiniMapToSurface(SDL_Surface* targetSurface) const;
     /** @brief Ouvre le dialogue d'import assets. */
     void openImportAssetDialog(void);
-    /** @brief Ouvre le dialogue d'import dossier racine SFX (scan recursif). */
-    void openImportSfxDialog(void);
     /** @brief Ouvre le dialogue d'import map.json. */
     void openImportMapDialog(void);
     /** @brief Ouvre le dialogue d'import d'un dossier racine navires (scan recursif). */
@@ -440,8 +370,6 @@ private:
     bool importMapFromAbsolutePath(const char* absolutePath);
     /** @brief Importe (ou reutilise) un asset depuis un path runtime JSON. */
     int importAssetFromRuntimeStoragePath(const std::string& runtimePath);
-    /** @brief Importe (ou reutilise) un SFX atlas depuis un path runtime JSON. */
-    int importSfxFromRuntimeStoragePath(const std::string& runtimePath);
     /** @brief Retourne true si un asset est considere comme une tour. */
     bool isTowerAssetName(const std::string& displayName) const;
     /** @brief Trouve l'asset pose le plus proche sous un point ecran. */
@@ -460,8 +388,6 @@ private:
      *  @return true si la touche est consommee.
      */
     bool handleMapNameInputKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
-    bool handleSfxFpsInputKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
-    bool applySfxFpsInputToSelected(void);
     /** @brief Traite l'import dossier navire publie par callback async. */
     void processPendingShipFolderRequest(void);
     /** @brief Charge un navire test depuis un dossier absolu.
@@ -493,14 +419,6 @@ private:
     void drawWorldGridAndBlockedTiles(void) const;
     /** @brief Dessine les assets poses et leur preview de pose. */
     void drawPlacedAssets(void) const;
-    /** @brief Dessine les VFX poses et leur preview de pose (couche front). */
-    void drawPlacedSfxOverlay(void) const;
-    /** @brief Pose le SFX selectionne sous la souris. */
-    void placeSelectedSfxAtMouseTile(void);
-    /** @brief Supprime un SFX a la souris (hit visuel prioritaire). */
-    void removeSfxAtMouseTile(void);
-    /** @brief Trouve le SFX pose le plus proche sous un point ecran. */
-    int findPlacedSfxIndexAtScreenPoint(float x, float y) const;
     /** @brief Dessine le HUD, les boutons et infos editeur. */
     void drawEditorHud(void) const;
     /** @brief Recalcule les rects des boutons/panneaux UI. */
@@ -511,26 +429,18 @@ private:
     int getAssetListMaxScrollOffset(void) const;
     /** @brief Renvoie le max de scroll de liste navires. */
     int getShipListMaxScrollOffset(void) const;
-    /** @brief Renvoie le max de scroll de liste SFX. */
-    int getSfxListMaxScrollOffset(void) const;
     /** @brief Clamp l'offset de scroll assets dans ses bornes. */
     void clampAssetListScrollOffset(void);
     /** @brief Clamp l'offset de scroll navires dans ses bornes. */
     void clampShipListScrollOffset(void);
-    /** @brief Clamp l'offset de scroll SFX dans ses bornes. */
-    void clampSfxListScrollOffset(void);
     /** @brief Garantit que l'asset selectionne est visible dans la liste. */
     void ensureSelectedAssetVisible(void);
     /** @brief Garantit que le navire selectionne est visible dans la liste. */
     void ensureSelectedShipVisible(void);
-    /** @brief Garantit que le SFX selectionne est visible dans la liste. */
-    void ensureSelectedSfxVisible(void);
     /** @brief Calcule l'index de debut rendu de la liste assets. */
     int computeAssetListStartIndex(void) const;
     /** @brief Calcule l'index de debut rendu de la liste navires. */
     int computeShipListStartIndex(void) const;
-    /** @brief Calcule l'index de debut rendu de la liste SFX. */
-    int computeSfxListStartIndex(void) const;
     /** @brief Gere un clic dans le panneau liste assets.
      *  @return true si le clic est consomme.
      */
@@ -539,22 +449,14 @@ private:
      *  @return true si le clic est consomme.
      */
     bool handleShipListClick(float x, float y);
-    /** @brief Gere un clic dans le panneau liste SFX.
-     *  @return true si le clic est consomme.
-     */
-    bool handleSfxListClick(float x, float y);
     /** @brief Gere le drag continu de la scrollbar liste assets. */
     void handleAssetListScrollDragFromMouse(void);
     /** @brief Gere le drag continu de la scrollbar liste navires. */
     void handleShipListScrollDragFromMouse(void);
-    /** @brief Gere le drag continu de la scrollbar liste SFX. */
-    void handleSfxListScrollDragFromMouse(void);
     /** @brief Dessine le panneau liste assets. */
     void drawAssetListPanel(void) const;
     /** @brief Dessine le panneau liste navires. */
     void drawShipListPanel(void) const;
-    /** @brief Dessine le panneau liste SFX. */
-    void drawSfxListPanel(void) const;
     /** @brief Construit le rect de vue courante pour la minimap.
      *  @return true si le rect est valide.
      */
@@ -582,8 +484,6 @@ private:
 
     /** @brief Callback async de resultat import fichier. */
     static void onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index);
-    /** @brief Callback async de resultat import SFX (json atlas). */
-    static void onImportSfxDialogResult(void* userdata, const char* const* filelist, int filter_index);
     /** @brief Callback async de resultat import map JSON. */
     static void onImportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
     /** @brief Callback async de resultat import dossier navire. */
