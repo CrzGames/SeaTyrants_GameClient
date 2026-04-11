@@ -100,6 +100,57 @@ private:
         uint32_t spawnAfterInstanceId = 0;
         /** Delai apres la phase de l'instance reference (ms), pour la lecture preview / jeu. */
         int spawnAfterDelayMs = 0;
+        /**
+         * Preview editor: decal SPAWN (meme unite que offsetX/Y) pour placer les rejets de trainee au sol.
+         */
+        bool motionSpawnCaptured = false;
+        float motionSpawnOffsetX = 0.0f;
+        float motionSpawnOffsetY = 0.0f;
+        /** 0 = pas de trainee ; sinon distance minimale en tuiles entre deux rejets (pilotage actif). */
+        int motionTrailEveryNTiles = 0;
+        /** Duree de vie en millisecondes de chaque rejet de trainee sur la carte. */
+        int motionTrailLifetimeMs = 2000;
+        /**
+         * Si true : chaque rejet reste pile sur le decal SPAWN memorise (tuile du navire au spawn).
+         * Si false : decal lateral aleatoire perpendiculaire a la marche (voir motionTrailLateralJitterRadius).
+         */
+        bool motionTrailStrictTilePlacement = true;
+        /**
+         * Demi-amplitude (meme unite que offsetX/Y) du decal aleatoire perpendiculaire a la marche ; ignore si strict.
+         */
+        float motionTrailLateralJitterRadius = 0.0f;
+        /**
+         * 0-100 : intensite d'une rotation aleatoire par rejet au spawn (100 % = jusqu'a ±45 deg par rapport au layer).
+         */
+        int motionTrailRotationRandomPercent = 0;
+        /**
+         * Pilotage : si true et navire immobile, salves de rejets en couronne autour du layer (offset courant).
+         */
+        bool motionTrailIdleRingWhenStationary = false;
+        /** Distance du centre du layer au cercle de base des pieces (memes unites qu'offsetX/Y sur la carte). */
+        float motionTrailIdleRingRadius = 48.0f;
+        /** Delai entre deux salves couronne a l'arret, pilotage actif (ms). */
+        int motionTrailIdleSpawnPeriodMs = 600;
+        /** Nombre de pieces par salve couronne (pilotage a l'arret), typ. 4-16. */
+        int motionTrailIdleRingPieceCount = 8;
+        /**
+         * 0-100 : rotation aleatoire par piece couronne (independant de la trainee en marche ; 100 % = jusqu'a +-45 deg).
+         */
+        int motionTrailIdleRingRotationRandomPercent = 0;
+        /**
+         * Rayon max d'un decal 2D aleatoire ajoute a chaque piece sur la couronne (memes unites qu'offsetX/Y ; 0 = cercle regulier).
+         */
+        float motionTrailIdleRingPositionJitterRadius = 0.0f;
+        /** Accumulateur de distance (tuiles) depuis le dernier rejet ; non serialise. */
+        float motionTrailDistanceAcc = 0.0f;
+        /** Accumulateur temps pour couronne a l'arret ; non serialise. */
+        float motionTrailIdleSpawnAccSec = 0.0f;
+        /**
+         * Salve couronne : pieces encore a apparaitre (apres la premiere) ; non serialise.
+         */
+        int motionTrailIdleRingSalvoPiecesRemaining = 0;
+        /** Delai interne entre deux pieces d'une meme salve ; non serialise. */
+        float motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
         std::array<DirectionOverride, 4> directionOverrides;
     };
 
@@ -265,6 +316,29 @@ private:
         int candidateCount = 0;
         SDL_FRect candidateRows[20]{};
     };
+    struct VfxTrailPopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect everyNTilesInputRect{};
+        SDL_FRect lifetimeMsInputRect{};
+        SDL_FRect trailStrictTileBtn{};
+        SDL_FRect trailLateralSpreadBtn{};
+        bool lateralSectionVisible = false;
+        SDL_FRect lateralJitterInputRect{};
+        SDL_FRect rotationPctInputRect{};
+        SDL_FRect idleRingOffBtn{};
+        SDL_FRect idleRingOnBtn{};
+        bool idleRingInputsVisible = false;
+        SDL_FRect idleRingPieceCountInputRect{};
+        SDL_FRect idleRingPeriodMsInputRect{};
+        SDL_FRect idleRingRadiusInputRect{};
+        SDL_FRect idleRingRotationPctInputRect{};
+        SDL_FRect idleRingPosJitterInputRect{};
+        SDL_FRect validateBtn{};
+        SDL_FRect clearBtn{};
+        SDL_FRect cancelBtn{};
+    };
     bool vfxRelativeTimingPopupVisible = false;
     bool vfxRelativeTimingPopupIsShipRow = false;
     int vfxRelativeTimingPopupTargetVfxIndex = -1;
@@ -274,6 +348,55 @@ private:
     std::string vfxRelativeTimingPopupDelayMsInput;
     bool vfxRelativeTimingPopupDelayMsFocused = false;
     mutable VfxRelativePopupLayout vfxRelativePopupLastLayout;
+
+    bool vfxTrailPopupVisible = false;
+    int vfxTrailPopupParentInstanceIndex = -1;
+    std::string vfxTrailPopupEveryNTilesInput;
+    std::string vfxTrailPopupLifetimeMsInput;
+    std::string vfxTrailPopupLateralJitterInput;
+    std::string vfxTrailPopupRotationPctInput;
+    std::string vfxTrailPopupIdleRingPieceCountInput;
+    std::string vfxTrailPopupIdlePeriodMsInput;
+    std::string vfxTrailPopupIdleRadiusInput;
+    std::string vfxTrailPopupIdleRingRotationPctInput;
+    std::string vfxTrailPopupIdleRingPosJitterInput;
+    bool vfxTrailPopupStrictTilePlacement = true;
+    bool vfxTrailPopupIdleRingWhenStationary = false;
+    bool vfxTrailPopupEveryNTilesFocused = false;
+    bool vfxTrailPopupLifetimeMsFocused = false;
+    bool vfxTrailPopupLateralJitterFocused = false;
+    bool vfxTrailPopupRotationPctFocused = false;
+    bool vfxTrailPopupIdleRingPieceCountFocused = false;
+    bool vfxTrailPopupIdlePeriodMsFocused = false;
+    bool vfxTrailPopupIdleRadiusFocused = false;
+    bool vfxTrailPopupIdleRingRotationPctFocused = false;
+    bool vfxTrailPopupIdleRingPosJitterFocused = false;
+    mutable VfxTrailPopupLayout vfxTrailPopupLastLayout;
+
+    struct ShipVfxTrailPiece {
+        uint32_t sourceVfxInstanceId = 0;
+        float anchorShipTileX = 0.0f;
+        float anchorShipTileY = 0.0f;
+        float bornTimeSeconds = 0.0f;
+        float timeRemainingSec = 0.0f;
+        /** Decal affiche (copie au spawn) : ne pas relire l'instance au dessin si le SPAWN est re-valide. */
+        float trailDrawOffsetX = 0.0f;
+        float trailDrawOffsetY = 0.0f;
+        /** Decal perpendiculaire a la marche (meme unite que trailDraw), fige au spawn. */
+        float trailPerpendicularJitterX = 0.0f;
+        float trailPerpendicularJitterY = 0.0f;
+        /** Ecart de rotation (deg) ajoute au layer pour ce rejet, fige au spawn. */
+        float trailRotationJitterDeg = 0.0f;
+        /** Identifiant stable pour la ligne « sous-instance » dans le panneau Layers. */
+        uint32_t layerPanelUiId = 0;
+        /** True si cree par la couronne a l'arret ; supprime des que le navire reprend sa marche. */
+        bool fromIdleRingCrown = false;
+    };
+    std::vector<ShipVfxTrailPiece> shipVfxTrailPieces;
+    uint32_t nextShipVfxTrailLayerPanelUiId = 1;
+    SDL_FPoint shipVfxTrailPrevShipTile{};
+    bool shipVfxTrailPrevShipTileValid = false;
+
     bool vfxDragActive;
     /** Mode cadran ROT (panneau layers) : cercle autour du navire + ligne vers le curseur. */
     bool vfxRotationDialActive;
@@ -349,6 +472,9 @@ private:
     SDL_FRect buttonPreviewIsoGridRect;
     SDL_FRect buttonShipVfxZoomMinusRect;
     SDL_FRect buttonShipVfxZoomPlusRect;
+    /** Pilotage RTS du navire preview (clic carte = moveToTile). */
+    bool previewShipPilotActive;
+    SDL_FRect buttonShipPilotRect;
     SDL_FRect buttonShipOrderMinusRect;
     SDL_FRect buttonShipOrderPlusRect;
     SDL_FRect buttonLayerOrderMinusRect;
@@ -442,6 +568,16 @@ private:
     void drawVfxRelativeTimingPopup(void) const;
     bool handleVfxRelativeTimingPopupMouseClick(float x, float y, RC2D_MouseButton button);
     bool handleVfxRelativeTimingPopupKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    void openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex);
+    void closeVfxTrailPopup(void);
+    bool computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) const;
+    void drawVfxTrailPopup(void) const;
+    bool handleVfxTrailPopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleVfxTrailPopupKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    std::vector<int> expandLayerPanelDisplayRows(const std::vector<int>& coreOrdered) const;
+    int findVfxLayerIndexByInstanceId(uint32_t instanceId) const;
+    int findTrailPieceIndexByLayerPanelUiId(uint32_t uiId) const;
+    void removeTrailPiecesWithSourceInstanceId(uint32_t sourceInstanceId);
     int computeVfxPreviewFrameIndex(
         const ShipVfxInstance& instance,
         float timeSeconds,
@@ -465,6 +601,17 @@ private:
     const ShipVfxInstance* getSelectedVfxInstance(void) const;
     DirectionOverride* getEditableDirectionOverride(ShipVfxInstance* instance);
     const DirectionOverride* getResolvedDirectionOverride(const ShipVfxInstance* instance) const;
+    /** Offsets logiques pour le VFX accroche au navire preview (offset courant / override). */
+    void getVfxPreviewDrawOffsets(
+        const ShipVfxInstance& instance,
+        const DirectionOverride* resolvedOverride,
+        float* outOffsetX,
+        float* outOffsetY) const;
+    void updatePreviewShipPilotAndVfxMotion(double dt);
+    void togglePreviewShipPilotControl(void);
+    void clearShipVfxTrailPieces(void);
+    void drawShipVfxTrailPieces(void) const;
+    void captureVfxMotionSpawnAtIndex(int instanceIndex);
     void resetSelectedVfxTransform(void);
     void toggleSelectedVfxVisibility(void);
     void toggleSelectedVfxLock(void);
@@ -510,7 +657,7 @@ private:
         int scrollOffset) const;
     void drawLayerListPanel(const std::vector<int>& orderedLayerIndices) const;
     void updateLayerListRowDragFromMouse(void);
-    void applyLayerPanelReorder(int sourceDisplayIndex, int targetDisplayIndex);
+    void applyLayerPanelReorderFromDisplayDrag(int sourceDisplayIndex, int targetInsertIndex);
     void drawInvalidAssetPanel(
         const SDL_FRect& panelRect,
         const char* title,
@@ -614,7 +761,7 @@ private:
 
     bool handleShipListClick(float x, float y);
     bool handleSfxListClick(float x, float y);
-    bool handleLayerListClick(float x, float y);
+    bool handleLayerListClick(float x, float y, RC2D_MouseButton button);
     bool handleLooseListClick(float x, float y);
     bool handleToolbarClick(float x, float y);
     bool handlePreviewClick(float x, float y, RC2D_MouseButton button);

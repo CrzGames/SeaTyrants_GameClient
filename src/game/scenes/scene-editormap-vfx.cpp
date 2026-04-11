@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <random>
 #include <vector>
 
 #include <RC2D/RC2D_filedialog.h>
@@ -23,6 +24,24 @@
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
 #include "game/render/world-render-clip.h"
+
+namespace
+{
+std::mt19937& editorMapVfxTrailJitterRng(void)
+{
+    static std::mt19937 gen = []() {
+        std::random_device rd;
+        std::seed_seq seed{rd(), rd(), rd(), rd()};
+        return std::mt19937(seed);
+    }();
+    return gen;
+}
+
+/** Amplitude max de rotation aleatoire par rejet (deg) lorsque motionTrailRotationRandomPercent vaut 100. */
+constexpr float kMotionTrailRotationJitterMaxDeg = 45.0f;
+/** Ecart temporel entre deux pieces d'une meme salve couronne (secondes). */
+constexpr float kIdleRingPieceStaggerSec = 0.055f;
+} // namespace
 
 namespace
 {
@@ -46,6 +65,26 @@ constexpr int kVisibleListRows = 10;
 /** Espacement vertical entre les lignes du panneau Layers (aligne dessin, clic, drag). */
 constexpr float kLayerListPanelRowGap = 6.0f;
 constexpr int kShipVfxLayerPageCount = 8;
+/**
+ * Sentinel dans la liste d'affichage Layers : une ligne « sous-instance » par rejet de trainee actif.
+ * code = kLayerPanelTrailPieceRowMarker - (int)layerPanelUiId (uiId > 0, raisonnable pour rester dans int32).
+ */
+constexpr int kLayerPanelTrailPieceRowMarker = -3000000;
+
+inline bool layerPanelRowIsTrailPieceSubRow(int code)
+{
+    return code <= kLayerPanelTrailPieceRowMarker;
+}
+
+inline uint32_t layerPanelTrailPieceUiIdFromRow(int code)
+{
+    return static_cast<uint32_t>(kLayerPanelTrailPieceRowMarker - code);
+}
+
+inline int layerPanelTrailPieceRowCodeFromUiId(uint32_t uiId)
+{
+    return kLayerPanelTrailPieceRowMarker - static_cast<int>(uiId);
+}
 
 struct ShipVfxLayerPagePickerLayout
 {
@@ -115,6 +154,9 @@ constexpr float kLayerRowVfxRotateDialButtonW = 52.0f;
 constexpr float kLayerRowFlipButtonW = 56.0f;
 /** Bouton RELATIF (decal spawn / phase), a gauche de FLIP V. */
 constexpr float kLayerRowRelativeButtonW = 78.0f;
+/** Bouton unique SPAWN|CIBLE (comme TILE/PIXEL), a gauche de RELATIF. */
+constexpr float kLayerRowMotionSpawnCibleToggleW = 92.0f;
+constexpr float kLayerRowMotionClusterGap = 4.0f;
 constexpr int kInvalidVisibleRows = 3;
 constexpr float kInvalidPanelPadding = 8.0f;
 constexpr float kInvalidPanelHeaderHeight = 22.0f;
@@ -928,6 +970,8 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonPreviewIsoGridRect{},
       buttonShipVfxZoomMinusRect{},
       buttonShipVfxZoomPlusRect{},
+      previewShipPilotActive(false),
+      buttonShipPilotRect{},
       buttonFollowShipRect{},
       buttonRemoveVfxRect{},
       buttonMoveULRect{},
@@ -1042,6 +1086,7 @@ void EditorMapVfxScene::clearAllShipVfxLayerPages(void)
 
 void EditorMapVfxScene::clearShipVfxLayerUiTransientStateForPageChange(void)
 {
+    this->closeVfxTrailPopup();
     this->selectedVfxInstanceIndex = -1;
     this->shipLayerSelected = false;
     this->layerNameInput.clear();
@@ -1053,6 +1098,7 @@ void EditorMapVfxScene::clearShipVfxLayerUiTransientStateForPageChange(void)
     this->layerRowDragSourceDisplayIndex = -1;
     this->layerRowDragTargetInsertIndex = -1;
     this->layerRowDragStartMouseY = 0.0f;
+    this->clearShipVfxTrailPieces();
 }
 
 void EditorMapVfxScene::applyShipVfxLayerPageIndex(int pageIndex)
@@ -1093,7 +1139,9 @@ void EditorMapVfxScene::resetEditorState(void)
     this->initDefaultShipLayerSettingsAllPages();
     this->shipLayerSelected = false;
     this->previewIsoGridVisible = false;
+    this->previewShipPilotActive = false;
     this->previewShipTile = SDL_FPoint{0.0f, 0.0f};
+    this->clearShipVfxTrailPieces();
     this->clearAllShipVfxLayerPages();
     this->selectedVfxInstanceIndex = -1;
     this->nextVfxInstanceId = 1U;
@@ -1168,10 +1216,13 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->invalidShipListScrollDragActive = false;
     this->shipVfxLayerPagePickerOpen = false;
     this->closeVfxRelativeTimingPopup();
+    this->closeVfxTrailPopup();
+    this->previewShipPilotActive = false;
 }
 
 void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
 {
+    this->previewShipPilotActive = false;
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
     map.update();
@@ -1602,8 +1653,139 @@ void EditorMapVfxScene::closeVfxRelativeTimingPopup(void)
     this->vfxRelativeTimingPopupDelayMsFocused = false;
 }
 
+void EditorMapVfxScene::closeVfxTrailPopup(void)
+{
+    this->vfxTrailPopupVisible = false;
+    this->vfxTrailPopupParentInstanceIndex = -1;
+    this->vfxTrailPopupEveryNTilesInput.clear();
+    this->vfxTrailPopupLifetimeMsInput.clear();
+    this->vfxTrailPopupLateralJitterInput.clear();
+    this->vfxTrailPopupRotationPctInput.clear();
+    this->vfxTrailPopupIdleRingPieceCountInput.clear();
+    this->vfxTrailPopupIdlePeriodMsInput.clear();
+    this->vfxTrailPopupIdleRadiusInput.clear();
+    this->vfxTrailPopupIdleRingRotationPctInput.clear();
+    this->vfxTrailPopupIdleRingPosJitterInput.clear();
+    this->vfxTrailPopupStrictTilePlacement = true;
+    this->vfxTrailPopupIdleRingWhenStationary = false;
+    this->vfxTrailPopupEveryNTilesFocused = false;
+    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLateralJitterFocused = false;
+    this->vfxTrailPopupRotationPctFocused = false;
+    this->vfxTrailPopupIdleRingPieceCountFocused = false;
+    this->vfxTrailPopupIdlePeriodMsFocused = false;
+    this->vfxTrailPopupIdleRadiusFocused = false;
+    this->vfxTrailPopupIdleRingRotationPctFocused = false;
+    this->vfxTrailPopupIdleRingPosJitterFocused = false;
+}
+
+void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
+{
+    this->closeVfxRelativeTimingPopup();
+    this->closeVfxTrailPopup();
+    if (vfxInstanceIndex < 0 || vfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        return;
+    }
+    const ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(vfxInstanceIndex)];
+    this->vfxTrailPopupVisible = true;
+    this->vfxTrailPopupParentInstanceIndex = vfxInstanceIndex;
+    this->vfxTrailPopupEveryNTilesInput = std::to_string(inst.motionTrailEveryNTiles);
+    this->vfxTrailPopupLifetimeMsInput = std::to_string(inst.motionTrailLifetimeMs);
+    this->vfxTrailPopupLateralJitterInput =
+        std::to_string(static_cast<int>(std::lround(inst.motionTrailLateralJitterRadius)));
+    this->vfxTrailPopupRotationPctInput = std::to_string(inst.motionTrailRotationRandomPercent);
+    this->vfxTrailPopupIdleRingPieceCountInput = std::to_string(inst.motionTrailIdleRingPieceCount);
+    this->vfxTrailPopupIdlePeriodMsInput = std::to_string(inst.motionTrailIdleSpawnPeriodMs);
+    this->vfxTrailPopupIdleRadiusInput =
+        std::to_string(static_cast<int>(std::lround(inst.motionTrailIdleRingRadius)));
+    this->vfxTrailPopupIdleRingRotationPctInput =
+        std::to_string(inst.motionTrailIdleRingRotationRandomPercent);
+    this->vfxTrailPopupIdleRingPosJitterInput =
+        std::to_string(static_cast<int>(std::lround(inst.motionTrailIdleRingPositionJitterRadius)));
+    this->vfxTrailPopupStrictTilePlacement = inst.motionTrailStrictTilePlacement;
+    this->vfxTrailPopupIdleRingWhenStationary = inst.motionTrailIdleRingWhenStationary;
+    this->vfxTrailPopupEveryNTilesFocused = true;
+    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLateralJitterFocused = false;
+    this->vfxTrailPopupRotationPctFocused = false;
+    this->shipVfxLayerPagePickerOpen = false;
+    this->statusMessage =
+        "SPAWN / trainee : regle la trace (tuile / decal), rotation %, puis VALIDER (decal SPAWN).";
+}
+
+bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) const
+{
+    if (out == nullptr || !this->vfxTrailPopupVisible)
+    {
+        return false;
+    }
+    const SDL_FRect mapRect = GetCurrentMap().rect;
+    out->dimFullMap = mapRect;
+    const float popupW = 520.0f;
+    const float popupH = 880.0f;
+    out->popup = SDL_FRect{
+        mapRect.x + ((mapRect.w - popupW) * 0.5f),
+        mapRect.y + ((mapRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+    const float px = out->popup.x + 14.0f;
+    const float pw = popupW - 28.0f;
+    out->everyNTilesInputRect = SDL_FRect{px, out->popup.y + 72.0f, pw, 32.0f};
+    out->lifetimeMsInputRect = SDL_FRect{px, out->popup.y + 132.0f, pw, 32.0f};
+    out->trailStrictTileBtn = SDL_FRect{px, out->popup.y + 198.0f, 246.0f, 30.0f};
+    out->trailLateralSpreadBtn = SDL_FRect{out->popup.x + 270.0f, out->popup.y + 198.0f, 236.0f, 30.0f};
+    out->lateralSectionVisible = !this->vfxTrailPopupStrictTilePlacement;
+    const float kIdleRowGap = 28.0f;
+    const float kIdleFieldH = 32.0f;
+    const auto layoutIdleRingBlock = [&](float idleBtnTopY) {
+        out->idleRingOffBtn = SDL_FRect{px, idleBtnTopY, 246.0f, 28.0f};
+        out->idleRingOnBtn = SDL_FRect{out->popup.x + 270.0f, idleBtnTopY, 236.0f, 28.0f};
+        out->idleRingInputsVisible = this->vfxTrailPopupIdleRingWhenStationary;
+        if (out->idleRingInputsVisible)
+        {
+            float cy = idleBtnTopY + 28.0f + 24.0f;
+            out->idleRingPieceCountInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
+            cy += kIdleFieldH + kIdleRowGap;
+            out->idleRingPeriodMsInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
+            cy += kIdleFieldH + kIdleRowGap;
+            out->idleRingRadiusInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
+            cy += kIdleFieldH + kIdleRowGap;
+            out->idleRingRotationPctInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
+            cy += kIdleFieldH + kIdleRowGap;
+            out->idleRingPosJitterInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
+        }
+        else
+        {
+            out->idleRingPieceCountInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+            out->idleRingPeriodMsInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+            out->idleRingRadiusInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+            out->idleRingRotationPctInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+            out->idleRingPosJitterInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        }
+    };
+    if (out->lateralSectionVisible)
+    {
+        out->lateralJitterInputRect = SDL_FRect{px, out->popup.y + 272.0f, pw, 32.0f};
+        out->rotationPctInputRect = SDL_FRect{px, out->popup.y + 326.0f, pw, 32.0f};
+        layoutIdleRingBlock(out->popup.y + 398.0f);
+    }
+    else
+    {
+        out->lateralJitterInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->rotationPctInputRect = SDL_FRect{px, out->popup.y + 250.0f, pw, 32.0f};
+        layoutIdleRingBlock(out->popup.y + 328.0f);
+    }
+    const float btnY = out->popup.y + popupH - 52.0f;
+    out->cancelBtn = SDL_FRect{out->popup.x + 14.0f, btnY, 110.0f, 28.0f};
+    out->clearBtn = SDL_FRect{out->popup.x + 134.0f, btnY, 110.0f, 28.0f};
+    out->validateBtn = SDL_FRect{out->popup.x + popupW - 124.0f, btnY, 110.0f, 28.0f};
+    return true;
+}
+
 void EditorMapVfxScene::openVfxRelativeTimingPopup(bool forShipRow, int vfxInstanceIndex)
 {
+    this->closeVfxTrailPopup();
     this->vfxRelativeTimingPopupIsShipRow = forShipRow;
     this->vfxRelativeTimingPopupTargetVfxIndex = forShipRow ? -1 : vfxInstanceIndex;
     this->vfxRelativeTimingPopupStep = 0;
@@ -2095,6 +2277,22 @@ void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
     duplicate.label = makeDefaultVfxLayerLabel(duplicate.sourceDisplayName, sourceNumber, sourceInstanceNumber);
     duplicate.offsetX += 12.0f;
     duplicate.offsetY += 12.0f;
+    duplicate.motionSpawnCaptured = false;
+    duplicate.motionTrailEveryNTiles = 0;
+    duplicate.motionTrailLifetimeMs = 2000;
+    duplicate.motionTrailStrictTilePlacement = true;
+    duplicate.motionTrailLateralJitterRadius = 0.0f;
+    duplicate.motionTrailRotationRandomPercent = 0;
+    duplicate.motionTrailIdleRingWhenStationary = false;
+    duplicate.motionTrailIdleRingRadius = 48.0f;
+    duplicate.motionTrailIdleSpawnPeriodMs = 600;
+    duplicate.motionTrailIdleRingPieceCount = 8;
+    duplicate.motionTrailIdleRingRotationRandomPercent = 0;
+    duplicate.motionTrailIdleRingPositionJitterRadius = 0.0f;
+    duplicate.motionTrailIdleSpawnAccSec = 0.0f;
+    duplicate.motionTrailIdleRingSalvoPiecesRemaining = 0;
+    duplicate.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+    duplicate.motionTrailDistanceAcc = 0.0f;
     this->currentShipVfxLayers().push_back(std::move(duplicate));
     const int duplicatedIndex = static_cast<int>(this->currentShipVfxLayers().size()) - 1;
     this->rebuildVfxLayerLabelsFromCurrentInstances();
@@ -2223,6 +2421,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     const float shipVfxZoomToolbarW = 110.0f;
     setNextButton(&this->buttonShipVfxZoomMinusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
     setNextButton(&this->buttonShipVfxZoomPlusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
+    setNextButton(&this->buttonShipPilotRect, &x, shipRow1Y, 118.0f);
 
     // Mode downscale: tout sur la meme ligne (gauche zoom+repere, centre import, droite scale).
     const float looseZoomW = 110.0f;
@@ -2288,7 +2487,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
     this->layerListRect = this->shipListRect;
-    this->layerListRect.w = 890.0f;
+    this->layerListRect.w = 990.0f;
     this->layerListRect.h = 360.0f;
     this->layerListRect.x = map.rect.x + 12.0f;
     this->layerListRect.y = map.rect.y + map.rect.h - this->layerListRect.h - 30.0f;
@@ -2302,12 +2501,12 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->invalidShipListRect = SDL_FRect{
         this->layerListRect.x,
         this->layerListRect.y - invalidPanelHeight - invalidPanelGap - invalidPanelLiftUp,
-        this->layerListRect.w,
+        this->layerListRect.w * 0.5f,
         invalidPanelHeight};
     this->invalidVfxListRect = SDL_FRect{
         this->layerListRect.x,
         this->invalidShipListRect.y - invalidPanelHeight - invalidPanelGap,
-        this->layerListRect.w,
+        this->layerListRect.w * 0.5f,
         invalidPanelHeight};
 }
 
@@ -2893,8 +3092,68 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         rowRect.w = rowsWidth;
         rowRect.h = rowHeight;
 
-        const int instanceIndex = orderedLayerIndices[static_cast<size_t>(displayIndex)];
-        const bool isShipRow = (instanceIndex < 0);
+        const int rowCode = orderedLayerIndices[static_cast<size_t>(displayIndex)];
+        const bool isTrailPieceSubRow = layerPanelRowIsTrailPieceSubRow(rowCode);
+        const bool isShipRow = (rowCode == -1);
+        if (isTrailPieceSubRow)
+        {
+            const uint32_t pieceUi = layerPanelTrailPieceUiIdFromRow(rowCode);
+            const int pieceIdx = this->findTrailPieceIndexByLayerPanelUiId(pieceUi);
+            if (pieceIdx < 0)
+            {
+                continue;
+            }
+            const ShipVfxTrailPiece& tp = this->shipVfxTrailPieces[static_cast<size_t>(pieceIdx)];
+            const int parentIx = this->findVfxLayerIndexByInstanceId(tp.sourceVfxInstanceId);
+            if (parentIx < 0)
+            {
+                continue;
+            }
+            const ShipVfxInstance& pinst = this->currentShipVfxLayers()[static_cast<size_t>(parentIx)];
+            (void)pinst;
+            const bool isDraggedSub = this->layerRowDragActive && (displayIndex == this->layerRowDragSourceDisplayIndex);
+            const bool isSelectedSub = (displayIndex == selectedIndex);
+            RC2D_Color subFill = RC2D_Color{40, 48, 58, 218};
+            if (isDraggedSub)
+            {
+                subFill = RC2D_Color{62, 94, 126, 220};
+            }
+            else if (isSelectedSub)
+            {
+                subFill = kRowSelectedFillColor;
+            }
+            rc2d_graphics_setColor(subFill);
+            rc2d_graphics_rectangle("fill", &rowRect);
+            rc2d_graphics_setColor(kRowBorderColor);
+            rc2d_graphics_rectangle("line", &rowRect);
+
+            if (this->overlayFont.sdl_font != nullptr)
+            {
+                char subBuf[200] = {};
+                SDL_snprintf(
+                    subBuf,
+                    sizeof(subBuf),
+                    "      Sous-instance : rejet trainee (animation \"%s\", reste %.1f s)",
+                    pinst.label.c_str(),
+                    (std::max)(tp.timeRemainingSec, 0.0f));
+                RC2D_Text rowText = rc2d_graphics_createText(
+                    const_cast<RC2D_Font*>(&this->overlayFont),
+                    makeAssetLabel(subBuf, 80).c_str());
+                rowText.color = RC2D_Color{176, 188, 202, 240};
+                rc2d_graphics_setTextColor(&rowText);
+                int rowTextW = 0;
+                int rowTextH = 0;
+                rc2d_graphics_getTextSize(&rowText, &rowTextW, &rowTextH);
+                rc2d_graphics_drawText(
+                    &rowText,
+                    rowRect.x + 28.0f,
+                    rowRect.y + (std::max)((rowRect.h - static_cast<float>(rowTextH)) * 0.5f, 1.0f));
+                rc2d_graphics_destroyText(&rowText);
+            }
+            continue;
+        }
+
+        const int instanceIndex = rowCode;
         int drawOrder = this->activeShipDrawOrder();
         bool visible = this->activeShipLayerVisible();
         bool debugBoundsVisible = this->activeShipDebugBoundsVisible();
@@ -3006,6 +3265,25 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
         layerRelativeRect.h = lockRect.h;
         layerRelativeRect.x = layerFlipVRowRect.x - layerRelativeRect.w - 4.0f;
         layerRelativeRect.y = lockRect.y;
+
+        SDL_FRect layerMotionSpawnCibleRect{};
+        layerMotionSpawnCibleRect.w = kLayerRowMotionSpawnCibleToggleW;
+        layerMotionSpawnCibleRect.h = lockRect.h;
+        layerMotionSpawnCibleRect.x = layerRelativeRect.x - kLayerRowMotionClusterGap - layerMotionSpawnCibleRect.w;
+        layerMotionSpawnCibleRect.y = lockRect.y;
+
+        const ShipVfxInstance* motionRowInst =
+            isShipRow ? nullptr : &this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
+
+        rc2d_graphics_setColor(
+            isShipRow
+                ? RC2D_Color{50, 58, 68, 220}
+                : ((motionRowInst != nullptr && motionRowInst->motionSpawnCaptured)
+                       ? RC2D_Color{72, 108, 84, 220}
+                       : RC2D_Color{56, 62, 72, 220}));
+        rc2d_graphics_rectangle("fill", &layerMotionSpawnCibleRect);
+        rc2d_graphics_setColor(RC2D_Color{162, 182, 200, 230});
+        rc2d_graphics_rectangle("line", &layerMotionSpawnCibleRect);
 
         bool relLinkActive = false;
         if (!isShipRow)
@@ -3194,6 +3472,20 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
                 layerRotateDialRect.y + ((layerRotateDialRect.h - static_cast<float>(rotH)) * 0.5f));
             rc2d_graphics_destroyText(&rotText);
 
+            const char* motionSpawnLabel = isShipRow ? "-" : "SPAWN";
+            RC2D_Text motionScText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), motionSpawnLabel);
+            motionScText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&motionScText);
+            int mScW = 0;
+            int mScH = 0;
+            rc2d_graphics_getTextSize(&motionScText, &mScW, &mScH);
+            rc2d_graphics_drawText(
+                &motionScText,
+                layerMotionSpawnCibleRect.x + ((layerMotionSpawnCibleRect.w - static_cast<float>(mScW)) * 0.5f),
+                layerMotionSpawnCibleRect.y + ((layerMotionSpawnCibleRect.h - static_cast<float>(mScH)) * 0.5f));
+            rc2d_graphics_destroyText(&motionScText);
+
             if (isShipRow)
             {
                 RC2D_Text relShipDash = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "-");
@@ -3286,7 +3578,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             const bool behind = (drawOrder < this->activeShipDrawOrder());
             const float indent = isShipRow ? 18.0f : (behind ? 8.0f : 34.0f);
             const float labelX = rowRect.x + indent;
-            const float labelWidth = (layerRelativeRect.x - 6.0f) - labelX;
+            const float labelWidth = (layerMotionSpawnCibleRect.x - 6.0f) - labelX;
             const int maxChars = std::clamp(static_cast<int>(labelWidth / 6.6f), 12, 72);
             std::string rowLabel = std::string("z=") + std::to_string(drawOrder) + " | " + label;
 
@@ -3409,7 +3701,9 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
         return;
     }
 
-    const int itemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
+    const std::vector<int> displayRowsForDrag =
+        this->expandLayerPanelDisplayRows(this->getOrderedVfxInstanceIndicesForLayerPanel());
+    const int itemCount = static_cast<int>(displayRowsForDrag.size());
     if (itemCount <= 1)
     {
         this->layerRowDragActive = false;
@@ -3423,7 +3717,29 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
     if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
     {
         const int sourceDisplayIndex = this->layerRowDragSourceDisplayIndex;
-        const int sourceInsertIndex = sourceDisplayIndex + 1;
+        int blockEnd = sourceDisplayIndex;
+        const int parentCode = displayRowsForDrag[static_cast<size_t>(sourceDisplayIndex)];
+        if (parentCode >= 0)
+        {
+            const uint32_t parentInstId =
+                this->currentShipVfxLayers()[static_cast<size_t>(parentCode)].instanceId;
+            while (blockEnd + 1 < itemCount)
+            {
+                const int nxt = displayRowsForDrag[static_cast<size_t>(blockEnd + 1)];
+                if (!layerPanelRowIsTrailPieceSubRow(nxt))
+                {
+                    break;
+                }
+                const int pi = this->findTrailPieceIndexByLayerPanelUiId(layerPanelTrailPieceUiIdFromRow(nxt));
+                if (pi < 0 ||
+                    this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId != parentInstId)
+                {
+                    break;
+                }
+                blockEnd += 1;
+            }
+        }
+        const int sourceInsertIndex = blockEnd + 1;
         const int targetInsertIndex = std::clamp(this->layerRowDragTargetInsertIndex, 0, itemCount);
 
         this->layerRowDragActive = false;
@@ -3432,13 +3748,7 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
 
         if (this->layerRowDragMoved && targetInsertIndex != sourceInsertIndex)
         {
-            int targetDisplayIndex = targetInsertIndex;
-            if (targetDisplayIndex > sourceDisplayIndex)
-            {
-                targetDisplayIndex -= 1;
-            }
-            targetDisplayIndex = std::clamp(targetDisplayIndex, 0, itemCount - 1);
-            this->applyLayerPanelReorder(sourceDisplayIndex, targetDisplayIndex);
+            this->applyLayerPanelReorderFromDisplayDrag(sourceDisplayIndex, targetInsertIndex);
         }
 
         this->layerRowDragMoved = false;
@@ -3504,32 +3814,75 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
     this->clampListScrollOffset(&this->layerListScrollOffset, itemCount);
 }
 
-void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targetDisplayIndex)
+void EditorMapVfxScene::applyLayerPanelReorderFromDisplayDrag(int sourceDisplayIndex, int targetInsertIndex)
 {
-    const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
-    const int itemCount = static_cast<int>(orderedLayerIndices.size());
-    if (itemCount <= 1)
+    const std::vector<int> core0 = this->getOrderedVfxInstanceIndicesForLayerPanel();
+    std::vector<int> display = this->expandLayerPanelDisplayRows(core0);
+    const int n = static_cast<int>(display.size());
+    if (n <= 1)
     {
         return;
     }
-    if (sourceDisplayIndex < 0 || sourceDisplayIndex >= itemCount)
+    if (sourceDisplayIndex < 0 || sourceDisplayIndex >= n)
     {
         return;
     }
-    if (targetDisplayIndex < 0 || targetDisplayIndex >= itemCount)
-    {
-        return;
-    }
-    if (sourceDisplayIndex == targetDisplayIndex)
+    if (layerPanelRowIsTrailPieceSubRow(display[static_cast<size_t>(sourceDisplayIndex)]))
     {
         return;
     }
 
-    std::vector<int> rowToInstanceIndex = orderedLayerIndices;
+    int blockStart = sourceDisplayIndex;
+    int blockEnd = sourceDisplayIndex;
+    const int parentInstIdx = display[static_cast<size_t>(blockStart)];
+    if (parentInstIdx >= 0)
+    {
+        const uint32_t parentId =
+            this->currentShipVfxLayers()[static_cast<size_t>(parentInstIdx)].instanceId;
+        while (blockEnd + 1 < n)
+        {
+            const int nxt = display[static_cast<size_t>(blockEnd + 1)];
+            if (!layerPanelRowIsTrailPieceSubRow(nxt))
+            {
+                break;
+            }
+            const int pi =
+                this->findTrailPieceIndexByLayerPanelUiId(layerPanelTrailPieceUiIdFromRow(nxt));
+            if (pi < 0 ||
+                this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId != parentId)
+            {
+                break;
+            }
+            blockEnd += 1;
+        }
+    }
+    const int L = blockEnd - blockStart + 1;
 
-    const int movedItem = rowToInstanceIndex[static_cast<size_t>(sourceDisplayIndex)];
-    rowToInstanceIndex.erase(rowToInstanceIndex.begin() + sourceDisplayIndex);
-    rowToInstanceIndex.insert(rowToInstanceIndex.begin() + targetDisplayIndex, movedItem);
+    const int tIns = std::clamp(targetInsertIndex, 0, n);
+    std::vector<int> block(display.begin() + blockStart, display.begin() + blockEnd + 1);
+    display.erase(display.begin() + blockStart, display.begin() + blockEnd + 1);
+
+    int insNew = tIns;
+    if (tIns > blockEnd)
+    {
+        insNew = tIns - L;
+    }
+    else if (tIns > blockStart)
+    {
+        insNew = blockStart;
+    }
+    insNew = std::clamp(insNew, 0, static_cast<int>(display.size()));
+    display.insert(display.begin() + insNew, block.begin(), block.end());
+
+    std::vector<int> rowToInstanceIndex;
+    rowToInstanceIndex.reserve(display.size());
+    for (const int code : display)
+    {
+        if (!layerPanelRowIsTrailPieceSubRow(code))
+        {
+            rowToInstanceIndex.push_back(code);
+        }
+    }
 
     auto shipIt = std::find(rowToInstanceIndex.begin(), rowToInstanceIndex.end(), -1);
     if (shipIt == rowToInstanceIndex.end())
@@ -3572,8 +3925,10 @@ void EditorMapVfxScene::applyLayerPanelReorder(int sourceDisplayIndex, int targe
         instance.behindShip = (effectiveOrder < this->activeShipDrawOrder());
     }
 
-    const int selectedRow = this->getSelectedLayerRowIndexForDisplay(this->getOrderedVfxInstanceIndicesForLayerPanel());
-    this->ensureSelectionVisible(selectedRow, &this->layerListScrollOffset, itemCount);
+    const std::vector<int> expandedAfter =
+        this->expandLayerPanelDisplayRows(rowToInstanceIndex);
+    const int selectedRow = this->getSelectedLayerRowIndexForDisplay(expandedAfter);
+    this->ensureSelectionVisible(selectedRow, &this->layerListScrollOffset, static_cast<int>(expandedAfter.size()));
     this->markShipVfxDirty();
     this->statusMessage = "Ordre des layers mis a jour (drag souris).";
 }
@@ -5318,6 +5673,10 @@ void EditorMapVfxScene::removeSelectedVfxInstance(void)
     }
 
     std::vector<ShipVfxInstance>& layers = this->currentShipVfxLayers();
+    const uint32_t removedInstanceId =
+        layers[static_cast<size_t>(this->selectedVfxInstanceIndex)].instanceId;
+    this->closeVfxTrailPopup();
+    this->removeTrailPiecesWithSourceInstanceId(removedInstanceId);
     layers.erase(layers.begin() + this->selectedVfxInstanceIndex);
     this->rebuildVfxLayerLabelsFromCurrentInstances();
     if (this->currentShipVfxLayers().empty())
@@ -5501,10 +5860,11 @@ void EditorMapVfxScene::applySelectedVfxRotationFromScreenPointer(float pointerX
 
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     const DirectionOverride* resolved = this->getResolvedDirectionOverride(instance);
-    const float offsetX = (resolved != nullptr) ? resolved->offsetX : instance->offsetX;
-    const float offsetY = (resolved != nullptr) ? resolved->offsetY : instance->offsetY;
-    const float pivotX = shipCenter.x + (offsetX * scale);
-    const float pivotY = shipCenter.y + (offsetY * scale);
+    float drawOffX = 0.0f;
+    float drawOffY = 0.0f;
+    this->getVfxPreviewDrawOffsets(*instance, resolved, &drawOffX, &drawOffY);
+    const float pivotX = shipCenter.x + (drawOffX * scale);
+    const float pivotY = shipCenter.y + (drawOffY * scale);
 
     const float dx = pointerX - pivotX;
     const float dy = pointerY - pivotY;
@@ -6023,6 +6383,291 @@ bool EditorMapVfxScene::handleLooseExportNameInputKey(
     return appendIfRoom(key[0]);
 }
 
+void EditorMapVfxScene::getVfxPreviewDrawOffsets(
+    const ShipVfxInstance& instance,
+    const DirectionOverride* resolvedOverride,
+    float* outOffsetX,
+    float* outOffsetY) const
+{
+    if (outOffsetX == nullptr || outOffsetY == nullptr)
+    {
+        return;
+    }
+    const float bx = (resolvedOverride != nullptr) ? resolvedOverride->offsetX : instance.offsetX;
+    const float by = (resolvedOverride != nullptr) ? resolvedOverride->offsetY : instance.offsetY;
+    *outOffsetX = bx;
+    *outOffsetY = by;
+}
+
+void EditorMapVfxScene::clearShipVfxTrailPieces(void)
+{
+    this->shipVfxTrailPieces.clear();
+    this->shipVfxTrailPrevShipTileValid = false;
+}
+
+void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
+{
+    Map& map = GetCurrentMap();
+    const float dtf = static_cast<float>(dt);
+    const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+
+    for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+    {
+        this->shipVfxTrailPieces[i].timeRemainingSec -= dtf;
+        if (this->shipVfxTrailPieces[i].timeRemainingSec <= 0.0f)
+        {
+            this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
+    if (this->previewShipPilotActive && this->previewShipLoaded)
+    {
+        this->previewShip.update(dt, map);
+        const SDL_FPoint p = this->previewShip.getPositionTile();
+        this->previewShipTile.x = p.x;
+        this->previewShipTile.y = p.y;
+    }
+
+    if (!this->previewShipLoaded)
+    {
+        return;
+    }
+
+    if (!this->previewShipPilotActive)
+    {
+        return;
+    }
+
+    const bool moving = this->previewShip.isMoving();
+    if (moving)
+    {
+        for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+        {
+            if (this->shipVfxTrailPieces[i].fromIdleRingCrown)
+            {
+                this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() +
+                                                static_cast<std::ptrdiff_t>(i));
+            }
+            else
+            {
+                ++i;
+            }
+        }
+        for (ShipVfxInstance& inst : this->currentShipVfxLayers())
+        {
+            inst.motionTrailIdleSpawnAccSec = 0.0f;
+            inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+        }
+        if (this->shipVfxTrailPrevShipTileValid)
+        {
+            const float dx = this->previewShipTile.x - this->shipVfxTrailPrevShipTile.x;
+            const float dy = this->previewShipTile.y - this->shipVfxTrailPrevShipTile.y;
+            const float dist = std::sqrt(dx * dx + dy * dy);
+            if (dist > 0.00001f)
+            {
+                auto& layers = this->currentShipVfxLayers();
+                for (ShipVfxInstance& inst : layers)
+                {
+                    if (inst.motionTrailEveryNTiles <= 0 || !inst.motionSpawnCaptured)
+                    {
+                        continue;
+                    }
+                    const float threshold = static_cast<float>(inst.motionTrailEveryNTiles);
+                    inst.motionTrailDistanceAcc += dist;
+                    while (inst.motionTrailDistanceAcc >= threshold)
+                    {
+                        inst.motionTrailDistanceAcc -= threshold;
+                        ShipVfxTrailPiece piece{};
+                        piece.sourceVfxInstanceId = inst.instanceId;
+                        piece.anchorShipTileX = this->previewShipTile.x;
+                        piece.anchorShipTileY = this->previewShipTile.y;
+                        piece.bornTimeSeconds = timeSec;
+                        piece.timeRemainingSec =
+                            (std::max)(static_cast<float>(inst.motionTrailLifetimeMs) / 1000.0f, 0.05f);
+                        piece.trailDrawOffsetX = inst.motionSpawnOffsetX;
+                        piece.trailDrawOffsetY = inst.motionSpawnOffsetY;
+                        piece.trailPerpendicularJitterX = 0.0f;
+                        piece.trailPerpendicularJitterY = 0.0f;
+                        if (!inst.motionTrailStrictTilePlacement && inst.motionTrailLateralJitterRadius > 0.0001f)
+                        {
+                            const float invDist = 1.0f / dist;
+                            const float perpX = -dy * invDist;
+                            const float perpY = dx * invDist;
+                            std::uniform_real_distribution<float> distU(
+                                -inst.motionTrailLateralJitterRadius, inst.motionTrailLateralJitterRadius);
+                            const float t = distU(editorMapVfxTrailJitterRng());
+                            piece.trailPerpendicularJitterX = perpX * t;
+                            piece.trailPerpendicularJitterY = perpY * t;
+                        }
+                        piece.trailRotationJitterDeg = 0.0f;
+                        if (inst.motionTrailRotationRandomPercent > 0)
+                        {
+                            const float p =
+                                static_cast<float>(std::clamp(inst.motionTrailRotationRandomPercent, 0, 100)) /
+                                100.0f;
+                            std::uniform_real_distribution<float> rotU(
+                                -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
+                            piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
+                        }
+                        uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
+                        if (nid == 0U)
+                        {
+                            nid = ++this->nextShipVfxTrailLayerPanelUiId;
+                        }
+                        piece.layerPanelUiId = nid;
+                        this->shipVfxTrailPieces.push_back(piece);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        constexpr float kTwoPi = 6.28318530718f;
+        const auto spawnIdleRingCrownPiece = [this, timeSec, kTwoPi](ShipVfxInstance& inst, int k) {
+            const int pieceCount = std::clamp(inst.motionTrailIdleRingPieceCount, 1, 32);
+            const float R = (std::max)(inst.motionTrailIdleRingRadius, 2.0f);
+            const DirectionOverride* ringOv = this->getResolvedDirectionOverride(&inst);
+            const float baseOx = (ringOv != nullptr) ? ringOv->offsetX : inst.offsetX;
+            const float baseOy = (ringOv != nullptr) ? ringOv->offsetY : inst.offsetY;
+            const float ang =
+                kTwoPi * (static_cast<float>(k) / static_cast<float>(pieceCount));
+            ShipVfxTrailPiece piece{};
+            piece.sourceVfxInstanceId = inst.instanceId;
+            piece.anchorShipTileX = this->previewShipTile.x;
+            piece.anchorShipTileY = this->previewShipTile.y;
+            piece.bornTimeSeconds = timeSec;
+            piece.timeRemainingSec =
+                (std::max)(static_cast<float>(inst.motionTrailLifetimeMs) / 1000.0f, 0.05f);
+            float ox = baseOx + std::cos(ang) * R;
+            float oy = baseOy + std::sin(ang) * R;
+            if (inst.motionTrailIdleRingPositionJitterRadius > 0.0001f)
+            {
+                std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+                std::uniform_real_distribution<float> uAng(0.0f, kTwoPi);
+                const float rr =
+                    std::sqrt((std::max)(u01(editorMapVfxTrailJitterRng()), 1.0e-8f)) *
+                    inst.motionTrailIdleRingPositionJitterRadius;
+                const float ja = uAng(editorMapVfxTrailJitterRng());
+                ox += std::cos(ja) * rr;
+                oy += std::sin(ja) * rr;
+            }
+            piece.trailDrawOffsetX = ox;
+            piece.trailDrawOffsetY = oy;
+            piece.trailPerpendicularJitterX = 0.0f;
+            piece.trailPerpendicularJitterY = 0.0f;
+            piece.trailRotationJitterDeg = 0.0f;
+            if (inst.motionTrailIdleRingRotationRandomPercent > 0)
+            {
+                const float p =
+                    static_cast<float>(std::clamp(inst.motionTrailIdleRingRotationRandomPercent, 0, 100)) /
+                    100.0f;
+                std::uniform_real_distribution<float> rotU(
+                    -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
+                piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
+            }
+            uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
+            if (nid == 0U)
+            {
+                nid = ++this->nextShipVfxTrailLayerPanelUiId;
+            }
+            piece.layerPanelUiId = nid;
+            piece.fromIdleRingCrown = true;
+            this->shipVfxTrailPieces.push_back(piece);
+        };
+
+        auto& layers = this->currentShipVfxLayers();
+        for (ShipVfxInstance& inst : layers)
+        {
+            if (!inst.motionTrailIdleRingWhenStationary || !inst.motionSpawnCaptured)
+            {
+                inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+                inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+                continue;
+            }
+            const int pieceCount = std::clamp(inst.motionTrailIdleRingPieceCount, 1, 32);
+            const float periodSec =
+                (std::max)(static_cast<float>(inst.motionTrailIdleSpawnPeriodMs) / 1000.0f, 0.15f);
+            const float staggerSec = kIdleRingPieceStaggerSec;
+
+            if (inst.motionTrailIdleRingSalvoPiecesRemaining > 0)
+            {
+                inst.motionTrailIdleRingSalvoStaggerAccSec += dtf;
+                while (inst.motionTrailIdleRingSalvoPiecesRemaining > 0 &&
+                       inst.motionTrailIdleRingSalvoStaggerAccSec >= staggerSec)
+                {
+                    inst.motionTrailIdleRingSalvoStaggerAccSec -= staggerSec;
+                    const int k = pieceCount - inst.motionTrailIdleRingSalvoPiecesRemaining;
+                    inst.motionTrailIdleRingSalvoPiecesRemaining -= 1;
+                    spawnIdleRingCrownPiece(inst, k);
+                }
+            }
+            else
+            {
+                inst.motionTrailIdleSpawnAccSec += dtf;
+                while (inst.motionTrailIdleSpawnAccSec >= periodSec)
+                {
+                    inst.motionTrailIdleSpawnAccSec -= periodSec;
+                    spawnIdleRingCrownPiece(inst, 0);
+                    inst.motionTrailIdleRingSalvoPiecesRemaining = pieceCount - 1;
+                    inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+                }
+            }
+        }
+    }
+
+    if (this->previewShipPilotActive)
+    {
+        this->shipVfxTrailPrevShipTile.x = this->previewShipTile.x;
+        this->shipVfxTrailPrevShipTile.y = this->previewShipTile.y;
+        this->shipVfxTrailPrevShipTileValid = true;
+    }
+}
+
+void EditorMapVfxScene::togglePreviewShipPilotControl(void)
+{
+    if (!this->previewShipLoaded)
+    {
+        this->statusMessage = "Charge un navire preview avant le pilotage.";
+        return;
+    }
+    this->previewShipPilotActive = !this->previewShipPilotActive;
+    if (!this->previewShipPilotActive)
+    {
+        this->previewShip.setPositionTile(this->previewShipTile.x, this->previewShipTile.y);
+        this->clearShipVfxTrailPieces();
+    }
+    else
+    {
+        this->shipVfxTrailPrevShipTileValid = false;
+    }
+    this->statusMessage = this->previewShipPilotActive
+        ? "Pilotage navire ON : clic gauche sur la mer = deplacement (A*)."
+        : "Pilotage navire OFF.";
+}
+
+void EditorMapVfxScene::captureVfxMotionSpawnAtIndex(int instanceIndex)
+{
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        return;
+    }
+    ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
+    const DirectionOverride* o = this->getResolvedDirectionOverride(&inst);
+    inst.motionSpawnOffsetX = (o != nullptr) ? o->offsetX : inst.offsetX;
+    inst.motionSpawnOffsetY = (o != nullptr) ? o->offsetY : inst.offsetY;
+    inst.motionSpawnCaptured = true;
+    inst.motionTrailDistanceAcc = 0.0f;
+    this->markShipVfxDirty();
+    this->statusMessage =
+        "SPAWN memorise (decal trainee). Les rejets actifs s'affichent comme sous-instances sous ce layer.";
+}
+
 int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, float y, int excludeInstanceIndex) const
 {
     if (!this->previewShipLoaded)
@@ -6091,8 +6736,11 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
         const float sourceW = frame.w;
         const float sourceH = frame.h;
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
-        const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
-        const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+        float drawOffX = 0.0f;
+        float drawOffY = 0.0f;
+        this->getVfxPreviewDrawOffsets(instance, override, &drawOffX, &drawOffY);
+        const float offsetX = drawOffX * scale;
+        const float offsetY = drawOffY * scale;
         const SDL_FRect bounds = SDL_FRect{
             shipCenter.x + offsetX - ((sourceW * scale) * 0.5f),
             shipCenter.y + offsetY - ((sourceH * scale) * 0.5f),
@@ -6131,8 +6779,11 @@ bool EditorMapVfxScene::tryGetScreenTileNearestForSelectedVfxCenter(SDL_Point* o
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     const ShipVfxInstance& instance = this->currentShipVfxLayers()[static_cast<size_t>(this->selectedVfxInstanceIndex)];
     const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
-    const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
-    const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+    float drawOffX = 0.0f;
+    float drawOffY = 0.0f;
+    this->getVfxPreviewDrawOffsets(instance, override, &drawOffX, &drawOffY);
+    const float offsetX = drawOffX * scale;
+    const float offsetY = drawOffY * scale;
     *outTile = map.screenToTileNearest(shipCenter.x + offsetX, shipCenter.y + offsetY);
     return true;
 }
@@ -6436,6 +7087,132 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         {
             instance.spawnAfterDelayMs = static_cast<int>(std::llround(spawnAfterMsNode->valuedouble));
         }
+
+        const cJSON* motionSpawnCapNode = cJSON_GetObjectItemCaseSensitive(node, "motionSpawnCaptured");
+        instance.motionSpawnCaptured = cJSON_IsBool(motionSpawnCapNode) ? cJSON_IsTrue(motionSpawnCapNode) : false;
+        if (!cJSON_IsBool(motionSpawnCapNode))
+        {
+            const cJSON* motionEnNode = cJSON_GetObjectItemCaseSensitive(node, "motionOffsetPreviewEnabled");
+            if (cJSON_IsBool(motionEnNode) && cJSON_IsTrue(motionEnNode))
+            {
+                instance.motionSpawnCaptured = true;
+            }
+        }
+        const cJSON* mSx = cJSON_GetObjectItemCaseSensitive(node, "motionSpawnOffsetX");
+        const cJSON* mSy = cJSON_GetObjectItemCaseSensitive(node, "motionSpawnOffsetY");
+        if (cJSON_IsNumber(mSx) && std::isfinite(mSx->valuedouble))
+        {
+            instance.motionSpawnOffsetX = static_cast<float>(mSx->valuedouble);
+        }
+        if (cJSON_IsNumber(mSy) && std::isfinite(mSy->valuedouble))
+        {
+            instance.motionSpawnOffsetY = static_cast<float>(mSy->valuedouble);
+        }
+        const cJSON* trailNNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailEveryNTiles");
+        if (cJSON_IsNumber(trailNNode) && std::isfinite(trailNNode->valuedouble))
+        {
+            instance.motionTrailEveryNTiles =
+                std::clamp(static_cast<int>(std::llround(trailNNode->valuedouble)), 0, 32);
+        }
+        const cJSON* trailLifeMsNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLifetimeMs");
+        if (cJSON_IsNumber(trailLifeMsNode) && std::isfinite(trailLifeMsNode->valuedouble) && trailLifeMsNode->valuedouble > 0.0)
+        {
+            instance.motionTrailLifetimeMs =
+                static_cast<int>(std::clamp(std::llround(trailLifeMsNode->valuedouble), 1LL, 9999999LL));
+        }
+        else
+        {
+            const cJSON* trailLifeNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLifetimeSec");
+            if (cJSON_IsNumber(trailLifeNode) && std::isfinite(trailLifeNode->valuedouble) && trailLifeNode->valuedouble > 0.0)
+            {
+                const double sec = trailLifeNode->valuedouble;
+                instance.motionTrailLifetimeMs = static_cast<int>(
+                    std::clamp(std::llround(sec * 1000.0), 1LL, 9999999LL));
+            }
+        }
+        instance.motionTrailDistanceAcc = 0.0f;
+        const cJSON* trailJitNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLateralJitterRadius");
+        if (cJSON_IsNumber(trailJitNode) && std::isfinite(trailJitNode->valuedouble))
+        {
+            instance.motionTrailLateralJitterRadius = static_cast<float>(
+                std::clamp(trailJitNode->valuedouble, 0.0, 2048.0));
+        }
+        else
+        {
+            instance.motionTrailLateralJitterRadius = 0.0f;
+        }
+        const cJSON* strictTileNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailStrictTilePlacement");
+        if (cJSON_IsBool(strictTileNode))
+        {
+            instance.motionTrailStrictTilePlacement = cJSON_IsTrue(strictTileNode);
+        }
+        else
+        {
+            instance.motionTrailStrictTilePlacement = (instance.motionTrailLateralJitterRadius <= 0.0001f);
+        }
+        const cJSON* rotPctNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailRotationRandomPercent");
+        if (cJSON_IsNumber(rotPctNode) && std::isfinite(rotPctNode->valuedouble))
+        {
+            instance.motionTrailRotationRandomPercent =
+                std::clamp(static_cast<int>(std::llround(rotPctNode->valuedouble)), 0, 100);
+        }
+        else
+        {
+            instance.motionTrailRotationRandomPercent = 0;
+        }
+        const cJSON* idleRingNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleRingWhenStationary");
+        instance.motionTrailIdleRingWhenStationary =
+            cJSON_IsBool(idleRingNode) ? cJSON_IsTrue(idleRingNode) : false;
+        const cJSON* idleRadNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleRingRadius");
+        if (cJSON_IsNumber(idleRadNode) && std::isfinite(idleRadNode->valuedouble))
+        {
+            instance.motionTrailIdleRingRadius =
+                static_cast<float>(std::clamp(idleRadNode->valuedouble, 1.0, 2048.0));
+        }
+        else
+        {
+            instance.motionTrailIdleRingRadius = 48.0f;
+        }
+        const cJSON* idlePerNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleSpawnPeriodMs");
+        if (cJSON_IsNumber(idlePerNode) && std::isfinite(idlePerNode->valuedouble))
+        {
+            instance.motionTrailIdleSpawnPeriodMs =
+                static_cast<int>(std::clamp(std::llround(idlePerNode->valuedouble), 100LL, 60000LL));
+        }
+        else
+        {
+            instance.motionTrailIdleSpawnPeriodMs = 600;
+        }
+        const cJSON* idleRingPcNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleRingPieceCount");
+        if (cJSON_IsNumber(idleRingPcNode) && std::isfinite(idleRingPcNode->valuedouble))
+        {
+            instance.motionTrailIdleRingPieceCount =
+                std::clamp(static_cast<int>(std::llround(idleRingPcNode->valuedouble)), 1, 32);
+        }
+        else
+        {
+            instance.motionTrailIdleRingPieceCount = 8;
+        }
+        instance.motionTrailIdleRingRotationRandomPercent = instance.motionTrailRotationRandomPercent;
+        const cJSON* idleRingRotPctNode =
+            cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleRingRotationRandomPercent");
+        if (cJSON_IsNumber(idleRingRotPctNode) && std::isfinite(idleRingRotPctNode->valuedouble))
+        {
+            instance.motionTrailIdleRingRotationRandomPercent =
+                std::clamp(static_cast<int>(std::llround(idleRingRotPctNode->valuedouble)), 0, 100);
+        }
+        const cJSON* idleRingPosJitNode =
+            cJSON_GetObjectItemCaseSensitive(node, "motionTrailIdleRingPositionJitterRadius");
+        if (cJSON_IsNumber(idleRingPosJitNode) && std::isfinite(idleRingPosJitNode->valuedouble))
+        {
+            instance.motionTrailIdleRingPositionJitterRadius = static_cast<float>(
+                std::clamp(idleRingPosJitNode->valuedouble, 0.0, 2048.0));
+        }
+        else
+        {
+            instance.motionTrailIdleRingPositionJitterRadius = 0.0f;
+        }
+        instance.motionTrailIdleSpawnAccSec = 0.0f;
 
         for (DirectionOverride& override : instance.directionOverrides)
         {
@@ -6794,6 +7571,31 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddBoolToObject(item, "sharedForAllStates", instance.sharedForAllStates);
         cJSON_AddNumberToObject(item, "spawnAfterInstanceId", static_cast<double>(instance.spawnAfterInstanceId));
         cJSON_AddNumberToObject(item, "spawnAfterDelayMs", static_cast<double>(instance.spawnAfterDelayMs));
+        cJSON_AddBoolToObject(item, "motionOffsetPreviewEnabled", instance.motionSpawnCaptured);
+        cJSON_AddBoolToObject(item, "motionSpawnCaptured", instance.motionSpawnCaptured);
+        cJSON_AddNumberToObject(item, "motionSpawnOffsetX", static_cast<double>(instance.motionSpawnOffsetX));
+        cJSON_AddNumberToObject(item, "motionSpawnOffsetY", static_cast<double>(instance.motionSpawnOffsetY));
+        cJSON_AddNumberToObject(item, "motionTrailEveryNTiles", static_cast<double>(instance.motionTrailEveryNTiles));
+        cJSON_AddNumberToObject(item, "motionTrailLifetimeMs", static_cast<double>(instance.motionTrailLifetimeMs));
+        cJSON_AddNumberToObject(
+            item, "motionTrailLateralJitterRadius", static_cast<double>(instance.motionTrailLateralJitterRadius));
+        cJSON_AddBoolToObject(item, "motionTrailStrictTilePlacement", instance.motionTrailStrictTilePlacement);
+        cJSON_AddNumberToObject(
+            item, "motionTrailRotationRandomPercent", static_cast<double>(instance.motionTrailRotationRandomPercent));
+        cJSON_AddBoolToObject(item, "motionTrailIdleRingWhenStationary", instance.motionTrailIdleRingWhenStationary);
+        cJSON_AddNumberToObject(item, "motionTrailIdleRingRadius", static_cast<double>(instance.motionTrailIdleRingRadius));
+        cJSON_AddNumberToObject(
+            item, "motionTrailIdleSpawnPeriodMs", static_cast<double>(instance.motionTrailIdleSpawnPeriodMs));
+        cJSON_AddNumberToObject(
+            item, "motionTrailIdleRingPieceCount", static_cast<double>(instance.motionTrailIdleRingPieceCount));
+        cJSON_AddNumberToObject(
+            item,
+            "motionTrailIdleRingRotationRandomPercent",
+            static_cast<double>(instance.motionTrailIdleRingRotationRandomPercent));
+        cJSON_AddNumberToObject(
+            item,
+            "motionTrailIdleRingPositionJitterRadius",
+            static_cast<double>(instance.motionTrailIdleRingPositionJitterRadius));
 
         cJSON* directionOverridesNode = cJSON_CreateObject();
         cJSON_AddItemToObject(item, "directionOverrides", directionOverridesNode);
@@ -7008,6 +7810,52 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
                     gameplayInstance,
                     "spawnAfterDelayMs",
                     static_cast<double>(instance.spawnAfterDelayMs));
+                cJSON_AddBoolToObject(gameplayInstance, "motionOffsetPreviewEnabled", instance.motionSpawnCaptured);
+                cJSON_AddBoolToObject(gameplayInstance, "motionSpawnCaptured", instance.motionSpawnCaptured);
+                cJSON_AddNumberToObject(gameplayInstance, "motionSpawnOffsetX", static_cast<double>(instance.motionSpawnOffsetX));
+                cJSON_AddNumberToObject(gameplayInstance, "motionSpawnOffsetY", static_cast<double>(instance.motionSpawnOffsetY));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailEveryNTiles",
+                    static_cast<double>(instance.motionTrailEveryNTiles));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailLifetimeMs",
+                    static_cast<double>(instance.motionTrailLifetimeMs));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailLateralJitterRadius",
+                    static_cast<double>(instance.motionTrailLateralJitterRadius));
+                cJSON_AddBoolToObject(
+                    gameplayInstance, "motionTrailStrictTilePlacement", instance.motionTrailStrictTilePlacement);
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailRotationRandomPercent",
+                    static_cast<double>(instance.motionTrailRotationRandomPercent));
+                cJSON_AddBoolToObject(
+                    gameplayInstance,
+                    "motionTrailIdleRingWhenStationary",
+                    instance.motionTrailIdleRingWhenStationary);
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailIdleRingRadius",
+                    static_cast<double>(instance.motionTrailIdleRingRadius));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailIdleSpawnPeriodMs",
+                    static_cast<double>(instance.motionTrailIdleSpawnPeriodMs));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailIdleRingPieceCount",
+                    static_cast<double>(instance.motionTrailIdleRingPieceCount));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailIdleRingRotationRandomPercent",
+                    static_cast<double>(instance.motionTrailIdleRingRotationRandomPercent));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailIdleRingPositionJitterRadius",
+                    static_cast<double>(instance.motionTrailIdleRingPositionJitterRadius));
             }
         }
 
@@ -7724,8 +8572,9 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
 
         const ShipVfxInstance& instance = previewLayers[static_cast<size_t>(item.instanceIndex)];
         const DirectionOverride* override = this->getResolvedDirectionOverride(&instance);
-        const float resolvedOffsetX = (override != nullptr) ? override->offsetX : instance.offsetX;
-        const float resolvedOffsetY = (override != nullptr) ? override->offsetY : instance.offsetY;
+        float resolvedOffsetX = 0.0f;
+        float resolvedOffsetY = 0.0f;
+        this->getVfxPreviewDrawOffsets(instance, override, &resolvedOffsetX, &resolvedOffsetY);
         const float resolvedRotation = (override != nullptr) ? override->rotationDeg : instance.rotationDeg;
         const bool resolvedFlipH = (override != nullptr) ? override->flipHorizontal : instance.flipHorizontal;
         const bool resolvedFlipV = (override != nullptr) ? override->flipVertical : instance.flipVertical;
@@ -7813,8 +8662,11 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
                     const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
                     const float sourceW = frame.w;
                     const float sourceH = frame.h;
-                    const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
-                    const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+                    float dbgOffX = 0.0f;
+                    float dbgOffY = 0.0f;
+                    this->getVfxPreviewDrawOffsets(instance, override, &dbgOffX, &dbgOffY);
+                    const float offsetX = dbgOffX * scale;
+                    const float offsetY = dbgOffY * scale;
                     SDL_FRect bounds{};
                     bounds.x = shipCenter.x + offsetX - ((sourceW * scale) * 0.5f);
                     bounds.y = shipCenter.y + offsetY - ((sourceH * scale) * 0.5f);
@@ -7828,6 +8680,132 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
                 }
             }
         }
+    }
+}
+
+void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
+{
+    if (!this->previewShipLoaded || this->shipVfxTrailPieces.empty())
+    {
+        return;
+    }
+    const Map& map = GetCurrentMap();
+    const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const auto& previewLayers = this->currentShipVfxLayers();
+
+    auto findInst = [&previewLayers](uint32_t id) -> const ShipVfxInstance* {
+        for (const ShipVfxInstance& inst : previewLayers)
+        {
+            if (inst.instanceId == id)
+            {
+                return &inst;
+            }
+        }
+        return nullptr;
+    };
+
+    std::vector<const ShipVfxTrailPiece*> sorted;
+    sorted.reserve(this->shipVfxTrailPieces.size());
+    for (const ShipVfxTrailPiece& p : this->shipVfxTrailPieces)
+    {
+        sorted.push_back(&p);
+    }
+    std::sort(sorted.begin(), sorted.end(), [this, &findInst](const ShipVfxTrailPiece* a, const ShipVfxTrailPiece* b) {
+        const ShipVfxInstance* ia = findInst(a->sourceVfxInstanceId);
+        const ShipVfxInstance* ib = findInst(b->sourceVfxInstanceId);
+        int oa = 0;
+        int ob = 0;
+        if (ia != nullptr)
+        {
+            const DirectionOverride* ova = this->getResolvedDirectionOverride(ia);
+            oa = (ova != nullptr) ? ova->drawOrder : ia->drawOrder;
+        }
+        if (ib != nullptr)
+        {
+            const DirectionOverride* ovb = this->getResolvedDirectionOverride(ib);
+            ob = (ovb != nullptr) ? ovb->drawOrder : ib->drawOrder;
+        }
+        if (oa != ob)
+        {
+            return oa < ob;
+        }
+        return a->bornTimeSeconds < b->bornTimeSeconds;
+    });
+
+    for (const ShipVfxTrailPiece* piecePtr : sorted)
+    {
+        const ShipVfxTrailPiece& piece = *piecePtr;
+        const ShipVfxInstance* inst = findInst(piece.sourceVfxInstanceId);
+        if (inst == nullptr)
+        {
+            continue;
+        }
+        const DirectionOverride* override = this->getResolvedDirectionOverride(inst);
+        const bool visible = (override != nullptr) ? override->visible : inst->visible;
+        if (!visible)
+        {
+            continue;
+        }
+        if (inst->importedSfxIndex < 0 || inst->importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+        {
+            continue;
+        }
+        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst->importedSfxIndex)];
+        if (imported.image.sdl_texture == nullptr || imported.frames.empty())
+        {
+            continue;
+        }
+
+        SDL_FPoint shipCenter =
+            map.tileToScreenCenterFloat(piece.anchorShipTileX, piece.anchorShipTileY);
+        float shipCenterOffsetX = 0.0f;
+        float shipCenterOffsetY = 0.0f;
+        if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+        {
+            shipCenter.x += shipCenterOffsetX;
+            shipCenter.y += shipCenterOffsetY;
+        }
+
+        const float phaseTime = (std::max)(0.0f, timeSeconds - piece.bornTimeSeconds);
+        const int frameIndex = this->computeVfxPreviewFrameIndex(*inst, phaseTime, previewLayers, imported);
+        const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+
+        const float ox = (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX) * scale;
+        const float oy = (piece.trailDrawOffsetY + piece.trailPerpendicularJitterY) * scale;
+        const float resolvedRotation = (override != nullptr) ? override->rotationDeg : inst->rotationDeg;
+        const float trailDrawRotationDeg = resolvedRotation + piece.trailRotationJitterDeg;
+        const bool resolvedFlipH = (override != nullptr) ? override->flipHorizontal : inst->flipHorizontal;
+        const bool resolvedFlipV = (override != nullptr) ? override->flipVertical : inst->flipVertical;
+
+        const float sourceW = frame.w;
+        const float sourceH = frame.h;
+        const float drawScaleX = scale;
+        const float drawScaleY = scale;
+        const float drawX = shipCenter.x + ox - ((sourceW * drawScaleX) * 0.5f);
+        const float drawY = shipCenter.y + oy - ((sourceH * drawScaleY) * 0.5f);
+        const float pivotX = sourceW * 0.5f;
+        const float pivotY = sourceH * 0.5f;
+
+        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+            const_cast<RC2D_Image*>(&imported.image),
+            frame.x,
+            frame.y,
+            frame.w,
+            frame.h);
+
+        rc2d_graphics_drawQuad(
+            const_cast<RC2D_Image*>(&imported.image),
+            &sourceQuad,
+            drawX,
+            drawY,
+            trailDrawRotationDeg,
+            drawScaleX,
+            drawScaleY,
+            pivotX,
+            pivotY,
+            resolvedFlipH,
+            resolvedFlipV);
     }
 }
 
@@ -7856,10 +8834,11 @@ void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
     const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
 
     const DirectionOverride* resolved = this->getResolvedDirectionOverride(instance);
-    const float offsetX = (resolved != nullptr) ? resolved->offsetX : instance->offsetX;
-    const float offsetY = (resolved != nullptr) ? resolved->offsetY : instance->offsetY;
-    const float pivotX = shipCenter.x + (offsetX * zoom);
-    const float pivotY = shipCenter.y + (offsetY * zoom);
+    float drawOffX = 0.0f;
+    float drawOffY = 0.0f;
+    this->getVfxPreviewDrawOffsets(*instance, resolved, &drawOffX, &drawOffY);
+    const float pivotX = shipCenter.x + (drawOffX * zoom);
+    const float pivotY = shipCenter.y + (drawOffY * zoom);
 
     float mouseX = 0.0f;
     float mouseY = 0.0f;
@@ -8372,6 +9351,73 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     }
 }
 
+std::vector<int> EditorMapVfxScene::expandLayerPanelDisplayRows(const std::vector<int>& coreOrdered) const
+{
+    std::vector<int> out;
+    out.reserve(coreOrdered.size() + this->shipVfxTrailPieces.size());
+    for (const int code : coreOrdered)
+    {
+        out.push_back(code);
+        if (code < 0)
+        {
+            continue;
+        }
+        const ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(code)];
+        for (const ShipVfxTrailPiece& p : this->shipVfxTrailPieces)
+        {
+            if (p.sourceVfxInstanceId == inst.instanceId && p.layerPanelUiId != 0U)
+            {
+                out.push_back(layerPanelTrailPieceRowCodeFromUiId(p.layerPanelUiId));
+            }
+        }
+    }
+    return out;
+}
+
+int EditorMapVfxScene::findVfxLayerIndexByInstanceId(uint32_t instanceId) const
+{
+    const auto& layers = this->currentShipVfxLayers();
+    for (int i = 0; i < static_cast<int>(layers.size()); ++i)
+    {
+        if (layers[static_cast<size_t>(i)].instanceId == instanceId)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int EditorMapVfxScene::findTrailPieceIndexByLayerPanelUiId(uint32_t uiId) const
+{
+    if (uiId == 0U)
+    {
+        return -1;
+    }
+    for (int i = 0; i < static_cast<int>(this->shipVfxTrailPieces.size()); ++i)
+    {
+        if (this->shipVfxTrailPieces[static_cast<size_t>(i)].layerPanelUiId == uiId)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void EditorMapVfxScene::removeTrailPiecesWithSourceInstanceId(uint32_t sourceInstanceId)
+{
+    for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+    {
+        if (this->shipVfxTrailPieces[i].sourceVfxInstanceId == sourceInstanceId)
+        {
+            this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+        else
+        {
+            ++i;
+        }
+    }
+}
+
 std::vector<int> EditorMapVfxScene::getOrderedVfxInstanceIndicesForLayerPanel(void) const
 {
     struct LayerEntry
@@ -8418,11 +9464,12 @@ int EditorMapVfxScene::getSelectedLayerRowIndexForDisplay(const std::vector<int>
 {
     for (size_t i = 0; i < orderedInstanceIndices.size(); ++i)
     {
-        if (this->shipLayerSelected && orderedInstanceIndices[i] < 0)
+        const int v = orderedInstanceIndices[i];
+        if (this->shipLayerSelected && v == -1)
         {
             return static_cast<int>(i);
         }
-        if (!this->shipLayerSelected && orderedInstanceIndices[i] == this->selectedVfxInstanceIndex)
+        if (!this->shipLayerSelected && !layerPanelRowIsTrailPieceSubRow(v) && v == this->selectedVfxInstanceIndex)
         {
             return static_cast<int>(i);
         }
@@ -8458,6 +9505,10 @@ void EditorMapVfxScene::drawHud(void) const
             this->previewIsoGridVisible);
         this->drawToolbarButton(this->buttonShipVfxZoomMinusRect, "ZOOM -", false);
         this->drawToolbarButton(this->buttonShipVfxZoomPlusRect, "ZOOM +", false);
+        this->drawToolbarButton(
+            this->buttonShipPilotRect,
+            this->previewShipPilotActive ? "PILOTER (ON)" : "PILOTER",
+            this->previewShipPilotActive);
 
         std::vector<std::string> shipLabels;
         shipLabels.reserve(this->importedShips.size());
@@ -8475,7 +9526,8 @@ void EditorMapVfxScene::drawHud(void) const
         }
         this->drawListPanel(this->sfxListRect, "VFX", sfxLabels, this->selectedSfxIndex, this->sfxListScrollOffset);
 
-        const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
+        const std::vector<int> orderedLayerIndices = this->expandLayerPanelDisplayRows(
+            this->getOrderedVfxInstanceIndicesForLayerPanel());
         this->drawLayerListPanel(orderedLayerIndices);
 
         this->drawInvalidAssetPanel(
@@ -8615,6 +9667,7 @@ void EditorMapVfxScene::drawHud(void) const
 
     this->drawLooseExportNamePopup();
     this->drawVfxRelativeTimingPopup();
+    this->drawVfxTrailPopup();
 }
 
 void EditorMapVfxScene::drawLooseExportNamePopup(void) const
@@ -9038,6 +10091,1098 @@ bool EditorMapVfxScene::handleVfxRelativeTimingPopupKey(
     return true;
 }
 
+void EditorMapVfxScene::drawVfxTrailPopup(void) const
+{
+    if (!this->vfxTrailPopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+    VfxTrailPopupLayout lay{};
+    if (!this->computeVfxTrailPopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->vfxTrailPopupLastLayout = lay;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 150});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{22, 30, 40, 235});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{145, 168, 194, 245});
+    rc2d_graphics_rectangle("line", &lay.popup);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    RC2D_Text titleText = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Trainee — marche (trace) et arret (couronne)");
+    titleText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&titleText);
+    rc2d_graphics_drawText(&titleText, lay.popup.x + 14.0f, lay.popup.y + 12.0f);
+    rc2d_graphics_destroyText(&titleText);
+
+    const ShipVfxInstance* pInst = nullptr;
+    if (this->vfxTrailPopupParentInstanceIndex >= 0 &&
+        this->vfxTrailPopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        pInst = &this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+    }
+    if (pInst != nullptr)
+    {
+        char sub[220] = {};
+        SDL_snprintf(
+            sub,
+            sizeof(sub),
+            "Instance id %u  |  %s",
+            static_cast<unsigned int>(pInst->instanceId),
+            pInst->label.c_str());
+        RC2D_Text subText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), sub);
+        subText.color = RC2D_Color{200, 208, 218, 235};
+        rc2d_graphics_setTextColor(&subText);
+        rc2d_graphics_drawText(&subText, lay.popup.x + 14.0f, lay.popup.y + 36.0f);
+        rc2d_graphics_destroyText(&subText);
+    }
+
+    auto drawInput = [this](const SDL_FRect& r, bool focused, const std::string& value) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{40, 54, 70, 245});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(focused ? RC2D_Color{160, 200, 240, 245} : RC2D_Color{124, 186, 236, 245});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        const std::string show = value + (focused ? "_" : "");
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), show.c_str());
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        rc2d_graphics_drawText(&t, r.x + 8.0f, r.y + 7.0f);
+        rc2d_graphics_destroyText(&t);
+    };
+
+    RC2D_Text nLbl = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "En marche : tuiles entre rejets (0 = off) :");
+    nLbl.color = RC2D_Color{210, 218, 228, 240};
+    rc2d_graphics_setTextColor(&nLbl);
+    rc2d_graphics_drawText(&nLbl, lay.popup.x + 14.0f, lay.popup.y + 56.0f);
+    rc2d_graphics_destroyText(&nLbl);
+    drawInput(lay.everyNTilesInputRect, this->vfxTrailPopupEveryNTilesFocused, this->vfxTrailPopupEveryNTilesInput);
+
+    RC2D_Text msLbl = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Duree de vie d'un rejet (ms) :");
+    msLbl.color = RC2D_Color{210, 218, 228, 240};
+    rc2d_graphics_setTextColor(&msLbl);
+    rc2d_graphics_drawText(&msLbl, lay.popup.x + 14.0f, lay.popup.y + 116.0f);
+    rc2d_graphics_destroyText(&msLbl);
+    drawInput(lay.lifetimeMsInputRect, this->vfxTrailPopupLifetimeMsFocused, this->vfxTrailPopupLifetimeMsInput);
+
+    RC2D_Text placeLbl = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Trace en marche :");
+    placeLbl.color = RC2D_Color{210, 218, 228, 240};
+    rc2d_graphics_setTextColor(&placeLbl);
+    rc2d_graphics_drawText(&placeLbl, lay.popup.x + 14.0f, lay.popup.y + 164.0f);
+    rc2d_graphics_destroyText(&placeLbl);
+
+    auto drawModeBtn = [this](const SDL_FRect& r, const char* lab, bool selected) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(selected ? RC2D_Color{72, 96, 124, 245} : RC2D_Color{56, 72, 92, 230});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(selected ? RC2D_Color{190, 214, 240, 250} : RC2D_Color{150, 170, 190, 235});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lab);
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&t, &tw, &th);
+        rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&t);
+    };
+    drawModeBtn(lay.trailStrictTileBtn, "Tuile + decal SPAWN", this->vfxTrailPopupStrictTilePlacement);
+    drawModeBtn(lay.trailLateralSpreadBtn, "Derive laterale", !this->vfxTrailPopupStrictTilePlacement);
+
+    if (lay.lateralSectionVisible)
+    {
+        RC2D_Text latH1 = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Derive : ecart max (comme offset X/Y) :");
+        latH1.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&latH1);
+        rc2d_graphics_drawText(&latH1, lay.popup.x + 14.0f, lay.popup.y + 242.0f);
+        rc2d_graphics_destroyText(&latH1);
+        drawInput(
+            lay.lateralJitterInputRect,
+            this->vfxTrailPopupLateralJitterFocused,
+            this->vfxTrailPopupLateralJitterInput);
+    }
+
+    RC2D_Text rotLbl = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Rotation en marche (0-100 %, max +-45 deg) :");
+    rotLbl.color = RC2D_Color{210, 218, 228, 240};
+    rc2d_graphics_setTextColor(&rotLbl);
+    rc2d_graphics_drawText(&rotLbl, lay.popup.x + 14.0f, lay.rotationPctInputRect.y - 22.0f);
+    rc2d_graphics_destroyText(&rotLbl);
+    drawInput(
+        lay.rotationPctInputRect,
+        this->vfxTrailPopupRotationPctFocused,
+        this->vfxTrailPopupRotationPctInput);
+
+    RC2D_Text idleHdr = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "A l'arret : couronne autour du layer");
+    idleHdr.color = RC2D_Color{210, 218, 228, 240};
+    rc2d_graphics_setTextColor(&idleHdr);
+    rc2d_graphics_drawText(&idleHdr, lay.popup.x + 14.0f, lay.idleRingOffBtn.y - 26.0f);
+    rc2d_graphics_destroyText(&idleHdr);
+    drawModeBtn(lay.idleRingOffBtn, "Couronne OFF", !this->vfxTrailPopupIdleRingWhenStationary);
+    drawModeBtn(lay.idleRingOnBtn, "Couronne ON", this->vfxTrailPopupIdleRingWhenStationary);
+    if (lay.idleRingInputsVisible)
+    {
+        RC2D_Text pcLbl = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Couronne : nombre de pieces (1-32) :");
+        pcLbl.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&pcLbl);
+        rc2d_graphics_drawText(&pcLbl, lay.popup.x + 14.0f, lay.idleRingPieceCountInputRect.y - 24.0f);
+        rc2d_graphics_destroyText(&pcLbl);
+        drawInput(
+            lay.idleRingPieceCountInputRect,
+            this->vfxTrailPopupIdleRingPieceCountFocused,
+            this->vfxTrailPopupIdleRingPieceCountInput);
+        RC2D_Text perLbl = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Couronne : delai entre salves (ms) :");
+        perLbl.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&perLbl);
+        rc2d_graphics_drawText(&perLbl, lay.popup.x + 14.0f, lay.idleRingPeriodMsInputRect.y - 24.0f);
+        rc2d_graphics_destroyText(&perLbl);
+        drawInput(
+            lay.idleRingPeriodMsInputRect,
+            this->vfxTrailPopupIdlePeriodMsFocused,
+            this->vfxTrailPopupIdlePeriodMsInput);
+        RC2D_Text radLbl = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Couronne : rayon (comme offset) :");
+        radLbl.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&radLbl);
+        rc2d_graphics_drawText(&radLbl, lay.popup.x + 14.0f, lay.idleRingRadiusInputRect.y - 24.0f);
+        rc2d_graphics_destroyText(&radLbl);
+        drawInput(
+            lay.idleRingRadiusInputRect,
+            this->vfxTrailPopupIdleRadiusFocused,
+            this->vfxTrailPopupIdleRadiusInput);
+        RC2D_Text idleRotLbl = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Couronne : rotation (0-100 %) :");
+        idleRotLbl.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&idleRotLbl);
+        rc2d_graphics_drawText(&idleRotLbl, lay.popup.x + 14.0f, lay.idleRingRotationPctInputRect.y - 24.0f);
+        rc2d_graphics_destroyText(&idleRotLbl);
+        drawInput(
+            lay.idleRingRotationPctInputRect,
+            this->vfxTrailPopupIdleRingRotationPctFocused,
+            this->vfxTrailPopupIdleRingRotationPctInput);
+        RC2D_Text idleJitLbl = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Couronne : decal aleatoire max (0 = off) :");
+        idleJitLbl.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&idleJitLbl);
+        rc2d_graphics_drawText(&idleJitLbl, lay.popup.x + 14.0f, lay.idleRingPosJitterInputRect.y - 24.0f);
+        rc2d_graphics_destroyText(&idleJitLbl);
+        drawInput(
+            lay.idleRingPosJitterInputRect,
+            this->vfxTrailPopupIdleRingPosJitterFocused,
+            this->vfxTrailPopupIdleRingPosJitterInput);
+    }
+
+    auto drawBtn = [this](const SDL_FRect& r, const char* lab) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{56, 72, 92, 230});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(RC2D_Color{150, 170, 190, 235});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lab);
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&t, &tw, &th);
+        rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&t);
+    };
+
+    drawBtn(lay.cancelBtn, "ANNULER");
+    drawBtn(lay.clearBtn, "EFFACER");
+    drawBtn(lay.validateBtn, "VALIDER");
+}
+
+bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->vfxTrailPopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+
+    VfxTrailPopupLayout lay{};
+    if (!this->computeVfxTrailPopupLayout(&lay))
+    {
+        return true;
+    }
+    this->vfxTrailPopupLastLayout = lay;
+
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        if (this->pointInRect(x, y, lay.dimFullMap))
+        {
+            this->closeVfxTrailPopup();
+            this->statusMessage = "Traînée : annule.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeVfxTrailPopup();
+        this->statusMessage = "Traînée : annule.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.clearBtn))
+    {
+        if (this->vfxTrailPopupParentInstanceIndex >= 0 &&
+            this->vfxTrailPopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+            this->removeTrailPiecesWithSourceInstanceId(t.instanceId);
+            t.motionTrailEveryNTiles = 0;
+            t.motionTrailLifetimeMs = 2000;
+            t.motionTrailStrictTilePlacement = true;
+            t.motionTrailLateralJitterRadius = 0.0f;
+            t.motionTrailRotationRandomPercent = 0;
+            t.motionTrailIdleRingWhenStationary = false;
+            t.motionTrailIdleRingRadius = 48.0f;
+            t.motionTrailIdleSpawnPeriodMs = 600;
+            t.motionTrailIdleRingPieceCount = 8;
+            t.motionTrailIdleRingRotationRandomPercent = 0;
+            t.motionTrailIdleRingPositionJitterRadius = 0.0f;
+            t.motionTrailIdleSpawnAccSec = 0.0f;
+            t.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            t.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+            t.motionTrailDistanceAcc = 0.0f;
+            t.motionSpawnCaptured = false;
+            this->markShipVfxDirty();
+        }
+        this->closeVfxTrailPopup();
+        this->statusMessage = "SPAWN / trainee : efface (rejets supprimes, spawn non memorise).";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.trailStrictTileBtn))
+    {
+        this->vfxTrailPopupStrictTilePlacement = true;
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        this->statusMessage =
+            "Trainee : sur la tuile du navire au spawn, decal SPAWN uniquement (pas d'ecart lateral).";
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.trailLateralSpreadBtn))
+    {
+        this->vfxTrailPopupStrictTilePlacement = false;
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        this->statusMessage =
+            "Trainee : ecart lateral aleatoire (perpendiculaire a la marche). Remplis la demi-largeur ci-dessous.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.everyNTilesInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = true;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.lifetimeMsInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = true;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (lay.lateralSectionVisible && this->pointInRect(x, y, lay.lateralJitterInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = true;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.rotationPctInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = true;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.idleRingOffBtn))
+    {
+        this->vfxTrailPopupIdleRingWhenStationary = false;
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        this->statusMessage = "Couronne a l'arret : desactivee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.idleRingOnBtn))
+    {
+        this->vfxTrailPopupIdleRingWhenStationary = true;
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        this->statusMessage =
+            "Couronne a l'arret : activee (pilotage ON, arrete le navire pour des salves autour du layer).";
+        return true;
+    }
+    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPieceCountInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = true;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPeriodMsInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = true;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingRadiusInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = true;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingRotationPctInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = true;
+        this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        return true;
+    }
+    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPosJitterInputRect))
+    {
+        this->vfxTrailPopupEveryNTilesFocused = false;
+        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
+        this->vfxTrailPopupRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPieceCountFocused = false;
+        this->vfxTrailPopupIdlePeriodMsFocused = false;
+        this->vfxTrailPopupIdleRadiusFocused = false;
+        this->vfxTrailPopupIdleRingRotationPctFocused = false;
+        this->vfxTrailPopupIdleRingPosJitterFocused = true;
+        return true;
+    }
+    this->vfxTrailPopupEveryNTilesFocused = false;
+    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLateralJitterFocused = false;
+    this->vfxTrailPopupRotationPctFocused = false;
+    this->vfxTrailPopupIdleRingPieceCountFocused = false;
+    this->vfxTrailPopupIdlePeriodMsFocused = false;
+    this->vfxTrailPopupIdleRadiusFocused = false;
+    this->vfxTrailPopupIdleRingRotationPctFocused = false;
+    this->vfxTrailPopupIdleRingPosJitterFocused = false;
+
+    if (this->pointInRect(x, y, lay.validateBtn))
+    {
+        char* endN = nullptr;
+        const long parsedN = std::strtol(this->vfxTrailPopupEveryNTilesInput.c_str(), &endN, 10);
+        int nTiles = 0;
+        if (endN != this->vfxTrailPopupEveryNTilesInput.c_str())
+        {
+            nTiles = static_cast<int>(std::clamp(parsedN, 0L, 32L));
+        }
+        char* endMs = nullptr;
+        const long parsedMs = std::strtol(this->vfxTrailPopupLifetimeMsInput.c_str(), &endMs, 10);
+        int lifeMs = 2000;
+        if (endMs != this->vfxTrailPopupLifetimeMsInput.c_str())
+        {
+            lifeMs = static_cast<int>(std::clamp(parsedMs, 1L, 9999999L));
+        }
+        char* endJit = nullptr;
+        const long parsedJit = std::strtol(this->vfxTrailPopupLateralJitterInput.c_str(), &endJit, 10);
+        float jitterR = 0.0f;
+        if (endJit != this->vfxTrailPopupLateralJitterInput.c_str())
+        {
+            jitterR = static_cast<float>(std::clamp(parsedJit, 0L, 2048L));
+        }
+        char* endRot = nullptr;
+        const long parsedRot = std::strtol(this->vfxTrailPopupRotationPctInput.c_str(), &endRot, 10);
+        int rotPct = 0;
+        if (endRot != this->vfxTrailPopupRotationPctInput.c_str())
+        {
+            rotPct = static_cast<int>(std::clamp(parsedRot, 0L, 100L));
+        }
+        char* endIdlePc = nullptr;
+        const long parsedIdlePc =
+            std::strtol(this->vfxTrailPopupIdleRingPieceCountInput.c_str(), &endIdlePc, 10);
+        int idleRingPc = 8;
+        if (endIdlePc != this->vfxTrailPopupIdleRingPieceCountInput.c_str())
+        {
+            idleRingPc = static_cast<int>(std::clamp(parsedIdlePc, 1L, 32L));
+        }
+        char* endIdlePer = nullptr;
+        const long parsedIdlePer = std::strtol(this->vfxTrailPopupIdlePeriodMsInput.c_str(), &endIdlePer, 10);
+        int idlePerMs = 600;
+        if (endIdlePer != this->vfxTrailPopupIdlePeriodMsInput.c_str())
+        {
+            idlePerMs = static_cast<int>(std::clamp(parsedIdlePer, 100L, 60000L));
+        }
+        char* endIdleRad = nullptr;
+        const long parsedIdleRad = std::strtol(this->vfxTrailPopupIdleRadiusInput.c_str(), &endIdleRad, 10);
+        float idleRad = 48.0f;
+        if (endIdleRad != this->vfxTrailPopupIdleRadiusInput.c_str())
+        {
+            idleRad = static_cast<float>(std::clamp(parsedIdleRad, 1L, 2048L));
+        }
+        char* endIdleRingRot = nullptr;
+        const long parsedIdleRingRot =
+            std::strtol(this->vfxTrailPopupIdleRingRotationPctInput.c_str(), &endIdleRingRot, 10);
+        int idleRingRotPct = 0;
+        if (endIdleRingRot != this->vfxTrailPopupIdleRingRotationPctInput.c_str())
+        {
+            idleRingRotPct = static_cast<int>(std::clamp(parsedIdleRingRot, 0L, 100L));
+        }
+        char* endIdleRingJit = nullptr;
+        const long parsedIdleRingJit =
+            std::strtol(this->vfxTrailPopupIdleRingPosJitterInput.c_str(), &endIdleRingJit, 10);
+        float idleRingPosJit = 0.0f;
+        if (endIdleRingJit != this->vfxTrailPopupIdleRingPosJitterInput.c_str())
+        {
+            idleRingPosJit = static_cast<float>(std::clamp(parsedIdleRingJit, 0L, 2048L));
+        }
+        bool didMemorizeSpawnDecal = false;
+        if (this->vfxTrailPopupParentInstanceIndex >= 0 &&
+            this->vfxTrailPopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+            const bool needInitialSpawnCapture = !t.motionSpawnCaptured;
+            t.motionTrailEveryNTiles = nTiles;
+            t.motionTrailLifetimeMs = lifeMs;
+            t.motionTrailStrictTilePlacement = this->vfxTrailPopupStrictTilePlacement;
+            t.motionTrailLateralJitterRadius =
+                this->vfxTrailPopupStrictTilePlacement ? 0.0f : jitterR;
+            t.motionTrailRotationRandomPercent = rotPct;
+            t.motionTrailIdleRingWhenStationary = this->vfxTrailPopupIdleRingWhenStationary;
+            t.motionTrailIdleRingPieceCount = idleRingPc;
+            t.motionTrailIdleSpawnPeriodMs = idlePerMs;
+            t.motionTrailIdleRingRadius = idleRad;
+            t.motionTrailIdleRingRotationRandomPercent = idleRingRotPct;
+            t.motionTrailIdleRingPositionJitterRadius = idleRingPosJit;
+            t.motionTrailIdleSpawnAccSec = 0.0f;
+            t.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            t.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+            t.motionTrailDistanceAcc = 0.0f;
+            this->markShipVfxDirty();
+            if (needInitialSpawnCapture)
+            {
+                this->captureVfxMotionSpawnAtIndex(this->vfxTrailPopupParentInstanceIndex);
+                didMemorizeSpawnDecal = true;
+            }
+        }
+        this->closeVfxTrailPopup();
+        this->statusMessage =
+            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
+            (this->vfxTrailPopupStrictTilePlacement ? std::string("tuile stricte")
+                                                    : (std::string("decal lat. max ") +
+                                                       std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            ", rotation " + std::to_string(rotPct) + "%" +
+            (this->vfxTrailPopupIdleRingWhenStationary
+                 ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
+                    std::to_string(idlePerMs) + " ms, rayon " +
+                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+                    std::to_string(idleRingRotPct) +
+                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) + ")")
+                 : std::string(", couronne arret OFF")) +
+            ". " +
+            (didMemorizeSpawnDecal ? std::string("Decal SPAWN memorise depuis la position actuelle du layer.")
+                                    : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+        return true;
+    }
+
+    return true;
+}
+
+bool EditorMapVfxScene::handleVfxTrailPopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)keycode;
+    (void)mod;
+    if (!this->vfxTrailPopupVisible)
+    {
+        return false;
+    }
+
+    if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
+    {
+        this->closeVfxTrailPopup();
+        this->statusMessage = "Traînée : annule.";
+        return true;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_TAB)
+    {
+        const bool spread = !this->vfxTrailPopupStrictTilePlacement;
+        const bool idleIn = this->vfxTrailPopupIdleRingWhenStationary;
+        auto clearIdle = [this]() {
+            this->vfxTrailPopupIdleRingPieceCountFocused = false;
+            this->vfxTrailPopupIdlePeriodMsFocused = false;
+            this->vfxTrailPopupIdleRadiusFocused = false;
+            this->vfxTrailPopupIdleRingRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        };
+        if (this->vfxTrailPopupEveryNTilesFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = true;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            clearIdle();
+        }
+        else if (this->vfxTrailPopupLifetimeMsFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            clearIdle();
+            this->vfxTrailPopupLateralJitterFocused = spread;
+            if (!spread)
+            {
+                this->vfxTrailPopupRotationPctFocused = true;
+            }
+        }
+        else if (this->vfxTrailPopupLateralJitterFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = true;
+            clearIdle();
+        }
+        else if (this->vfxTrailPopupRotationPctFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            if (idleIn)
+            {
+                clearIdle();
+                this->vfxTrailPopupIdleRingPieceCountFocused = true;
+            }
+            else
+            {
+                this->vfxTrailPopupEveryNTilesFocused = true;
+                clearIdle();
+            }
+        }
+        else if (this->vfxTrailPopupIdleRingPieceCountFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPieceCountFocused = false;
+            this->vfxTrailPopupIdlePeriodMsFocused = true;
+            this->vfxTrailPopupIdleRadiusFocused = false;
+            this->vfxTrailPopupIdleRingRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        }
+        else if (this->vfxTrailPopupIdlePeriodMsFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPieceCountFocused = false;
+            this->vfxTrailPopupIdlePeriodMsFocused = false;
+            this->vfxTrailPopupIdleRadiusFocused = true;
+            this->vfxTrailPopupIdleRingRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        }
+        else if (this->vfxTrailPopupIdleRadiusFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPieceCountFocused = false;
+            this->vfxTrailPopupIdlePeriodMsFocused = false;
+            this->vfxTrailPopupIdleRadiusFocused = false;
+            this->vfxTrailPopupIdleRingRotationPctFocused = true;
+            this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        }
+        else if (this->vfxTrailPopupIdleRingRotationPctFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = false;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPieceCountFocused = false;
+            this->vfxTrailPopupIdlePeriodMsFocused = false;
+            this->vfxTrailPopupIdleRadiusFocused = false;
+            this->vfxTrailPopupIdleRingRotationPctFocused = false;
+            this->vfxTrailPopupIdleRingPosJitterFocused = true;
+        }
+        else if (this->vfxTrailPopupIdleRingPosJitterFocused)
+        {
+            this->vfxTrailPopupEveryNTilesFocused = true;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            clearIdle();
+        }
+        else
+        {
+            this->vfxTrailPopupEveryNTilesFocused = true;
+            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = false;
+            clearIdle();
+        }
+        return true;
+    }
+
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        char* endN = nullptr;
+        const long parsedN = std::strtol(this->vfxTrailPopupEveryNTilesInput.c_str(), &endN, 10);
+        int nTiles = 0;
+        if (endN != this->vfxTrailPopupEveryNTilesInput.c_str())
+        {
+            nTiles = static_cast<int>(std::clamp(parsedN, 0L, 32L));
+        }
+        char* endMs = nullptr;
+        const long parsedMs = std::strtol(this->vfxTrailPopupLifetimeMsInput.c_str(), &endMs, 10);
+        int lifeMs = 2000;
+        if (endMs != this->vfxTrailPopupLifetimeMsInput.c_str())
+        {
+            lifeMs = static_cast<int>(std::clamp(parsedMs, 1L, 9999999L));
+        }
+        char* endJit = nullptr;
+        const long parsedJit = std::strtol(this->vfxTrailPopupLateralJitterInput.c_str(), &endJit, 10);
+        float jitterR = 0.0f;
+        if (endJit != this->vfxTrailPopupLateralJitterInput.c_str())
+        {
+            jitterR = static_cast<float>(std::clamp(parsedJit, 0L, 2048L));
+        }
+        char* endRot = nullptr;
+        const long parsedRot = std::strtol(this->vfxTrailPopupRotationPctInput.c_str(), &endRot, 10);
+        int rotPct = 0;
+        if (endRot != this->vfxTrailPopupRotationPctInput.c_str())
+        {
+            rotPct = static_cast<int>(std::clamp(parsedRot, 0L, 100L));
+        }
+        char* endIdlePc = nullptr;
+        const long parsedIdlePc =
+            std::strtol(this->vfxTrailPopupIdleRingPieceCountInput.c_str(), &endIdlePc, 10);
+        int idleRingPc = 8;
+        if (endIdlePc != this->vfxTrailPopupIdleRingPieceCountInput.c_str())
+        {
+            idleRingPc = static_cast<int>(std::clamp(parsedIdlePc, 1L, 32L));
+        }
+        char* endIdlePer = nullptr;
+        const long parsedIdlePer = std::strtol(this->vfxTrailPopupIdlePeriodMsInput.c_str(), &endIdlePer, 10);
+        int idlePerMs = 600;
+        if (endIdlePer != this->vfxTrailPopupIdlePeriodMsInput.c_str())
+        {
+            idlePerMs = static_cast<int>(std::clamp(parsedIdlePer, 100L, 60000L));
+        }
+        char* endIdleRad = nullptr;
+        const long parsedIdleRad = std::strtol(this->vfxTrailPopupIdleRadiusInput.c_str(), &endIdleRad, 10);
+        float idleRad = 48.0f;
+        if (endIdleRad != this->vfxTrailPopupIdleRadiusInput.c_str())
+        {
+            idleRad = static_cast<float>(std::clamp(parsedIdleRad, 1L, 2048L));
+        }
+        char* endIdleRingRot = nullptr;
+        const long parsedIdleRingRot =
+            std::strtol(this->vfxTrailPopupIdleRingRotationPctInput.c_str(), &endIdleRingRot, 10);
+        int idleRingRotPct = 0;
+        if (endIdleRingRot != this->vfxTrailPopupIdleRingRotationPctInput.c_str())
+        {
+            idleRingRotPct = static_cast<int>(std::clamp(parsedIdleRingRot, 0L, 100L));
+        }
+        char* endIdleRingJit = nullptr;
+        const long parsedIdleRingJit =
+            std::strtol(this->vfxTrailPopupIdleRingPosJitterInput.c_str(), &endIdleRingJit, 10);
+        float idleRingPosJit = 0.0f;
+        if (endIdleRingJit != this->vfxTrailPopupIdleRingPosJitterInput.c_str())
+        {
+            idleRingPosJit = static_cast<float>(std::clamp(parsedIdleRingJit, 0L, 2048L));
+        }
+        bool didMemorizeSpawnDecal = false;
+        if (this->vfxTrailPopupParentInstanceIndex >= 0 &&
+            this->vfxTrailPopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+            const bool needInitialSpawnCapture = !t.motionSpawnCaptured;
+            t.motionTrailEveryNTiles = nTiles;
+            t.motionTrailLifetimeMs = lifeMs;
+            t.motionTrailStrictTilePlacement = this->vfxTrailPopupStrictTilePlacement;
+            t.motionTrailLateralJitterRadius =
+                this->vfxTrailPopupStrictTilePlacement ? 0.0f : jitterR;
+            t.motionTrailRotationRandomPercent = rotPct;
+            t.motionTrailIdleRingWhenStationary = this->vfxTrailPopupIdleRingWhenStationary;
+            t.motionTrailIdleRingPieceCount = idleRingPc;
+            t.motionTrailIdleSpawnPeriodMs = idlePerMs;
+            t.motionTrailIdleRingRadius = idleRad;
+            t.motionTrailIdleRingRotationRandomPercent = idleRingRotPct;
+            t.motionTrailIdleRingPositionJitterRadius = idleRingPosJit;
+            t.motionTrailIdleSpawnAccSec = 0.0f;
+            t.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            t.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+            t.motionTrailDistanceAcc = 0.0f;
+            this->markShipVfxDirty();
+            if (needInitialSpawnCapture)
+            {
+                this->captureVfxMotionSpawnAtIndex(this->vfxTrailPopupParentInstanceIndex);
+                didMemorizeSpawnDecal = true;
+            }
+        }
+        this->closeVfxTrailPopup();
+        this->statusMessage =
+            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
+            (this->vfxTrailPopupStrictTilePlacement ? std::string("tuile stricte")
+                                                    : (std::string("decal lat. max ") +
+                                                       std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            ", rotation " + std::to_string(rotPct) + "%" +
+            (this->vfxTrailPopupIdleRingWhenStationary
+                 ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
+                    std::to_string(idlePerMs) + " ms, rayon " +
+                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+                    std::to_string(idleRingRotPct) +
+                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) + ")")
+                 : std::string(", couronne arret OFF")) +
+            ". " +
+            (didMemorizeSpawnDecal ? std::string("Decal SPAWN memorise depuis la position actuelle du layer.")
+                                    : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+        return true;
+    }
+
+    if (scancode == SDL_SCANCODE_BACKSPACE && !isrepeat)
+    {
+        if (this->vfxTrailPopupEveryNTilesFocused && !this->vfxTrailPopupEveryNTilesInput.empty())
+        {
+            this->vfxTrailPopupEveryNTilesInput.pop_back();
+        }
+        else if (this->vfxTrailPopupLifetimeMsFocused && !this->vfxTrailPopupLifetimeMsInput.empty())
+        {
+            this->vfxTrailPopupLifetimeMsInput.pop_back();
+        }
+        else if (this->vfxTrailPopupLateralJitterFocused && !this->vfxTrailPopupLateralJitterInput.empty())
+        {
+            this->vfxTrailPopupLateralJitterInput.pop_back();
+        }
+        else if (this->vfxTrailPopupRotationPctFocused && !this->vfxTrailPopupRotationPctInput.empty())
+        {
+            this->vfxTrailPopupRotationPctInput.pop_back();
+        }
+        else if (this->vfxTrailPopupIdleRingPieceCountFocused &&
+                 !this->vfxTrailPopupIdleRingPieceCountInput.empty())
+        {
+            this->vfxTrailPopupIdleRingPieceCountInput.pop_back();
+        }
+        else if (this->vfxTrailPopupIdlePeriodMsFocused && !this->vfxTrailPopupIdlePeriodMsInput.empty())
+        {
+            this->vfxTrailPopupIdlePeriodMsInput.pop_back();
+        }
+        else if (this->vfxTrailPopupIdleRadiusFocused && !this->vfxTrailPopupIdleRadiusInput.empty())
+        {
+            this->vfxTrailPopupIdleRadiusInput.pop_back();
+        }
+        else if (this->vfxTrailPopupIdleRingRotationPctFocused &&
+                 !this->vfxTrailPopupIdleRingRotationPctInput.empty())
+        {
+            this->vfxTrailPopupIdleRingRotationPctInput.pop_back();
+        }
+        else if (this->vfxTrailPopupIdleRingPosJitterFocused &&
+                 !this->vfxTrailPopupIdleRingPosJitterInput.empty())
+        {
+            this->vfxTrailPopupIdleRingPosJitterInput.pop_back();
+        }
+        return true;
+    }
+
+    auto appendDigit = [this](char digit) -> bool {
+        if (this->vfxTrailPopupEveryNTilesFocused)
+        {
+            if (this->vfxTrailPopupEveryNTilesInput.size() >= 3U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupEveryNTilesInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupLifetimeMsFocused)
+        {
+            if (this->vfxTrailPopupLifetimeMsInput.size() >= 8U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupLifetimeMsInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupLateralJitterFocused)
+        {
+            if (this->vfxTrailPopupLateralJitterInput.size() >= 4U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupLateralJitterInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupRotationPctFocused)
+        {
+            if (this->vfxTrailPopupRotationPctInput.size() >= 3U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupRotationPctInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupIdleRingPieceCountFocused)
+        {
+            if (this->vfxTrailPopupIdleRingPieceCountInput.size() >= 2U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupIdleRingPieceCountInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupIdlePeriodMsFocused)
+        {
+            if (this->vfxTrailPopupIdlePeriodMsInput.size() >= 5U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupIdlePeriodMsInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupIdleRadiusFocused)
+        {
+            if (this->vfxTrailPopupIdleRadiusInput.size() >= 4U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupIdleRadiusInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupIdleRingRotationPctFocused)
+        {
+            if (this->vfxTrailPopupIdleRingRotationPctInput.size() >= 3U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupIdleRingRotationPctInput.push_back(digit);
+            return true;
+        }
+        if (this->vfxTrailPopupIdleRingPosJitterFocused)
+        {
+            if (this->vfxTrailPopupIdleRingPosJitterInput.size() >= 4U)
+            {
+                return true;
+            }
+            this->vfxTrailPopupIdleRingPosJitterInput.push_back(digit);
+        }
+        return true;
+    };
+
+    const bool nFocus = this->vfxTrailPopupEveryNTilesFocused;
+    const bool msFocus = this->vfxTrailPopupLifetimeMsFocused;
+    const bool jitFocus = this->vfxTrailPopupLateralJitterFocused;
+    const bool rotFocus = this->vfxTrailPopupRotationPctFocused;
+    const bool idlePcFocus = this->vfxTrailPopupIdleRingPieceCountFocused;
+    const bool idlePerFocus = this->vfxTrailPopupIdlePeriodMsFocused;
+    const bool idleRadFocus = this->vfxTrailPopupIdleRadiusFocused;
+    const bool idleRingRotFocus = this->vfxTrailPopupIdleRingRotationPctFocused;
+    const bool idleRingJitFocus = this->vfxTrailPopupIdleRingPosJitterFocused;
+    if ((nFocus || msFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
+         idleRingRotFocus || idleRingJitFocus) &&
+        !isrepeat)
+    {
+        switch (scancode)
+        {
+        case SDL_SCANCODE_KP_0:
+            return appendDigit('0');
+        case SDL_SCANCODE_KP_1:
+            return appendDigit('1');
+        case SDL_SCANCODE_KP_2:
+            return appendDigit('2');
+        case SDL_SCANCODE_KP_3:
+            return appendDigit('3');
+        case SDL_SCANCODE_KP_4:
+            return appendDigit('4');
+        case SDL_SCANCODE_KP_5:
+            return appendDigit('5');
+        case SDL_SCANCODE_KP_6:
+            return appendDigit('6');
+        case SDL_SCANCODE_KP_7:
+            return appendDigit('7');
+        case SDL_SCANCODE_KP_8:
+            return appendDigit('8');
+        case SDL_SCANCODE_KP_9:
+            return appendDigit('9');
+        default:
+            break;
+        }
+    }
+
+    if ((nFocus || msFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
+         idleRingRotFocus || idleRingJitFocus) &&
+        key != nullptr && std::strlen(key) == 1U)
+    {
+        const char c = key[0];
+        if (c >= '0' && c <= '9')
+        {
+            if (nFocus && this->vfxTrailPopupEveryNTilesInput.size() < 3U)
+            {
+                this->vfxTrailPopupEveryNTilesInput.push_back(c);
+                return true;
+            }
+            if (msFocus && this->vfxTrailPopupLifetimeMsInput.size() < 8U)
+            {
+                this->vfxTrailPopupLifetimeMsInput.push_back(c);
+                return true;
+            }
+            if (jitFocus && this->vfxTrailPopupLateralJitterInput.size() < 4U)
+            {
+                this->vfxTrailPopupLateralJitterInput.push_back(c);
+                return true;
+            }
+            if (rotFocus && this->vfxTrailPopupRotationPctInput.size() < 3U)
+            {
+                this->vfxTrailPopupRotationPctInput.push_back(c);
+                return true;
+            }
+            if (idlePcFocus && this->vfxTrailPopupIdleRingPieceCountInput.size() < 2U)
+            {
+                this->vfxTrailPopupIdleRingPieceCountInput.push_back(c);
+                return true;
+            }
+            if (idlePerFocus && this->vfxTrailPopupIdlePeriodMsInput.size() < 5U)
+            {
+                this->vfxTrailPopupIdlePeriodMsInput.push_back(c);
+                return true;
+            }
+            if (idleRadFocus && this->vfxTrailPopupIdleRadiusInput.size() < 4U)
+            {
+                this->vfxTrailPopupIdleRadiusInput.push_back(c);
+                return true;
+            }
+            if (idleRingRotFocus && this->vfxTrailPopupIdleRingRotationPctInput.size() < 3U)
+            {
+                this->vfxTrailPopupIdleRingRotationPctInput.push_back(c);
+                return true;
+            }
+            if (idleRingJitFocus && this->vfxTrailPopupIdleRingPosJitterInput.size() < 4U)
+            {
+                this->vfxTrailPopupIdleRingPosJitterInput.push_back(c);
+                return true;
+            }
+        }
+    }
+
+    return true;
+}
+
 bool EditorMapVfxScene::handleShipListClick(float x, float y)
 {
     int clickedIndex = -1;
@@ -9087,14 +11232,19 @@ bool EditorMapVfxScene::handleSfxListClick(float x, float y)
     return true;
 }
 
-bool EditorMapVfxScene::handleLayerListClick(float x, float y)
+bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton button)
 {
     if (!this->pointInRect(x, y, this->layerListRect))
     {
         return false;
     }
+    if (button != RC2D_MOUSE_BUTTON_LEFT && button != RC2D_MOUSE_BUTTON_RIGHT)
+    {
+        return false;
+    }
 
-    const std::vector<int> orderedLayerIndices = this->getOrderedVfxInstanceIndicesForLayerPanel();
+    const std::vector<int> orderedLayerIndices = this->expandLayerPanelDisplayRows(
+        this->getOrderedVfxInstanceIndicesForLayerPanel());
     const int itemCount = static_cast<int>(orderedLayerIndices.size());
 
     const float panelPadding = 4.0f;
@@ -9112,6 +11262,11 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
 
     if (this->shipVfxLayerPagePickerOpen)
     {
+        if (button == RC2D_MOUSE_BUTTON_RIGHT)
+        {
+            this->shipVfxLayerPagePickerOpen = false;
+            return true;
+        }
         for (int pi = 0; pi < kShipVfxLayerPageCount; ++pi)
         {
             if (this->pointInRect(x, y, pagePickLayout.pageRowRects[pi]))
@@ -9136,7 +11291,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         return true;
     }
 
-    if (this->pointInRect(x, y, pagePickLayout.pageButtonRect))
+    if (button == RC2D_MOUSE_BUTTON_LEFT && this->pointInRect(x, y, pagePickLayout.pageButtonRect))
     {
         this->shipVfxLayerPagePickerOpen = true;
         return true;
@@ -9150,16 +11305,19 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
 
     if (this->pointInRect(x, y, scrollTrackRect))
     {
-        int clickedIndexIgnored = -1;
-        this->handleListPanelClick(
-            x,
-            y,
-            this->layerListRect,
-            itemCount,
-            &this->layerListScrollOffset,
-            &this->layerListScrollDragActive,
-            &this->layerListScrollDragGrabOffsetY,
-            &clickedIndexIgnored);
+        if (button == RC2D_MOUSE_BUTTON_LEFT)
+        {
+            int clickedIndexIgnored = -1;
+            this->handleListPanelClick(
+                x,
+                y,
+                this->layerListRect,
+                itemCount,
+                &this->layerListScrollOffset,
+                &this->layerListScrollDragActive,
+                &this->layerListScrollDragGrabOffsetY,
+                &clickedIndexIgnored);
+        }
         this->layerRowDragActive = false;
         this->layerRowDragMoved = false;
         this->layerRowDragSourceDisplayIndex = -1;
@@ -9277,6 +11435,12 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
     layerRelativeRect.x = layerFlipVRowRect.x - layerRelativeRect.w - 4.0f;
     layerRelativeRect.y = lockRect.y;
 
+    SDL_FRect layerMotionSpawnCibleRect{};
+    layerMotionSpawnCibleRect.w = kLayerRowMotionSpawnCibleToggleW;
+    layerMotionSpawnCibleRect.h = lockRect.h;
+    layerMotionSpawnCibleRect.x = layerRelativeRect.x - kLayerRowMotionClusterGap - layerMotionSpawnCibleRect.w;
+    layerMotionSpawnCibleRect.y = lockRect.y;
+
     auto clearLayerDragState = [this]() {
         this->layerRowDragActive = false;
         this->layerRowDragMoved = false;
@@ -9291,10 +11455,26 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
             return;
         }
         const int rowValue = orderedLayerIndices[static_cast<size_t>(clickedIndex)];
-        if (rowValue < 0)
+        if (rowValue == -1)
         {
             this->shipLayerSelected = true;
             this->setSelectedVfxInstanceIndex(-1);
+            return;
+        }
+        if (layerPanelRowIsTrailPieceSubRow(rowValue))
+        {
+            const uint32_t uid = layerPanelTrailPieceUiIdFromRow(rowValue);
+            const int pi = this->findTrailPieceIndexByLayerPanelUiId(uid);
+            if (pi >= 0)
+            {
+                const uint32_t sid = this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId;
+                const int pIx = this->findVfxLayerIndexByInstanceId(sid);
+                if (pIx >= 0)
+                {
+                    this->shipLayerSelected = false;
+                    this->setSelectedVfxInstanceIndex(pIx);
+                }
+            }
             return;
         }
 
@@ -9302,14 +11482,54 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y)
         this->setSelectedVfxInstanceIndex(rowValue);
     };
 
+    const int clickedRowValue = orderedLayerIndices[static_cast<size_t>(clickedIndex)];
+    const bool clickedTrailPieceSubRow = layerPanelRowIsTrailPieceSubRow(clickedRowValue);
+    if (clickedTrailPieceSubRow)
+    {
+        clearLayerDragState();
+        if (button == RC2D_MOUSE_BUTTON_LEFT)
+        {
+            selectClickedRow();
+            this->ensureSelectionVisible(
+                this->getSelectedLayerRowIndexForDisplay(orderedLayerIndices),
+                &this->layerListScrollOffset,
+                itemCount);
+        }
+        return true;
+    }
+
     const bool clickedIsShipRow =
         clickedIndex >= 0 &&
         clickedIndex < static_cast<int>(orderedLayerIndices.size()) &&
-        orderedLayerIndices[static_cast<size_t>(clickedIndex)] < 0;
+        clickedRowValue == -1;
     const int clickedInstanceIndex =
-        (!clickedIsShipRow && clickedIndex >= 0 && clickedIndex < static_cast<int>(orderedLayerIndices.size()))
-        ? orderedLayerIndices[static_cast<size_t>(clickedIndex)]
+        (!clickedIsShipRow && !clickedTrailPieceSubRow && clickedIndex >= 0 &&
+         clickedIndex < static_cast<int>(orderedLayerIndices.size()))
+        ? clickedRowValue
         : -1;
+
+    if (this->pointInRect(x, y, layerMotionSpawnCibleRect))
+    {
+        selectClickedRow();
+        clearLayerDragState();
+        if (clickedIsShipRow)
+        {
+            this->statusMessage = "SPAWN / trainee : layer VFX uniquement (SHIP : -).";
+            return true;
+        }
+        if (button == RC2D_MOUSE_BUTTON_LEFT)
+        {
+            this->openVfxTrailPopupForInstanceIndex(clickedInstanceIndex);
+            return true;
+        }
+        return true;
+    }
+
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        clearLayerDragState();
+        return true;
+    }
 
     if (this->pointInRect(x, y, layerRelativeRect))
     {
@@ -9707,6 +11927,11 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->adjustShipVfxPreviewZoom(0.05f);
             return true;
         }
+        if (this->pointInRect(x, y, this->buttonShipPilotRect))
+        {
+            this->togglePreviewShipPilotControl();
+            return true;
+        }
     }
 
     if (this->editorMode == EditorMode::LOOSE_SPRITES)
@@ -9829,6 +12054,19 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         return false;
     }
 
+    if (this->previewShipPilotActive && this->previewShipLoaded && button == RC2D_MOUSE_BUTTON_LEFT)
+    {
+        const int vfxHitForMove = this->findTopmostVfxInstanceIndexAtPoint(x, y);
+        if (vfxHitForMove < 0 && !this->vfxRotationDialActive)
+        {
+            Map& mapMut = GetCurrentMap();
+            const SDL_Point t = mapMut.screenToTileNearest(x, y);
+            this->previewShip.moveToTile(mapMut, t.x, t.y);
+            this->statusMessage = "Navire : ordre de deplacement (pilotage actif).";
+            return true;
+        }
+    }
+
     auto isPointInsideInstanceBounds = [this, x, y](int instanceIndex) -> bool {
         if (!this->previewShipLoaded)
         {
@@ -9872,8 +12110,11 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
         const auto& hitLayers = this->currentShipVfxLayers();
         const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, hitLayers, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
-        const float offsetX = ((override != nullptr) ? override->offsetX : instance.offsetX) * scale;
-        const float offsetY = ((override != nullptr) ? override->offsetY : instance.offsetY) * scale;
+        float hitOffX = 0.0f;
+        float hitOffY = 0.0f;
+        this->getVfxPreviewDrawOffsets(instance, override, &hitOffX, &hitOffY);
+        const float offsetX = hitOffX * scale;
+        const float offsetY = hitOffY * scale;
         const SDL_FRect bounds = SDL_FRect{
             shipCenter.x + offsetX - ((frame.w * scale) * 0.5f),
             shipCenter.y + offsetY - ((frame.h * scale) * 0.5f),
@@ -10361,6 +12602,8 @@ void EditorMapVfxScene::update(double dt)
             }
         }
 
+        this->updatePreviewShipPilotAndVfxMotion(dt);
+
     }
     else
     {
@@ -10438,6 +12681,7 @@ void EditorMapVfxScene::draw(void)
         {
             this->drawShipVfxDebugIsoGrid();
         }
+        this->drawShipVfxTrailPieces();
         this->drawShipVfxPreview();
         this->drawShipVfxRotationDialOverlay();
     }
@@ -10476,6 +12720,10 @@ void EditorMapVfxScene::keypressed(
     (void)keycode;
     (void)keyboardID;
 
+    if (this->handleVfxTrailPopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     if (this->handleVfxRelativeTimingPopupKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
@@ -10863,6 +13111,12 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     (void)mouseID;
     Map& map = GetCurrentMap();
 
+    if (this->vfxTrailPopupVisible)
+    {
+        (void)this->handleVfxTrailPopupMouseClick(x, y, button);
+        return;
+    }
+
     if (this->vfxRelativeTimingPopupVisible)
     {
         (void)this->handleVfxRelativeTimingPopupMouseClick(x, y, button);
@@ -10929,7 +13183,7 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
             {
                 return;
             }
-            if (this->handleLayerListClick(x, y))
+            if (this->handleLayerListClick(x, y, button))
             {
                 return;
             }
@@ -10948,6 +13202,14 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
             {
                 return;
             }
+        }
+    }
+
+    if (button == RC2D_MOUSE_BUTTON_RIGHT && this->editorMode == EditorMode::SHIP_VFX)
+    {
+        if (this->handleLayerListClick(x, y, button))
+        {
+            return;
         }
     }
 
@@ -11059,7 +13321,8 @@ void EditorMapVfxScene::mousewheelmoved(
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
         const Map& wheelMap = GetCurrentMap();
-        const int layerItemCount = static_cast<int>(this->getOrderedVfxInstanceIndicesForLayerPanel().size());
+        const int layerItemCount = static_cast<int>(this->expandLayerPanelDisplayRows(
+            this->getOrderedVfxInstanceIndicesForLayerPanel()).size());
         // Ordre aligne sur mousepressed : ignores, calques, puis listes navire / VFX.
         if (scrollInvalidPanel(this->invalidVfxListRect, static_cast<int>(this->invalidVfxFolders.size()), &this->invalidVfxListScrollOffset))
         {
