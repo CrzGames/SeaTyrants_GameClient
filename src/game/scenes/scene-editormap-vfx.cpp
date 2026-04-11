@@ -5514,7 +5514,7 @@ void EditorMapVfxScene::applySelectedVfxRotationFromScreenPointer(float pointerX
     }
 
     // Degres horaire depuis le haut ecran (0 deg = vers le haut), aligne sur l'usage ecran Y vers le bas.
-    float deg = std::atan2f(dx, -dy) * (180.0f / 3.14159265f);
+    float deg = static_cast<float>(std::atan2(dx, -dy)) * (180.0f / 3.14159265f);
     while (deg < 0.0f)
     {
         deg += 360.0f;
