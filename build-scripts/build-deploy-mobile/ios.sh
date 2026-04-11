@@ -57,7 +57,7 @@ fi
 # ==================================================
 DEVICE_ID="$(
   xcrun devicectl list devices 2>/dev/null \
-    | grep -i 'connected' \
+    | grep -E 'available \(paired\)|connected' \
     | grep -Eo '[0-9A-Fa-f-]{36}' \
     | head -n 1 || true
 )"
