@@ -1,6 +1,7 @@
 ﻿#include "core/callbacks.h"
 
 #include "core/context.h"
+#include "game/render/world-render-clip.h"
 #include "crypto/kx.h"
 #include "game/scenes/scene-game.h"
 #include "game/scenes/scene-manager.h"
@@ -27,6 +28,7 @@ SceneManager sceneManager;
 void rc2d_unload(void)
 {
     sceneManager.unload();
+    WorldRenderClip::destroy();
 }
 
 void rc2d_load(void)
