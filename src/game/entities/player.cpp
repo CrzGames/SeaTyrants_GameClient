@@ -20,7 +20,7 @@ void Player::load(void)
     // Valeurs runtime de base du joueur au chargement de scene.
     this->hpCurrent = 100;
     this->hpMax = 100;
-    this->moveSpeedTilesPerSecond = 4.0f;
+    this->moveSpeedTilesPerSecond = 5.0f;
     this->viewRangeTiles = 60.0f;
 
     // La vitesse logique du joueur est propagee au navire.
