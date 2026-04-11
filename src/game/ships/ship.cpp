@@ -4,8 +4,9 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <limits>
-#include <set>
+#include <queue>
 
 #include <cJSON.h>
 
@@ -445,30 +446,27 @@ bool Ship::buildPathAStar(
         int index; // Index lineaire dans la grille.
     };
 
-    // Comparateur pour l'open set : tri par f, puis par (row, col, index)
-    // pour garantir un resultat deterministe.
+    // Comparateur pour min-heap : tri par f, puis (row, col, index)
+    // pour garder un ordre deterministe.
     struct OpenCompare {
         bool operator()(const OpenEntry& a, const OpenEntry& b) const
         {
-            constexpr float kEpsilon = 0.000001f;
-            const float df = a.f - b.f;
-
-            if (std::fabs(df) > kEpsilon)
+            if (a.f != b.f)
             {
-                return a.f < b.f;
+                return a.f > b.f;
             }
 
             if (a.row != b.row)
             {
-                return a.row < b.row;
+                return a.row > b.row;
             }
 
             if (a.col != b.col)
             {
-                return a.col < b.col;
+                return a.col > b.col;
             }
 
-            return a.index < b.index;
+            return a.index > b.index;
         }
     };
 
@@ -476,12 +474,44 @@ bool Ship::buildPathAStar(
 
     const float inf = std::numeric_limits<float>::infinity();
 
-    // Tous les noeuds commencent avec g=inf, f=inf, pas de parent, pas fermes.
-    std::vector<NodeState> states(
-        static_cast<size_t>(total),
-        NodeState{inf, inf, -1, false, MoveDirection::NONE});
+    // Buffers reutilises entre appels pour eviter des reallocations massives.
+    thread_local std::vector<NodeState> states;
+    thread_local std::vector<uint32_t> stateStamp;
+    thread_local uint32_t stateGeneration = 0U;
 
-    std::set<OpenEntry, OpenCompare> openSet;
+    if (states.size() < static_cast<size_t>(total))
+    {
+        states.resize(static_cast<size_t>(total));
+    }
+    if (stateStamp.size() < static_cast<size_t>(total))
+    {
+        stateStamp.resize(static_cast<size_t>(total), 0U);
+    }
+
+    // Increment de generation (avec protection overflow).
+    stateGeneration += 1U;
+    if (stateGeneration == 0U)
+    {
+        std::fill(stateStamp.begin(), stateStamp.end(), 0U);
+        stateGeneration = 1U;
+    }
+
+    std::vector<NodeState>& statesRef = states;
+    std::vector<uint32_t>& stateStampRef = stateStamp;
+    const uint32_t currentGeneration = stateGeneration;
+
+    auto ensureState = [&statesRef, &stateStampRef, currentGeneration, inf](int tileIndex) -> NodeState& {
+        if (stateStampRef[static_cast<size_t>(tileIndex)] != currentGeneration)
+        {
+            stateStampRef[static_cast<size_t>(tileIndex)] = currentGeneration;
+            statesRef[static_cast<size_t>(tileIndex)] =
+                NodeState{inf, inf, -1, false, MoveDirection::NONE};
+        }
+
+        return statesRef[static_cast<size_t>(tileIndex)];
+    };
+
+    std::priority_queue<OpenEntry, std::vector<OpenEntry>, OpenCompare> openSet;
 
     const int startIndex = indexOf(startTile.x, startTile.y);
     const int goalIndex = indexOf(goalTile.x, goalTile.y);
@@ -494,13 +524,30 @@ bool Ship::buildPathAStar(
         return false;
     }
 
-    // Le noeud de depart a un cout g=0.
-    states[static_cast<size_t>(startIndex)].g = 0.0f;
-    states[static_cast<size_t>(startIndex)].f =
-        aStarHeuristic(startTile.x, startTile.y, goalTile.x, goalTile.y);
+    int goalRow = 0;
+    int goalCol = 0;
+    const bool goalSeaValid = tileToSeaRowCol(goalTile.x, goalTile.y, goalRow, goalCol);
 
-    openSet.insert(OpenEntry{
-        states[static_cast<size_t>(startIndex)].f,
+    auto heuristicFromSea = [goalSeaValid, goalRow, goalCol](int fromRow, int fromCol) -> float {
+        if (!goalSeaValid)
+        {
+            return 0.0f;
+        }
+
+        const float dr = static_cast<float>(fromRow - goalRow);
+        const float dc = static_cast<float>(fromCol - goalCol);
+        return std::sqrt((dr * dr) + (dc * dc));
+    };
+
+    // Le noeud de depart a un cout g=0.
+    NodeState& startState = ensureState(startIndex);
+    startState.g = 0.0f;
+    startState.f = goalSeaValid
+        ? heuristicFromSea(startRow, startCol)
+        : aStarHeuristic(startTile.x, startTile.y, goalTile.x, goalTile.y);
+
+    openSet.push(OpenEntry{
+        startState.f,
         startRow,
         startCol,
         startIndex});
@@ -515,6 +562,9 @@ bool Ship::buildPathAStar(
     const int evenRowDr[kNeighborCount] = {-1,  1,  1, -1};
     const int evenRowDc[kNeighborCount] = { 1,  1,  0,  0};
 
+    const float halfTileW = map.getTileWidth() * 0.5f;
+    const float halfTileH = map.getTileHeight() * 0.5f;
+
     // --- Boucle principale A* ---
 
     bool found = false;
@@ -522,11 +572,19 @@ bool Ship::buildPathAStar(
     while (!openSet.empty())
     {
         // Extraction du noeud avec le plus petit f.
-        const OpenEntry current = *openSet.begin();
-        openSet.erase(openSet.begin());
+        const OpenEntry current = openSet.top();
+        openSet.pop();
 
-        // Noeud deja ferme (doublon dans l'open set) -> on l'ignore.
-        if (states[static_cast<size_t>(current.index)].closed)
+        NodeState& currentState = ensureState(current.index);
+
+        // Noeud deja ferme (doublon stale) -> on l'ignore.
+        if (currentState.closed)
+        {
+            continue;
+        }
+
+        // Entree stale (ancienne valeur de f) -> on l'ignore.
+        if (current.f > currentState.f)
         {
             continue;
         }
@@ -539,7 +597,7 @@ bool Ship::buildPathAStar(
         }
 
         // Fermer le noeud courant.
-        states[static_cast<size_t>(current.index)].closed = true;
+        currentState.closed = true;
 
         // Reconversion de l'index en tuile puis en (row, col) Sea-like.
         const SDL_Point currentTile = pointOf(current.index);
@@ -575,39 +633,42 @@ bool Ship::buildPathAStar(
             }
 
             const int nextIndex = indexOf(nextX, nextY);
+            NodeState& nextState = ensureState(nextIndex);
 
             // Noeud deja ferme -> on l'ignore.
-            if (states[static_cast<size_t>(nextIndex)].closed)
+            if (nextState.closed)
             {
                 continue;
             }
 
             // Cout tentative : chaque deplacement coute 1.
-            const float tentativeG = states[static_cast<size_t>(current.index)].g + 1.0f;
+            const float tentativeG = currentState.g + 1.0f;
 
             // Ce chemin n'ameliore pas le meilleur cout connu -> on l'ignore.
-            if (tentativeG >= states[static_cast<size_t>(nextIndex)].g)
+            if (tentativeG >= nextState.g)
             {
                 continue;
             }
 
             // Mise a jour du noeud voisin.
-            states[static_cast<size_t>(nextIndex)].parent = current.index;
-            states[static_cast<size_t>(nextIndex)].g = tentativeG;
-            states[static_cast<size_t>(nextIndex)].f =
-                tentativeG + aStarHeuristic(nextX, nextY, goalTile.x, goalTile.y);
+            nextState.parent = current.index;
+            nextState.g = tentativeG;
+            nextState.f = tentativeG + (goalSeaValid
+                    ? heuristicFromSea(nextRow, nextCol)
+                    : aStarHeuristic(nextX, nextY, goalTile.x, goalTile.y));
 
             // Calcul de la direction visuelle du segment courant -> voisin.
-            // On projette les deux tuiles a l'ecran pour obtenir un vecteur ecran.
-            const SDL_FPoint currentCenter = map.tileToScreenCenter(currentTile.x, currentTile.y);
-            const SDL_FPoint nextCenter = map.tileToScreenCenter(nextX, nextY);
-            states[static_cast<size_t>(nextIndex)].dirFromParent = quantizeScreenDirection(
-                nextCenter.x - currentCenter.x,
-                nextCenter.y - currentCenter.y);
+            // Equivalence de tileToScreenCenter(next) - tileToScreenCenter(current),
+            // sans repasser par deux conversions completes.
+            const float deltaTileX = static_cast<float>(nextX - currentTile.x);
+            const float deltaTileY = static_cast<float>(nextY - currentTile.y);
+            const float deltaScreenX = (deltaTileX - deltaTileY) * halfTileW;
+            const float deltaScreenY = (deltaTileX + deltaTileY) * halfTileH;
+            nextState.dirFromParent = quantizeScreenDirection(deltaScreenX, deltaScreenY);
 
             // Insertion dans l'open set.
-            openSet.insert(OpenEntry{
-                states[static_cast<size_t>(nextIndex)].f,
+            openSet.push(OpenEntry{
+                nextState.f,
                 nextRow,
                 nextCol,
                 nextIndex});
@@ -633,10 +694,18 @@ bool Ship::buildPathAStar(
             return false;
         }
 
-        outPath.push_back(pointOf(walk));
-        outDirections.push_back(states[static_cast<size_t>(walk)].dirFromParent);
+        if (stateStamp[static_cast<size_t>(walk)] != stateGeneration)
+        {
+            outPath.clear();
+            outDirections.clear();
+            return false;
+        }
 
-        walk = states[static_cast<size_t>(walk)].parent;
+        const NodeState& walkState = states[static_cast<size_t>(walk)];
+        outPath.push_back(pointOf(walk));
+        outDirections.push_back(walkState.dirFromParent);
+
+        walk = walkState.parent;
 
         if (walk < 0)
         {
