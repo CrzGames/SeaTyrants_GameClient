@@ -1,3 +1,3 @@
 # Format: library=repository:tag ou library=repository:commit_sha
 
-Crzgames_RC2D=https://github.com/CrzGames/Crzgames_RC2D.git:4ff662e7bc87be27d3656d6846078c292e71659b
+Crzgames_RC2D=https://github.com/CrzGames/Crzgames_RC2D.git:913ac8a08ac7dec7b2f688454c62d0feaed3ca4e
