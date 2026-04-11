@@ -47,10 +47,11 @@ public:
     /**
      * @brief Charge les sprites du navire depuis un dossier atlas.
      * @param folderPath Dossier contenant 1.png..8.png.
-     * @param storageKind Storage RC2D (TITLE/USER).
      * @return True si le navire est charge.
+     *
+     * Le gameplay charge toujours depuis RC2D_STORAGE_TITLE.
      */
-    bool loadShip(const char* folderPath, RC2D_StorageKind storageKind);
+    bool loadShip(const char* folderPath);
 
     /**
      * @brief Decharge les ressources du navire.

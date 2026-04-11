@@ -190,6 +190,15 @@ public:
     /**
      * @brief Charge les sprites 1.png..8.png depuis un dossier.
      * @param folderPath Chemin du dossier atlas navire.
+     * @return True si tous les sprites sont charges depuis RC2D_STORAGE_TITLE.
+     *
+     * Cette surcharge runtime gameplay force toujours le storage TITLE.
+     */
+    bool loadSpritesFromFolder(const char* folderPath);
+
+    /**
+     * @brief Charge les sprites 1.png..8.png depuis un dossier.
+     * @param folderPath Chemin du dossier atlas navire.
      * @param storageKind Storage RC2D (TITLE/USER).
      * @return True si tous les sprites sont charges.
      *
@@ -219,10 +228,16 @@ public:
      * @brief Retourne l'apparence de vie courante.
      */
     HealthVisual getHealthVisual(void) const;
+
     /**
-     * @brief Force la direction visuelle pour une preview statique.
+     * @brief Force la direction visuelle pour une preview statique dans l'editeur de map.
      */
     void setPreviewDirection(PreviewDirection direction);
+
+    /**
+     * @brief Retourne la direction visuelle diagonale actuellement affichee.
+     */
+    PreviewDirection getCurrentPreviewDirection(void) const;
 
     // ---- Vitesse ----
 

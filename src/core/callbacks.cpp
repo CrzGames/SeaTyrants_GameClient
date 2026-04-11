@@ -64,8 +64,8 @@ void rc2d_load(void)
     sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
 #endif
     //sceneManager.addScene("splashscreen", new SplashScreenScene());
-    //sceneManager.addScene("game", new GameScene());
-    sceneManager.changeScene("editormap-vfx");
+    sceneManager.addScene("game", new GameScene());
+    sceneManager.changeScene("game");
 
     // Mettre en plein écran.
     //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);

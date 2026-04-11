@@ -1,0 +1,377 @@
+{
+	"editor":	{
+		"schema":	"scene-editormap-vfx",
+		"schemaVersion":	1,
+		"ship":	{
+			"displayName":	"ship-elite27",
+			"folderPath":	"assets/images/ships/ship-elite27"
+		},
+		"animation":	{
+			"displayName":	"vfx-cannon",
+			"sourceJsonPath":	"assets/images/vfx/vfx-cannon/vfx-cannon-spritesheet.json",
+			"defaultVfxFps":	20
+		},
+		"layerPages":	[{
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	false,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[{
+						"instanceId":	7,
+						"label":	"cannon #1 (1)",
+						"displayName":	"vfx-cannon",
+						"sourceJsonPath":	"assets/images/vfx/vfx-cannon/vfx-cannon-spritesheet.json",
+						"offsetX":	-6.5,
+						"offsetY":	101,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	1,
+						"visible":	true,
+						"debugBoundsVisible":	true,
+						"placementSnapClickToTile":	false,
+						"locked":	false,
+						"followShip":	true,
+						"sharedForAllDirections":	true,
+						"sharedForAllStates":	true,
+						"spawnAfterInstanceId":	0,
+						"spawnAfterDelayMs":	0,
+						"directionOverrides":	{
+							"down_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	1,
+								"visible":	true
+							},
+							"up_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	1,
+								"visible":	true
+							},
+							"up_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	1,
+								"visible":	true
+							},
+							"down_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	1,
+								"visible":	true
+							}
+						}
+					}, {
+						"instanceId":	8,
+						"label":	"cannon #1 (2)",
+						"displayName":	"vfx-cannon",
+						"sourceJsonPath":	"assets/images/vfx/vfx-cannon/vfx-cannon-spritesheet.json",
+						"offsetX":	47,
+						"offsetY":	68.5,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	2,
+						"visible":	true,
+						"debugBoundsVisible":	true,
+						"placementSnapClickToTile":	false,
+						"locked":	false,
+						"followShip":	true,
+						"sharedForAllDirections":	true,
+						"sharedForAllStates":	true,
+						"spawnAfterInstanceId":	7,
+						"spawnAfterDelayMs":	450,
+						"directionOverrides":	{
+							"down_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"up_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"up_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"down_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							}
+						}
+					}, {
+						"instanceId":	9,
+						"label":	"cannon #1 (3)",
+						"displayName":	"vfx-cannon",
+						"sourceJsonPath":	"assets/images/vfx/vfx-cannon/vfx-cannon-spritesheet.json",
+						"offsetX":	96.5,
+						"offsetY":	43.5,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	3,
+						"visible":	true,
+						"debugBoundsVisible":	true,
+						"placementSnapClickToTile":	false,
+						"locked":	false,
+						"followShip":	true,
+						"sharedForAllDirections":	true,
+						"sharedForAllStates":	true,
+						"spawnAfterInstanceId":	8,
+						"spawnAfterDelayMs":	450,
+						"directionOverrides":	{
+							"down_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	3,
+								"visible":	true
+							},
+							"up_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	3,
+								"visible":	true
+							},
+							"up_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	3,
+								"visible":	true
+							},
+							"down_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	3,
+								"visible":	true
+							}
+						}
+					}]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}]
+	},
+	"gameplay":	{
+		"shipFolderPath":	"assets/images/ships/ship-elite27",
+		"vfxFolderPath":	"assets/images/vfx/vfx-cannon",
+		"defaultVfxFps":	20,
+		"directionStates":	[{
+				"ship":	{
+					"direction":	"down_left",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[{
+						"instanceId":	7,
+						"offsetX":	-6.5,
+						"offsetY":	101,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	1,
+						"visible":	true,
+						"spawnAfterInstanceId":	0,
+						"spawnAfterDelayMs":	0
+					}, {
+						"instanceId":	8,
+						"offsetX":	47,
+						"offsetY":	68.5,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	2,
+						"visible":	true,
+						"spawnAfterInstanceId":	7,
+						"spawnAfterDelayMs":	450
+					}, {
+						"instanceId":	9,
+						"offsetX":	96.5,
+						"offsetY":	43.5,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	3,
+						"visible":	true,
+						"spawnAfterInstanceId":	8,
+						"spawnAfterDelayMs":	450
+					}]
+			}, {
+				"ship":	{
+					"direction":	"up_right",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_left",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_right",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_left",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_right",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_left",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_right",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}]
+	}
+}

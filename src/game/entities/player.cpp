@@ -45,10 +45,10 @@ float Player::getViewRangeTiles(void) const
     return this->viewRangeTiles;
 }
 
-bool Player::loadShip(const char* folderPath, RC2D_StorageKind storageKind)
+bool Player::loadShip(const char* folderPath)
 {
-    // Delegation directe au composant Ship (atlas + validation).
-    return this->ship.loadSpritesFromFolder(folderPath, storageKind);
+    // Delegation directe au composant Ship (atlas + validation) avec storage TITLE.
+    return this->ship.loadSpritesFromFolder(folderPath);
 }
 
 void Player::unloadShip(void)

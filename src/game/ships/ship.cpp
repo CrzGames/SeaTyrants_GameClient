@@ -1022,6 +1022,12 @@ Ship::HealthVisual Ship::getHealthVisual(void) const
     return this->healthVisual;
 }
 
+bool Ship::loadSpritesFromFolder(const char* folderPath)
+{
+    // Runtime gameplay: le chargement ship se fait toujours depuis le storage TITLE.
+    return this->loadSpritesFromFolder(folderPath, RC2D_STORAGE_TITLE);
+}
+
 void Ship::setPreviewDirection(PreviewDirection direction)
 {
     DiagonalDirection diagonal = DiagonalDirection::DOWN_LEFT;
@@ -1049,6 +1055,26 @@ void Ship::setPreviewDirection(PreviewDirection direction)
     this->directionA = diagonal;
     this->directionB = diagonal;
     this->moveDirection = MoveDirection::NONE;
+}
+
+Ship::PreviewDirection Ship::getCurrentPreviewDirection(void) const
+{
+    const DiagonalDirection visualDirection =
+        (this->directionUsesPair && this->directionToggle) ? this->directionB : this->directionA;
+
+    switch (visualDirection)
+    {
+    case DiagonalDirection::DOWN_LEFT:
+        return PreviewDirection::DOWN_LEFT;
+    case DiagonalDirection::UP_RIGHT:
+        return PreviewDirection::UP_RIGHT;
+    case DiagonalDirection::UP_LEFT:
+        return PreviewDirection::UP_LEFT;
+    case DiagonalDirection::DOWN_RIGHT:
+        return PreviewDirection::DOWN_RIGHT;
+    default:
+        return PreviewDirection::DOWN_LEFT;
+    }
 }
 
 void Ship::setSpeedTilesPerSecond(float speed)
