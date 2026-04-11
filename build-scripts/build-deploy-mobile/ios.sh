@@ -46,7 +46,7 @@ echo -e "${GREEN}Cleaning and rebuilding the project...${NC}"
 cmake --build "$BUILD_DIR" --target clean
 cmake --build "$BUILD_DIR" --config "$CONFIGURATION"
 
-APP_PATH="$(find "$BUILD_DIR/$CONFIGURATION" -name "$APP_NAME.app" -print -quit)"
+APP_PATH="$(find "$BUILD_DIR" -type d -path "*/${CONFIGURATION}-iphoneos/${APP_NAME}.app" -print -quit)"
 if [ ! -d "$APP_PATH" ]; then
   echo -e "${RED}Erreur : Aucun fichier $APP_NAME.app trouvé.${NC}"
   exit 1
