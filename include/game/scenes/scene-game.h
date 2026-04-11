@@ -1,11 +1,14 @@
 #pragma once
 
+#include <string>
+
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
 #include "game/ui/hud/ingame-hud-overlay.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 #include "game/ui/overlay/tile-click-marker.h"
+#include "game/vfx/vfx.h"
 
 /**
  * @brief Scene principale gameplay.
@@ -18,6 +21,9 @@ private:
     ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
     IngameHudOverlay hudOverlay;       /**< UI gameplay (fond + minimap + bouton centre). */
+    std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */
+    std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
+    VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
 
 public:
     /**

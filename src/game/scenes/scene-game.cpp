@@ -9,7 +9,10 @@ GameScene::GameScene(void)
     : clickMarker{},
       scrollBarOverlay{},
       shipAutoFollowEnabled(true),
-      hudOverlay{}
+      hudOverlay{},
+      playerShipFolderPath("assets/images/ships/ship-elite27"),
+      playerVfxFolderPath("assets/images/vfx/vfx-cannon"),
+      shipVfx{}
 {
 }
 
@@ -18,11 +21,26 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
     Camera& camera = GetCamera();
+    const std::string& shipFolderPath = this->playerShipFolderPath;
 
     // Load le navire du joueur.
-    if (!player.loadShip("assets/images/ships/elite8", RC2D_STORAGE_TITLE))
+    if (!player.loadShip(shipFolderPath.c_str()))
     {
-        RC2D_log(RC2D_LOG_ERROR, "GameScene: echec chargement navire '%s'", "assets/atlas/elite20");
+        RC2D_log(
+            RC2D_LOG_ERROR,
+            "GameScene: echec chargement navire '%s'",
+            shipFolderPath.c_str());
+    }
+
+    // Load le VFX de tir du joueur.
+    if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
+    {
+        RC2D_log(
+            RC2D_LOG_ERROR,
+            "GameScene: echec chargement VFX (shipFolder='%s', vfxFolder='%s')",
+            this->playerShipFolderPath.c_str(),
+            this->playerVfxFolderPath.c_str());
+        return;
     }
 
     // Spawn au secteur 30-AE (centre approximatif).
@@ -41,6 +59,7 @@ void GameScene::unload(void)
 
     // Libere les ressources du jeu.
     GameplayShaderController::unloadAll();
+    this->shipVfx.unload();
     player.unload();
     this->clickMarker.hide();
     this->scrollBarOverlay.unload();
@@ -91,6 +110,7 @@ void GameScene::update(double dt)
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
     oceanShader.endWakeFrame(map, map.rect);
+    this->shipVfx.update(dt, player.getShip());
 
     // Met a jour les shaders de visibilite (nuages + fog).
     GameplayShaderController::updateVisibility(dt, player);
@@ -152,8 +172,14 @@ void GameScene::draw(void)
     // Dessine le marqueur de clic.
     this->clickMarker.draw(map);
 
-    // Dessine le joueur par-dessus l'ocean et le fog.
+    // Dessine les VFX derriere le ship.
+    this->shipVfx.draw(map, player.getShip(), true);
+
+    // Dessine le joueur.
     player.draw(map);
+
+    // Dessine les VFX devant le ship.
+    this->shipVfx.draw(map, player.getShip(), false);
 
     // Dessine les nuages par-dessus le joueur pour un rendu "au-dessus".
     if (visionCloudShader.isReady())
