@@ -88,6 +88,7 @@ inline int layerPanelTrailPieceRowCodeFromUiId(uint32_t uiId)
 
 struct ShipVfxLayerPagePickerLayout
 {
+    SDL_FRect duplicateToPagesButtonRect{};
     SDL_FRect pageButtonRect{};
     SDL_FRect popupRect{};
     SDL_FRect pageRowRects[kShipVfxLayerPageCount]{};
@@ -102,10 +103,16 @@ static ShipVfxLayerPagePickerLayout buildShipVfxLayerPagePickerLayout(
     ShipVfxLayerPagePickerLayout out{};
     const float rowsWidth = layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
     constexpr float kPageBtnW = 56.0f;
+    constexpr float kDupPagesBtnW = 52.0f;
+    constexpr float kHeaderPageBtnGap = 4.0f;
     out.pageButtonRect.x = layerListRect.x + panelPadding + rowsWidth - kPageBtnW;
     out.pageButtonRect.y = layerListRect.y + 1.0f;
     out.pageButtonRect.w = kPageBtnW;
     out.pageButtonRect.h = headerHeight + 2.0f;
+    out.duplicateToPagesButtonRect.w = kDupPagesBtnW;
+    out.duplicateToPagesButtonRect.h = headerHeight + 2.0f;
+    out.duplicateToPagesButtonRect.x = out.pageButtonRect.x - kDupPagesBtnW - kHeaderPageBtnGap;
+    out.duplicateToPagesButtonRect.y = layerListRect.y + 1.0f;
 
     if (!pickerOpen)
     {
@@ -998,6 +1005,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonShipVfxZoomMinusRect{},
       buttonShipVfxZoomPlusRect{},
       previewShipPilotActive(false),
+      pilotVfxMaxDurationClockAnchorSeconds(0.0f),
       buttonShipPilotRect{},
       buttonFollowShipRect{},
       buttonRemoveVfxRect{},
@@ -1126,7 +1134,6 @@ void EditorMapVfxScene::clearShipVfxLayerUiTransientStateForPageChange(void)
     this->layerRowDragSourceDisplayIndex = -1;
     this->layerRowDragTargetInsertIndex = -1;
     this->layerRowDragStartMouseY = 0.0f;
-    this->clearShipVfxTrailPieces();
 }
 
 void EditorMapVfxScene::applyShipVfxLayerPageIndex(int pageIndex)
@@ -1168,6 +1175,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->shipLayerSelected = false;
     this->previewIsoGridVisible = false;
     this->previewShipPilotActive = false;
+    this->pilotVfxMaxDurationClockAnchorSeconds = 0.0f;
     this->previewShipTile = SDL_FPoint{0.0f, 0.0f};
     this->clearShipVfxTrailPieces();
     this->clearAllShipVfxLayerPages();
@@ -1182,6 +1190,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->vfxDragStartOffsetX = 0.0f;
     this->vfxDragStartOffsetY = 0.0f;
     this->shipVfxLayerPagePickerOpen = false;
+    this->closeVfxDuplicateToPagesPopup();
     this->shipVfxDirty = false;
     this->loadedShipVfxConfigPath.clear();
     this->invalidShipFolders.clear();
@@ -1248,12 +1257,15 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->shipVfxLayerPagePickerOpen = false;
     this->closeVfxRelativeTimingPopup();
     this->closeVfxTrailPopup();
+    this->closeVfxDuplicateToPagesPopup();
     this->previewShipPilotActive = false;
+    this->pilotVfxMaxDurationClockAnchorSeconds = 0.0f;
 }
 
 void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
 {
     this->previewShipPilotActive = false;
+    this->pilotVfxMaxDurationClockAnchorSeconds = 0.0f;
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
     map.update();
@@ -1538,6 +1550,7 @@ void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
     this->previewShipLoaded = false;
     this->loadedShipFolderAbsolute.clear();
     this->clearAllShipVfxLayerPages();
+    this->clearShipVfxTrailPieces();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
     this->initDefaultShipLayerSettingsAllPages();
@@ -1713,6 +1726,7 @@ void EditorMapVfxScene::closeVfxTrailPopup(void)
 void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
 {
     this->closeVfxRelativeTimingPopup();
+    this->closeVfxDuplicateToPagesPopup();
     this->closeVfxTrailPopup();
     if (vfxInstanceIndex < 0 || vfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
     {
@@ -1742,7 +1756,7 @@ void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
     this->vfxTrailPopupRotationPctFocused = false;
     this->shipVfxLayerPagePickerOpen = false;
     this->statusMessage =
-        "SPAWN / trainee : regle la trace (tuile / decal), rotation %, puis VALIDER (decal SPAWN).";
+        "SPAWN / trainee : trace sur tuiles ou derive laterale, rotation %, puis VALIDER (memorise SPAWN).";
 }
 
 bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) const
@@ -1817,6 +1831,7 @@ bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) con
 void EditorMapVfxScene::openVfxRelativeTimingPopup(bool forShipRow, int vfxInstanceIndex)
 {
     this->closeVfxTrailPopup();
+    this->closeVfxDuplicateToPagesPopup();
     this->vfxRelativeTimingPopupIsShipRow = forShipRow;
     this->vfxRelativeTimingPopupTargetVfxIndex = forShipRow ? -1 : vfxInstanceIndex;
     this->vfxRelativeTimingPopupStep = 0;
@@ -1910,6 +1925,20 @@ bool EditorMapVfxScene::computeVfxRelativePopupLayout(VfxRelativePopupLayout* ou
     out->validateBtn = SDL_FRect{out->popup.x + popupW - 124.0f, btnY, 110.0f, 28.0f};
     out->delayInputRect = SDL_FRect{out->popup.x + 14.0f, out->popup.y + 102.0f, popupW - 28.0f, 32.0f};
     return true;
+}
+
+bool EditorMapVfxScene::shouldSkipDrawImportedSfxForPilotMaxLifetime(const ImportedSfx& imported, float timeSeconds) const
+{
+    if (!this->previewShipPilotActive)
+    {
+        return false;
+    }
+    if (imported.animationTotalDurationInfinite || imported.animationTotalDurationMs <= 0)
+    {
+        return false;
+    }
+    const float elapsedSec = timeSeconds - this->pilotVfxMaxDurationClockAnchorSeconds;
+    return elapsedSec >= static_cast<float>(imported.animationTotalDurationMs) * 0.001f;
 }
 
 float EditorMapVfxScene::computeVfxPreviewPhaseSecondsInCycle(
@@ -2284,30 +2313,13 @@ void EditorMapVfxScene::toggleSelectedVfxDirectionOverride(void)
     this->markShipVfxDirty();
 }
 
-void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
+EditorMapVfxScene::ShipVfxInstance EditorMapVfxScene::duplicateShipVfxInstanceFreshId(
+    const EditorMapVfxScene::ShipVfxInstance& src)
 {
-    ShipVfxInstance* instance = this->getSelectedVfxInstance();
-    if (instance == nullptr)
-    {
-        this->statusMessage = "Aucun VFX selectionne.";
-        return;
-    }
-    ShipVfxInstance duplicate = *instance;
+    ShipVfxInstance duplicate = src;
     duplicate.instanceId = this->nextVfxInstanceId++;
     duplicate.spawnAfterInstanceId = 0U;
     duplicate.spawnAfterDelayMs = 0;
-    int sourceInstanceNumber = 1;
-    for (const ShipVfxInstance& existing : this->currentShipVfxLayers())
-    {
-        if (existing.importedSfxIndex == duplicate.importedSfxIndex)
-        {
-            sourceInstanceNumber += 1;
-        }
-    }
-    const int sourceNumber = (std::max)(1, duplicate.importedSfxIndex + 1);
-    duplicate.label = makeDefaultVfxLayerLabel(duplicate.sourceDisplayName, sourceNumber, sourceInstanceNumber);
-    duplicate.offsetX += 12.0f;
-    duplicate.offsetY += 12.0f;
     duplicate.motionSpawnCaptured = false;
     duplicate.motionTrailEveryNTiles = 0;
     duplicate.motionTrailLifetimeMs = 2000;
@@ -2324,12 +2336,325 @@ void EditorMapVfxScene::duplicateSelectedVfxInstance(void)
     duplicate.motionTrailIdleRingSalvoPiecesRemaining = 0;
     duplicate.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
     duplicate.motionTrailDistanceAcc = 0.0f;
-    this->currentShipVfxLayers().push_back(std::move(duplicate));
-    const int duplicatedIndex = static_cast<int>(this->currentShipVfxLayers().size()) - 1;
+    return duplicate;
+}
+
+void EditorMapVfxScene::closeVfxDuplicateToPagesPopup(void)
+{
+    this->vfxDuplicateToPagesPopupVisible = false;
+    this->vfxDuplicateToPagesPopupSourcePageKey = -1;
+}
+
+void EditorMapVfxScene::openVfxDuplicateToPagesPopupFromSelectedVfx(void)
+{
+    this->closeVfxRelativeTimingPopup();
+    this->closeVfxTrailPopup();
+    this->closeVfxDuplicateToPagesPopup();
+    this->shipVfxLayerPagePickerOpen = false;
+
+    ShipVfxInstance* instance = this->getSelectedVfxInstance();
+    if (instance == nullptr)
+    {
+        this->statusMessage = "Aucun VFX selectionne.";
+        return;
+    }
+    if (instance->locked)
+    {
+        this->statusMessage = "Layer verrouille : duplication refusee.";
+        return;
+    }
+
+    this->vfxDuplicateToPagesPopupSourceSnapshot = *instance;
+    this->vfxDuplicateToPagesPopupSourcePageKey = this->getShipVfxLayerPageKey();
+    for (size_t i = 0; i < this->vfxDuplicateToPagesPageSelected.size(); ++i)
+    {
+        this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == this->vfxDuplicateToPagesPopupSourcePageKey);
+    }
+    this->vfxDuplicateToPagesPopupVisible = true;
+    this->statusMessage =
+        "Dupliquer vers les pages cochees (defaut : page courante seule), puis VALIDER.";
+}
+
+void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
+{
+    int targetCount = 0;
+    for (bool sel : this->vfxDuplicateToPagesPageSelected)
+    {
+        if (sel)
+        {
+            targetCount += 1;
+        }
+    }
+    if (targetCount <= 0)
+    {
+        this->statusMessage = "Coche au moins une page cible.";
+        return;
+    }
+
+    const int srcPage = this->vfxDuplicateToPagesPopupSourcePageKey;
+    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    {
+        if (!this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(p)])
+        {
+            continue;
+        }
+        ShipVfxInstance dup = this->duplicateShipVfxInstanceFreshId(this->vfxDuplicateToPagesPopupSourceSnapshot);
+        if (p == srcPage)
+        {
+            dup.offsetX += 12.0f;
+            dup.offsetY += 12.0f;
+        }
+        this->shipVfxLayerPages[static_cast<size_t>(p)].push_back(std::move(dup));
+    }
+
+    const int curKey = this->getShipVfxLayerPageKey();
+    const bool addedToCurrentPage = this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(curKey)];
+
     this->rebuildVfxLayerLabelsFromCurrentInstances();
-    this->setSelectedVfxInstanceIndex(duplicatedIndex);
     this->markShipVfxDirty();
-    this->statusMessage = "Instance VFX dupliquee.";
+    this->closeVfxDuplicateToPagesPopup();
+
+    if (addedToCurrentPage)
+    {
+        this->setSelectedVfxInstanceIndex(static_cast<int>(this->currentShipVfxLayers().size()) - 1);
+    }
+
+    char buf[96] = {};
+    SDL_snprintf(buf, sizeof(buf), "VFX duplique sur %d page(s).", targetCount);
+    this->statusMessage = buf;
+}
+
+bool EditorMapVfxScene::computeVfxDuplicateToPagesPopupLayout(VfxDuplicateToPagesPopupLayout* out) const
+{
+    if (out == nullptr || !this->vfxDuplicateToPagesPopupVisible)
+    {
+        return false;
+    }
+    const SDL_FRect mapRect = GetCurrentMap().rect;
+    out->dimFullMap = mapRect;
+    const float popupW = (std::min)(mapRect.w - 80.0f, 460.0f);
+    const float rowH = 22.0f;
+    const float rowGap = 3.0f;
+    const float topPad = 38.0f;
+    const float presetH = 26.0f;
+    const float presetGap = 6.0f;
+    const float bottomBtns = 36.0f;
+    const float popupH = topPad + (rowH + rowGap) * static_cast<float>(kShipVfxLayerPageCount) + presetGap +
+        presetH + presetGap + bottomBtns;
+    out->popup = SDL_FRect{
+        mapRect.x + ((mapRect.w - popupW) * 0.5f),
+        mapRect.y + ((mapRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+    const float pad = 12.0f;
+    float y = out->popup.y + topPad;
+    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    {
+        out->pageRowRects[i] = SDL_FRect{out->popup.x + pad, y, popupW - pad * 2.0f, rowH};
+        y += rowH + rowGap;
+    }
+    const float presetY = y + presetGap;
+    const float quarter = (popupW - pad * 2.0f - presetGap * 3.0f) * 0.25f;
+    out->btnAll = SDL_FRect{out->popup.x + pad, presetY, quarter, presetH};
+    out->btnNone = SDL_FRect{out->btnAll.x + quarter + presetGap, presetY, quarter, presetH};
+    out->btnOtherPages = SDL_FRect{out->btnNone.x + quarter + presetGap, presetY, quarter, presetH};
+    out->btnSourceOnly = SDL_FRect{out->btnOtherPages.x + quarter + presetGap, presetY, quarter, presetH};
+    const float btnY = out->popup.y + popupH - bottomBtns + 4.0f;
+    out->cancelBtn = SDL_FRect{out->popup.x + pad, btnY, 120.0f, 28.0f};
+    out->validateBtn = SDL_FRect{out->popup.x + popupW - pad - 130.0f, btnY, 130.0f, 28.0f};
+    return true;
+}
+
+void EditorMapVfxScene::drawVfxDuplicateToPagesPopup(void) const
+{
+    if (!this->vfxDuplicateToPagesPopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+    VfxDuplicateToPagesPopupLayout lay{};
+    if (!this->computeVfxDuplicateToPagesPopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->vfxDuplicateToPagesPopupLastLayout = lay;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 150});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{34, 40, 50, 245});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{150, 168, 188, 245});
+    rc2d_graphics_rectangle("line", &lay.popup);
+
+    RC2D_Text titleText = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Dupliquer le layer VFX vers les pages");
+    titleText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&titleText);
+    rc2d_graphics_drawText(&titleText, lay.popup.x + 12.0f, lay.popup.y + 8.0f);
+    rc2d_graphics_destroyText(&titleText);
+
+    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    {
+        const bool on = this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)];
+        rc2d_graphics_setColor(on ? RC2D_Color{64, 108, 86, 235} : RC2D_Color{44, 52, 64, 230});
+        rc2d_graphics_rectangle("fill", &lay.pageRowRects[i]);
+        rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+        rc2d_graphics_rectangle("line", &lay.pageRowRects[i]);
+        char rowBuf[180] = {};
+        shipVfxLayerPageLabelUtf8(i, rowBuf, sizeof(rowBuf));
+        char lineBuf[220] = {};
+        SDL_snprintf(lineBuf, sizeof(lineBuf), "%s  [%s]", rowBuf, on ? "X" : " ");
+        RC2D_Text rowT = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lineBuf);
+        rowT.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&rowT);
+        rc2d_graphics_drawText(&rowT, lay.pageRowRects[i].x + 8.0f, lay.pageRowRects[i].y + 3.0f);
+        rc2d_graphics_destroyText(&rowT);
+    }
+
+    auto drawMiniBtn = [this](const SDL_FRect& r, const char* lab) {
+        rc2d_graphics_setColor(RC2D_Color{56, 68, 84, 230});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+        rc2d_graphics_rectangle("line", &r);
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lab);
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&t, &tw, &th);
+        rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&t);
+    };
+    drawMiniBtn(lay.btnAll, "Toutes");
+    drawMiniBtn(lay.btnNone, "Aucune");
+    drawMiniBtn(lay.btnOtherPages, "Autres");
+    drawMiniBtn(lay.btnSourceOnly, "Ici");
+
+    drawMiniBtn(lay.cancelBtn, "Annuler");
+    rc2d_graphics_setColor(RC2D_Color{72, 118, 92, 230});
+    rc2d_graphics_rectangle("fill", &lay.validateBtn);
+    rc2d_graphics_setColor(RC2D_Color{150, 188, 160, 240});
+    rc2d_graphics_rectangle("line", &lay.validateBtn);
+    RC2D_Text valT = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Valider");
+    valT.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&valT);
+    int vw = 0;
+    int vh = 0;
+    rc2d_graphics_getTextSize(&valT, &vw, &vh);
+    rc2d_graphics_drawText(
+        &valT,
+        lay.validateBtn.x + ((lay.validateBtn.w - static_cast<float>(vw)) * 0.5f),
+        lay.validateBtn.y + ((lay.validateBtn.h - static_cast<float>(vh)) * 0.5f));
+    rc2d_graphics_destroyText(&valT);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+bool EditorMapVfxScene::handleVfxDuplicateToPagesPopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->vfxDuplicateToPagesPopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+    VfxDuplicateToPagesPopupLayout lay{};
+    if (!this->computeVfxDuplicateToPagesPopupLayout(&lay))
+    {
+        return true;
+    }
+    this->vfxDuplicateToPagesPopupLastLayout = lay;
+
+    if (this->pointInRect(x, y, lay.validateBtn))
+    {
+        this->applyVfxDuplicateToPagesPopupValidate();
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeVfxDuplicateToPagesPopup();
+        this->statusMessage = "Duplication vers pages : annule.";
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.btnAll))
+    {
+        for (bool& s : this->vfxDuplicateToPagesPageSelected)
+        {
+            s = true;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.btnNone))
+    {
+        for (bool& s : this->vfxDuplicateToPagesPageSelected)
+        {
+            s = false;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.btnOtherPages))
+    {
+        const int src = this->vfxDuplicateToPagesPopupSourcePageKey;
+        for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+        {
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = (i != src);
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.btnSourceOnly))
+    {
+        for (size_t i = 0; i < this->vfxDuplicateToPagesPageSelected.size(); ++i)
+        {
+            this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == this->vfxDuplicateToPagesPopupSourcePageKey);
+        }
+        return true;
+    }
+    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    {
+        if (this->pointInRect(x, y, lay.pageRowRects[i]))
+        {
+            bool& s = this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)];
+            s = !s;
+            return true;
+        }
+    }
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        this->closeVfxDuplicateToPagesPopup();
+        this->statusMessage = "Duplication vers pages : annule.";
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::handleVfxDuplicateToPagesPopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+    (void)keycode;
+    (void)mod;
+    if (!this->vfxDuplicateToPagesPopupVisible)
+    {
+        return false;
+    }
+    if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
+    {
+        this->closeVfxDuplicateToPagesPopup();
+        this->statusMessage = "Duplication vers pages : annule.";
+        return true;
+    }
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        this->applyVfxDuplicateToPagesPopupValidate();
+        return true;
+    }
+    return true;
 }
 
 void EditorMapVfxScene::moveSelectedLayerOrder(int delta)
@@ -2519,7 +2844,7 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
 
     this->layerListRect = this->shipListRect;
-    this->layerListRect.w = 990.0f;
+    this->layerListRect.w = 1040.0f;
     this->layerListRect.h = 360.0f;
     this->layerListRect.x = map.rect.x + 12.0f;
     this->layerListRect.y = map.rect.y + map.rect.h - this->layerListRect.h - 30.0f;
@@ -3048,6 +3373,25 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
 
     const ShipVfxLayerPagePickerLayout pagePickHeader =
         buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, false);
+    rc2d_graphics_setColor(RC2D_Color{52, 72, 96, 230});
+    rc2d_graphics_rectangle("fill", &pagePickHeader.duplicateToPagesButtonRect);
+    rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+    rc2d_graphics_rectangle("line", &pagePickHeader.duplicateToPagesButtonRect);
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        RC2D_Text dupPagesText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "DUP+");
+        dupPagesText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&dupPagesText);
+        int dpW = 0;
+        int dpH = 0;
+        rc2d_graphics_getTextSize(&dupPagesText, &dpW, &dpH);
+        rc2d_graphics_drawText(
+            &dupPagesText,
+            pagePickHeader.duplicateToPagesButtonRect.x +
+                ((pagePickHeader.duplicateToPagesButtonRect.w - static_cast<float>(dpW)) * 0.5f),
+            pagePickHeader.duplicateToPagesButtonRect.y + 1.0f);
+        rc2d_graphics_destroyText(&dupPagesText);
+    }
     rc2d_graphics_setColor(RC2D_Color{48, 56, 68, 230});
     rc2d_graphics_rectangle("fill", &pagePickHeader.pageButtonRect);
     rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
@@ -3135,7 +3479,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             {
                 continue;
             }
-            const ShipVfxTrailPiece& tp = this->shipVfxTrailPieces[static_cast<size_t>(pieceIdx)];
+            const ShipVfxTrailPiece& tp = this->currentShipVfxTrailPieces()[static_cast<size_t>(pieceIdx)];
             const int parentIx = this->findVfxLayerIndexByInstanceId(tp.sourceVfxInstanceId);
             if (parentIx < 0)
             {
@@ -3764,7 +4108,7 @@ void EditorMapVfxScene::updateLayerListRowDragFromMouse(void)
                 }
                 const int pi = this->findTrailPieceIndexByLayerPanelUiId(layerPanelTrailPieceUiIdFromRow(nxt));
                 if (pi < 0 ||
-                    this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId != parentInstId)
+                    this->currentShipVfxTrailPieces()[static_cast<size_t>(pi)].sourceVfxInstanceId != parentInstId)
                 {
                     break;
                 }
@@ -3881,7 +4225,7 @@ void EditorMapVfxScene::applyLayerPanelReorderFromDisplayDrag(int sourceDisplayI
             const int pi =
                 this->findTrailPieceIndexByLayerPanelUiId(layerPanelTrailPieceUiIdFromRow(nxt));
             if (pi < 0 ||
-                this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId != parentId)
+                this->currentShipVfxTrailPieces()[static_cast<size_t>(pi)].sourceVfxInstanceId != parentId)
             {
                 break;
             }
@@ -4886,6 +5230,7 @@ bool EditorMapVfxScene::selectImportedShipAtIndex(int shipIndex)
     }
 
     this->clearAllShipVfxLayerPages();
+    this->clearShipVfxTrailPieces();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
     this->initDefaultShipLayerSettingsAllPages();
@@ -4962,6 +5307,8 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
     std::filesystem::path selectedJsonSourcePath;
     std::filesystem::path selectedImageSourcePath;
     float selectedDefaultFps = 12.0f;
+    bool selectedAnimTotalDurationInfinite = true;
+    int selectedAnimTotalDurationMs = 0;
 
     for (const std::filesystem::path& jsonSourcePath : jsonFiles)
     {
@@ -4997,6 +5344,8 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
                 selectedJsonSourcePath = jsonSourcePath;
                 selectedImageSourcePath = imageSourcePath;
                 selectedDefaultFps = parsed.fps;
+                selectedAnimTotalDurationInfinite = parsed.animationTotalDurationInfinite;
+                selectedAnimTotalDurationMs = parsed.animationTotalDurationMs;
                 break;
             }
         }
@@ -5074,6 +5423,8 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
         imported.frames.push_back(std::move(frame));
     }
     imported.defaultFps = std::clamp(selectedDefaultFps, kSfxFpsMin, kSfxFpsMax);
+    imported.animationTotalDurationInfinite = selectedAnimTotalDurationInfinite;
+    imported.animationTotalDurationMs = selectedAnimTotalDurationMs;
 
     this->importedSfx.push_back(std::move(imported));
     this->selectedSfxIndex = static_cast<int>(this->importedSfx.size()) - 1;
@@ -6802,8 +7153,14 @@ void EditorMapVfxScene::getVfxPreviewDrawOffsets(
 
 void EditorMapVfxScene::clearShipVfxTrailPieces(void)
 {
-    this->shipVfxTrailPieces.clear();
-    this->shipVfxTrailPrevShipTileValid = false;
+    for (std::vector<ShipVfxTrailPiece>& pageTrails : this->shipVfxTrailPiecesByPage)
+    {
+        pageTrails.clear();
+    }
+    for (bool& valid : this->shipVfxTrailPrevShipTileValidByPage)
+    {
+        valid = false;
+    }
 }
 
 void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
@@ -6811,13 +7168,14 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
     Map& map = GetCurrentMap();
     const float dtf = static_cast<float>(dt);
     const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const size_t trailPageIx = static_cast<size_t>(this->getShipVfxLayerPageKey());
 
-    for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+    for (size_t i = 0; i < this->currentShipVfxTrailPieces().size();)
     {
-        this->shipVfxTrailPieces[i].timeRemainingSec -= dtf;
-        if (this->shipVfxTrailPieces[i].timeRemainingSec <= 0.0f)
+        this->currentShipVfxTrailPieces()[i].timeRemainingSec -= dtf;
+        if (this->currentShipVfxTrailPieces()[i].timeRemainingSec <= 0.0f)
         {
-            this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+            this->currentShipVfxTrailPieces().erase(this->currentShipVfxTrailPieces().begin() + static_cast<std::ptrdiff_t>(i));
         }
         else
         {
@@ -6827,6 +7185,38 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
 
     if (this->previewShipPilotActive && this->previewShipLoaded)
     {
+        const float timeSecPilotCull = static_cast<float>(SDL_GetTicks()) * 0.001f;
+        const auto& layersPilotCull = this->currentShipVfxLayers();
+        for (size_t i = 0; i < this->currentShipVfxTrailPieces().size();)
+        {
+            const ShipVfxTrailPiece& trailPiece = this->currentShipVfxTrailPieces()[i];
+            const ShipVfxInstance* srcInst = nullptr;
+            for (const ShipVfxInstance& cand : layersPilotCull)
+            {
+                if (cand.instanceId == trailPiece.sourceVfxInstanceId)
+                {
+                    srcInst = &cand;
+                    break;
+                }
+            }
+            if (srcInst == nullptr || srcInst->importedSfxIndex < 0 ||
+                srcInst->importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+            {
+                ++i;
+                continue;
+            }
+            const ImportedSfx& trailImported =
+                this->importedSfx[static_cast<size_t>(srcInst->importedSfxIndex)];
+            if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(trailImported, timeSecPilotCull))
+            {
+                this->currentShipVfxTrailPieces().erase(this->currentShipVfxTrailPieces().begin() + static_cast<std::ptrdiff_t>(i));
+            }
+            else
+            {
+                ++i;
+            }
+        }
+
         this->previewShip.update(dt, map);
         const SDL_FPoint p = this->previewShip.getPositionTile();
         this->previewShipTile.x = p.x;
@@ -6846,11 +7236,11 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
     const bool moving = this->previewShip.isMoving();
     if (moving)
     {
-        for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+        for (size_t i = 0; i < this->currentShipVfxTrailPieces().size();)
         {
-            if (this->shipVfxTrailPieces[i].fromIdleRingCrown)
+            if (this->currentShipVfxTrailPieces()[i].fromIdleRingCrown)
             {
-                this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() +
+                this->currentShipVfxTrailPieces().erase(this->currentShipVfxTrailPieces().begin() +
                                                 static_cast<std::ptrdiff_t>(i));
             }
             else
@@ -6864,10 +7254,12 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
             inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
         }
-        if (this->shipVfxTrailPrevShipTileValid)
+        if (this->shipVfxTrailPrevShipTileValidByPage[trailPageIx])
         {
-            const float dx = this->previewShipTile.x - this->shipVfxTrailPrevShipTile.x;
-            const float dy = this->previewShipTile.y - this->shipVfxTrailPrevShipTile.y;
+            const float dx =
+                this->previewShipTile.x - this->shipVfxTrailPrevShipTileByPage[trailPageIx].x;
+            const float dy =
+                this->previewShipTile.y - this->shipVfxTrailPrevShipTileByPage[trailPageIx].y;
             const float dist = std::sqrt(dx * dx + dy * dy);
             if (dist > 0.00001f)
             {
@@ -6882,6 +7274,17 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                     inst.motionTrailDistanceAcc += dist;
                     while (inst.motionTrailDistanceAcc >= threshold)
                     {
+                        if (inst.importedSfxIndex >= 0 &&
+                            inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+                        {
+                            const ImportedSfx& spawnImp =
+                                this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
+                            if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(spawnImp, timeSec))
+                            {
+                                inst.motionTrailDistanceAcc -= threshold;
+                                continue;
+                            }
+                        }
                         inst.motionTrailDistanceAcc -= threshold;
                         ShipVfxTrailPiece piece{};
                         piece.sourceVfxInstanceId = inst.instanceId;
@@ -6890,8 +7293,19 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                         piece.bornTimeSeconds = timeSec;
                         piece.timeRemainingSec =
                             (std::max)(static_cast<float>(inst.motionTrailLifetimeMs) / 1000.0f, 0.05f);
-                        piece.trailDrawOffsetX = inst.motionSpawnOffsetX;
-                        piece.trailDrawOffsetY = inst.motionSpawnOffsetY;
+                        const DirectionOverride* movOvr = this->getResolvedDirectionOverride(&inst);
+                        if (inst.motionTrailStrictTilePlacement)
+                        {
+                            this->getVfxPreviewDrawOffsets(inst, movOvr, &piece.trailDrawOffsetX, &piece.trailDrawOffsetY);
+                        }
+                        else
+                        {
+                            piece.trailDrawOffsetX = inst.motionSpawnOffsetX;
+                            piece.trailDrawOffsetY = inst.motionSpawnOffsetY;
+                        }
+                        piece.anchorShipSpriteCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixels(
+                            &piece.anchorShipSpriteCenterOffXPx,
+                            &piece.anchorShipSpriteCenterOffYPx);
                         piece.trailPerpendicularJitterX = 0.0f;
                         piece.trailPerpendicularJitterY = 0.0f;
                         if (!inst.motionTrailStrictTilePlacement && inst.motionTrailLateralJitterRadius > 0.0001f)
@@ -6921,7 +7335,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                             nid = ++this->nextShipVfxTrailLayerPanelUiId;
                         }
                         piece.layerPanelUiId = nid;
-                        this->shipVfxTrailPieces.push_back(piece);
+                        this->currentShipVfxTrailPieces().push_back(piece);
                     }
                 }
             }
@@ -6930,7 +7344,17 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
     else
     {
         constexpr float kTwoPi = 6.28318530718f;
-        const auto spawnIdleRingCrownPiece = [this, timeSec, kTwoPi](ShipVfxInstance& inst, int k) {
+        const auto spawnIdleRingCrownPiece = [this, timeSec, kTwoPi](ShipVfxInstance& inst, int k) -> bool {
+            if (inst.importedSfxIndex >= 0 &&
+                inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+            {
+                const ImportedSfx& ringImported =
+                    this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
+                if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(ringImported, timeSec))
+                {
+                    return false;
+                }
+            }
             const int pieceCount = std::clamp(inst.motionTrailIdleRingPieceCount, 1, 32);
             const float R = (std::max)(inst.motionTrailIdleRingRadius, 2.0f);
             const DirectionOverride* ringOv = this->getResolvedDirectionOverride(&inst);
@@ -6960,6 +7384,9 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             }
             piece.trailDrawOffsetX = ox;
             piece.trailDrawOffsetY = oy;
+            piece.anchorShipSpriteCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixels(
+                &piece.anchorShipSpriteCenterOffXPx,
+                &piece.anchorShipSpriteCenterOffYPx);
             piece.trailPerpendicularJitterX = 0.0f;
             piece.trailPerpendicularJitterY = 0.0f;
             piece.trailRotationJitterDeg = 0.0f;
@@ -6979,7 +7406,8 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             }
             piece.layerPanelUiId = nid;
             piece.fromIdleRingCrown = true;
-            this->shipVfxTrailPieces.push_back(piece);
+            this->currentShipVfxTrailPieces().push_back(piece);
+            return true;
         };
 
         auto& layers = this->currentShipVfxLayers();
@@ -7005,7 +7433,11 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                     inst.motionTrailIdleRingSalvoStaggerAccSec -= staggerSec;
                     const int k = pieceCount - inst.motionTrailIdleRingSalvoPiecesRemaining;
                     inst.motionTrailIdleRingSalvoPiecesRemaining -= 1;
-                    spawnIdleRingCrownPiece(inst, k);
+                    if (!spawnIdleRingCrownPiece(inst, k))
+                    {
+                        inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+                        break;
+                    }
                 }
             }
             else
@@ -7014,7 +7446,10 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                 while (inst.motionTrailIdleSpawnAccSec >= periodSec)
                 {
                     inst.motionTrailIdleSpawnAccSec -= periodSec;
-                    spawnIdleRingCrownPiece(inst, 0);
+                    if (!spawnIdleRingCrownPiece(inst, 0))
+                    {
+                        break;
+                    }
                     inst.motionTrailIdleRingSalvoPiecesRemaining = pieceCount - 1;
                     inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
                 }
@@ -7024,9 +7459,9 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
 
     if (this->previewShipPilotActive)
     {
-        this->shipVfxTrailPrevShipTile.x = this->previewShipTile.x;
-        this->shipVfxTrailPrevShipTile.y = this->previewShipTile.y;
-        this->shipVfxTrailPrevShipTileValid = true;
+        this->shipVfxTrailPrevShipTileByPage[trailPageIx].x = this->previewShipTile.x;
+        this->shipVfxTrailPrevShipTileByPage[trailPageIx].y = this->previewShipTile.y;
+        this->shipVfxTrailPrevShipTileValidByPage[trailPageIx] = true;
     }
 }
 
@@ -7045,7 +7480,11 @@ void EditorMapVfxScene::togglePreviewShipPilotControl(void)
     }
     else
     {
-        this->shipVfxTrailPrevShipTileValid = false;
+        for (bool& v : this->shipVfxTrailPrevShipTileValidByPage)
+        {
+            v = false;
+        }
+        this->pilotVfxMaxDurationClockAnchorSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     }
     this->statusMessage = this->previewShipPilotActive
         ? "Pilotage navire ON : clic gauche sur la mer = deplacement (A*)."
@@ -7066,7 +7505,8 @@ void EditorMapVfxScene::captureVfxMotionSpawnAtIndex(int instanceIndex)
     inst.motionTrailDistanceAcc = 0.0f;
     this->markShipVfxDirty();
     this->statusMessage =
-        "SPAWN memorise (decal trainee). Les rejets actifs s'affichent comme sous-instances sous ce layer.";
+        "SPAWN reference enregistree. En mode derive laterale, la trace utilise ce decal memorise ; "
+        "en mode emplacement du layer, la trace reprend les offsets du layer sur chaque tuile du parcours.";
 }
 
 int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, float y, int excludeInstanceIndex) const
@@ -7127,6 +7567,10 @@ int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, floa
 
         const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
         if (imported.frames.empty() || imported.image.sdl_texture == nullptr)
+        {
+            continue;
+        }
+        if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(imported, timeSeconds))
         {
             continue;
         }
@@ -7309,6 +7753,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parseRoot, "layerPages"));
 
     this->clearAllShipVfxLayerPages();
+    this->clearShipVfxTrailPieces();
     this->initDefaultShipLayerSettingsAllPages();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
@@ -7815,6 +8260,7 @@ bool EditorMapVfxScene::loadShipVfxConfigForSelectedShip(void)
         else
         {
             this->clearAllShipVfxLayerPages();
+            this->clearShipVfxTrailPieces();
             this->initDefaultShipLayerSettingsAllPages();
             this->setSelectedVfxInstanceIndex(-1);
             this->nextVfxInstanceId = 1U;
@@ -9001,6 +9447,10 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
         {
             continue;
         }
+        if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(imported, timeSeconds))
+        {
+            continue;
+        }
 
         const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, previewLayers, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
@@ -9068,7 +9518,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
             if (instance.importedSfxIndex >= 0 && instance.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
             {
                 const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(instance.importedSfxIndex)];
-                if (!imported.frames.empty())
+                if (!imported.frames.empty() && !this->shouldSkipDrawImportedSfxForPilotMaxLifetime(imported, timeSeconds))
                 {
                     const int frameIndex =
                         this->computeVfxPreviewFrameIndex(instance, timeSeconds, previewLayers, imported);
@@ -9098,7 +9548,7 @@ void EditorMapVfxScene::drawShipVfxPreview(void) const
 
 void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
 {
-    if (!this->previewShipLoaded || this->shipVfxTrailPieces.empty())
+    if (!this->previewShipLoaded || this->currentShipVfxTrailPieces().empty())
     {
         return;
     }
@@ -9119,8 +9569,8 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
     };
 
     std::vector<const ShipVfxTrailPiece*> sorted;
-    sorted.reserve(this->shipVfxTrailPieces.size());
-    for (const ShipVfxTrailPiece& p : this->shipVfxTrailPieces)
+    sorted.reserve(this->currentShipVfxTrailPieces().size());
+    for (const ShipVfxTrailPiece& p : this->currentShipVfxTrailPieces())
     {
         sorted.push_back(&p);
     }
@@ -9169,15 +9619,27 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
         {
             continue;
         }
+        if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(imported, timeSeconds))
+        {
+            continue;
+        }
 
         SDL_FPoint shipCenter =
             map.tileToScreenCenterFloat(piece.anchorShipTileX, piece.anchorShipTileY);
-        float shipCenterOffsetX = 0.0f;
-        float shipCenterOffsetY = 0.0f;
-        if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+        if (piece.anchorShipSpriteCenterOffValid)
         {
-            shipCenter.x += shipCenterOffsetX;
-            shipCenter.y += shipCenterOffsetY;
+            shipCenter.x += piece.anchorShipSpriteCenterOffXPx;
+            shipCenter.y += piece.anchorShipSpriteCenterOffYPx;
+        }
+        else
+        {
+            float shipCenterOffsetX = 0.0f;
+            float shipCenterOffsetY = 0.0f;
+            if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+            {
+                shipCenter.x += shipCenterOffsetX;
+                shipCenter.y += shipCenterOffsetY;
+            }
         }
 
         const float phaseTime = (std::max)(0.0f, timeSeconds - piece.bornTimeSeconds);
@@ -9313,6 +9775,10 @@ void EditorMapVfxScene::drawShipVfxTilePlacementGhost(void) const
 
     const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
     const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(gImported, timeSeconds))
+    {
+        return;
+    }
     const DirectionOverride* gOverride = this->getResolvedDirectionOverride(&ghostInst);
     const float gRot = (gOverride != nullptr) ? gOverride->rotationDeg : ghostInst.rotationDeg;
     const bool gFh = (gOverride != nullptr) ? gOverride->flipHorizontal : ghostInst.flipHorizontal;
@@ -9767,7 +10233,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
 std::vector<int> EditorMapVfxScene::expandLayerPanelDisplayRows(const std::vector<int>& coreOrdered) const
 {
     std::vector<int> out;
-    out.reserve(coreOrdered.size() + this->shipVfxTrailPieces.size());
+    out.reserve(coreOrdered.size() + this->currentShipVfxTrailPieces().size());
     for (const int code : coreOrdered)
     {
         out.push_back(code);
@@ -9776,7 +10242,7 @@ std::vector<int> EditorMapVfxScene::expandLayerPanelDisplayRows(const std::vecto
             continue;
         }
         const ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(code)];
-        for (const ShipVfxTrailPiece& p : this->shipVfxTrailPieces)
+        for (const ShipVfxTrailPiece& p : this->currentShipVfxTrailPieces())
         {
             if (p.sourceVfxInstanceId == inst.instanceId && p.layerPanelUiId != 0U)
             {
@@ -9806,9 +10272,9 @@ int EditorMapVfxScene::findTrailPieceIndexByLayerPanelUiId(uint32_t uiId) const
     {
         return -1;
     }
-    for (int i = 0; i < static_cast<int>(this->shipVfxTrailPieces.size()); ++i)
+    for (int i = 0; i < static_cast<int>(this->currentShipVfxTrailPieces().size()); ++i)
     {
-        if (this->shipVfxTrailPieces[static_cast<size_t>(i)].layerPanelUiId == uiId)
+        if (this->currentShipVfxTrailPieces()[static_cast<size_t>(i)].layerPanelUiId == uiId)
         {
             return i;
         }
@@ -9818,11 +10284,11 @@ int EditorMapVfxScene::findTrailPieceIndexByLayerPanelUiId(uint32_t uiId) const
 
 void EditorMapVfxScene::removeTrailPiecesWithSourceInstanceId(uint32_t sourceInstanceId)
 {
-    for (size_t i = 0; i < this->shipVfxTrailPieces.size();)
+    for (size_t i = 0; i < this->currentShipVfxTrailPieces().size();)
     {
-        if (this->shipVfxTrailPieces[i].sourceVfxInstanceId == sourceInstanceId)
+        if (this->currentShipVfxTrailPieces()[i].sourceVfxInstanceId == sourceInstanceId)
         {
-            this->shipVfxTrailPieces.erase(this->shipVfxTrailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+            this->currentShipVfxTrailPieces().erase(this->currentShipVfxTrailPieces().begin() + static_cast<std::ptrdiff_t>(i));
         }
         else
         {
@@ -10127,6 +10593,7 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawLooseExportNamePopup();
     this->drawVfxRelativeTimingPopup();
     this->drawVfxTrailPopup();
+    this->drawVfxDuplicateToPagesPopup();
 }
 
 void EditorMapVfxScene::drawLooseExportNamePopup(void) const
@@ -10659,7 +11126,7 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
         rc2d_graphics_destroyText(&t);
     };
-    drawModeBtn(lay.trailStrictTileBtn, "Tuile + decal SPAWN", this->vfxTrailPopupStrictTilePlacement);
+    drawModeBtn(lay.trailStrictTileBtn, "Emplacement du layer", this->vfxTrailPopupStrictTilePlacement);
     drawModeBtn(lay.trailLateralSpreadBtn, "Derive laterale", !this->vfxTrailPopupStrictTilePlacement);
 
     if (lay.lateralSectionVisible)
@@ -10857,7 +11324,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRingRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
         this->statusMessage =
-            "Trainee : sur la tuile du navire au spawn, decal SPAWN uniquement (pas d'ecart lateral).";
+            "Trainee : une pastille par tuile du parcours, avec le meme decal X/Y que le layer (comme la preview).";
         return true;
     }
     if (this->pointInRect(x, y, lay.trailLateralSpreadBtn))
@@ -11132,23 +11599,30 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
                 didMemorizeSpawnDecal = true;
             }
         }
+        const bool trailStrictForStatus = this->vfxTrailPopupStrictTilePlacement;
+        const bool trailIdleForStatus = this->vfxTrailPopupIdleRingWhenStationary;
         this->closeVfxTrailPopup();
+        const std::string spawnTail =
+            didMemorizeSpawnDecal
+                ? (trailStrictForStatus ? std::string("Reference SPAWN enregistree.")
+                                        : std::string("Decal SPAWN memorise depuis la position actuelle du layer."))
+                : (trailStrictForStatus
+                       ? std::string("Reference SPAWN inchangée (EFFACER puis VALIDER pour recapturer).")
+                       : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
         this->statusMessage =
             "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
-            (this->vfxTrailPopupStrictTilePlacement ? std::string("tuile stricte")
-                                                    : (std::string("decal lat. max ") +
-                                                       std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            (trailStrictForStatus ? std::string("emplacement du layer")
+                                  : (std::string("decal lat. max ") +
+                                     std::to_string(static_cast<int>(std::lround(jitterR))))) +
             ", rotation " + std::to_string(rotPct) + "%" +
-            (this->vfxTrailPopupIdleRingWhenStationary
-                 ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
-                    std::to_string(idlePerMs) + " ms, rayon " +
-                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
-                    std::to_string(idleRingRotPct) +
-                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) + ")")
-                 : std::string(", couronne arret OFF")) +
-            ". " +
-            (didMemorizeSpawnDecal ? std::string("Decal SPAWN memorise depuis la position actuelle du layer.")
-                                    : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
+                                    std::to_string(idlePerMs) + " ms, rayon " +
+                                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+                                    std::to_string(idleRingRotPct) +
+                                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) +
+                                    ")")
+                                 : std::string(", couronne arret OFF")) +
+            ". " + spawnTail;
         return true;
     }
 
@@ -11396,23 +11870,30 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
                 didMemorizeSpawnDecal = true;
             }
         }
+        const bool trailStrictForStatus = this->vfxTrailPopupStrictTilePlacement;
+        const bool trailIdleForStatus = this->vfxTrailPopupIdleRingWhenStationary;
         this->closeVfxTrailPopup();
+        const std::string spawnTail =
+            didMemorizeSpawnDecal
+                ? (trailStrictForStatus ? std::string("Reference SPAWN enregistree.")
+                                        : std::string("Decal SPAWN memorise depuis la position actuelle du layer."))
+                : (trailStrictForStatus
+                       ? std::string("Reference SPAWN inchangée (EFFACER puis VALIDER pour recapturer).")
+                       : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
         this->statusMessage =
             "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
-            (this->vfxTrailPopupStrictTilePlacement ? std::string("tuile stricte")
-                                                    : (std::string("decal lat. max ") +
-                                                       std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            (trailStrictForStatus ? std::string("emplacement du layer")
+                                  : (std::string("decal lat. max ") +
+                                     std::to_string(static_cast<int>(std::lround(jitterR))))) +
             ", rotation " + std::to_string(rotPct) + "%" +
-            (this->vfxTrailPopupIdleRingWhenStationary
-                 ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
-                    std::to_string(idlePerMs) + " ms, rayon " +
-                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
-                    std::to_string(idleRingRotPct) +
-                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) + ")")
-                 : std::string(", couronne arret OFF")) +
-            ". " +
-            (didMemorizeSpawnDecal ? std::string("Decal SPAWN memorise depuis la position actuelle du layer.")
-                                    : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
+                                    std::to_string(idlePerMs) + " ms, rayon " +
+                                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+                                    std::to_string(idleRingRotPct) +
+                                    " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) +
+                                    ")")
+                                 : std::string(", couronne arret OFF")) +
+            ". " + spawnTail;
         return true;
     }
 
@@ -11750,6 +12231,12 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
         return true;
     }
 
+    if (button == RC2D_MOUSE_BUTTON_LEFT && this->pointInRect(x, y, pagePickLayout.duplicateToPagesButtonRect))
+    {
+        this->openVfxDuplicateToPagesPopupFromSelectedVfx();
+        return true;
+    }
+
     if (button == RC2D_MOUSE_BUTTON_LEFT && this->pointInRect(x, y, pagePickLayout.pageButtonRect))
     {
         this->shipVfxLayerPagePickerOpen = true;
@@ -11926,7 +12413,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
             const int pi = this->findTrailPieceIndexByLayerPanelUiId(uid);
             if (pi >= 0)
             {
-                const uint32_t sid = this->shipVfxTrailPieces[static_cast<size_t>(pi)].sourceVfxInstanceId;
+                const uint32_t sid = this->currentShipVfxTrailPieces()[static_cast<size_t>(pi)].sourceVfxInstanceId;
                 const int pIx = this->findVfxLayerIndexByInstanceId(sid);
                 if (pIx >= 0)
                 {
@@ -12135,7 +12622,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
             return true;
         }
 
-        this->duplicateSelectedVfxInstance();
+        this->openVfxDuplicateToPagesPopupFromSelectedVfx();
         clearLayerDragState();
         return true;
     }
@@ -12574,6 +13061,13 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
             return false;
         }
 
+        const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+        const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+        if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(imported, timeSeconds))
+        {
+            return false;
+        }
+
         const Map& map = GetCurrentMap();
         SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
         float shipCenterOffsetX = 0.0f;
@@ -12584,8 +13078,6 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
             shipCenter.y += shipCenterOffsetY;
         }
 
-        const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
-        const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
         const auto& hitLayers = this->currentShipVfxLayers();
         const int frameIndex = this->computeVfxPreviewFrameIndex(instance, timeSeconds, hitLayers, imported);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
@@ -13205,6 +13697,10 @@ void EditorMapVfxScene::keypressed(
     (void)keycode;
     (void)keyboardID;
 
+    if (this->handleVfxDuplicateToPagesPopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     if (this->handleVfxTrailPopupKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
@@ -13359,7 +13855,7 @@ void EditorMapVfxScene::keypressed(
         }
         if (!isrepeat && scancode == SDL_SCANCODE_D)
         {
-            this->duplicateSelectedVfxInstance();
+            this->openVfxDuplicateToPagesPopupFromSelectedVfx();
             return;
         }
         if (!isrepeat && scancode == SDL_SCANCODE_R)
@@ -13602,6 +14098,12 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     (void)clicks;
     (void)mouseID;
     Map& map = GetCurrentMap();
+
+    if (this->vfxDuplicateToPagesPopupVisible)
+    {
+        (void)this->handleVfxDuplicateToPagesPopupMouseClick(x, y, button);
+        return;
+    }
 
     if (this->vfxTrailPopupVisible)
     {

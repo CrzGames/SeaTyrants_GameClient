@@ -62,6 +62,12 @@ private:
         RC2D_Image image;
         std::vector<ImportedSfxFrame> frames;
         float defaultFps;
+        /**
+         * Duree max d'affichage en PILOTER (ms) depuis activation du bouton ; l'anim tourne toujours au defaultFps.
+         * true ou ms 0 : pas de masquage (preview identique hors pilot).
+         */
+        bool animationTotalDurationInfinite = true;
+        int animationTotalDurationMs = 0;
     };
 
     struct DirectionOverride {
@@ -111,8 +117,9 @@ private:
         /** Duree de vie en millisecondes de chaque rejet de trainee sur la carte. */
         int motionTrailLifetimeMs = 2000;
         /**
-         * Si true : chaque rejet reste pile sur le decal SPAWN memorise (tuile du navire au spawn).
-         * Si false : decal lateral aleatoire perpendiculaire a la marche (voir motionTrailLateralJitterRadius).
+         * Si true : en marche, ancrage sur les tuiles du parcours + meme decal X/Y que le layer (comme la preview sur le navire).
+         * Si false : decal lateral aleatoire perpendiculaire a la marche (voir motionTrailLateralJitterRadius) ;
+         *   decal trace = offsets SPAWN memorises.
          */
         bool motionTrailStrictTilePlacement = true;
         /**
@@ -384,6 +391,13 @@ private:
         /** Decal affiche (copie au spawn) : ne pas relire l'instance au dessin si le SPAWN est re-valide. */
         float trailDrawOffsetX = 0.0f;
         float trailDrawOffsetY = 0.0f;
+        /**
+         * Au spawn : decal ecran (px) centre tuile -> reference navire, identique a drawShipVfxPreview + getCurrentSpriteCenterOffsetPixels.
+         * Evite d'appliquer le pivot du navire courant a une ancienne tuile d'ancrage.
+         */
+        float anchorShipSpriteCenterOffXPx = 0.0f;
+        float anchorShipSpriteCenterOffYPx = 0.0f;
+        bool anchorShipSpriteCenterOffValid = false;
         /** Decal perpendiculaire a la marche (meme unite que trailDraw), fige au spawn. */
         float trailPerpendicularJitterX = 0.0f;
         float trailPerpendicularJitterY = 0.0f;
@@ -394,10 +408,39 @@ private:
         /** True si cree par la couronne a l'arret ; supprime des que le navire reprend sa marche. */
         bool fromIdleRingCrown = false;
     };
-    std::vector<ShipVfxTrailPiece> shipVfxTrailPieces;
+    /** Rejets de trainee / sous-instances : une liste par page calques (direction x HP), comme shipVfxLayerPages. */
+    std::array<std::vector<ShipVfxTrailPiece>, 8> shipVfxTrailPiecesByPage{};
     uint32_t nextShipVfxTrailLayerPanelUiId = 1;
-    SDL_FPoint shipVfxTrailPrevShipTile{};
-    bool shipVfxTrailPrevShipTileValid = false;
+    std::array<SDL_FPoint, 8> shipVfxTrailPrevShipTileByPage{};
+    std::array<bool, 8> shipVfxTrailPrevShipTileValidByPage{};
+
+    std::vector<ShipVfxTrailPiece>& currentShipVfxTrailPieces(void)
+    {
+        return this->shipVfxTrailPiecesByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    const std::vector<ShipVfxTrailPiece>& currentShipVfxTrailPieces(void) const
+    {
+        return this->shipVfxTrailPiecesByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
+    }
+
+    struct VfxDuplicateToPagesPopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect pageRowRects[8]{};
+        SDL_FRect btnAll{};
+        SDL_FRect btnNone{};
+        SDL_FRect btnOtherPages{};
+        SDL_FRect btnSourceOnly{};
+        SDL_FRect validateBtn{};
+        SDL_FRect cancelBtn{};
+    };
+    bool vfxDuplicateToPagesPopupVisible = false;
+    ShipVfxInstance vfxDuplicateToPagesPopupSourceSnapshot{};
+    int vfxDuplicateToPagesPopupSourcePageKey = -1;
+    std::array<bool, 8> vfxDuplicateToPagesPageSelected{};
+    mutable VfxDuplicateToPagesPopupLayout vfxDuplicateToPagesPopupLastLayout{};
 
     bool vfxDragActive;
     /** Mode cadran ROT (panneau layers) : cercle autour du navire + ligne vers le curseur. */
@@ -479,6 +522,8 @@ private:
     SDL_FRect buttonShipVfxZoomPlusRect;
     /** Pilotage RTS du navire preview (clic carte = moveToTile). */
     bool previewShipPilotActive;
+    /** Horloge SDL_GetTicks (s) au passage PILOTER ON : clip duree max VFX par atlas (animationTotalDurationMs). */
+    float pilotVfxMaxDurationClockAnchorSeconds;
     SDL_FRect buttonShipPilotRect;
     SDL_FRect buttonShipOrderMinusRect;
     SDL_FRect buttonShipOrderPlusRect;
@@ -589,6 +634,7 @@ private:
         float timeSeconds,
         const std::vector<ShipVfxInstance>& layerVec,
         const ImportedSfx& imported) const;
+    bool shouldSkipDrawImportedSfxForPilotMaxLifetime(const ImportedSfx& imported, float timeSeconds) const;
     /** Phase [0, periode) en secondes pour une instance, en enchainant les RELATIF (A->B->C). */
     float computeVfxPreviewPhaseSecondsInCycle(
         const ShipVfxInstance& instance,
@@ -616,6 +662,19 @@ private:
     void updatePreviewShipPilotAndVfxMotion(double dt);
     void togglePreviewShipPilotControl(void);
     void clearShipVfxTrailPieces(void);
+    void closeVfxDuplicateToPagesPopup(void);
+    void openVfxDuplicateToPagesPopupFromSelectedVfx(void);
+    void applyVfxDuplicateToPagesPopupValidate(void);
+    bool computeVfxDuplicateToPagesPopupLayout(VfxDuplicateToPagesPopupLayout* out) const;
+    void drawVfxDuplicateToPagesPopup(void) const;
+    bool handleVfxDuplicateToPagesPopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleVfxDuplicateToPagesPopupKey(
+        const char* key,
+        SDL_Scancode scancode,
+        SDL_Keycode keycode,
+        SDL_Keymod mod,
+        bool isrepeat);
+    ShipVfxInstance duplicateShipVfxInstanceFreshId(const ShipVfxInstance& src);
     void drawShipVfxTrailPieces(void) const;
     void captureVfxMotionSpawnAtIndex(int instanceIndex);
     void resetSelectedVfxTransform(void);
@@ -624,7 +683,6 @@ private:
     void toggleSelectedVfxBehindShip(void);
     void toggleSelectedVfxSharedForAllDirections(void);
     void toggleSelectedVfxDirectionOverride(void);
-    void duplicateSelectedVfxInstance(void);
     void moveSelectedLayerOrder(int delta);
     bool applyLayerNameInput(void);
     bool importShipVfxConfigFromPath(const char* absoluteFilePath);
