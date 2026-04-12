@@ -2037,7 +2037,7 @@ void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
     if (!std::isfinite(this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec) ||
         this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec <= 0.0f)
     {
-        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec = 6.0f;
     }
     this->vfxTrailPopupParentInstanceIndex = vfxInstanceIndex;
     this->vfxTrailPopupEveryNTilesInput = std::to_string(inst.motionTrailEveryNTiles);
@@ -6487,7 +6487,7 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
     float previewSpeedTilesPerSec = GetGameState().player.getMoveSpeedTilesPerSecond();
     if (!std::isfinite(previewSpeedTilesPerSec) || previewSpeedTilesPerSec <= 0.0f)
     {
-        previewSpeedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+        previewSpeedTilesPerSec = 6.0f;
     }
     this->previewShip.setSpeedTilesPerSecond(previewSpeedTilesPerSec);
     this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
@@ -8469,7 +8469,7 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
     }
     if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
     {
-        speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+        speedTilesPerSec = 6.0f;
     }
     const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
     piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
@@ -8935,7 +8935,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                         float speedTilesPerSec = (dtf > 0.000001f) ? (dist / dtf) : this->previewShip.getSpeedTilesPerSecond();
                         if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
                         {
-                            speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+                            speedTilesPerSec = 6.0f;
                         }
                         const int spawnCount =
                             inst.motionTrailStrictTilePlacement ? 1 : std::clamp(inst.motionTrailConeSpawnCount, 1, 32);
@@ -9001,7 +9001,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             float speedTilesPerSec = this->previewShip.getSpeedTilesPerSecond();
             if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
             {
-                speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+                speedTilesPerSec = 6.0f;
             }
             const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
             piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
