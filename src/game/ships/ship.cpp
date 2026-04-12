@@ -1170,9 +1170,15 @@ void Ship::setDrawAnchorForSprite(int spriteIndex, float anchorX, float anchorY)
     this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)].y = std::clamp(anchorY, 0.0f, 1.0f);
 }
 
-bool Ship::getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffsetY) const
+bool Ship::getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(float effectiveZoom,
+                                                              float* outOffsetX,
+                                                              float* outOffsetY) const
 {
     if (outOffsetX == nullptr || outOffsetY == nullptr)
+    {
+        return false;
+    }
+    if (!std::isfinite(effectiveZoom) || effectiveZoom <= 0.0f)
     {
         return false;
     }
@@ -1192,11 +1198,16 @@ bool Ship::getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffse
     const float spriteW = static_cast<float>(sprite.sdl_texture->w);
     const float spriteH = static_cast<float>(sprite.sdl_texture->h);
     const SDL_FPoint& anchor = this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)];
-    const float cameraZoom = GetCamera().getZoomFactor() * this->drawScale;
 
-    *outOffsetX = (0.5f - anchor.x) * spriteW * cameraZoom;
-    *outOffsetY = (0.5f - anchor.y) * spriteH * cameraZoom;
+    *outOffsetX = (0.5f - anchor.x) * spriteW * effectiveZoom;
+    *outOffsetY = (0.5f - anchor.y) * spriteH * effectiveZoom;
     return true;
+}
+
+bool Ship::getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffsetY) const
+{
+    const float effectiveZoom = GetCamera().getZoomFactor() * this->drawScale;
+    return this->getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(effectiveZoom, outOffsetX, outOffsetY);
 }
 
 bool Ship::getCurrentSpriteSizePixels(float* outWidth, float* outHeight) const
@@ -1537,4 +1548,56 @@ void Ship::draw(const Map& map) const
     const SDL_FPoint center = map.tileToScreenCenterFloat(this->tilePosition.x, this->tilePosition.y);
 
     this->drawSpriteCentered(sprite, spriteIndex, center.x, center.y);
+}
+
+void Ship::drawEditorPreviewAt(float screenCenterX, float screenCenterY, float targetWidthPixels) const
+{
+    const int spriteIndex = this->getCurrentSpriteIndex();
+    if (spriteIndex < 0 || spriteIndex >= static_cast<int>(this->sprites.size()))
+    {
+        return;
+    }
+
+    const RC2D_Image& sprite = this->sprites[static_cast<size_t>(spriteIndex)];
+    if (sprite.sdl_texture == nullptr)
+    {
+        return;
+    }
+
+    const float spriteW = static_cast<float>(sprite.sdl_texture->w);
+    const float spriteH = static_cast<float>(sprite.sdl_texture->h);
+    if (spriteW <= 0.5f)
+    {
+        return;
+    }
+
+    const float tw = (std::max)(targetWidthPixels, 4.0f);
+    const float effZoom = tw / spriteW;
+
+    RC2D_Quad quad = {};
+    quad.src = SDL_FRect{0.0f, 0.0f, spriteW, spriteH};
+
+    const SDL_FPoint& anchor = this->spriteDrawAnchors[static_cast<size_t>(spriteIndex)];
+    const float anchorPixelX = spriteW * anchor.x;
+    const float anchorPixelY = spriteH * anchor.y;
+
+    const float drawX = screenCenterX - (anchorPixelX * effZoom);
+    const float drawY = screenCenterY - (anchorPixelY * effZoom);
+
+    Uint8 previousAlpha = 255;
+    SDL_GetTextureAlphaMod(sprite.sdl_texture, &previousAlpha);
+    SDL_SetTextureAlphaMod(sprite.sdl_texture, this->drawAlpha);
+    rc2d_graphics_drawQuad(
+        (RC2D_Image*)&sprite,
+        &quad,
+        drawX,
+        drawY,
+        0.0,
+        effZoom,
+        effZoom,
+        -1.0f,
+        -1.0f,
+        false,
+        false);
+    SDL_SetTextureAlphaMod(sprite.sdl_texture, previousAlpha);
 }

@@ -1,4 +1,4 @@
-#if GAME_ENV_DEV
+﻿#if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-vfx.h"
 
@@ -23,6 +23,7 @@
 
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
+#include "game/map/map.h"
 #include "game/render/world-render-clip.h"
 
 namespace
@@ -39,8 +40,279 @@ std::mt19937& editorMapVfxTrailJitterRng(void)
 
 /** Amplitude max de rotation aleatoire par rejet (deg) lorsque motionTrailRotationRandomPercent vaut 100. */
 constexpr float kMotionTrailRotationJitterMaxDeg = 45.0f;
-/** Ecart temporel entre deux pieces d'une meme salve couronne (secondes). */
+/** Ecart temporel entre deux pieces d'une meme rafale couronne (secondes). */
 constexpr float kIdleRingPieceStaggerSec = 0.055f;
+/** Cadence fixe entre deux rafales couronne a l'arret (secondes). */
+constexpr float kIdleRingSalvoPeriodSec = 0.60f;
+constexpr int kMotionTrailEveryNTilesMin = 0;
+constexpr int kMotionTrailEveryNTilesMax = 64;
+/** Longueur max du cone arriere en fonction du rayon lateral saisi (meme unite que les offsets). */
+constexpr float kMotionTrailConeDepthBySpreadRatio = 1.0f;
+/** Exposant de repartition de la profondeur du cone (1.0 = uniforme, >1 = plus proche de l'origine). */
+constexpr float kMotionTrailConeDepthUExponent = 1.35f;
+constexpr float kTrailConePopupLengthMin = 1.0f;
+constexpr float kTrailConePopupLengthMax = 2048.0f;
+constexpr float kTrailConePopupOffsetMin = -2048.0f;
+constexpr float kTrailConePopupOffsetMax = 2048.0f;
+constexpr float kTrailConePopupHalfAngleMin = 2.0f;
+constexpr float kTrailConePopupHalfAngleMax = 85.0f;
+/** Dans le preview/placement cone : axe "arriere" fixe (independant de l'orientation navire). */
+constexpr float kTrailConePopupRearAxisRad = 1.57079632679f;
+
+struct EditorMapVfxTrailConePreviewGeom
+{
+    float layerAnchorX = 0.0f;
+    float layerAnchorY = 0.0f;
+    float coneOriginX = 0.0f;
+    float coneOriginY = 0.0f;
+    float maxOffsetPx = 1.0f;
+    float maxLengthPx = 1.0f;
+    float lengthPx = 1.0f;
+    float axisAngleRad = kTrailConePopupRearAxisRad;
+    float tipX = 0.0f;
+    float tipY = 0.0f;
+    float leftX = 0.0f;
+    float leftY = 0.0f;
+    float rightX = 0.0f;
+    float rightY = 0.0f;
+    float sideX = 0.0f;
+    float sideY = 0.0f;
+};
+
+float editorMapVfxDistance2D(float ax, float ay, float bx, float by)
+{
+    const float dx = bx - ax;
+    const float dy = by - ay;
+    return std::sqrt((dx * dx) + (dy * dy));
+}
+
+void editorMapVfxClampRectInside(SDL_FRect* rect, const SDL_FRect& bounds, float marginPx)
+{
+    if (rect == nullptr)
+    {
+        return;
+    }
+    const float minX = bounds.x + marginPx;
+    const float minY = bounds.y + marginPx;
+    const float maxX = (bounds.x + bounds.w) - rect->w - marginPx;
+    const float maxY = (bounds.y + bounds.h) - rect->h - marginPx;
+    rect->x = (std::clamp)(rect->x, minX, maxX);
+    rect->y = (std::clamp)(rect->y, minY, maxY);
+}
+
+void editorMapVfxPushHandleAwayFrom(
+    SDL_FRect* movable,
+    const SDL_FRect& anchor,
+    float minCenterDistance,
+    const SDL_FRect& bounds)
+{
+    if (movable == nullptr)
+    {
+        return;
+    }
+    float mx = movable->x + (movable->w * 0.5f);
+    float my = movable->y + (movable->h * 0.5f);
+    const float ax = anchor.x + (anchor.w * 0.5f);
+    const float ay = anchor.y + (anchor.h * 0.5f);
+    float dx = mx - ax;
+    float dy = my - ay;
+    float dist = std::sqrt((dx * dx) + (dy * dy));
+    if (dist < 0.0001f)
+    {
+        dx = 1.0f;
+        dy = 0.0f;
+        dist = 1.0f;
+    }
+    if (dist < minCenterDistance)
+    {
+        const float need = minCenterDistance - dist;
+        mx += (dx / dist) * need;
+        my += (dy / dist) * need;
+        movable->x = mx - (movable->w * 0.5f);
+        movable->y = my - (movable->h * 0.5f);
+        editorMapVfxClampRectInside(movable, bounds, 2.0f);
+    }
+}
+
+void editorMapVfxDirectionIndexToTileStep(int directionIndex, float* outStepTileX, float* outStepTileY)
+{
+    if (outStepTileX == nullptr || outStepTileY == nullptr)
+    {
+        return;
+    }
+    const int dir = ((directionIndex % 4) + 4) % 4;
+    switch (dir)
+    {
+    case 0:
+        *outStepTileX = 0.0f;
+        *outStepTileY = 1.0f;
+        break;
+    case 1:
+        *outStepTileX = 0.0f;
+        *outStepTileY = -1.0f;
+        break;
+    case 2:
+        *outStepTileX = -1.0f;
+        *outStepTileY = 0.0f;
+        break;
+    default:
+        *outStepTileX = 1.0f;
+        *outStepTileY = 0.0f;
+        break;
+    }
+}
+
+float editorMapVfxNormalizeSignedAngleDeg(float angleDeg)
+{
+    while (angleDeg > 180.0f)
+    {
+        angleDeg -= 360.0f;
+    }
+    while (angleDeg <= -180.0f)
+    {
+        angleDeg += 360.0f;
+    }
+    return angleDeg;
+}
+
+float editorMapVfxTrailConeLengthToPreviewPx(float lengthValue, float maxLengthPx)
+{
+    const float maxPx = (std::max)(maxLengthPx, 1.0f);
+    const float clampedLength = (std::clamp)(lengthValue, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+    // Mapping quasi 1:1 pour que la longueur vue dans la popup colle a la portee reelle de spawn.
+    return (std::clamp)(clampedLength, 0.0f, maxPx);
+}
+
+float editorMapVfxTrailConePreviewPxToLength(float lengthPx, float maxLengthPx)
+{
+    const float maxPx = (std::max)(maxLengthPx, 1.0f);
+    const float clampedPx = (std::clamp)(lengthPx, 0.0f, maxPx);
+    return (std::clamp)(clampedPx, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+}
+
+float editorMapVfxTrailConeOffsetUnitsToPreviewPx(float offsetUnits, float maxOffsetPx)
+{
+    const float maxPx = (std::max)(maxOffsetPx, 1.0f);
+    // Mapping quasi 1:1 pour que l'offset vert vu en popup corresponde a la position de spawn.
+    const float clampedUnits = (std::clamp)(offsetUnits, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    return (std::clamp)(clampedUnits, -maxPx, maxPx);
+}
+
+float editorMapVfxTrailConePreviewPxToOffsetUnits(float offsetPx, float maxOffsetPx)
+{
+    const float maxPx = (std::max)(maxOffsetPx, 1.0f);
+    const float clampedPx = (std::clamp)(offsetPx, -maxPx, maxPx);
+    return (std::clamp)(clampedPx, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+}
+
+EditorMapVfxTrailConePreviewGeom editorMapVfxBuildTrailConePreviewGeom(
+    const SDL_FRect& previewRect,
+    float lengthValue,
+    float offsetXUnits,
+    float offsetYUnits,
+    float directionOffsetDeg,
+    float halfAngleDeg)
+{
+    EditorMapVfxTrailConePreviewGeom geom{};
+    geom.layerAnchorX = previewRect.x + (previewRect.w * 0.5f);
+    geom.layerAnchorY = previewRect.y + (previewRect.h * 0.5f);
+    geom.maxOffsetPx = (std::max)(16.0f, (std::min)(previewRect.w, previewRect.h) * 0.44f);
+    const float offsetXPx = editorMapVfxTrailConeOffsetUnitsToPreviewPx(offsetXUnits, geom.maxOffsetPx);
+    const float offsetYPx = editorMapVfxTrailConeOffsetUnitsToPreviewPx(offsetYUnits, geom.maxOffsetPx);
+    geom.coneOriginX = geom.layerAnchorX + offsetXPx;
+    geom.coneOriginY = geom.layerAnchorY + offsetYPx;
+    geom.maxLengthPx = (std::max)(24.0f, (std::min)(previewRect.w, previewRect.h) * 0.48f);
+    geom.lengthPx = editorMapVfxTrailConeLengthToPreviewPx(lengthValue, geom.maxLengthPx);
+    const float dirOffRad = directionOffsetDeg * (3.14159265359f / 180.0f);
+    geom.axisAngleRad = kTrailConePopupRearAxisRad + dirOffRad;
+    const float coneHalfAngleRad =
+        (std::clamp)(halfAngleDeg, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax) *
+        (3.14159265359f / 180.0f);
+
+    geom.tipX = geom.coneOriginX + std::cos(geom.axisAngleRad) * geom.lengthPx;
+    geom.tipY = geom.coneOriginY + std::sin(geom.axisAngleRad) * geom.lengthPx;
+    geom.leftX = geom.coneOriginX + std::cos(geom.axisAngleRad - coneHalfAngleRad) * geom.lengthPx;
+    geom.leftY = geom.coneOriginY + std::sin(geom.axisAngleRad - coneHalfAngleRad) * geom.lengthPx;
+    geom.rightX = geom.coneOriginX + std::cos(geom.axisAngleRad + coneHalfAngleRad) * geom.lengthPx;
+    geom.rightY = geom.coneOriginY + std::sin(geom.axisAngleRad + coneHalfAngleRad) * geom.lengthPx;
+    // Poignee largeur: placee sur la branche droite du cone.
+    geom.sideX = geom.rightX;
+    geom.sideY = geom.rightY;
+    return geom;
+}
+
+float editorMapVfxSampleTrailConeDepth(float lateralSpread)
+{
+    const float spreadAbs = std::fabs(lateralSpread);
+    if (spreadAbs <= 0.0001f)
+    {
+        return 0.0f;
+    }
+
+    const float maxDepth = spreadAbs * kMotionTrailConeDepthBySpreadRatio;
+    std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+    const float u = std::pow((std::max)(u01(editorMapVfxTrailJitterRng()), 1.0e-6f), kMotionTrailConeDepthUExponent);
+    return maxDepth * u;
+}
+
+float editorMapVfxSampleTrailConeLateral(float halfWidth)
+{
+    const float hw = (std::max)(halfWidth, 0.0f);
+    if (hw <= 0.0001f)
+    {
+        return 0.0f;
+    }
+    // Densite plus naturelle vers l'axe du cone, tout en restant strictement dans [-halfWidth, +halfWidth].
+    std::normal_distribution<float> gauss(0.0f, hw * 0.36f);
+    for (int i = 0; i < 4; ++i)
+    {
+        const float v = gauss(editorMapVfxTrailJitterRng());
+        if (std::fabs(v) <= hw)
+        {
+            return v;
+        }
+    }
+    return (std::clamp)(gauss(editorMapVfxTrailJitterRng()), -hw, hw);
+}
+
+int editorMapVfxParseIntClamped(const char* str, int lo, int hi, int fallback)
+{
+    if (str == nullptr || str[0] == '\0')
+    {
+        return fallback;
+    }
+    char* end = nullptr;
+    const long v = std::strtol(str, &end, 10);
+    if (end == str)
+    {
+        return fallback;
+    }
+    int iv = static_cast<int>(v);
+    if (iv < lo)
+    {
+        iv = lo;
+    }
+    if (iv > hi)
+    {
+        iv = hi;
+    }
+    return iv;
+}
+
+float editorMapVfxParseFloat(const char* str, float fallback)
+{
+    if (str == nullptr || str[0] == '\0')
+    {
+        return fallback;
+    }
+    char* end = nullptr;
+    const float v = std::strtof(str, &end);
+    if (end == str)
+    {
+        return fallback;
+    }
+    return v;
+}
 } // namespace
 
 namespace
@@ -66,7 +338,7 @@ constexpr int kVisibleListRows = 10;
 constexpr float kLayerListPanelRowGap = 6.0f;
 constexpr int kShipVfxLayerPageCount = 8;
 /**
- * Sentinel dans la liste d'affichage Layers : une ligne « sous-instance » par rejet de trainee actif.
+ * Sentinel dans la liste d'affichage Layers : une ligne Ãƒâ€šÃ‚Â« sous-instance Ãƒâ€šÃ‚Â» par rejet de trainee actif.
  * code = kLayerPanelTrailPieceRowMarker - (int)layerPanelUiId (uiId > 0, raisonnable pour rester dans int32).
  */
 constexpr int kLayerPanelTrailPieceRowMarker = -3000000;
@@ -1699,10 +1971,11 @@ void EditorMapVfxScene::closeVfxRelativeTimingPopup(void)
 
 void EditorMapVfxScene::closeVfxTrailPopup(void)
 {
+    this->closeVfxTrailConePopup();
     this->vfxTrailPopupVisible = false;
     this->vfxTrailPopupParentInstanceIndex = -1;
     this->vfxTrailPopupEveryNTilesInput.clear();
-    this->vfxTrailPopupLifetimeMsInput.clear();
+    this->vfxTrailPopupLifetimeTilesInput.clear();
     this->vfxTrailPopupLateralJitterInput.clear();
     this->vfxTrailPopupRotationPctInput.clear();
     this->vfxTrailPopupIdleRingPieceCountInput.clear();
@@ -1713,7 +1986,7 @@ void EditorMapVfxScene::closeVfxTrailPopup(void)
     this->vfxTrailPopupStrictTilePlacement = true;
     this->vfxTrailPopupIdleRingWhenStationary = false;
     this->vfxTrailPopupEveryNTilesFocused = false;
-    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLifetimeTilesFocused = false;
     this->vfxTrailPopupLateralJitterFocused = false;
     this->vfxTrailPopupRotationPctFocused = false;
     this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -1721,6 +1994,31 @@ void EditorMapVfxScene::closeVfxTrailPopup(void)
     this->vfxTrailPopupIdleRadiusFocused = false;
     this->vfxTrailPopupIdleRingRotationPctFocused = false;
     this->vfxTrailPopupIdleRingPosJitterFocused = false;
+    this->vfxTrailPopupPreviewMarcheShipVisible = true;
+    this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec = 0.0f;
+    this->vfxTrailPopupPreviewCrownShipVisible = true;
+    this->vfxTrailPopupPreviewZoom = 1.0f;
+    this->vfxTrailPopupMarcheLastPilotMoveDirValid = false;
+    this->vfxTrailPopupMarcheSimPieces.clear();
+    this->vfxTrailPopupMarcheSimParamSignature.clear();
+    this->vfxTrailPopupMarcheSimDistanceAcc = 0.0f;
+    this->vfxTrailPopupMarcheDistAlongPathPx = 0.0f;
+}
+
+void EditorMapVfxScene::closeVfxTrailConePopup(void)
+{
+    this->vfxTrailConePopupVisible = false;
+    this->vfxTrailConePopupParentInstanceIndex = -1;
+    this->vfxTrailConePopupLength = 96.0f;
+    this->vfxTrailConePopupOffsetX = 0.0f;
+    this->vfxTrailConePopupOffsetY = 0.0f;
+    this->vfxTrailConePopupDirectionOffsetDeg = 0.0f;
+    this->vfxTrailConePopupHalfAngleDeg = 28.0f;
+    this->vfxTrailConePopupSpawnCount = 1;
+    this->vfxTrailConePopupCenterDragActive = false;
+    this->vfxTrailConePopupTipDragActive = false;
+    this->vfxTrailConePopupSideDragActive = false;
+    this->vfxTrailConePopupLastLayout = VfxTrailConePopupLayout{};
 }
 
 void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
@@ -1734,9 +2032,16 @@ void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
     }
     const ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(vfxInstanceIndex)];
     this->vfxTrailPopupVisible = true;
+    this->vfxTrailPopupPreviewZoom = (std::clamp)(GetCamera().getZoomFactor(), 0.4f, 1.0f);
+    this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec = this->previewShip.getSpeedTilesPerSecond();
+    if (!std::isfinite(this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec) ||
+        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec <= 0.0f)
+    {
+        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+    }
     this->vfxTrailPopupParentInstanceIndex = vfxInstanceIndex;
     this->vfxTrailPopupEveryNTilesInput = std::to_string(inst.motionTrailEveryNTiles);
-    this->vfxTrailPopupLifetimeMsInput = std::to_string(inst.motionTrailLifetimeMs);
+    this->vfxTrailPopupLifetimeTilesInput = std::to_string(inst.motionTrailLifetimeTiles);
     this->vfxTrailPopupLateralJitterInput =
         std::to_string(static_cast<int>(std::lround(inst.motionTrailLateralJitterRadius)));
     this->vfxTrailPopupRotationPctInput = std::to_string(inst.motionTrailRotationRandomPercent);
@@ -1751,12 +2056,794 @@ void EditorMapVfxScene::openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex)
     this->vfxTrailPopupStrictTilePlacement = inst.motionTrailStrictTilePlacement;
     this->vfxTrailPopupIdleRingWhenStationary = inst.motionTrailIdleRingWhenStationary;
     this->vfxTrailPopupEveryNTilesFocused = true;
-    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLifetimeTilesFocused = false;
     this->vfxTrailPopupLateralJitterFocused = false;
     this->vfxTrailPopupRotationPctFocused = false;
     this->shipVfxLayerPagePickerOpen = false;
+    VfxTrailPopupLayout openLay{};
+    if (this->computeVfxTrailPopupLayout(&openLay))
+    {
+        this->vfxTrailPopupLastLayout = openLay;
+    }
     this->statusMessage =
-        "SPAWN / trainee : trace sur tuiles ou derive laterale, rotation %, puis VALIDER (memorise SPAWN).";
+        "SPAWN / trainee : SPAWN (EMPLACEMENT DU LAYER) ou SPAWN (OFFSET CONE), rotation %, puis VALIDER.";
+}
+
+void EditorMapVfxScene::openVfxTrailConePopupForInstanceIndex(int vfxInstanceIndex)
+{
+    if (vfxInstanceIndex < 0 || vfxInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        return;
+    }
+    const ShipVfxInstance& inst = this->currentShipVfxLayers()[static_cast<size_t>(vfxInstanceIndex)];
+    this->vfxTrailConePopupVisible = true;
+    this->vfxTrailConePopupParentInstanceIndex = vfxInstanceIndex;
+    this->vfxTrailConePopupLength = std::clamp(inst.motionTrailLateralJitterRadius, 1.0f, 2048.0f);
+    this->vfxTrailConePopupOffsetX = std::clamp(inst.motionTrailConeOffsetX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    this->vfxTrailConePopupOffsetY = std::clamp(inst.motionTrailConeOffsetY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    this->vfxTrailConePopupDirectionOffsetDeg = std::clamp(inst.motionTrailConeDirectionOffsetDeg, -179.0f, 179.0f);
+    this->vfxTrailConePopupHalfAngleDeg = std::clamp(inst.motionTrailConeHalfAngleDeg, 2.0f, 85.0f);
+    this->vfxTrailConePopupSpawnCount = std::clamp(inst.motionTrailConeSpawnCount, 1, 32);
+    this->vfxTrailConePopupCenterDragActive = false;
+    this->vfxTrailConePopupTipDragActive = false;
+    this->vfxTrailConePopupSideDragActive = false;
+    VfxTrailConePopupLayout lay{};
+    if (this->computeVfxTrailConePopupLayout(&lay))
+    {
+        this->vfxTrailConePopupLastLayout = lay;
+    }
+    this->statusMessage =
+        "Cone arriere : glisse VERT (offset X/Y), ORANGE (direction + longueur), CYAN (largeur), puis APPLIQUER.";
+}
+
+bool EditorMapVfxScene::computeVfxTrailConePopupLayout(VfxTrailConePopupLayout* out) const
+{
+    if (out == nullptr || !this->vfxTrailConePopupVisible)
+    {
+        return false;
+    }
+
+    const SDL_FRect mapRect = GetCurrentMap().rect;
+    out->dimFullMap = mapRect;
+
+    constexpr float kPopupMarginMap = 16.0f;
+    const float popupW = (std::clamp)(mapRect.w - (kPopupMarginMap * 2.0f), 680.0f, 980.0f);
+    const float popupH = (std::clamp)(mapRect.h - (kPopupMarginMap * 2.0f), 430.0f, 760.0f);
+    out->popup = SDL_FRect{
+        mapRect.x + ((mapRect.w - popupW) * 0.5f),
+        mapRect.y + ((mapRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+
+    constexpr float kPopupInnerPad = 14.0f;
+    constexpr float kPreviewTop = 76.0f;
+    constexpr float kPreviewBottomPad = 74.0f;
+    out->previewRect = SDL_FRect{
+        out->popup.x + kPopupInnerPad,
+        out->popup.y + kPreviewTop,
+        (std::max)(out->popup.w - (kPopupInnerPad * 2.0f), 120.0f),
+        (std::max)(out->popup.h - kPreviewTop - kPreviewBottomPad, 140.0f)};
+
+    constexpr float kBtnW = 120.0f;
+    constexpr float kBtnH = 30.0f;
+    constexpr float kBtnGap = 12.0f;
+    const float btnY = out->popup.y + out->popup.h - kBtnH - 14.0f;
+    out->cancelBtn = SDL_FRect{out->popup.x + kPopupInnerPad, btnY, kBtnW, kBtnH};
+    out->resetBtn =
+        SDL_FRect{out->cancelBtn.x + out->cancelBtn.w + kBtnGap, btnY, kBtnW, kBtnH};
+    out->validateBtn =
+        SDL_FRect{out->popup.x + out->popup.w - kPopupInnerPad - kBtnW, btnY, kBtnW, kBtnH};
+
+    constexpr float kSpawnBtnW = 24.0f;
+    constexpr float kSpawnBtnH = 22.0f;
+    const float spawnY = out->popup.y + 31.0f;
+    out->spawnCountPlusBtn =
+        SDL_FRect{out->popup.x + out->popup.w - 14.0f - kSpawnBtnW, spawnY, kSpawnBtnW, kSpawnBtnH};
+    out->spawnCountMinusBtn =
+        SDL_FRect{out->spawnCountPlusBtn.x - 6.0f - kSpawnBtnW, spawnY, kSpawnBtnW, kSpawnBtnH};
+
+    const EditorMapVfxTrailConePreviewGeom geom = editorMapVfxBuildTrailConePreviewGeom(
+        out->previewRect,
+        this->vfxTrailConePopupLength,
+        this->vfxTrailConePopupOffsetX,
+        this->vfxTrailConePopupOffsetY,
+        this->vfxTrailConePopupDirectionOffsetDeg,
+        this->vfxTrailConePopupHalfAngleDeg);
+    constexpr float kCenterHandleHalf = 8.0f;
+    constexpr float kTipHandleHalf = 10.0f;
+    constexpr float kSideHandleHalf = 8.0f;
+    out->centerHandleRect = SDL_FRect{
+        geom.coneOriginX - kCenterHandleHalf,
+        geom.coneOriginY - kCenterHandleHalf,
+        kCenterHandleHalf * 2.0f,
+        kCenterHandleHalf * 2.0f};
+    out->tipHandleRect = SDL_FRect{
+        geom.tipX - kTipHandleHalf,
+        geom.tipY - kTipHandleHalf,
+        kTipHandleHalf * 2.0f,
+        kTipHandleHalf * 2.0f};
+    out->sideHandleRect = SDL_FRect{
+        geom.sideX - kSideHandleHalf,
+        geom.sideY - kSideHandleHalf,
+        kSideHandleHalf * 2.0f,
+        kSideHandleHalf * 2.0f};
+
+    // Evite les poignées collées l'une sur l'autre quand le cone est court/serre.
+    editorMapVfxClampRectInside(&out->centerHandleRect, out->previewRect, 2.0f);
+    editorMapVfxClampRectInside(&out->tipHandleRect, out->previewRect, 2.0f);
+    editorMapVfxClampRectInside(&out->sideHandleRect, out->previewRect, 2.0f);
+    constexpr float kCenterTipMinDist = 34.0f;
+    constexpr float kCenterSideMinDist = 30.0f;
+    constexpr float kTipSideMinDist = 28.0f;
+    for (int i = 0; i < 3; ++i)
+    {
+        editorMapVfxPushHandleAwayFrom(
+            &out->tipHandleRect, out->centerHandleRect, kCenterTipMinDist, out->previewRect);
+        editorMapVfxPushHandleAwayFrom(
+            &out->sideHandleRect, out->centerHandleRect, kCenterSideMinDist, out->previewRect);
+        editorMapVfxPushHandleAwayFrom(
+            &out->sideHandleRect, out->tipHandleRect, kTipSideMinDist, out->previewRect);
+    }
+
+    return true;
+}
+
+void EditorMapVfxScene::drawVfxTrailConePopup(void) const
+{
+    if (!this->vfxTrailConePopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+    VfxTrailConePopupLayout lay{};
+    if (!this->computeVfxTrailConePopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->vfxTrailConePopupLastLayout = lay;
+
+    const EditorMapVfxTrailConePreviewGeom geom = editorMapVfxBuildTrailConePreviewGeom(
+        lay.previewRect,
+        this->vfxTrailConePopupLength,
+        this->vfxTrailConePopupOffsetX,
+        this->vfxTrailConePopupOffsetY,
+        this->vfxTrailConePopupDirectionOffsetDeg,
+        this->vfxTrailConePopupHalfAngleDeg);
+    const float halfAngleDeg =
+        (std::clamp)(this->vfxTrailConePopupHalfAngleDeg, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+    const float halfAngleRad = halfAngleDeg * (3.14159265359f / 180.0f);
+    const float tipHalfWidthUnits = std::tan(halfAngleRad) *
+                                    (std::clamp)(this->vfxTrailConePopupLength,
+                                                 kTrailConePopupLengthMin,
+                                                 kTrailConePopupLengthMax);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 150});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{22, 30, 40, 245});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{145, 168, 194, 245});
+    rc2d_graphics_rectangle("line", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{16, 22, 30, 250});
+    rc2d_graphics_rectangle("fill", &lay.previewRect);
+    rc2d_graphics_setColor(RC2D_Color{100, 122, 148, 220});
+    rc2d_graphics_rectangle("line", &lay.previewRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    RC2D_Text title = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "SPAWN (OFFSET CONE) : placement precis");
+    title.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&title);
+    rc2d_graphics_drawText(&title, lay.popup.x + 14.0f, lay.popup.y + 12.0f);
+    rc2d_graphics_destroyText(&title);
+
+    char line1[220] = {};
+    SDL_snprintf(
+        line1,
+        sizeof(line1),
+        "Longueur %.0f  |  Direction %.1f deg  |  Ouverture %.1f deg  |  Spawn x%d",
+        static_cast<double>((std::clamp)(this->vfxTrailConePopupLength, kTrailConePopupLengthMin, kTrailConePopupLengthMax)),
+        static_cast<double>((std::clamp)(this->vfxTrailConePopupDirectionOffsetDeg, -179.0f, 179.0f)),
+        static_cast<double>(halfAngleDeg),
+        std::clamp(this->vfxTrailConePopupSpawnCount, 1, 32));
+    RC2D_Text info1 = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), line1);
+    info1.color = RC2D_Color{200, 210, 224, 240};
+    rc2d_graphics_setTextColor(&info1);
+    rc2d_graphics_drawText(&info1, lay.popup.x + 14.0f, lay.popup.y + 34.0f);
+    rc2d_graphics_destroyText(&info1);
+
+    char line2[220] = {};
+    SDL_snprintf(
+        line2,
+        sizeof(line2),
+        "Offset cone X %.0f | Y %.0f  |  VERT=offset XY, ORANGE=dir+long, CYAN=largeur (demi-largeur: %.0f)",
+        static_cast<double>((std::clamp)(this->vfxTrailConePopupOffsetX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax)),
+        static_cast<double>((std::clamp)(this->vfxTrailConePopupOffsetY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax)),
+        static_cast<double>(tipHalfWidthUnits));
+    RC2D_Text info2 = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), line2);
+    info2.color = RC2D_Color{184, 196, 212, 236};
+    rc2d_graphics_setTextColor(&info2);
+    rc2d_graphics_drawText(&info2, lay.popup.x + 14.0f, lay.popup.y + 52.0f);
+    rc2d_graphics_destroyText(&info2);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    // Repere "arriere" de reference (0 deg).
+    const float rearX = geom.coneOriginX + std::cos(kTrailConePopupRearAxisRad) * geom.maxLengthPx;
+    const float rearY = geom.coneOriginY + std::sin(kTrailConePopupRearAxisRad) * geom.maxLengthPx;
+    rc2d_graphics_setColor(RC2D_Color{110, 126, 148, 188});
+    rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, rearX, rearY);
+
+    // Leger remplissage du cone via des rayons anchor -> base.
+    for (int i = 0; i < 10; ++i)
+    {
+        const float t = static_cast<float>(i) / 9.0f;
+        const float bx = geom.leftX + ((geom.rightX - geom.leftX) * t);
+        const float by = geom.leftY + ((geom.rightY - geom.leftY) * t);
+        rc2d_graphics_setColor(RC2D_Color{255, 163, 74, 56});
+        rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, bx, by);
+    }
+
+    rc2d_graphics_setColor(RC2D_Color{255, 170, 72, 230});
+    rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, geom.leftX, geom.leftY);
+    rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, geom.rightX, geom.rightY);
+    rc2d_graphics_setColor(RC2D_Color{255, 144, 54, 245});
+    rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, geom.tipX, geom.tipY);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    // Repere center du layer.
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{220, 230, 242, 220});
+    rc2d_graphics_line(geom.layerAnchorX - 6.0f, geom.layerAnchorY, geom.layerAnchorX + 6.0f, geom.layerAnchorY);
+    rc2d_graphics_line(geom.layerAnchorX, geom.layerAnchorY - 6.0f, geom.layerAnchorX, geom.layerAnchorY + 6.0f);
+    // Relie layer -> origine cone.
+    rc2d_graphics_setColor(RC2D_Color{130, 220, 150, 210});
+    rc2d_graphics_line(geom.layerAnchorX, geom.layerAnchorY, geom.coneOriginX, geom.coneOriginY);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer != nullptr)
+    {
+        SDL_Rect clip{};
+        clip.x = static_cast<int>(std::floor(lay.previewRect.x));
+        clip.y = static_cast<int>(std::floor(lay.previewRect.y));
+        clip.w = (std::max)(static_cast<int>(std::ceil(lay.previewRect.x + lay.previewRect.w)) - clip.x, 1);
+        clip.h = (std::max)(static_cast<int>(std::ceil(lay.previewRect.y + lay.previewRect.h)) - clip.y, 1);
+        SDL_SetRenderClipRect(renderer, &clip);
+    }
+    if (this->previewShipLoaded)
+    {
+        float shipW = 96.0f;
+        float sw = 0.0f;
+        float sh = 0.0f;
+        if (this->previewShip.getCurrentSpriteSizePixels(&sw, &sh))
+        {
+            (void)sh;
+            const float maxPreviewShipW = (std::max)((std::min)(lay.previewRect.w, lay.previewRect.h) * 0.36f, 36.0f);
+            shipW = (std::clamp)(sw * this->previewShip.getDrawScale(), 36.0f, maxPreviewShipW);
+        }
+        this->previewShip.drawEditorPreviewAt(geom.layerAnchorX, geom.layerAnchorY, shipW);
+    }
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
+
+    // Si une poignee est decalee pour rester cliquable, relie son point reel au carre.
+    const float centerHandleCx = lay.centerHandleRect.x + (lay.centerHandleRect.w * 0.5f);
+    const float centerHandleCy = lay.centerHandleRect.y + (lay.centerHandleRect.h * 0.5f);
+    const float tipHandleCx = lay.tipHandleRect.x + (lay.tipHandleRect.w * 0.5f);
+    const float tipHandleCy = lay.tipHandleRect.y + (lay.tipHandleRect.h * 0.5f);
+    const float sideHandleCx = lay.sideHandleRect.x + (lay.sideHandleRect.w * 0.5f);
+    const float sideHandleCy = lay.sideHandleRect.y + (lay.sideHandleRect.h * 0.5f);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    if (editorMapVfxDistance2D(centerHandleCx, centerHandleCy, geom.coneOriginX, geom.coneOriginY) > 1.0f)
+    {
+        rc2d_graphics_setColor(RC2D_Color{130, 220, 150, 210});
+        rc2d_graphics_line(geom.coneOriginX, geom.coneOriginY, centerHandleCx, centerHandleCy);
+    }
+    if (editorMapVfxDistance2D(tipHandleCx, tipHandleCy, geom.tipX, geom.tipY) > 1.0f)
+    {
+        rc2d_graphics_setColor(RC2D_Color{255, 180, 120, 210});
+        rc2d_graphics_line(geom.tipX, geom.tipY, tipHandleCx, tipHandleCy);
+    }
+    if (editorMapVfxDistance2D(sideHandleCx, sideHandleCy, geom.sideX, geom.sideY) > 1.0f)
+    {
+        rc2d_graphics_setColor(RC2D_Color{160, 235, 245, 210});
+        rc2d_graphics_line(geom.sideX, geom.sideY, sideHandleCx, sideHandleCy);
+    }
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    auto drawHandle = [](const SDL_FRect& r, const RC2D_Color& fill, const RC2D_Color& border) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(fill);
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(border);
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    };
+    drawHandle(
+        lay.centerHandleRect,
+        this->vfxTrailConePopupCenterDragActive ? RC2D_Color{92, 210, 120, 250} : RC2D_Color{72, 172, 96, 238},
+        RC2D_Color{190, 250, 200, 250});
+    drawHandle(
+        lay.tipHandleRect,
+        this->vfxTrailConePopupTipDragActive ? RC2D_Color{255, 146, 52, 250} : RC2D_Color{220, 118, 38, 238},
+        RC2D_Color{255, 210, 170, 250});
+    drawHandle(
+        lay.sideHandleRect,
+        this->vfxTrailConePopupSideDragActive ? RC2D_Color{64, 196, 215, 250} : RC2D_Color{48, 164, 186, 236},
+        RC2D_Color{180, 245, 255, 250});
+
+    auto drawBtn = [this](const SDL_FRect& r, const char* label) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{56, 72, 92, 230});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(RC2D_Color{150, 170, 190, 235});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), label);
+        t.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&t);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&t, &tw, &th);
+        rc2d_graphics_drawText(
+            &t,
+            r.x + ((r.w - static_cast<float>(tw)) * 0.5f),
+            r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&t);
+    };
+    drawBtn(lay.spawnCountMinusBtn, "-");
+    drawBtn(lay.spawnCountPlusBtn, "+");
+    drawBtn(lay.cancelBtn, "ANNULER");
+    drawBtn(lay.resetBtn, "RESET");
+    drawBtn(lay.validateBtn, "APPLIQUER");
+}
+
+bool EditorMapVfxScene::handleVfxTrailConePopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->vfxTrailConePopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+
+    VfxTrailConePopupLayout lay{};
+    if (!this->computeVfxTrailConePopupLayout(&lay))
+    {
+        return true;
+    }
+    this->vfxTrailConePopupLastLayout = lay;
+
+    auto applyConeToInstance = [this]() {
+        const float applyLen =
+            (std::clamp)(this->vfxTrailConePopupLength, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+        const float applyOffX =
+            (std::clamp)(this->vfxTrailConePopupOffsetX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        const float applyOffY =
+            (std::clamp)(this->vfxTrailConePopupOffsetY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        const float applyDir =
+            (std::clamp)(editorMapVfxNormalizeSignedAngleDeg(this->vfxTrailConePopupDirectionOffsetDeg), -179.0f, 179.0f);
+        const float applyHalf =
+            (std::clamp)(this->vfxTrailConePopupHalfAngleDeg, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+        const int applyCount = std::clamp(this->vfxTrailConePopupSpawnCount, 1, 32);
+        this->vfxTrailConePopupLength = applyLen;
+        this->vfxTrailConePopupOffsetX = applyOffX;
+        this->vfxTrailConePopupOffsetY = applyOffY;
+        this->vfxTrailConePopupDirectionOffsetDeg = applyDir;
+        this->vfxTrailConePopupHalfAngleDeg = applyHalf;
+        this->vfxTrailConePopupSpawnCount = applyCount;
+
+        if (this->vfxTrailConePopupParentInstanceIndex >= 0 &&
+            this->vfxTrailConePopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& target =
+                this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailConePopupParentInstanceIndex)];
+            target.motionTrailStrictTilePlacement = false;
+            target.motionTrailLateralJitterRadius = applyLen;
+            target.motionTrailConeOffsetX = applyOffX;
+            target.motionTrailConeOffsetY = applyOffY;
+            target.motionTrailConeDirectionOffsetDeg = applyDir;
+            target.motionTrailConeHalfAngleDeg = applyHalf;
+            target.motionTrailConeSpawnCount = applyCount;
+            target.motionTrailDistanceAcc = 0.0f;
+            this->vfxTrailPopupStrictTilePlacement = false;
+            this->vfxTrailPopupLateralJitterInput =
+                std::to_string(static_cast<int>(std::lround(target.motionTrailLateralJitterRadius)));
+            this->markShipVfxDirty();
+        }
+    };
+
+    if (this->pointInRect(x, y, lay.spawnCountMinusBtn))
+    {
+        this->vfxTrailConePopupSpawnCount = std::clamp(this->vfxTrailConePopupSpawnCount - 1, 1, 32);
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.spawnCountPlusBtn))
+    {
+        this->vfxTrailConePopupSpawnCount = std::clamp(this->vfxTrailConePopupSpawnCount + 1, 1, 32);
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.centerHandleRect))
+    {
+        this->vfxTrailConePopupCenterDragActive = true;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = false;
+        this->updateVfxTrailConePopupDragFromMouse();
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.tipHandleRect))
+    {
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = true;
+        this->vfxTrailConePopupSideDragActive = false;
+        this->updateVfxTrailConePopupDragFromMouse();
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.sideHandleRect))
+    {
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = true;
+        this->updateVfxTrailConePopupDragFromMouse();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.previewRect))
+    {
+        const EditorMapVfxTrailConePreviewGeom geom = editorMapVfxBuildTrailConePreviewGeom(
+            lay.previewRect,
+            this->vfxTrailConePopupLength,
+            this->vfxTrailConePopupOffsetX,
+            this->vfxTrailConePopupOffsetY,
+            this->vfxTrailConePopupDirectionOffsetDeg,
+            this->vfxTrailConePopupHalfAngleDeg);
+        const float centerDx = x - geom.coneOriginX;
+        const float centerDy = y - geom.coneOriginY;
+        const float tipDx = x - geom.tipX;
+        const float tipDy = y - geom.tipY;
+        const float sideDx = x - geom.sideX;
+        const float sideDy = y - geom.sideY;
+        const float centerDistSq = (centerDx * centerDx) + (centerDy * centerDy);
+        const float tipDistSq = (tipDx * tipDx) + (tipDy * tipDy);
+        const float sideDistSq = (sideDx * sideDx) + (sideDy * sideDy);
+        if (centerDistSq <= tipDistSq && centerDistSq <= sideDistSq)
+        {
+            this->vfxTrailConePopupCenterDragActive = true;
+            this->vfxTrailConePopupTipDragActive = false;
+            this->vfxTrailConePopupSideDragActive = false;
+        }
+        else if (tipDistSq <= sideDistSq)
+        {
+            this->vfxTrailConePopupCenterDragActive = false;
+            this->vfxTrailConePopupTipDragActive = true;
+            this->vfxTrailConePopupSideDragActive = false;
+        }
+        else
+        {
+            this->vfxTrailConePopupCenterDragActive = false;
+            this->vfxTrailConePopupTipDragActive = false;
+            this->vfxTrailConePopupSideDragActive = true;
+        }
+        this->updateVfxTrailConePopupDragFromMouse();
+        return true;
+    }
+
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        if (this->pointInRect(x, y, lay.dimFullMap))
+        {
+            this->closeVfxTrailConePopup();
+            this->statusMessage = "Cone arriere : annule.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeVfxTrailConePopup();
+        this->statusMessage = "Cone arriere : annule.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.resetBtn))
+    {
+        this->vfxTrailConePopupLength = 120.0f;
+        this->vfxTrailConePopupOffsetX = 0.0f;
+        this->vfxTrailConePopupOffsetY = 0.0f;
+        this->vfxTrailConePopupDirectionOffsetDeg = 0.0f;
+        this->vfxTrailConePopupHalfAngleDeg = 28.0f;
+        this->vfxTrailConePopupSpawnCount = 1;
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = false;
+        this->statusMessage = "Cone arriere : reset (L=120, OffX/Y=0, Dir=0, Ouv=28, Spawn x1).";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.validateBtn))
+    {
+        applyConeToInstance();
+        const float applyLen = this->vfxTrailConePopupLength;
+        const float applyOffX = this->vfxTrailConePopupOffsetX;
+        const float applyOffY = this->vfxTrailConePopupOffsetY;
+        const float applyDir = this->vfxTrailConePopupDirectionOffsetDeg;
+        const float applyHalf = this->vfxTrailConePopupHalfAngleDeg;
+        const int applyCount = this->vfxTrailConePopupSpawnCount;
+        this->closeVfxTrailConePopup();
+        char msg[220] = {};
+        SDL_snprintf(msg,
+                     sizeof(msg),
+                     "Cone applique : L %.0f, OffX %.0f, OffY %.0f, Dir %.1f deg, Ouv %.1f deg, Spawn x%d.",
+                     static_cast<double>(applyLen),
+                     static_cast<double>(applyOffX),
+                     static_cast<double>(applyOffY),
+                     static_cast<double>(applyDir),
+                     static_cast<double>(applyHalf),
+                     applyCount);
+        this->statusMessage = msg;
+        return true;
+    }
+
+    this->vfxTrailConePopupCenterDragActive = false;
+    this->vfxTrailConePopupTipDragActive = false;
+    this->vfxTrailConePopupSideDragActive = false;
+    return true;
+}
+
+bool EditorMapVfxScene::handleVfxTrailConePopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+    (void)keycode;
+    (void)mod;
+    if (!this->vfxTrailConePopupVisible)
+    {
+        return false;
+    }
+
+    auto applyConeToInstance = [this]() {
+        const float applyLen =
+            (std::clamp)(this->vfxTrailConePopupLength, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+        const float applyOffX =
+            (std::clamp)(this->vfxTrailConePopupOffsetX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        const float applyOffY =
+            (std::clamp)(this->vfxTrailConePopupOffsetY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        const float applyDir =
+            (std::clamp)(editorMapVfxNormalizeSignedAngleDeg(this->vfxTrailConePopupDirectionOffsetDeg), -179.0f, 179.0f);
+        const float applyHalf =
+            (std::clamp)(this->vfxTrailConePopupHalfAngleDeg, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+        const int applyCount = std::clamp(this->vfxTrailConePopupSpawnCount, 1, 32);
+        this->vfxTrailConePopupLength = applyLen;
+        this->vfxTrailConePopupOffsetX = applyOffX;
+        this->vfxTrailConePopupOffsetY = applyOffY;
+        this->vfxTrailConePopupDirectionOffsetDeg = applyDir;
+        this->vfxTrailConePopupHalfAngleDeg = applyHalf;
+        this->vfxTrailConePopupSpawnCount = applyCount;
+
+        if (this->vfxTrailConePopupParentInstanceIndex >= 0 &&
+            this->vfxTrailConePopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+        {
+            ShipVfxInstance& target =
+                this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailConePopupParentInstanceIndex)];
+            target.motionTrailStrictTilePlacement = false;
+            target.motionTrailLateralJitterRadius = applyLen;
+            target.motionTrailConeOffsetX = applyOffX;
+            target.motionTrailConeOffsetY = applyOffY;
+            target.motionTrailConeDirectionOffsetDeg = applyDir;
+            target.motionTrailConeHalfAngleDeg = applyHalf;
+            target.motionTrailConeSpawnCount = applyCount;
+            target.motionTrailDistanceAcc = 0.0f;
+            this->vfxTrailPopupStrictTilePlacement = false;
+            this->vfxTrailPopupLateralJitterInput =
+                std::to_string(static_cast<int>(std::lround(target.motionTrailLateralJitterRadius)));
+            this->markShipVfxDirty();
+        }
+    };
+
+    if (!isrepeat && scancode == SDL_SCANCODE_ESCAPE)
+    {
+        this->closeVfxTrailConePopup();
+        this->statusMessage = "Cone arriere : annule.";
+        return true;
+    }
+
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        applyConeToInstance();
+        const float applyLen = this->vfxTrailConePopupLength;
+        const float applyOffX = this->vfxTrailConePopupOffsetX;
+        const float applyOffY = this->vfxTrailConePopupOffsetY;
+        const float applyDir = this->vfxTrailConePopupDirectionOffsetDeg;
+        const float applyHalf = this->vfxTrailConePopupHalfAngleDeg;
+        const int applyCount = this->vfxTrailConePopupSpawnCount;
+        this->closeVfxTrailConePopup();
+        char msg[220] = {};
+        SDL_snprintf(msg,
+                     sizeof(msg),
+                     "Cone applique : L %.0f, OffX %.0f, OffY %.0f, Dir %.1f deg, Ouv %.1f deg, Spawn x%d.",
+                     static_cast<double>(applyLen),
+                     static_cast<double>(applyOffX),
+                     static_cast<double>(applyOffY),
+                     static_cast<double>(applyDir),
+                     static_cast<double>(applyHalf),
+                     applyCount);
+        this->statusMessage = msg;
+        return true;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_R)
+    {
+        this->vfxTrailConePopupLength = 120.0f;
+        this->vfxTrailConePopupOffsetX = 0.0f;
+        this->vfxTrailConePopupOffsetY = 0.0f;
+        this->vfxTrailConePopupDirectionOffsetDeg = 0.0f;
+        this->vfxTrailConePopupHalfAngleDeg = 28.0f;
+        this->vfxTrailConePopupSpawnCount = 1;
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = false;
+        this->statusMessage = "Cone arriere : reset (R).";
+        return true;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_LEFT)
+    {
+        this->vfxTrailConePopupDirectionOffsetDeg = (std::clamp)(
+            this->vfxTrailConePopupDirectionOffsetDeg - 1.0f, -179.0f, 179.0f);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_RIGHT)
+    {
+        this->vfxTrailConePopupDirectionOffsetDeg = (std::clamp)(
+            this->vfxTrailConePopupDirectionOffsetDeg + 1.0f, -179.0f, 179.0f);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_UP)
+    {
+        this->vfxTrailConePopupHalfAngleDeg = (std::clamp)(
+            this->vfxTrailConePopupHalfAngleDeg + 1.0f, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_DOWN)
+    {
+        this->vfxTrailConePopupHalfAngleDeg = (std::clamp)(
+            this->vfxTrailConePopupHalfAngleDeg - 1.0f, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+        return true;
+    }
+    if (!isrepeat && (scancode == SDL_SCANCODE_EQUALS || scancode == SDL_SCANCODE_KP_PLUS))
+    {
+        this->vfxTrailConePopupLength = (std::clamp)(
+            this->vfxTrailConePopupLength + 8.0f, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+        return true;
+    }
+    if (!isrepeat && (scancode == SDL_SCANCODE_MINUS || scancode == SDL_SCANCODE_KP_MINUS))
+    {
+        this->vfxTrailConePopupLength = (std::clamp)(
+            this->vfxTrailConePopupLength - 8.0f, kTrailConePopupLengthMin, kTrailConePopupLengthMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_A)
+    {
+        this->vfxTrailConePopupOffsetX = (std::clamp)(
+            this->vfxTrailConePopupOffsetX - 8.0f, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_D)
+    {
+        this->vfxTrailConePopupOffsetX = (std::clamp)(
+            this->vfxTrailConePopupOffsetX + 8.0f, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_W)
+    {
+        this->vfxTrailConePopupOffsetY = (std::clamp)(
+            this->vfxTrailConePopupOffsetY - 8.0f, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_S)
+    {
+        this->vfxTrailConePopupOffsetY = (std::clamp)(
+            this->vfxTrailConePopupOffsetY + 8.0f, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_KP_8)
+    {
+        this->vfxTrailConePopupSpawnCount = std::clamp(this->vfxTrailConePopupSpawnCount + 1, 1, 32);
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_KP_2)
+    {
+        this->vfxTrailConePopupSpawnCount = std::clamp(this->vfxTrailConePopupSpawnCount - 1, 1, 32);
+        return true;
+    }
+
+    return true;
+}
+
+void EditorMapVfxScene::updateVfxTrailConePopupDragFromMouse(void)
+{
+    if (!this->vfxTrailConePopupVisible)
+    {
+        return;
+    }
+    if (!this->vfxTrailConePopupCenterDragActive &&
+        !this->vfxTrailConePopupTipDragActive &&
+        !this->vfxTrailConePopupSideDragActive)
+    {
+        return;
+    }
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = false;
+        return;
+    }
+
+    VfxTrailConePopupLayout lay{};
+    if (!this->computeVfxTrailConePopupLayout(&lay))
+    {
+        this->vfxTrailConePopupCenterDragActive = false;
+        this->vfxTrailConePopupTipDragActive = false;
+        this->vfxTrailConePopupSideDragActive = false;
+        return;
+    }
+    this->vfxTrailConePopupLastLayout = lay;
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+
+    const EditorMapVfxTrailConePreviewGeom geom = editorMapVfxBuildTrailConePreviewGeom(
+        lay.previewRect,
+        this->vfxTrailConePopupLength,
+        this->vfxTrailConePopupOffsetX,
+        this->vfxTrailConePopupOffsetY,
+        this->vfxTrailConePopupDirectionOffsetDeg,
+        this->vfxTrailConePopupHalfAngleDeg);
+    const float vx = mouseX - geom.coneOriginX;
+    const float vy = mouseY - geom.coneOriginY;
+    const float vLen = std::sqrt((vx * vx) + (vy * vy));
+
+    if (this->vfxTrailConePopupCenterDragActive)
+    {
+        const float offXPx = mouseX - geom.layerAnchorX;
+        const float offYPx = mouseY - geom.layerAnchorY;
+        this->vfxTrailConePopupOffsetX =
+            editorMapVfxTrailConePreviewPxToOffsetUnits(offXPx, geom.maxOffsetPx);
+        this->vfxTrailConePopupOffsetY =
+            editorMapVfxTrailConePreviewPxToOffsetUnits(offYPx, geom.maxOffsetPx);
+    }
+    else if (this->vfxTrailConePopupTipDragActive)
+    {
+        if (vLen > 0.0001f)
+        {
+            const float ang = std::atan2(vy, vx);
+            float offDeg = (ang - kTrailConePopupRearAxisRad) * (180.0f / 3.14159265359f);
+            offDeg = editorMapVfxNormalizeSignedAngleDeg(offDeg);
+            this->vfxTrailConePopupDirectionOffsetDeg = (std::clamp)(offDeg, -179.0f, 179.0f);
+        }
+        this->vfxTrailConePopupLength = editorMapVfxTrailConePreviewPxToLength(vLen, geom.maxLengthPx);
+    }
+    else if (this->vfxTrailConePopupSideDragActive && vLen > 0.0001f)
+    {
+        const float sideAng = std::atan2(vy, vx);
+        float deltaDeg = (sideAng - geom.axisAngleRad) * (180.0f / 3.14159265359f);
+        deltaDeg = editorMapVfxNormalizeSignedAngleDeg(deltaDeg);
+        this->vfxTrailConePopupHalfAngleDeg =
+            (std::clamp)(std::fabs(deltaDeg), kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+    }
 }
 
 bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) const
@@ -1767,64 +2854,151 @@ bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) con
     }
     const SDL_FRect mapRect = GetCurrentMap().rect;
     out->dimFullMap = mapRect;
-    const float popupW = 520.0f;
-    const float popupH = 880.0f;
+    constexpr float kTrailPopupMargin = 14.0f;
+    constexpr float kTrailPopupColGutter = 12.0f;
+    constexpr float kTrailPopupLeftColPreferred = 608.0f;
+    const float popupW = (std::min)(1300.0f, (std::max)(mapRect.w - 16.0f, 720.0f));
+    const float popupH = 960.0f;
     out->popup = SDL_FRect{
         mapRect.x + ((mapRect.w - popupW) * 0.5f),
         mapRect.y + ((mapRect.h - popupH) * 0.5f),
         popupW,
         popupH};
-    const float px = out->popup.x + 14.0f;
-    const float pw = popupW - 28.0f;
-    out->everyNTilesInputRect = SDL_FRect{px, out->popup.y + 72.0f, pw, 32.0f};
-    out->lifetimeMsInputRect = SDL_FRect{px, out->popup.y + 132.0f, pw, 32.0f};
-    out->trailStrictTileBtn = SDL_FRect{px, out->popup.y + 198.0f, 246.0f, 30.0f};
-    out->trailLateralSpreadBtn = SDL_FRect{out->popup.x + 270.0f, out->popup.y + 198.0f, 236.0f, 30.0f};
+    float leftColW = kTrailPopupLeftColPreferred;
+    const float innerAvail = popupW - (kTrailPopupMargin * 2.0f) - kTrailPopupColGutter;
+    if (innerAvail < leftColW + 180.0f)
+    {
+        leftColW = (std::max)(280.0f, innerAvail * 0.5f);
+    }
+    const float px = out->popup.x + kTrailPopupMargin;
+    const float pw = leftColW;
+    const float previewX = px + pw + kTrailPopupColGutter;
+    const float previewW = (std::max)(out->popup.x + out->popup.w - kTrailPopupMargin - previewX, 48.0f);
+    constexpr float kTrailModeBtnGap = 10.0f;
+    const float trailModeBtnW = (pw - kTrailModeBtnGap) * 0.5f;
+
+    constexpr float kInputH = 32.0f;
+    constexpr float kTrailModeBtnH = 30.0f;
+    constexpr float kIdleModeBtnH = 28.0f;
+    constexpr float kLabelH = 17.0f;
+    constexpr float kLabelToInputGap = 8.0f;
+    constexpr float kAfterFieldGap = 14.0f;
+    constexpr float kAfterModeRowGap = 14.0f;
+    /** Espace vide au-dessus / au-dessous de chaque trait horizontal (separation visuelle). */
+    constexpr float kTrailRulePadV = 20.0f;
+    /** Bas approximatif du bloc titre + ligne instance (titre py+12, instance py+36). */
+    constexpr float kTrailPopupHeaderBottom = 54.0f;
+
+    const float py = out->popup.y;
+    out->trailRuleAfterInstanceY = py + kTrailPopupHeaderBottom + kTrailRulePadV;
+    float y = out->trailRuleAfterInstanceY + kTrailRulePadV;
+
+    out->everyNTilesInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+    y = out->everyNTilesInputRect.y + kInputH + kAfterFieldGap;
+
+    out->lifetimeTilesInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+    y = out->lifetimeTilesInputRect.y + kInputH + kAfterFieldGap;
+
+    out->trailStrictTileBtn =
+        SDL_FRect{px, y + kLabelH + kLabelToInputGap, trailModeBtnW, kTrailModeBtnH};
+    out->trailLateralSpreadBtn = SDL_FRect{px + trailModeBtnW + kTrailModeBtnGap,
+                                           y + kLabelH + kLabelToInputGap,
+                                           trailModeBtnW,
+                                           kTrailModeBtnH};
+    y = out->trailStrictTileBtn.y + kTrailModeBtnH + kAfterModeRowGap;
+
     out->lateralSectionVisible = !this->vfxTrailPopupStrictTilePlacement;
-    const float kIdleRowGap = 28.0f;
-    const float kIdleFieldH = 32.0f;
-    const auto layoutIdleRingBlock = [&](float idleBtnTopY) {
-        out->idleRingOffBtn = SDL_FRect{px, idleBtnTopY, 246.0f, 28.0f};
-        out->idleRingOnBtn = SDL_FRect{out->popup.x + 270.0f, idleBtnTopY, 236.0f, 28.0f};
-        out->idleRingInputsVisible = this->vfxTrailPopupIdleRingWhenStationary;
-        if (out->idleRingInputsVisible)
-        {
-            float cy = idleBtnTopY + 28.0f + 24.0f;
-            out->idleRingPieceCountInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
-            cy += kIdleFieldH + kIdleRowGap;
-            out->idleRingPeriodMsInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
-            cy += kIdleFieldH + kIdleRowGap;
-            out->idleRingRadiusInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
-            cy += kIdleFieldH + kIdleRowGap;
-            out->idleRingRotationPctInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
-            cy += kIdleFieldH + kIdleRowGap;
-            out->idleRingPosJitterInputRect = SDL_FRect{px, cy, pw, kIdleFieldH};
-        }
-        else
-        {
-            out->idleRingPieceCountInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-            out->idleRingPeriodMsInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-            out->idleRingRadiusInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-            out->idleRingRotationPctInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-            out->idleRingPosJitterInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-        }
-    };
     if (out->lateralSectionVisible)
     {
-        out->lateralJitterInputRect = SDL_FRect{px, out->popup.y + 272.0f, pw, 32.0f};
-        out->rotationPctInputRect = SDL_FRect{px, out->popup.y + 326.0f, pw, 32.0f};
-        layoutIdleRingBlock(out->popup.y + 398.0f);
+        out->lateralJitterInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+        y = out->lateralJitterInputRect.y + kInputH + kAfterFieldGap;
     }
     else
     {
         out->lateralJitterInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-        out->rotationPctInputRect = SDL_FRect{px, out->popup.y + 250.0f, pw, 32.0f};
-        layoutIdleRingBlock(out->popup.y + 328.0f);
     }
+
+    out->rotationPctInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+    y = out->rotationPctInputRect.y + kInputH + kAfterFieldGap;
+
+    out->trailRuleBeforeArretY = y + kTrailRulePadV;
+    y = out->trailRuleBeforeArretY + kTrailRulePadV;
+
+    out->idleRingOffBtn = SDL_FRect{px, y + kLabelH + kLabelToInputGap, trailModeBtnW, kIdleModeBtnH};
+    out->idleRingOnBtn = SDL_FRect{
+        px + trailModeBtnW + kTrailModeBtnGap, y + kLabelH + kLabelToInputGap, trailModeBtnW, kIdleModeBtnH};
+    y = out->idleRingOffBtn.y + kIdleModeBtnH + kAfterModeRowGap;
+
+    out->idleRingInputsVisible = this->vfxTrailPopupIdleRingWhenStationary;
+    if (out->idleRingInputsVisible)
+    {
+        out->idleRingPieceCountInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+        y = out->idleRingPieceCountInputRect.y + kInputH + kAfterFieldGap;
+        out->idleRingPeriodMsInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->idleRingRadiusInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+        y = out->idleRingRadiusInputRect.y + kInputH + kAfterFieldGap;
+        out->idleRingRotationPctInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+        y = out->idleRingRotationPctInputRect.y + kInputH + kAfterFieldGap;
+        out->idleRingPosJitterInputRect = SDL_FRect{px, y + kLabelH + kLabelToInputGap, pw, kInputH};
+    }
+    else
+    {
+        out->idleRingPieceCountInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->idleRingPeriodMsInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->idleRingRadiusInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->idleRingRotationPctInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+        out->idleRingPosJitterInputRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    const float pyTop = out->popup.y;
+    const float previewTop = pyTop + 50.0f;
+    const float previewBottom = pyTop + popupH - 58.0f;
+    const float previewTotalH = (std::max)(previewBottom - previewTop, 80.0f);
+    /** Bandeau zoom au-dessus des deux previews (hors rectangles marche / arret). */
+    constexpr float kPreviewZoomStripH = 28.0f;
+    constexpr float kPreviewZoomBelowStripGap = 4.0f;
+    constexpr float kPreviewZoomBtnW = 30.0f;
+    constexpr float kPreviewZoomBtnH = 22.0f;
+    const float innerPreviewH =
+        (std::max)(previewTotalH - kPreviewZoomStripH - kPreviewZoomBelowStripGap, 72.0f);
+    const float marcheH = innerPreviewH * 0.5f - 6.0f;
+    const float arretGap = 12.0f;
+    const float arretH = innerPreviewH - marcheH - arretGap;
+    const float marcheTop = previewTop + kPreviewZoomStripH + kPreviewZoomBelowStripGap;
+    out->previewMarcheRect = SDL_FRect{previewX, marcheTop, previewW, (std::max)(marcheH, 48.0f)};
+    out->previewArretRect =
+        SDL_FRect{previewX, marcheTop + marcheH + arretGap, previewW, (std::max)(arretH, 48.0f)};
+    const float zmY = previewTop + (kPreviewZoomStripH - kPreviewZoomBtnH) * 0.5f;
+    out->previewZoomPlusBtn =
+        SDL_FRect{previewX + previewW - kPreviewZoomBtnW - 6.0f, zmY, kPreviewZoomBtnW, kPreviewZoomBtnH};
+    out->previewZoomMinusBtn = SDL_FRect{out->previewZoomPlusBtn.x - kPreviewZoomBtnW - 6.0f,
+                                         zmY,
+                                         kPreviewZoomBtnW,
+                                         kPreviewZoomBtnH};
+    constexpr float kPreviewSpeedGroupGap = 70.0f;
+    out->previewSpeedPlusBtn = SDL_FRect{out->previewZoomMinusBtn.x - kPreviewZoomBtnW - kPreviewSpeedGroupGap,
+                                         zmY,
+                                         kPreviewZoomBtnW,
+                                         kPreviewZoomBtnH};
+    out->previewSpeedMinusBtn = SDL_FRect{out->previewSpeedPlusBtn.x - kPreviewZoomBtnW - 6.0f,
+                                          zmY,
+                                          kPreviewZoomBtnW,
+                                          kPreviewZoomBtnH};
+    out->previewMarcheShipToggleBtn = SDL_FRect{
+        out->previewMarcheRect.x + out->previewMarcheRect.w - 120.0f,
+        out->previewMarcheRect.y + 4.0f,
+        112.0f,
+        24.0f};
+    out->previewCrownShipToggleBtn = SDL_FRect{
+        out->previewArretRect.x + out->previewArretRect.w - 120.0f,
+        out->previewArretRect.y + 4.0f,
+        112.0f,
+        24.0f};
+
     const float btnY = out->popup.y + popupH - 52.0f;
-    out->cancelBtn = SDL_FRect{out->popup.x + 14.0f, btnY, 110.0f, 28.0f};
-    out->clearBtn = SDL_FRect{out->popup.x + 134.0f, btnY, 110.0f, 28.0f};
-    out->validateBtn = SDL_FRect{out->popup.x + popupW - 124.0f, btnY, 110.0f, 28.0f};
+    out->cancelBtn = SDL_FRect{out->popup.x + kTrailPopupMargin, btnY, 110.0f, 28.0f};
+    out->clearBtn = SDL_FRect{out->popup.x + kTrailPopupMargin + 120.0f, btnY, 110.0f, 28.0f};
+    out->validateBtn = SDL_FRect{out->popup.x + popupW - kTrailPopupMargin - 110.0f, btnY, 110.0f, 28.0f};
     return true;
 }
 
@@ -1933,6 +3107,11 @@ bool EditorMapVfxScene::shouldSkipDrawImportedSfxForPilotMaxLifetime(const Impor
     {
         return false;
     }
+    /** L'horloge pilotage carte ne doit pas couper les previews du popup trainee (rejets / couronne). */
+    if (this->vfxTrailPopupVisible)
+    {
+        return false;
+    }
     if (imported.animationTotalDurationInfinite || imported.animationTotalDurationMs <= 0)
     {
         return false;
@@ -2030,6 +3209,29 @@ int EditorMapVfxScene::computeVfxPreviewFrameIndex(
 
     const float phaseSec = this->computeVfxPreviewPhaseSecondsInCycle(instance, timeSeconds, layerVec, imported, 0);
     return static_cast<int>(std::floor(phaseSec * fps)) % frameCount;
+}
+
+int EditorMapVfxScene::computeTrailPieceFrameIndex(const ImportedSfx& imported, float elapsedSinceSpawnSec) const
+{
+    const int frameCount = static_cast<int>(imported.frames.size());
+    if (frameCount <= 0)
+    {
+        return 0;
+    }
+
+    const float fps = (std::max)(imported.defaultFps, 1.0f);
+    const float ageSec =
+        (std::isfinite(elapsedSinceSpawnSec) && elapsedSinceSpawnSec > 0.0f) ? elapsedSinceSpawnSec : 0.0f;
+    const float frameFloat = ageSec * fps;
+    /** Rejets/couronne: la lecture depend du FPS spritesheet, la vie depend uniquement de timeRemainingSec. */
+    const float frameCountF = static_cast<float>(frameCount);
+    float frameInCycle = std::fmod(frameFloat, frameCountF);
+    if (frameInCycle < 0.0f)
+    {
+        frameInCycle += frameCountF;
+    }
+    const int frameIndex = static_cast<int>(std::floor(frameInCycle));
+    return (std::clamp)(frameIndex, 0, frameCount - 1);
 }
 
 bool EditorMapVfxScene::shouldPreviewHideShipForRelativeTiming(float timeSeconds) const
@@ -2318,25 +3520,51 @@ EditorMapVfxScene::ShipVfxInstance EditorMapVfxScene::duplicateShipVfxInstanceFr
 {
     ShipVfxInstance duplicate = src;
     duplicate.instanceId = this->nextVfxInstanceId++;
-    duplicate.spawnAfterInstanceId = 0U;
-    duplicate.spawnAfterDelayMs = 0;
-    duplicate.motionSpawnCaptured = false;
-    duplicate.motionTrailEveryNTiles = 0;
-    duplicate.motionTrailLifetimeMs = 2000;
-    duplicate.motionTrailStrictTilePlacement = true;
-    duplicate.motionTrailLateralJitterRadius = 0.0f;
-    duplicate.motionTrailRotationRandomPercent = 0;
-    duplicate.motionTrailIdleRingWhenStationary = false;
-    duplicate.motionTrailIdleRingRadius = 48.0f;
-    duplicate.motionTrailIdleSpawnPeriodMs = 600;
-    duplicate.motionTrailIdleRingPieceCount = 8;
-    duplicate.motionTrailIdleRingRotationRandomPercent = 0;
-    duplicate.motionTrailIdleRingPositionJitterRadius = 0.0f;
+    // Runtime-only accumulators reset; toutes les proprietes editor/gameplay restent copiees.
     duplicate.motionTrailIdleSpawnAccSec = 0.0f;
     duplicate.motionTrailIdleRingSalvoPiecesRemaining = 0;
     duplicate.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
     duplicate.motionTrailDistanceAcc = 0.0f;
     return duplicate;
+}
+
+bool EditorMapVfxScene::duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex)
+{
+    if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        return false;
+    }
+    const ShipVfxInstance& src = this->currentShipVfxLayers()[static_cast<size_t>(instanceIndex)];
+    if (src.locked)
+    {
+        this->statusMessage = "Layer verrouille: duplication refusee.";
+        return false;
+    }
+
+    ShipVfxInstance dup = this->duplicateShipVfxInstanceFreshId(src);
+    // Petit decal visuel uniquement pour distinguer immediatement la copie.
+    dup.offsetX += 12.0f;
+    dup.offsetY += 12.0f;
+    for (DirectionOverride& o : dup.directionOverrides)
+    {
+        if (o.enabled)
+        {
+            o.offsetX += 12.0f;
+            o.offsetY += 12.0f;
+        }
+    }
+    if (dup.motionSpawnCaptured)
+    {
+        dup.motionSpawnOffsetX += 12.0f;
+        dup.motionSpawnOffsetY += 12.0f;
+    }
+
+    this->currentShipVfxLayers().push_back(std::move(dup));
+    this->setSelectedVfxInstanceIndex(static_cast<int>(this->currentShipVfxLayers().size()) - 1);
+    this->rebuildVfxLayerLabelsFromCurrentInstances();
+    this->markShipVfxDirty();
+    this->statusMessage = "Layer duplique (copie complete).";
+    return true;
 }
 
 void EditorMapVfxScene::closeVfxDuplicateToPagesPopup(void)
@@ -2352,27 +3580,26 @@ void EditorMapVfxScene::openVfxDuplicateToPagesPopupFromSelectedVfx(void)
     this->closeVfxDuplicateToPagesPopup();
     this->shipVfxLayerPagePickerOpen = false;
 
-    ShipVfxInstance* instance = this->getSelectedVfxInstance();
-    if (instance == nullptr)
+    const int srcPage = this->getShipVfxLayerPageKey();
+    if (srcPage < 0 || srcPage >= kShipVfxLayerPageCount)
     {
-        this->statusMessage = "Aucun VFX selectionne.";
         return;
     }
-    if (instance->locked)
+    if (this->shipVfxLayerPages[static_cast<size_t>(srcPage)].empty())
     {
-        this->statusMessage = "Layer verrouille : duplication refusee.";
+        this->statusMessage = "La page courante ne contient aucun layer VFX a dupliquer.";
         return;
     }
 
-    this->vfxDuplicateToPagesPopupSourceSnapshot = *instance;
-    this->vfxDuplicateToPagesPopupSourcePageKey = this->getShipVfxLayerPageKey();
+    this->vfxDuplicateToPagesPopupSourceSnapshot = ShipVfxInstance{};
+    this->vfxDuplicateToPagesPopupSourcePageKey = srcPage;
     for (size_t i = 0; i < this->vfxDuplicateToPagesPageSelected.size(); ++i)
     {
-        this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == this->vfxDuplicateToPagesPopupSourcePageKey);
+        this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == srcPage);
     }
     this->vfxDuplicateToPagesPopupVisible = true;
     this->statusMessage =
-        "Dupliquer vers les pages cochees (defaut : page courante seule), puis VALIDER.";
+        "DUP+ : dupliquer toute la page courante vers les pages cochees, puis VALIDER.";
 }
 
 void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
@@ -2392,19 +3619,74 @@ void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
     }
 
     const int srcPage = this->vfxDuplicateToPagesPopupSourcePageKey;
+    if (srcPage < 0 || srcPage >= kShipVfxLayerPageCount)
+    {
+        this->statusMessage = "Page source invalide.";
+        return;
+    }
+    const std::vector<ShipVfxInstance> sourceSnapshot =
+        this->shipVfxLayerPages[static_cast<size_t>(srcPage)];
+    if (sourceSnapshot.empty())
+    {
+        this->statusMessage = "La page source est vide.";
+        return;
+    }
+
+    int copiedLayersTotal = 0;
     for (int p = 0; p < kShipVfxLayerPageCount; ++p)
     {
         if (!this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(p)])
         {
             continue;
         }
-        ShipVfxInstance dup = this->duplicateShipVfxInstanceFreshId(this->vfxDuplicateToPagesPopupSourceSnapshot);
-        if (p == srcPage)
+
+        std::vector<std::pair<uint32_t, uint32_t>> idMap{};
+        idMap.reserve(sourceSnapshot.size());
+        std::vector<ShipVfxInstance> clonedLayers{};
+        clonedLayers.reserve(sourceSnapshot.size());
+        for (const ShipVfxInstance& srcLayer : sourceSnapshot)
         {
-            dup.offsetX += 12.0f;
-            dup.offsetY += 12.0f;
+            ShipVfxInstance dup = this->duplicateShipVfxInstanceFreshId(srcLayer);
+            idMap.push_back({srcLayer.instanceId, dup.instanceId});
+            clonedLayers.push_back(std::move(dup));
         }
-        this->shipVfxLayerPages[static_cast<size_t>(p)].push_back(std::move(dup));
+        const auto remapInstanceId = [&idMap](uint32_t oldId) -> uint32_t {
+            for (const auto& m : idMap)
+            {
+                if (m.first == oldId)
+                {
+                    return m.second;
+                }
+            }
+            return oldId;
+        };
+        for (ShipVfxInstance& dup : clonedLayers)
+        {
+            if (dup.spawnAfterInstanceId != 0U)
+            {
+                dup.spawnAfterInstanceId = remapInstanceId(dup.spawnAfterInstanceId);
+            }
+            if (p == srcPage)
+            {
+                dup.offsetX += 12.0f;
+                dup.offsetY += 12.0f;
+                for (DirectionOverride& o : dup.directionOverrides)
+                {
+                    if (o.enabled)
+                    {
+                        o.offsetX += 12.0f;
+                        o.offsetY += 12.0f;
+                    }
+                }
+                if (dup.motionSpawnCaptured)
+                {
+                    dup.motionSpawnOffsetX += 12.0f;
+                    dup.motionSpawnOffsetY += 12.0f;
+                }
+            }
+            this->shipVfxLayerPages[static_cast<size_t>(p)].push_back(std::move(dup));
+            copiedLayersTotal += 1;
+        }
     }
 
     const int curKey = this->getShipVfxLayerPageKey();
@@ -2420,7 +3702,12 @@ void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
     }
 
     char buf[96] = {};
-    SDL_snprintf(buf, sizeof(buf), "VFX duplique sur %d page(s).", targetCount);
+    SDL_snprintf(
+        buf,
+        sizeof(buf),
+        "Page dupliquee: %d layer(s) copies vers %d page(s).",
+        copiedLayersTotal,
+        targetCount);
     this->statusMessage = buf;
 }
 
@@ -2488,7 +3775,7 @@ void EditorMapVfxScene::drawVfxDuplicateToPagesPopup(void) const
 
     RC2D_Text titleText = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
-        "Dupliquer le layer VFX vers les pages");
+        "DUP+ : dupliquer toute la page vers les pages");
     titleText.color = kHudTextColor;
     rc2d_graphics_setTextColor(&titleText);
     rc2d_graphics_drawText(&titleText, lay.popup.x + 12.0f, lay.popup.y + 8.0f);
@@ -2777,7 +4064,6 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     const float shipVfxZoomToolbarW = 110.0f;
     setNextButton(&this->buttonShipVfxZoomMinusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
     setNextButton(&this->buttonShipVfxZoomPlusRect, &x, shipRow1Y, shipVfxZoomToolbarW);
-    setNextButton(&this->buttonShipPilotRect, &x, shipRow1Y, 118.0f);
 
     // Mode downscale: tout sur la meme ligne (gauche zoom+repere, centre import, droite scale).
     const float looseZoomW = 110.0f;
@@ -5198,7 +6484,12 @@ bool EditorMapVfxScene::loadShipFolderFromAbsolutePath(const char* folderAbsolut
         return false;
     }
 
-    this->previewShip.setSpeedTilesPerSecond(4.0f);
+    float previewSpeedTilesPerSec = GetGameState().player.getMoveSpeedTilesPerSecond();
+    if (!std::isfinite(previewSpeedTilesPerSec) || previewSpeedTilesPerSec <= 0.0f)
+    {
+        previewSpeedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+    }
+    this->previewShip.setSpeedTilesPerSecond(previewSpeedTilesPerSec);
     this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
     this->applyPreviewDirectionToShip();
     this->previewShipOpacityPercent = 100;
@@ -7151,6 +8442,349 @@ void EditorMapVfxScene::getVfxPreviewDrawOffsets(
     *outOffsetY = by;
 }
 
+void EditorMapVfxScene::appendMotionTrailPieceFromStep(
+    const ShipVfxInstance& inst,
+    float anchorShipTileX,
+    float anchorShipTileY,
+    float moveDxTiles,
+    float moveDyTiles,
+    float timeSec,
+    std::vector<ShipVfxTrailPiece>& outPieces,
+    uint32_t& nextUiId,
+    float marchePopupPreviewPathU,
+    float anchorShipCenterOffsetEffectiveZoom,
+    float spawnSpeedTilesPerSec) const
+{
+    (void)moveDxTiles;
+    (void)moveDyTiles;
+    ShipVfxTrailPiece piece{};
+    piece.sourceVfxInstanceId = inst.instanceId;
+    piece.anchorShipTileX = anchorShipTileX;
+    piece.anchorShipTileY = anchorShipTileY;
+    piece.bornTimeSeconds = timeSec;
+    float speedTilesPerSec = spawnSpeedTilesPerSec;
+    if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+    {
+        speedTilesPerSec = this->previewShip.getSpeedTilesPerSecond();
+    }
+    if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+    {
+        speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+    }
+    const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
+    piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
+    const DirectionOverride* movOvr = this->getResolvedDirectionOverride(&inst);
+    // Base commune des rejets : ancrage sur le decal courant du layer.
+    this->getVfxPreviewDrawOffsets(inst, movOvr, &piece.trailDrawOffsetX, &piece.trailDrawOffsetY);
+    if (std::isfinite(anchorShipCenterOffsetEffectiveZoom) &&
+        anchorShipCenterOffsetEffectiveZoom > 0.0f)
+    {
+        piece.anchorShipSpriteCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(
+            anchorShipCenterOffsetEffectiveZoom,
+            &piece.anchorShipSpriteCenterOffXPx,
+            &piece.anchorShipSpriteCenterOffYPx);
+    }
+    else
+    {
+        piece.anchorShipSpriteCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixels(
+            &piece.anchorShipSpriteCenterOffXPx,
+            &piece.anchorShipSpriteCenterOffYPx);
+    }
+    piece.trailPerpendicularJitterX = 0.0f;
+    piece.trailPerpendicularJitterY = 0.0f;
+    if (!inst.motionTrailStrictTilePlacement)
+    {
+        piece.trailDrawOffsetX += inst.motionTrailConeOffsetX;
+        piece.trailDrawOffsetY += inst.motionTrailConeOffsetY;
+        const float spread = (std::max)(inst.motionTrailLateralJitterRadius, 0.0f);
+        if (spread > 0.0001f)
+        {
+            // Mode cone: repere fixe (independant de l'orientation navire), identique a la preview popup.
+            const float dirOffRad = inst.motionTrailConeDirectionOffsetDeg * (3.14159265359f / 180.0f);
+            const float coneAxisRad = kTrailConePopupRearAxisRad + dirOffRad;
+            const float coneAxisX = std::cos(coneAxisRad);
+            const float coneAxisY = std::sin(coneAxisRad);
+            const float conePerpX = -coneAxisY;
+            const float conePerpY = coneAxisX;
+
+            const float depth = editorMapVfxSampleTrailConeDepth(spread);
+            const float coneHalfAngleDeg = std::clamp(inst.motionTrailConeHalfAngleDeg, 2.0f, 85.0f);
+            const float coneHalfAngleRad = coneHalfAngleDeg * (3.14159265359f / 180.0f);
+            const float widthAtDepth = std::tan(coneHalfAngleRad) * depth;
+            const float lateral = editorMapVfxSampleTrailConeLateral(widthAtDepth);
+
+            piece.trailDrawOffsetX += coneAxisX * depth;
+            piece.trailDrawOffsetY += coneAxisY * depth;
+            piece.trailPerpendicularJitterX = conePerpX * lateral;
+            piece.trailPerpendicularJitterY = conePerpY * lateral;
+        }
+    }
+    piece.trailRotationJitterDeg = 0.0f;
+    if (inst.motionTrailRotationRandomPercent > 0)
+    {
+        const float p =
+            static_cast<float>(std::clamp(inst.motionTrailRotationRandomPercent, 0, 100)) / 100.0f;
+        std::uniform_real_distribution<float> rotU(
+            -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
+        piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
+    }
+    piece.trailInitialPhaseSec = 0.0f;
+    if (inst.importedSfxIndex >= 0 && inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
+        piece.trailInitialPhaseSec = this->computeVfxPreviewPhaseSecondsInCycle(
+            inst,
+            timeSec,
+            this->currentShipVfxLayers(),
+            imported,
+            0);
+    }
+    uint32_t nid = ++nextUiId;
+    if (nid == 0U)
+    {
+        nid = ++nextUiId;
+    }
+    piece.layerPanelUiId = nid;
+    piece.fromIdleRingCrown = false;
+    piece.marchePopupPreviewPathU = marchePopupPreviewPathU;
+    outPieces.push_back(std::move(piece));
+}
+
+struct EditorMapVfxMarchePopupGrid
+{
+    float halfTileW = 0.0f;
+    float halfTileH = 0.0f;
+    float startScreenX = 0.0f;
+    float startScreenY = 0.0f;
+    float startTileX = 0.0f;
+    float startTileY = 0.0f;
+    float stepTileX = 1.0f;
+    float stepTileY = 0.0f;
+    float pathLengthTiles = 0.0f;
+};
+
+static EditorMapVfxMarchePopupGrid editorMapVfxBuildMarchePopupGrid(
+    const SDL_FRect& rm, int dirMarche, const Map& map, float worldZoom)
+{
+    EditorMapVfxMarchePopupGrid g{};
+    const float camZ = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    const float baseTileW = map.getTileWidth() / camZ;
+    const float baseTileH = map.getTileHeight() / camZ;
+    const float tileW = (std::max)(baseTileW * worldZoom, 1.0f);
+    const float tileH = (std::max)(baseTileH * worldZoom, 1.0f);
+    g.halfTileW = tileW * 0.5f;
+    g.halfTileH = tileH * 0.5f;
+
+    editorMapVfxDirectionIndexToTileStep(dirMarche, &g.stepTileX, &g.stepTileY);
+
+    const float stepScreenX = (g.stepTileX - g.stepTileY) * g.halfTileW;
+    const float stepScreenY = (g.stepTileX + g.stepTileY) * g.halfTileH;
+
+    constexpr float kMarchePathPad = 26.0f;
+    const float availW = (std::max)(rm.w - (kMarchePathPad * 2.0f), 8.0f);
+    const float availH = (std::max)(rm.h - (kMarchePathPad * 2.0f), 8.0f);
+    const float maxByX = (std::fabs(stepScreenX) > 0.0001f) ? (availW / std::fabs(stepScreenX)) : 1000.0f;
+    const float maxByY = (std::fabs(stepScreenY) > 0.0001f) ? (availH / std::fabs(stepScreenY)) : 1000.0f;
+    g.pathLengthTiles = (std::clamp)(std::floor((std::min)(maxByX, maxByY)), 2.0f, 64.0f);
+
+    const float spanX = stepScreenX * g.pathLengthTiles;
+    const float spanY = stepScreenY * g.pathLengthTiles;
+    const float minX = rm.x + ((rm.w - std::fabs(spanX)) * 0.5f);
+    const float minY = rm.y + ((rm.h - std::fabs(spanY)) * 0.5f);
+    g.startScreenX = minX + ((spanX < 0.0f) ? std::fabs(spanX) : 0.0f);
+    g.startScreenY = minY + ((spanY < 0.0f) ? std::fabs(spanY) : 0.0f);
+
+    g.startTileX = 0.0f;
+    g.startTileY = 0.0f;
+    return g;
+}
+
+void EditorMapVfxScene::resetVfxTrailPopupMarcheSimulationState(const std::string& signature)
+{
+    this->vfxTrailPopupMarcheSimParamSignature = signature;
+    this->vfxTrailPopupMarcheSimPieces.clear();
+    this->vfxTrailPopupMarcheDistAlongPathPx = 0.0f;
+    this->vfxTrailPopupMarcheSimDistanceAcc = 0.0f;
+}
+
+void EditorMapVfxScene::updateVfxTrailPopupMarcheSimulation(double dt)
+{
+    const float dtf = static_cast<float>(dt);
+    const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    if (!this->vfxTrailPopupVisible || !this->previewShipLoaded ||
+        this->vfxTrailPopupParentInstanceIndex < 0 ||
+        this->vfxTrailPopupParentInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        this->vfxTrailPopupMarcheSimPieces.clear();
+        this->vfxTrailPopupMarcheSimParamSignature.clear();
+        this->vfxTrailPopupMarcheDistAlongPathPx = 0.0f;
+        this->vfxTrailPopupMarcheSimDistanceAcc = 0.0f;
+        return;
+    }
+
+    ShipVfxInstance& instRef =
+        this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+    constexpr float kTrailPopupPreviewWorldZoomMin = 0.4f;
+    constexpr float kTrailPopupPreviewWorldZoomMax = 1.0f;
+    const float worldZ = (std::clamp)(this->vfxTrailPopupPreviewZoom,
+                                      kTrailPopupPreviewWorldZoomMin,
+                                      kTrailPopupPreviewWorldZoomMax);
+    const float shipEffectiveZoom = worldZ * this->previewShip.getDrawScale();
+    const int pageKey = this->getShipVfxLayerPageKey();
+    const SDL_FRect& rm = this->vfxTrailPopupLastLayout.previewMarcheRect;
+    float simConeLength = editorMapVfxParseFloat(
+        this->vfxTrailPopupLateralJitterInput.c_str(), instRef.motionTrailLateralJitterRadius);
+    float simConeOffX = instRef.motionTrailConeOffsetX;
+    float simConeOffY = instRef.motionTrailConeOffsetY;
+    float simConeDir = instRef.motionTrailConeDirectionOffsetDeg;
+    float simConeHalf = instRef.motionTrailConeHalfAngleDeg;
+    int simConeSpawnCount = std::clamp(instRef.motionTrailConeSpawnCount, 1, 32);
+    if (this->vfxTrailConePopupVisible &&
+        this->vfxTrailConePopupParentInstanceIndex == this->vfxTrailPopupParentInstanceIndex)
+    {
+        simConeLength = this->vfxTrailConePopupLength;
+        simConeOffX = this->vfxTrailConePopupOffsetX;
+        simConeOffY = this->vfxTrailConePopupOffsetY;
+        simConeDir = this->vfxTrailConePopupDirectionOffsetDeg;
+        simConeHalf = this->vfxTrailConePopupHalfAngleDeg;
+        simConeSpawnCount = this->vfxTrailConePopupSpawnCount;
+    }
+    simConeLength = (std::clamp)(simConeLength, 0.0f, kTrailConePopupLengthMax);
+    simConeOffX = (std::clamp)(simConeOffX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    simConeOffY = (std::clamp)(simConeOffY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    simConeDir = (std::clamp)(simConeDir, -179.0f, 179.0f);
+    simConeHalf = (std::clamp)(simConeHalf, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+    simConeSpawnCount = std::clamp(simConeSpawnCount, 1, 32);
+    const std::string sig = std::to_string(pageKey) + "|" + this->vfxTrailPopupEveryNTilesInput + "|" +
+                            this->vfxTrailPopupLifetimeTilesInput + "|" + std::to_string(simConeLength) + "|" +
+                            std::to_string(simConeOffX) + "|" + std::to_string(simConeOffY) + "|" +
+                            std::to_string(simConeDir) + "|" + std::to_string(simConeHalf) + "|" +
+                            std::to_string(simConeSpawnCount) + "|" +
+                            this->vfxTrailPopupRotationPctInput + "|" +
+                            (this->vfxTrailPopupStrictTilePlacement ? "1" : "0");
+    if (sig != this->vfxTrailPopupMarcheSimParamSignature)
+    {
+        this->resetVfxTrailPopupMarcheSimulationState(sig);
+    }
+
+    for (size_t i = 0; i < this->vfxTrailPopupMarcheSimPieces.size();)
+    {
+        this->vfxTrailPopupMarcheSimPieces[i].timeRemainingSec -= dtf;
+        if (this->vfxTrailPopupMarcheSimPieces[i].timeRemainingSec <= 0.0f)
+        {
+            this->vfxTrailPopupMarcheSimPieces.erase(this->vfxTrailPopupMarcheSimPieces.begin() +
+                                                    static_cast<std::ptrdiff_t>(i));
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
+    const int parsedEveryNMarche = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupEveryNTilesInput.c_str(),
+        kMotionTrailEveryNTilesMin,
+        kMotionTrailEveryNTilesMax,
+        instRef.motionTrailEveryNTiles);
+    if (parsedEveryNMarche <= 0)
+    {
+        return;
+    }
+
+    if (rm.w <= 4.0f || rm.h <= 4.0f)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    const int dirMarche = pageKey % 4;
+    /** Geometrie de rendu: suit le zoom popup pour que navire + rejets restent dans le meme repere visuel. */
+    const EditorMapVfxMarchePopupGrid grid = editorMapVfxBuildMarchePopupGrid(rm, dirMarche, map, worldZ);
+    if (grid.pathLengthTiles < 0.0001f)
+    {
+        return;
+    }
+    /** Vitesse preview rejets en marche ajustable via boutons SPEED - / +. */
+    float speedTilesPerSec = this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec;
+    if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+    {
+        speedTilesPerSec = this->previewShip.getSpeedTilesPerSecond();
+    }
+    speedTilesPerSec = (std::clamp)(speedTilesPerSec, 0.05f, 50.0f);
+    const float frameDistTiles = speedTilesPerSec * dtf;
+
+    ShipVfxInstance simInst = instRef;
+    simInst.motionTrailEveryNTiles = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupEveryNTilesInput.c_str(),
+        kMotionTrailEveryNTilesMin,
+        kMotionTrailEveryNTilesMax,
+        instRef.motionTrailEveryNTiles);
+    simInst.motionTrailLifetimeTiles = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupLifetimeTilesInput.c_str(), 1, 4096, instRef.motionTrailLifetimeTiles);
+    simInst.motionTrailLateralJitterRadius = simConeLength;
+    simInst.motionTrailConeOffsetX = simConeOffX;
+    simInst.motionTrailConeOffsetY = simConeOffY;
+    simInst.motionTrailConeDirectionOffsetDeg = simConeDir;
+    simInst.motionTrailConeHalfAngleDeg = simConeHalf;
+    simInst.motionTrailConeSpawnCount = simConeSpawnCount;
+    simInst.motionTrailRotationRandomPercent = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupRotationPctInput.c_str(), 0, 100, instRef.motionTrailRotationRandomPercent);
+    simInst.motionTrailStrictTilePlacement = this->vfxTrailPopupStrictTilePlacement;
+
+    const float thresholdTiles = static_cast<float>(simInst.motionTrailEveryNTiles);
+    const float movedDist = (std::max)(frameDistTiles, 0.0f);
+    float accDist = this->vfxTrailPopupMarcheSimDistanceAcc + movedDist;
+    float headU = std::fmod(this->vfxTrailPopupMarcheDistAlongPathPx, 1.0f);
+    if (headU < 0.0f)
+    {
+        headU += 1.0f;
+    }
+    const float pathLenTiles = (std::max)(grid.pathLengthTiles, 0.0001f);
+    const float headDistBefore = headU * pathLenTiles;
+    const float headDistAfter = headDistBefore + movedDist;
+
+    int spawnGuard = 0;
+    while (thresholdTiles > 0.0f && accDist >= thresholdTiles && spawnGuard < 1024)
+    {
+        const float overshootTiles = accDist - thresholdTiles;
+        float spawnDistTiles = headDistAfter - overshootTiles;
+        spawnDistTiles = std::fmod(spawnDistTiles, pathLenTiles);
+        if (spawnDistTiles < 0.0f)
+        {
+            spawnDistTiles += pathLenTiles;
+        }
+        const float spawnTileX = grid.startTileX + grid.stepTileX * spawnDistTiles;
+        const float spawnTileY = grid.startTileY + grid.stepTileY * spawnDistTiles;
+        const float spawnU = spawnDistTiles / pathLenTiles;
+        accDist -= thresholdTiles;
+        const int spawnCount = simInst.motionTrailStrictTilePlacement ? 1 : std::clamp(simInst.motionTrailConeSpawnCount, 1, 32);
+        for (int burst = 0; burst < spawnCount && spawnGuard < 1024; ++burst)
+        {
+            this->appendMotionTrailPieceFromStep(simInst,
+                                                 spawnTileX,
+                                                 spawnTileY,
+                                                 grid.stepTileX,
+                                                 grid.stepTileY,
+                                                 timeSec,
+                                                 this->vfxTrailPopupMarcheSimPieces,
+                                                 this->vfxTrailPopupMarcheSimNextUiId,
+                                                 spawnU,
+                                                 shipEffectiveZoom,
+                                                 speedTilesPerSec);
+            ++spawnGuard;
+        }
+    }
+    this->vfxTrailPopupMarcheSimDistanceAcc =
+        (thresholdTiles > 0.0f) ? (std::clamp)(accDist, 0.0f, thresholdTiles) : 0.0f;
+    float headDistAfterWrapped = std::fmod(headDistAfter, pathLenTiles);
+    if (headDistAfterWrapped < 0.0f)
+    {
+        headDistAfterWrapped += pathLenTiles;
+    }
+    const float headUAfter = headDistAfterWrapped / pathLenTiles;
+    this->vfxTrailPopupMarcheDistAlongPathPx = headUAfter;
+}
+
 void EditorMapVfxScene::clearShipVfxTrailPieces(void)
 {
     for (std::vector<ShipVfxTrailPiece>& pageTrails : this->shipVfxTrailPiecesByPage)
@@ -7230,6 +8864,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
 
     if (!this->previewShipPilotActive)
     {
+        this->vfxTrailPopupMarcheLastPilotMoveDirValid = false;
         return;
     }
 
@@ -7263,16 +8898,20 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             const float dist = std::sqrt(dx * dx + dy * dy);
             if (dist > 0.00001f)
             {
+                this->vfxTrailPopupMarcheLastPilotMoveDirX = dx / dist;
+                this->vfxTrailPopupMarcheLastPilotMoveDirY = dy / dist;
+                this->vfxTrailPopupMarcheLastPilotMoveDirValid = true;
                 auto& layers = this->currentShipVfxLayers();
                 for (ShipVfxInstance& inst : layers)
                 {
-                    if (inst.motionTrailEveryNTiles <= 0 || !inst.motionSpawnCaptured)
+                    if (inst.motionTrailEveryNTiles <= 0)
                     {
                         continue;
                     }
-                    const float threshold = static_cast<float>(inst.motionTrailEveryNTiles);
+                    const float thresholdTiles = static_cast<float>(inst.motionTrailEveryNTiles);
                     inst.motionTrailDistanceAcc += dist;
-                    while (inst.motionTrailDistanceAcc >= threshold)
+                    int spawnGuard = 0;
+                    while (thresholdTiles > 0.0f && inst.motionTrailDistanceAcc >= thresholdTiles && spawnGuard < 1024)
                     {
                         if (inst.importedSfxIndex >= 0 &&
                             inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
@@ -7281,68 +8920,60 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                                 this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
                             if (this->shouldSkipDrawImportedSfxForPilotMaxLifetime(spawnImp, timeSec))
                             {
-                                inst.motionTrailDistanceAcc -= threshold;
+                                inst.motionTrailDistanceAcc -= thresholdTiles;
+                                ++spawnGuard;
                                 continue;
                             }
                         }
-                        inst.motionTrailDistanceAcc -= threshold;
-                        ShipVfxTrailPiece piece{};
-                        piece.sourceVfxInstanceId = inst.instanceId;
-                        piece.anchorShipTileX = this->previewShipTile.x;
-                        piece.anchorShipTileY = this->previewShipTile.y;
-                        piece.bornTimeSeconds = timeSec;
-                        piece.timeRemainingSec =
-                            (std::max)(static_cast<float>(inst.motionTrailLifetimeMs) / 1000.0f, 0.05f);
-                        const DirectionOverride* movOvr = this->getResolvedDirectionOverride(&inst);
-                        if (inst.motionTrailStrictTilePlacement)
+                        const float invDist = 1.0f / dist;
+                        const float nx = dx * invDist;
+                        const float ny = dy * invDist;
+                        const float overshoot = inst.motionTrailDistanceAcc - thresholdTiles;
+                        const float spawnTileX = this->previewShipTile.x - (nx * overshoot);
+                        const float spawnTileY = this->previewShipTile.y - (ny * overshoot);
+                        inst.motionTrailDistanceAcc -= thresholdTiles;
+                        float speedTilesPerSec = (dtf > 0.000001f) ? (dist / dtf) : this->previewShip.getSpeedTilesPerSecond();
+                        if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
                         {
-                            this->getVfxPreviewDrawOffsets(inst, movOvr, &piece.trailDrawOffsetX, &piece.trailDrawOffsetY);
+                            speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
                         }
-                        else
+                        const int spawnCount =
+                            inst.motionTrailStrictTilePlacement ? 1 : std::clamp(inst.motionTrailConeSpawnCount, 1, 32);
+                        for (int burst = 0; burst < spawnCount && spawnGuard < 1024; ++burst)
                         {
-                            piece.trailDrawOffsetX = inst.motionSpawnOffsetX;
-                            piece.trailDrawOffsetY = inst.motionSpawnOffsetY;
+                            this->appendMotionTrailPieceFromStep(inst,
+                                                                spawnTileX,
+                                                                spawnTileY,
+                                                                dx,
+                                                                dy,
+                                                                timeSec,
+                                                                this->currentShipVfxTrailPieces(),
+                                                                this->nextShipVfxTrailLayerPanelUiId,
+                                                                -1.0f,
+                                                                -1.0f,
+                                                                speedTilesPerSec);
+                            ++spawnGuard;
                         }
-                        piece.anchorShipSpriteCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixels(
-                            &piece.anchorShipSpriteCenterOffXPx,
-                            &piece.anchorShipSpriteCenterOffYPx);
-                        piece.trailPerpendicularJitterX = 0.0f;
-                        piece.trailPerpendicularJitterY = 0.0f;
-                        if (!inst.motionTrailStrictTilePlacement && inst.motionTrailLateralJitterRadius > 0.0001f)
-                        {
-                            const float invDist = 1.0f / dist;
-                            const float perpX = -dy * invDist;
-                            const float perpY = dx * invDist;
-                            std::uniform_real_distribution<float> distU(
-                                -inst.motionTrailLateralJitterRadius, inst.motionTrailLateralJitterRadius);
-                            const float t = distU(editorMapVfxTrailJitterRng());
-                            piece.trailPerpendicularJitterX = perpX * t;
-                            piece.trailPerpendicularJitterY = perpY * t;
-                        }
-                        piece.trailRotationJitterDeg = 0.0f;
-                        if (inst.motionTrailRotationRandomPercent > 0)
-                        {
-                            const float p =
-                                static_cast<float>(std::clamp(inst.motionTrailRotationRandomPercent, 0, 100)) /
-                                100.0f;
-                            std::uniform_real_distribution<float> rotU(
-                                -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
-                            piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
-                        }
-                        uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
-                        if (nid == 0U)
-                        {
-                            nid = ++this->nextShipVfxTrailLayerPanelUiId;
-                        }
-                        piece.layerPanelUiId = nid;
-                        this->currentShipVfxTrailPieces().push_back(piece);
+                    }
+                    if (thresholdTiles > 0.0f)
+                    {
+                        inst.motionTrailDistanceAcc = (std::clamp)(inst.motionTrailDistanceAcc, 0.0f, thresholdTiles);
                     }
                 }
             }
+            else
+            {
+                this->vfxTrailPopupMarcheLastPilotMoveDirValid = false;
+            }
+        }
+        else
+        {
+            this->vfxTrailPopupMarcheLastPilotMoveDirValid = false;
         }
     }
     else
     {
+        this->vfxTrailPopupMarcheLastPilotMoveDirValid = false;
         constexpr float kTwoPi = 6.28318530718f;
         const auto spawnIdleRingCrownPiece = [this, timeSec, kTwoPi](ShipVfxInstance& inst, int k) -> bool {
             if (inst.importedSfxIndex >= 0 &&
@@ -7367,8 +8998,13 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             piece.anchorShipTileX = this->previewShipTile.x;
             piece.anchorShipTileY = this->previewShipTile.y;
             piece.bornTimeSeconds = timeSec;
-            piece.timeRemainingSec =
-                (std::max)(static_cast<float>(inst.motionTrailLifetimeMs) / 1000.0f, 0.05f);
+            float speedTilesPerSec = this->previewShip.getSpeedTilesPerSecond();
+            if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+            {
+                speedTilesPerSec = Player::kDefaultMoveSpeedTilesPerSecond;
+            }
+            const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
+            piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
             float ox = baseOx + std::cos(ang) * R;
             float oy = baseOy + std::sin(ang) * R;
             if (inst.motionTrailIdleRingPositionJitterRadius > 0.0001f)
@@ -7399,6 +9035,17 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                     -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
                 piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
             }
+            piece.trailInitialPhaseSec = 0.0f;
+            if (inst.importedSfxIndex >= 0 && inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
+            {
+                const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
+                piece.trailInitialPhaseSec = this->computeVfxPreviewPhaseSecondsInCycle(
+                    inst,
+                    timeSec,
+                    this->currentShipVfxLayers(),
+                    imported,
+                    0);
+            }
             uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
             if (nid == 0U)
             {
@@ -7413,15 +9060,14 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
         auto& layers = this->currentShipVfxLayers();
         for (ShipVfxInstance& inst : layers)
         {
-            if (!inst.motionTrailIdleRingWhenStationary || !inst.motionSpawnCaptured)
+            if (!inst.motionTrailIdleRingWhenStationary)
             {
                 inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
                 inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
                 continue;
             }
             const int pieceCount = std::clamp(inst.motionTrailIdleRingPieceCount, 1, 32);
-            const float periodSec =
-                (std::max)(static_cast<float>(inst.motionTrailIdleSpawnPeriodMs) / 1000.0f, 0.15f);
+            const float periodSec = kIdleRingSalvoPeriodSec;
             const float staggerSec = kIdleRingPieceStaggerSec;
 
             if (inst.motionTrailIdleRingSalvoPiecesRemaining > 0)
@@ -7467,28 +9113,9 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
 
 void EditorMapVfxScene::togglePreviewShipPilotControl(void)
 {
-    if (!this->previewShipLoaded)
-    {
-        this->statusMessage = "Charge un navire preview avant le pilotage.";
-        return;
-    }
-    this->previewShipPilotActive = !this->previewShipPilotActive;
-    if (!this->previewShipPilotActive)
-    {
-        this->previewShip.setPositionTile(this->previewShipTile.x, this->previewShipTile.y);
-        this->clearShipVfxTrailPieces();
-    }
-    else
-    {
-        for (bool& v : this->shipVfxTrailPrevShipTileValidByPage)
-        {
-            v = false;
-        }
-        this->pilotVfxMaxDurationClockAnchorSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
-    }
-    this->statusMessage = this->previewShipPilotActive
-        ? "Pilotage navire ON : clic gauche sur la mer = deplacement (A*)."
-        : "Pilotage navire OFF.";
+    this->previewShipPilotActive = false;
+    this->clearShipVfxTrailPieces();
+    this->statusMessage = "Mode PILOTER retire de scene-editormap-vfx.";
 }
 
 void EditorMapVfxScene::captureVfxMotionSpawnAtIndex(int instanceIndex)
@@ -7505,8 +9132,8 @@ void EditorMapVfxScene::captureVfxMotionSpawnAtIndex(int instanceIndex)
     inst.motionTrailDistanceAcc = 0.0f;
     this->markShipVfxDirty();
     this->statusMessage =
-        "SPAWN reference enregistree. En mode derive laterale, la trace utilise ce decal memorise ; "
-        "en mode emplacement du layer, la trace reprend les offsets du layer sur chaque tuile du parcours.";
+        "Reference SPAWN enregistree (etat technique). La trainee suit le layer ; en mode cone, "
+        "la dispersion se fait autour du layer.";
 }
 
 int EditorMapVfxScene::findTopmostVfxInstanceIndexAtPointExcluding(float x, float y, int excludeInstanceIndex) const
@@ -7957,24 +9584,16 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         const cJSON* trailNNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailEveryNTiles");
         if (cJSON_IsNumber(trailNNode) && std::isfinite(trailNNode->valuedouble))
         {
-            instance.motionTrailEveryNTiles =
-                std::clamp(static_cast<int>(std::llround(trailNNode->valuedouble)), 0, 32);
+            instance.motionTrailEveryNTiles = (std::clamp)(
+                static_cast<int>(std::llround(trailNNode->valuedouble)),
+                kMotionTrailEveryNTilesMin,
+                kMotionTrailEveryNTilesMax);
         }
-        const cJSON* trailLifeMsNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLifetimeMs");
-        if (cJSON_IsNumber(trailLifeMsNode) && std::isfinite(trailLifeMsNode->valuedouble) && trailLifeMsNode->valuedouble > 0.0)
+        const cJSON* trailLifeNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLifetimeTiles");
+        if (cJSON_IsNumber(trailLifeNode) && std::isfinite(trailLifeNode->valuedouble) && trailLifeNode->valuedouble > 0.0)
         {
-            instance.motionTrailLifetimeMs =
-                static_cast<int>(std::clamp(std::llround(trailLifeMsNode->valuedouble), 1LL, 9999999LL));
-        }
-        else
-        {
-            const cJSON* trailLifeNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLifetimeSec");
-            if (cJSON_IsNumber(trailLifeNode) && std::isfinite(trailLifeNode->valuedouble) && trailLifeNode->valuedouble > 0.0)
-            {
-                const double sec = trailLifeNode->valuedouble;
-                instance.motionTrailLifetimeMs = static_cast<int>(
-                    std::clamp(std::llround(sec * 1000.0), 1LL, 9999999LL));
-            }
+            instance.motionTrailLifetimeTiles =
+                static_cast<int>(std::clamp(std::llround(trailLifeNode->valuedouble), 1LL, 4096LL));
         }
         instance.motionTrailDistanceAcc = 0.0f;
         const cJSON* trailJitNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailLateralJitterRadius");
@@ -7986,6 +9605,56 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         else
         {
             instance.motionTrailLateralJitterRadius = 0.0f;
+        }
+        const cJSON* coneOffXNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailConeOffsetX");
+        if (cJSON_IsNumber(coneOffXNode) && std::isfinite(coneOffXNode->valuedouble))
+        {
+            instance.motionTrailConeOffsetX = static_cast<float>(
+                std::clamp(coneOffXNode->valuedouble, -2048.0, 2048.0));
+        }
+        else
+        {
+            instance.motionTrailConeOffsetX = 0.0f;
+        }
+        const cJSON* coneOffYNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailConeOffsetY");
+        if (cJSON_IsNumber(coneOffYNode) && std::isfinite(coneOffYNode->valuedouble))
+        {
+            instance.motionTrailConeOffsetY = static_cast<float>(
+                std::clamp(coneOffYNode->valuedouble, -2048.0, 2048.0));
+        }
+        else
+        {
+            instance.motionTrailConeOffsetY = 0.0f;
+        }
+        const cJSON* coneDirNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailConeDirectionOffsetDeg");
+        if (cJSON_IsNumber(coneDirNode) && std::isfinite(coneDirNode->valuedouble))
+        {
+            instance.motionTrailConeDirectionOffsetDeg = static_cast<float>(
+                std::clamp(coneDirNode->valuedouble, -179.0, 179.0));
+        }
+        else
+        {
+            instance.motionTrailConeDirectionOffsetDeg = 0.0f;
+        }
+        const cJSON* coneHalfNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailConeHalfAngleDeg");
+        if (cJSON_IsNumber(coneHalfNode) && std::isfinite(coneHalfNode->valuedouble))
+        {
+            instance.motionTrailConeHalfAngleDeg = static_cast<float>(
+                std::clamp(coneHalfNode->valuedouble, 2.0, 85.0));
+        }
+        else
+        {
+            instance.motionTrailConeHalfAngleDeg = 28.0f;
+        }
+        const cJSON* coneCountNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailConeSpawnCount");
+        if (cJSON_IsNumber(coneCountNode) && std::isfinite(coneCountNode->valuedouble))
+        {
+            instance.motionTrailConeSpawnCount =
+                std::clamp(static_cast<int>(std::llround(coneCountNode->valuedouble)), 1, 32);
+        }
+        else
+        {
+            instance.motionTrailConeSpawnCount = 1;
         }
         const cJSON* strictTileNode = cJSON_GetObjectItemCaseSensitive(node, "motionTrailStrictTilePlacement");
         if (cJSON_IsBool(strictTileNode))
@@ -8422,10 +10091,21 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddBoolToObject(item, "motionSpawnCaptured", instance.motionSpawnCaptured);
         cJSON_AddNumberToObject(item, "motionSpawnOffsetX", static_cast<double>(instance.motionSpawnOffsetX));
         cJSON_AddNumberToObject(item, "motionSpawnOffsetY", static_cast<double>(instance.motionSpawnOffsetY));
-        cJSON_AddNumberToObject(item, "motionTrailEveryNTiles", static_cast<double>(instance.motionTrailEveryNTiles));
-        cJSON_AddNumberToObject(item, "motionTrailLifetimeMs", static_cast<double>(instance.motionTrailLifetimeMs));
+        cJSON_AddNumberToObject(
+            item, "motionTrailEveryNTiles", static_cast<double>(instance.motionTrailEveryNTiles));
+        cJSON_AddNumberToObject(item, "motionTrailLifetimeTiles", static_cast<double>(instance.motionTrailLifetimeTiles));
         cJSON_AddNumberToObject(
             item, "motionTrailLateralJitterRadius", static_cast<double>(instance.motionTrailLateralJitterRadius));
+        cJSON_AddNumberToObject(
+            item, "motionTrailConeOffsetX", static_cast<double>(instance.motionTrailConeOffsetX));
+        cJSON_AddNumberToObject(
+            item, "motionTrailConeOffsetY", static_cast<double>(instance.motionTrailConeOffsetY));
+        cJSON_AddNumberToObject(
+            item, "motionTrailConeDirectionOffsetDeg", static_cast<double>(instance.motionTrailConeDirectionOffsetDeg));
+        cJSON_AddNumberToObject(
+            item, "motionTrailConeHalfAngleDeg", static_cast<double>(instance.motionTrailConeHalfAngleDeg));
+        cJSON_AddNumberToObject(
+            item, "motionTrailConeSpawnCount", static_cast<double>(instance.motionTrailConeSpawnCount));
         cJSON_AddBoolToObject(item, "motionTrailStrictTilePlacement", instance.motionTrailStrictTilePlacement);
         cJSON_AddNumberToObject(
             item, "motionTrailRotationRandomPercent", static_cast<double>(instance.motionTrailRotationRandomPercent));
@@ -8667,12 +10347,32 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
                     static_cast<double>(instance.motionTrailEveryNTiles));
                 cJSON_AddNumberToObject(
                     gameplayInstance,
-                    "motionTrailLifetimeMs",
-                    static_cast<double>(instance.motionTrailLifetimeMs));
+                    "motionTrailLifetimeTiles",
+                    static_cast<double>(instance.motionTrailLifetimeTiles));
                 cJSON_AddNumberToObject(
                     gameplayInstance,
                     "motionTrailLateralJitterRadius",
                     static_cast<double>(instance.motionTrailLateralJitterRadius));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailConeOffsetX",
+                    static_cast<double>(instance.motionTrailConeOffsetX));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailConeOffsetY",
+                    static_cast<double>(instance.motionTrailConeOffsetY));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailConeDirectionOffsetDeg",
+                    static_cast<double>(instance.motionTrailConeDirectionOffsetDeg));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailConeHalfAngleDeg",
+                    static_cast<double>(instance.motionTrailConeHalfAngleDeg));
+                cJSON_AddNumberToObject(
+                    gameplayInstance,
+                    "motionTrailConeSpawnCount",
+                    static_cast<double>(instance.motionTrailConeSpawnCount));
                 cJSON_AddBoolToObject(
                     gameplayInstance, "motionTrailStrictTilePlacement", instance.motionTrailStrictTilePlacement);
                 cJSON_AddNumberToObject(
@@ -9643,7 +11343,8 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
         }
 
         const float phaseTime = (std::max)(0.0f, timeSeconds - piece.bornTimeSeconds);
-        const int frameIndex = this->computeVfxPreviewFrameIndex(*inst, phaseTime, previewLayers, imported);
+        const float trailPlaybackSec = piece.trailInitialPhaseSec + phaseTime;
+        const int frameIndex = this->computeTrailPieceFrameIndex(imported, trailPlaybackSec);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
         const float ox = (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX) * scale;
@@ -10384,10 +12085,6 @@ void EditorMapVfxScene::drawHud(void) const
             this->previewIsoGridVisible);
         this->drawToolbarButton(this->buttonShipVfxZoomMinusRect, "ZOOM -", false);
         this->drawToolbarButton(this->buttonShipVfxZoomPlusRect, "ZOOM +", false);
-        this->drawToolbarButton(
-            this->buttonShipPilotRect,
-            this->previewShipPilotActive ? "PILOTER (ON)" : "PILOTER",
-            this->previewShipPilotActive);
 
         std::vector<std::string> shipLabels;
         shipLabels.reserve(this->importedShips.size());
@@ -10593,6 +12290,7 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawLooseExportNamePopup();
     this->drawVfxRelativeTimingPopup();
     this->drawVfxTrailPopup();
+    this->drawVfxTrailConePopup();
     this->drawVfxDuplicateToPagesPopup();
 }
 
@@ -10678,8 +12376,8 @@ void EditorMapVfxScene::drawVfxRelativeTimingPopup(void) const
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 
     const char* title = (this->vfxRelativeTimingPopupStep == 0)
-        ? "RELATIF — choisir l'instance de reference"
-        : "RELATIF — delai apres l'instance choisie (ms)";
+        ? "RELATIF ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â choisir l'instance de reference"
+        : "RELATIF ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â delai apres l'instance choisie (ms)";
     RC2D_Text titleText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
     titleText.color = kHudTextColor;
     rc2d_graphics_setTextColor(&titleText);
@@ -11017,6 +12715,318 @@ bool EditorMapVfxScene::handleVfxRelativeTimingPopupKey(
     return true;
 }
 
+void EditorMapVfxScene::drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay) const
+{
+    if (!this->previewShipLoaded)
+    {
+        return;
+    }
+    if (this->vfxTrailPopupParentInstanceIndex < 0 ||
+        this->vfxTrailPopupParentInstanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        return;
+    }
+    const ShipVfxInstance& inst =
+        this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+    if (inst.importedSfxIndex < 0 || inst.importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return;
+    }
+    const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
+    if (imported.image.sdl_texture == nullptr || imported.frames.empty())
+    {
+        return;
+    }
+
+    const float timeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const auto& previewLayers = this->currentShipVfxLayers();
+    const DirectionOverride* ovr = this->getResolvedDirectionOverride(&inst);
+    /** Meme plage que Camera::min/maxZoomFactor : apercu identique au zoom carte pour navire + VFX. */
+    constexpr float kTrailPopupPreviewWorldZoomMin = 0.4f;
+    constexpr float kTrailPopupPreviewWorldZoomMax = 1.0f;
+    const float worldZ = (std::clamp)(this->vfxTrailPopupPreviewZoom,
+                                      kTrailPopupPreviewWorldZoomMin,
+                                      kTrailPopupPreviewWorldZoomMax);
+    const float shipEffectiveZoom = worldZ * this->previewShip.getDrawScale();
+    const int marcheEveryN = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupEveryNTilesInput.c_str(),
+        kMotionTrailEveryNTilesMin,
+        kMotionTrailEveryNTilesMax,
+        inst.motionTrailEveryNTiles);
+    const bool showMarcheTrailPieces = marcheEveryN > 0;
+    const bool showMarcheShipOnPath = marcheEveryN > 0 && this->vfxTrailPopupPreviewMarcheShipVisible;
+
+    auto drawOneQuadAt = [&](float centerX,
+                             float centerY,
+                             float offsetXUnscaled,
+                             float offsetYUnscaled,
+                             float extraRotDeg) {
+        float scx = 0.0f;
+        float scy = 0.0f;
+        if (this->previewShip.getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(shipEffectiveZoom, &scx, &scy))
+        {
+            centerX += scx;
+            centerY += scy;
+        }
+        const float ox = offsetXUnscaled * worldZ;
+        const float oy = offsetYUnscaled * worldZ;
+        const float resolvedRot = (ovr != nullptr) ? ovr->rotationDeg : inst.rotationDeg;
+        const float trailRot = resolvedRot + extraRotDeg;
+        const bool fh = (ovr != nullptr) ? ovr->flipHorizontal : inst.flipHorizontal;
+        const bool fv = (ovr != nullptr) ? ovr->flipVertical : inst.flipVertical;
+
+        const int frameIndex =
+            this->computeVfxPreviewFrameIndex(inst, timeSeconds, previewLayers, imported);
+        const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+        const float sourceW = frame.w;
+        const float sourceH = frame.h;
+        const float drawX = centerX + ox - ((sourceW * worldZ) * 0.5f);
+        const float drawY = centerY + oy - ((sourceH * worldZ) * 0.5f);
+        const float pivotX = sourceW * 0.5f;
+        const float pivotY = sourceH * 0.5f;
+        const RC2D_Quad sourceQuad =
+            rc2d_graphics_newQuad(const_cast<RC2D_Image*>(&imported.image), frame.x, frame.y, frame.w, frame.h);
+        rc2d_graphics_drawQuad(const_cast<RC2D_Image*>(&imported.image),
+                               &sourceQuad,
+                               drawX,
+                               drawY,
+                               trailRot,
+                               worldZ,
+                               worldZ,
+                               pivotX,
+                               pivotY,
+                               fh,
+                               fv);
+    };
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+
+    const SDL_FRect& rm = lay.previewMarcheRect;
+    if (rm.w > 4.0f && rm.h > 4.0f)
+    {
+        if (renderer != nullptr)
+        {
+            SDL_Rect clip{};
+            clip.x = static_cast<int>(std::floor(rm.x));
+            clip.y = static_cast<int>(std::floor(rm.y));
+            clip.w = (std::max)(static_cast<int>(std::ceil(rm.x + rm.w)) - clip.x, 1);
+            clip.h = (std::max)(static_cast<int>(std::ceil(rm.y + rm.h)) - clip.y, 1);
+            SDL_SetRenderClipRect(renderer, &clip);
+        }
+
+        const int pageKeyMarche = this->getShipVfxLayerPageKey();
+        const int dirMarche = pageKeyMarche % 4;
+        const Map& map = GetCurrentMap();
+        const EditorMapVfxMarchePopupGrid grid = editorMapVfxBuildMarchePopupGrid(rm, dirMarche, map, worldZ);
+        if (grid.pathLengthTiles > 0.0001f)
+        {
+            float previewShipCenterOffX = 0.0f;
+            float previewShipCenterOffY = 0.0f;
+            const bool previewShipCenterOffValid = this->previewShip.getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(
+                shipEffectiveZoom,
+                &previewShipCenterOffX,
+                &previewShipCenterOffY);
+
+            auto marcheTileToScreen = [&](float tileX, float tileY) -> SDL_FPoint {
+                const float relX = tileX - grid.startTileX;
+                const float relY = tileY - grid.startTileY;
+                return SDL_FPoint{
+                    grid.startScreenX + (relX - relY) * grid.halfTileW,
+                    grid.startScreenY + (relX + relY) * grid.halfTileH};
+            };
+
+            auto marcheVfxCenterAtTile = [&](const ShipVfxTrailPiece& piece) -> SDL_FPoint {
+                float ptx = piece.anchorShipTileX;
+                float pty = piece.anchorShipTileY;
+                if (piece.marchePopupPreviewPathU >= 0.0f)
+                {
+                    const float pu = (std::clamp)(piece.marchePopupPreviewPathU, 0.0f, 1.0f);
+                    const float pd = pu * grid.pathLengthTiles;
+                    ptx = grid.startTileX + grid.stepTileX * pd;
+                    pty = grid.startTileY + grid.stepTileY * pd;
+                }
+                SDL_FPoint out = marcheTileToScreen(ptx, pty);
+                if (previewShipCenterOffValid)
+                {
+                    out.x += previewShipCenterOffX;
+                    out.y += previewShipCenterOffY;
+                }
+                out.x += (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX) * worldZ;
+                out.y += (piece.trailDrawOffsetY + piece.trailPerpendicularJitterY) * worldZ;
+                return out;
+            };
+
+            auto drawMarcheSimQuadAt = [&](float centerX, float centerY, const ShipVfxTrailPiece& piece) {
+                const float resolvedRot = (ovr != nullptr) ? ovr->rotationDeg : inst.rotationDeg;
+                const float trailRot = resolvedRot + piece.trailRotationJitterDeg;
+                const bool fh = (ovr != nullptr) ? ovr->flipHorizontal : inst.flipHorizontal;
+                const bool fv = (ovr != nullptr) ? ovr->flipVertical : inst.flipVertical;
+                const float phaseT = (std::max)(0.0f, timeSeconds - piece.bornTimeSeconds);
+                const float trailPlaybackSec = piece.trailInitialPhaseSec + phaseT;
+                const int frameIndex = this->computeTrailPieceFrameIndex(imported, trailPlaybackSec);
+                const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
+                const float sourceW = frame.w;
+                const float sourceH = frame.h;
+                const float drawX = centerX - ((sourceW * worldZ) * 0.5f);
+                const float drawY = centerY - ((sourceH * worldZ) * 0.5f);
+                const float pivotX = sourceW * 0.5f;
+                const float pivotY = sourceH * 0.5f;
+                const RC2D_Quad sourceQuad =
+                    rc2d_graphics_newQuad(const_cast<RC2D_Image*>(&imported.image), frame.x, frame.y, frame.w, frame.h);
+                rc2d_graphics_drawQuad(const_cast<RC2D_Image*>(&imported.image),
+                                       &sourceQuad,
+                                       drawX,
+                                       drawY,
+                                       trailRot,
+                                       worldZ,
+                                       worldZ,
+                                       pivotX,
+                                       pivotY,
+                                       fh,
+                                       fv);
+            };
+
+            float headU = std::fmod(this->vfxTrailPopupMarcheDistAlongPathPx, 1.0f);
+            if (headU < 0.0f)
+            {
+                headU += 1.0f;
+            }
+            const float headDistTiles = headU * grid.pathLengthTiles;
+            const float headTileX = grid.startTileX + grid.stepTileX * headDistTiles;
+            const float headTileY = grid.startTileY + grid.stepTileY * headDistTiles;
+            const SDL_FPoint headAnchor = marcheTileToScreen(headTileX, headTileY);
+
+            std::vector<const ShipVfxTrailPiece*> marcheSorted;
+            marcheSorted.reserve(this->vfxTrailPopupMarcheSimPieces.size());
+            for (const ShipVfxTrailPiece& mp : this->vfxTrailPopupMarcheSimPieces)
+            {
+                if (mp.sourceVfxInstanceId == inst.instanceId && mp.marchePopupPreviewPathU >= 0.0f)
+                {
+                    marcheSorted.push_back(&mp);
+                }
+            }
+            std::sort(marcheSorted.begin(),
+                      marcheSorted.end(),
+                      [](const ShipVfxTrailPiece* a, const ShipVfxTrailPiece* b) {
+                          return a->bornTimeSeconds < b->bornTimeSeconds;
+                      });
+
+            const int shipOrdMarche = this->activeShipDrawOrder();
+            const int vfxOrdMarche = (ovr != nullptr) ? ovr->drawOrder : inst.drawOrder;
+            const bool marcheVfxDrawnBeforeShip = vfxOrdMarche < shipOrdMarche;
+
+            auto drawMarcheTrailLayer = [&]() {
+                if (!showMarcheTrailPieces)
+                {
+                    return;
+                }
+                for (const ShipVfxTrailPiece* mpPtr : marcheSorted)
+                {
+                    const ShipVfxTrailPiece& mp = *mpPtr;
+                    const SDL_FPoint pc = marcheVfxCenterAtTile(mp);
+                    drawMarcheSimQuadAt(pc.x, pc.y, mp);
+                }
+            };
+
+            if (marcheVfxDrawnBeforeShip)
+            {
+                drawMarcheTrailLayer();
+            }
+            if (showMarcheShipOnPath)
+            {
+                float sw = 0.0f;
+                float sh = 0.0f;
+                if (this->previewShip.getCurrentSpriteSizePixels(&sw, &sh))
+                {
+                    const float targetShipW = sw * shipEffectiveZoom;
+                    this->previewShip.drawEditorPreviewAt(headAnchor.x, headAnchor.y, targetShipW);
+                }
+            }
+            if (!marcheVfxDrawnBeforeShip)
+            {
+                drawMarcheTrailLayer();
+            }
+        }
+
+        if (renderer != nullptr)
+        {
+            SDL_SetRenderClipRect(renderer, nullptr);
+        }
+    }
+
+    const SDL_FRect& ra = lay.previewArretRect;
+    if (ra.w > 4.0f && ra.h > 4.0f)
+    {
+        if (renderer != nullptr)
+        {
+            SDL_Rect clip{};
+            clip.x = static_cast<int>(std::floor(ra.x));
+            clip.y = static_cast<int>(std::floor(ra.y));
+            clip.w = (std::max)(static_cast<int>(std::ceil(ra.x + ra.w)) - clip.x, 1);
+            clip.h = (std::max)(static_cast<int>(std::ceil(ra.y + ra.h)) - clip.y, 1);
+            SDL_SetRenderClipRect(renderer, &clip);
+        }
+
+        const int pc = editorMapVfxParseIntClamped(
+            this->vfxTrailPopupIdleRingPieceCountInput.c_str(), 1, 32, inst.motionTrailIdleRingPieceCount);
+        const float radiusU =
+            editorMapVfxParseFloat(this->vfxTrailPopupIdleRadiusInput.c_str(), inst.motionTrailIdleRingRadius);
+        const int idleRotPct = editorMapVfxParseIntClamped(this->vfxTrailPopupIdleRingRotationPctInput.c_str(),
+                                                           0,
+                                                           100,
+                                                           inst.motionTrailIdleRingRotationRandomPercent);
+        const float posJitU = editorMapVfxParseFloat(this->vfxTrailPopupIdleRingPosJitterInput.c_str(),
+                                                     inst.motionTrailIdleRingPositionJitterRadius);
+        const float baseOx = (ovr != nullptr) ? ovr->offsetX : inst.offsetX;
+        const float baseOy = (ovr != nullptr) ? ovr->offsetY : inst.offsetY;
+        constexpr float kTwoPi = 6.28318530718f;
+        const float crx = ra.x + ra.w * 0.5f;
+        const float cry = ra.y + ra.h * 0.52f;
+        const float idleRotF = static_cast<float>(idleRotPct) / 100.0f;
+
+        const int shipOrd = this->activeShipDrawOrder();
+        const int vfxOrd = (ovr != nullptr) ? ovr->drawOrder : inst.drawOrder;
+        const bool vfxDrawnBeforeShip = vfxOrd < shipOrd;
+
+        float crownSw = 0.0f;
+        float crownSh = 0.0f;
+        const bool haveCrownShipSize = this->previewShip.getCurrentSpriteSizePixels(&crownSw, &crownSh);
+        const float wantShipWCrown = haveCrownShipSize ? (crownSw * shipEffectiveZoom) : 64.0f;
+
+        auto drawCrownPieces = [&]() {
+            for (int k = 0; k < pc; ++k)
+            {
+                const float ang = kTwoPi * (static_cast<float>(k) / static_cast<float>(pc));
+                float ox = baseOx + std::cos(ang) * radiusU;
+                float oy = baseOy + std::sin(ang) * radiusU;
+                ox += posJitU * std::cos(ang * 2.7f + timeSeconds * 1.9f) * 0.65f;
+                oy += posJitU * std::sin(ang * 2.3f + timeSeconds * 1.7f) * 0.65f;
+                const float er =
+                    idleRotF * kMotionTrailRotationJitterMaxDeg * std::sin(ang * 4.0f + timeSeconds * 2.0f);
+                drawOneQuadAt(crx, cry, ox, oy, er);
+            }
+        };
+
+        if (vfxDrawnBeforeShip)
+        {
+            drawCrownPieces();
+        }
+        if (this->vfxTrailPopupPreviewCrownShipVisible && this->previewShipLoaded)
+        {
+            this->previewShip.drawEditorPreviewAt(crx, cry, wantShipWCrown);
+        }
+        if (!vfxDrawnBeforeShip)
+        {
+            drawCrownPieces();
+        }
+
+        if (renderer != nullptr)
+        {
+            SDL_SetRenderClipRect(renderer, nullptr);
+        }
+    }
+}
+
 void EditorMapVfxScene::drawVfxTrailPopup(void) const
 {
     if (!this->vfxTrailPopupVisible || this->overlayFont.sdl_font == nullptr)
@@ -11030,6 +13040,15 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
     }
     const_cast<EditorMapVfxScene*>(this)->vfxTrailPopupLastLayout = lay;
 
+    constexpr float kTrailLblH = 17.0f;
+    constexpr float kTrailLblToInputGap = 8.0f;
+    const float px = lay.everyNTilesInputRect.x;
+    const float ruleLineX0 = lay.everyNTilesInputRect.x;
+    const float ruleLineX1 = lay.everyNTilesInputRect.x + lay.everyNTilesInputRect.w;
+    const auto trailLabelYAboveInput = [kTrailLblH, kTrailLblToInputGap](const SDL_FRect& inputRect) {
+        return inputRect.y - kTrailLblToInputGap - kTrailLblH;
+    };
+
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
     rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 150});
     rc2d_graphics_rectangle("fill", &lay.dimFullMap);
@@ -11041,7 +13060,7 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
 
     RC2D_Text titleText = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
-        "Trainee — marche (trace) et arret (couronne)");
+        "Trainee ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â marche (trace) et arret (couronne)");
     titleText.color = kHudTextColor;
     rc2d_graphics_setTextColor(&titleText);
     rc2d_graphics_drawText(&titleText, lay.popup.x + 14.0f, lay.popup.y + 12.0f);
@@ -11069,6 +13088,14 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         rc2d_graphics_destroyText(&subText);
     }
 
+    auto drawTrailHRule = [ruleLineX0, ruleLineX1](float yy) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{88, 108, 132, 215});
+        rc2d_graphics_line(ruleLineX0, yy, ruleLineX1, yy);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    };
+    drawTrailHRule(lay.trailRuleAfterInstanceY);
+
     auto drawInput = [this](const SDL_FRect& r, bool focused, const std::string& value) {
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
         rc2d_graphics_setColor(RC2D_Color{40, 54, 70, 245});
@@ -11084,30 +13111,37 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         rc2d_graphics_destroyText(&t);
     };
 
+    RC2D_Text secMarche = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont), "Marche (trace et rejets)");
+    secMarche.color = RC2D_Color{170, 188, 208, 235};
+    rc2d_graphics_setTextColor(&secMarche);
+    rc2d_graphics_drawText(&secMarche, px, lay.trailRuleAfterInstanceY - 20.0f + 4.0f);
+    rc2d_graphics_destroyText(&secMarche);
+
     RC2D_Text nLbl = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
         "En marche : tuiles entre rejets (0 = off) :");
     nLbl.color = RC2D_Color{210, 218, 228, 240};
     rc2d_graphics_setTextColor(&nLbl);
-    rc2d_graphics_drawText(&nLbl, lay.popup.x + 14.0f, lay.popup.y + 56.0f);
+    rc2d_graphics_drawText(&nLbl, px, trailLabelYAboveInput(lay.everyNTilesInputRect));
     rc2d_graphics_destroyText(&nLbl);
     drawInput(lay.everyNTilesInputRect, this->vfxTrailPopupEveryNTilesFocused, this->vfxTrailPopupEveryNTilesInput);
 
     RC2D_Text msLbl = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
-        "Duree de vie d'un rejet (ms) :");
+        "Duree de vie d'un rejet (en tuiles) :");
     msLbl.color = RC2D_Color{210, 218, 228, 240};
     rc2d_graphics_setTextColor(&msLbl);
-    rc2d_graphics_drawText(&msLbl, lay.popup.x + 14.0f, lay.popup.y + 116.0f);
+    rc2d_graphics_drawText(&msLbl, px, trailLabelYAboveInput(lay.lifetimeTilesInputRect));
     rc2d_graphics_destroyText(&msLbl);
-    drawInput(lay.lifetimeMsInputRect, this->vfxTrailPopupLifetimeMsFocused, this->vfxTrailPopupLifetimeMsInput);
+    drawInput(lay.lifetimeTilesInputRect, this->vfxTrailPopupLifetimeTilesFocused, this->vfxTrailPopupLifetimeTilesInput);
 
     RC2D_Text placeLbl = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
         "Trace en marche :");
     placeLbl.color = RC2D_Color{210, 218, 228, 240};
     rc2d_graphics_setTextColor(&placeLbl);
-    rc2d_graphics_drawText(&placeLbl, lay.popup.x + 14.0f, lay.popup.y + 164.0f);
+    rc2d_graphics_drawText(&placeLbl, px, trailLabelYAboveInput(lay.trailStrictTileBtn));
     rc2d_graphics_destroyText(&placeLbl);
 
     auto drawModeBtn = [this](const SDL_FRect& r, const char* lab, bool selected) {
@@ -11126,22 +13160,58 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         rc2d_graphics_drawText(&t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
         rc2d_graphics_destroyText(&t);
     };
-    drawModeBtn(lay.trailStrictTileBtn, "Emplacement du layer", this->vfxTrailPopupStrictTilePlacement);
-    drawModeBtn(lay.trailLateralSpreadBtn, "Derive laterale", !this->vfxTrailPopupStrictTilePlacement);
+    drawModeBtn(lay.trailStrictTileBtn, "SPAWN (EMPLACEMENT DU LAYER)", this->vfxTrailPopupStrictTilePlacement);
+    drawModeBtn(
+        lay.trailLateralSpreadBtn,
+        "SPAWN (OFFSET CONE)",
+        !this->vfxTrailPopupStrictTilePlacement);
 
     if (lay.lateralSectionVisible)
     {
+        float coneLen = editorMapVfxParseFloat(
+            this->vfxTrailPopupLateralJitterInput.c_str(),
+            (pInst != nullptr) ? pInst->motionTrailLateralJitterRadius : 0.0f);
+        float coneOffX = (pInst != nullptr) ? pInst->motionTrailConeOffsetX : 0.0f;
+        float coneOffY = (pInst != nullptr) ? pInst->motionTrailConeOffsetY : 0.0f;
+        float coneDir = (pInst != nullptr) ? pInst->motionTrailConeDirectionOffsetDeg : 0.0f;
+        float coneHalf = (pInst != nullptr) ? pInst->motionTrailConeHalfAngleDeg : 28.0f;
+        int coneCount = (pInst != nullptr) ? pInst->motionTrailConeSpawnCount : 1;
+        if (this->vfxTrailConePopupVisible &&
+            this->vfxTrailConePopupParentInstanceIndex == this->vfxTrailPopupParentInstanceIndex)
+        {
+            coneLen = this->vfxTrailConePopupLength;
+            coneOffX = this->vfxTrailConePopupOffsetX;
+            coneOffY = this->vfxTrailConePopupOffsetY;
+            coneDir = this->vfxTrailConePopupDirectionOffsetDeg;
+            coneHalf = this->vfxTrailConePopupHalfAngleDeg;
+            coneCount = this->vfxTrailConePopupSpawnCount;
+        }
+        coneLen = (std::clamp)(coneLen, 0.0f, kTrailConePopupLengthMax);
+        coneOffX = (std::clamp)(coneOffX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        coneOffY = (std::clamp)(coneOffY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+        coneDir = (std::clamp)(coneDir, -179.0f, 179.0f);
+        coneHalf = (std::clamp)(coneHalf, kTrailConePopupHalfAngleMin, kTrailConePopupHalfAngleMax);
+        coneCount = std::clamp(coneCount, 1, 32);
+
         RC2D_Text latH1 = rc2d_graphics_createText(
             const_cast<RC2D_Font*>(&this->overlayFont),
-            "Derive : ecart max (comme offset X/Y) :");
+            "Cone arriere : clique ici pour configurer offset + direction + ouverture :");
         latH1.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&latH1);
-        rc2d_graphics_drawText(&latH1, lay.popup.x + 14.0f, lay.popup.y + 242.0f);
+        rc2d_graphics_drawText(&latH1, px, trailLabelYAboveInput(lay.lateralJitterInputRect));
         rc2d_graphics_destroyText(&latH1);
-        drawInput(
-            lay.lateralJitterInputRect,
-            this->vfxTrailPopupLateralJitterFocused,
-            this->vfxTrailPopupLateralJitterInput);
+
+        char coneSummary[180] = {};
+        SDL_snprintf(coneSummary,
+                     sizeof(coneSummary),
+                     "Configurer cone (L %.0f | OffX %.0f | OffY %.0f | Dir %.1f deg | Ouv %.1f deg | x%d)",
+                     static_cast<double>(coneLen),
+                     static_cast<double>(coneOffX),
+                     static_cast<double>(coneOffY),
+                     static_cast<double>(coneDir),
+                     static_cast<double>(coneHalf),
+                     coneCount);
+        drawInput(lay.lateralJitterInputRect, false, coneSummary);
     }
 
     RC2D_Text rotLbl = rc2d_graphics_createText(
@@ -11149,19 +13219,28 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         "Rotation en marche (0-100 %, max +-45 deg) :");
     rotLbl.color = RC2D_Color{210, 218, 228, 240};
     rc2d_graphics_setTextColor(&rotLbl);
-    rc2d_graphics_drawText(&rotLbl, lay.popup.x + 14.0f, lay.rotationPctInputRect.y - 22.0f);
+    rc2d_graphics_drawText(&rotLbl, px, trailLabelYAboveInput(lay.rotationPctInputRect));
     rc2d_graphics_destroyText(&rotLbl);
     drawInput(
         lay.rotationPctInputRect,
         this->vfxTrailPopupRotationPctFocused,
         this->vfxTrailPopupRotationPctInput);
 
+    drawTrailHRule(lay.trailRuleBeforeArretY);
+
+    RC2D_Text secArret = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont), "Arret (couronne)");
+    secArret.color = RC2D_Color{170, 188, 208, 235};
+    rc2d_graphics_setTextColor(&secArret);
+    rc2d_graphics_drawText(&secArret, px, lay.trailRuleBeforeArretY - 20.0f + 4.0f);
+    rc2d_graphics_destroyText(&secArret);
+
     RC2D_Text idleHdr = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
-        "A l'arret : couronne autour du layer");
+        "Couronne autour du layer :");
     idleHdr.color = RC2D_Color{210, 218, 228, 240};
     rc2d_graphics_setTextColor(&idleHdr);
-    rc2d_graphics_drawText(&idleHdr, lay.popup.x + 14.0f, lay.idleRingOffBtn.y - 26.0f);
+    rc2d_graphics_drawText(&idleHdr, px, trailLabelYAboveInput(lay.idleRingOffBtn));
     rc2d_graphics_destroyText(&idleHdr);
     drawModeBtn(lay.idleRingOffBtn, "Couronne OFF", !this->vfxTrailPopupIdleRingWhenStationary);
     drawModeBtn(lay.idleRingOnBtn, "Couronne ON", this->vfxTrailPopupIdleRingWhenStationary);
@@ -11172,29 +13251,18 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
             "Couronne : nombre de pieces (1-32) :");
         pcLbl.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&pcLbl);
-        rc2d_graphics_drawText(&pcLbl, lay.popup.x + 14.0f, lay.idleRingPieceCountInputRect.y - 24.0f);
+        rc2d_graphics_drawText(&pcLbl, px, trailLabelYAboveInput(lay.idleRingPieceCountInputRect));
         rc2d_graphics_destroyText(&pcLbl);
         drawInput(
             lay.idleRingPieceCountInputRect,
             this->vfxTrailPopupIdleRingPieceCountFocused,
             this->vfxTrailPopupIdleRingPieceCountInput);
-        RC2D_Text perLbl = rc2d_graphics_createText(
-            const_cast<RC2D_Font*>(&this->overlayFont),
-            "Couronne : delai entre salves (ms) :");
-        perLbl.color = RC2D_Color{190, 200, 212, 238};
-        rc2d_graphics_setTextColor(&perLbl);
-        rc2d_graphics_drawText(&perLbl, lay.popup.x + 14.0f, lay.idleRingPeriodMsInputRect.y - 24.0f);
-        rc2d_graphics_destroyText(&perLbl);
-        drawInput(
-            lay.idleRingPeriodMsInputRect,
-            this->vfxTrailPopupIdlePeriodMsFocused,
-            this->vfxTrailPopupIdlePeriodMsInput);
         RC2D_Text radLbl = rc2d_graphics_createText(
             const_cast<RC2D_Font*>(&this->overlayFont),
             "Couronne : rayon (comme offset) :");
         radLbl.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&radLbl);
-        rc2d_graphics_drawText(&radLbl, lay.popup.x + 14.0f, lay.idleRingRadiusInputRect.y - 24.0f);
+        rc2d_graphics_drawText(&radLbl, px, trailLabelYAboveInput(lay.idleRingRadiusInputRect));
         rc2d_graphics_destroyText(&radLbl);
         drawInput(
             lay.idleRingRadiusInputRect,
@@ -11205,7 +13273,7 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
             "Couronne : rotation (0-100 %) :");
         idleRotLbl.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&idleRotLbl);
-        rc2d_graphics_drawText(&idleRotLbl, lay.popup.x + 14.0f, lay.idleRingRotationPctInputRect.y - 24.0f);
+        rc2d_graphics_drawText(&idleRotLbl, px, trailLabelYAboveInput(lay.idleRingRotationPctInputRect));
         rc2d_graphics_destroyText(&idleRotLbl);
         drawInput(
             lay.idleRingRotationPctInputRect,
@@ -11216,12 +13284,128 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
             "Couronne : decal aleatoire max (0 = off) :");
         idleJitLbl.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&idleJitLbl);
-        rc2d_graphics_drawText(&idleJitLbl, lay.popup.x + 14.0f, lay.idleRingPosJitterInputRect.y - 24.0f);
+        rc2d_graphics_drawText(&idleJitLbl, px, trailLabelYAboveInput(lay.idleRingPosJitterInputRect));
         rc2d_graphics_destroyText(&idleJitLbl);
         drawInput(
             lay.idleRingPosJitterInputRect,
             this->vfxTrailPopupIdleRingPosJitterFocused,
             this->vfxTrailPopupIdleRingPosJitterInput);
+    }
+
+    {
+        const float dividerX = lay.previewMarcheRect.x - 6.0f;
+        const float divY0 = lay.popup.y + 46.0f;
+        const float divY1 = lay.popup.y + lay.popup.h - 56.0f;
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{88, 108, 132, 200});
+        rc2d_graphics_line(dividerX, divY0, dividerX, divY1);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        auto fillPreviewBack = [](const SDL_FRect& r) {
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            rc2d_graphics_setColor(RC2D_Color{16, 22, 30, 245});
+            rc2d_graphics_rectangle("fill", &r);
+            rc2d_graphics_setColor(RC2D_Color{100, 122, 148, 210});
+            rc2d_graphics_rectangle("line", &r);
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        };
+        fillPreviewBack(lay.previewMarcheRect);
+        fillPreviewBack(lay.previewArretRect);
+
+        RC2D_Text pm = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Preview : rejets en marche (live)");
+        pm.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&pm);
+        rc2d_graphics_drawText(&pm, lay.previewMarcheRect.x + 8.0f, lay.previewMarcheRect.y + 6.0f);
+        rc2d_graphics_destroyText(&pm);
+
+        RC2D_Text pa = rc2d_graphics_createText(
+            const_cast<RC2D_Font*>(&this->overlayFont),
+            "Preview : couronne (live)");
+        pa.color = RC2D_Color{190, 200, 212, 238};
+        rc2d_graphics_setTextColor(&pa);
+        rc2d_graphics_drawText(&pa, lay.previewArretRect.x + 8.0f, lay.previewArretRect.y + 30.0f);
+        rc2d_graphics_destroyText(&pa);
+
+        this->drawVfxTrailPopupPreviews(lay);
+
+        {
+            auto drawTinyBtn = [this](const SDL_FRect& r, const char* lab) {
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+                rc2d_graphics_setColor(RC2D_Color{56, 72, 92, 240});
+                rc2d_graphics_rectangle("fill", &r);
+                rc2d_graphics_setColor(RC2D_Color{150, 170, 190, 235});
+                rc2d_graphics_rectangle("line", &r);
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+                RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lab);
+                t.color = kHudTextColor;
+                rc2d_graphics_setTextColor(&t);
+                int tw = 0;
+                int th = 0;
+                rc2d_graphics_getTextSize(&t, &tw, &th);
+                rc2d_graphics_drawText(
+                    &t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+                rc2d_graphics_destroyText(&t);
+            };
+            drawTinyBtn(lay.previewSpeedMinusBtn, "-");
+            drawTinyBtn(lay.previewSpeedPlusBtn, "+");
+            drawTinyBtn(lay.previewZoomMinusBtn, "-");
+            drawTinyBtn(lay.previewZoomPlusBtn, "+");
+            char sl[32] = {};
+            SDL_snprintf(sl,
+                         sizeof(sl),
+                         "spd %.2f",
+                         static_cast<double>(
+                             (std::clamp)(this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec, 0.05f, 50.0f)));
+            RC2D_Text st = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), sl);
+            st.color = RC2D_Color{190, 200, 212, 238};
+            rc2d_graphics_setTextColor(&st);
+            rc2d_graphics_drawText(
+                &st,
+                lay.previewSpeedMinusBtn.x - 76.0f,
+                lay.previewSpeedMinusBtn.y + ((lay.previewSpeedMinusBtn.h - 16.0f) * 0.5f));
+            rc2d_graphics_destroyText(&st);
+            char zl[28] = {};
+            SDL_snprintf(zl,
+                         sizeof(zl),
+                         "x%.2f",
+                         static_cast<double>(
+                             (std::clamp)(this->vfxTrailPopupPreviewZoom, 0.4f, 1.0f)));
+            RC2D_Text zt = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), zl);
+            zt.color = RC2D_Color{190, 200, 212, 238};
+            rc2d_graphics_setTextColor(&zt);
+            rc2d_graphics_drawText(
+                &zt,
+                lay.previewZoomMinusBtn.x - 44.0f,
+                lay.previewZoomMinusBtn.y + ((lay.previewZoomMinusBtn.h - 16.0f) * 0.5f));
+            rc2d_graphics_destroyText(&zt);
+        }
+
+        {
+            auto drawShipToggleBtn = [this](const SDL_FRect& tb, bool visible) {
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+                rc2d_graphics_setColor(RC2D_Color{56, 72, 92, 230});
+                rc2d_graphics_rectangle("fill", &tb);
+                rc2d_graphics_setColor(RC2D_Color{150, 170, 190, 235});
+                rc2d_graphics_rectangle("line", &tb);
+                rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+                const char* togLab = visible ? "Cacher navire" : "Voir navire";
+                RC2D_Text tt = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), togLab);
+                tt.color = kHudTextColor;
+                rc2d_graphics_setTextColor(&tt);
+                int ttw = 0;
+                int tth = 0;
+                rc2d_graphics_getTextSize(&tt, &ttw, &tth);
+                rc2d_graphics_drawText(
+                    &tt,
+                    tb.x + ((tb.w - static_cast<float>(ttw)) * 0.5f),
+                    tb.y + ((tb.h - static_cast<float>(tth)) * 0.5f));
+                rc2d_graphics_destroyText(&tt);
+            };
+            drawShipToggleBtn(lay.previewMarcheShipToggleBtn, this->vfxTrailPopupPreviewMarcheShipVisible);
+            drawShipToggleBtn(lay.previewCrownShipToggleBtn, this->vfxTrailPopupPreviewCrownShipVisible);
+        }
     }
 
     auto drawBtn = [this](const SDL_FRect& r, const char* lab) {
@@ -11264,12 +13448,75 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     }
     this->vfxTrailPopupLastLayout = lay;
 
+    if (this->pointInRect(x, y, lay.previewSpeedMinusBtn))
+    {
+        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec =
+            (std::max)(0.05f, this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec - 0.25f);
+        char sb[72] = {};
+        SDL_snprintf(sb,
+                     sizeof(sb),
+                     "Apercu rejets en marche : vitesse %.2f tuiles/s",
+                     static_cast<double>(this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec));
+        this->statusMessage = sb;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.previewSpeedPlusBtn))
+    {
+        this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec =
+            (std::min)(50.0f, this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec + 0.25f);
+        char sb[72] = {};
+        SDL_snprintf(sb,
+                     sizeof(sb),
+                     "Apercu rejets en marche : vitesse %.2f tuiles/s",
+                     static_cast<double>(this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec));
+        this->statusMessage = sb;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.previewZoomMinusBtn))
+    {
+        this->vfxTrailPopupPreviewZoom = (std::max)(0.4f, this->vfxTrailPopupPreviewZoom - 0.05f);
+        char zb[48] = {};
+        SDL_snprintf(zb, sizeof(zb), "Apercu trainee : zoom %.2f", static_cast<double>(this->vfxTrailPopupPreviewZoom));
+        this->statusMessage = zb;
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.previewZoomPlusBtn))
+    {
+        this->vfxTrailPopupPreviewZoom = (std::min)(1.0f, this->vfxTrailPopupPreviewZoom + 0.05f);
+        char zb[48] = {};
+        SDL_snprintf(zb, sizeof(zb), "Apercu trainee : zoom %.2f", static_cast<double>(this->vfxTrailPopupPreviewZoom));
+        this->statusMessage = zb;
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.previewCrownShipToggleBtn))
+    {
+        this->vfxTrailPopupPreviewCrownShipVisible = !this->vfxTrailPopupPreviewCrownShipVisible;
+        this->statusMessage = this->vfxTrailPopupPreviewCrownShipVisible
+                                  ? "Apercu couronne : navire visible."
+                                  : "Apercu couronne : navire masque.";
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.previewMarcheShipToggleBtn))
+    {
+        this->vfxTrailPopupPreviewMarcheShipVisible = !this->vfxTrailPopupPreviewMarcheShipVisible;
+        this->statusMessage = this->vfxTrailPopupPreviewMarcheShipVisible
+                                  ? "Apercu rejets en marche : navire visible."
+                                  : "Apercu rejets en marche : navire masque.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.previewMarcheRect) || this->pointInRect(x, y, lay.previewArretRect))
+    {
+        return true;
+    }
+
     if (!this->pointInRect(x, y, lay.popup))
     {
         if (this->pointInRect(x, y, lay.dimFullMap))
         {
             this->closeVfxTrailPopup();
-            this->statusMessage = "Traînée : annule.";
+            this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
         }
         return true;
     }
@@ -11277,7 +13524,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     if (this->pointInRect(x, y, lay.cancelBtn))
     {
         this->closeVfxTrailPopup();
-        this->statusMessage = "Traînée : annule.";
+        this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
         return true;
     }
 
@@ -11289,9 +13536,14 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
             ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
             this->removeTrailPiecesWithSourceInstanceId(t.instanceId);
             t.motionTrailEveryNTiles = 0;
-            t.motionTrailLifetimeMs = 2000;
+            t.motionTrailLifetimeTiles = 12;
             t.motionTrailStrictTilePlacement = true;
             t.motionTrailLateralJitterRadius = 0.0f;
+            t.motionTrailConeOffsetX = 0.0f;
+            t.motionTrailConeOffsetY = 0.0f;
+            t.motionTrailConeDirectionOffsetDeg = 0.0f;
+            t.motionTrailConeHalfAngleDeg = 28.0f;
+            t.motionTrailConeSpawnCount = 1;
             t.motionTrailRotationRandomPercent = 0;
             t.motionTrailIdleRingWhenStationary = false;
             t.motionTrailIdleRingRadius = 48.0f;
@@ -11315,7 +13567,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     {
         this->vfxTrailPopupStrictTilePlacement = true;
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11324,14 +13576,14 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRingRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
         this->statusMessage =
-            "Trainee : une pastille par tuile du parcours, avec le meme decal X/Y que le layer (comme la preview).";
+            "Trainee : un rejet tous les N tuiles parcourues, avec le meme decal X/Y que le layer (comme la preview).";
         return true;
     }
     if (this->pointInRect(x, y, lay.trailLateralSpreadBtn))
     {
         this->vfxTrailPopupStrictTilePlacement = false;
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11339,15 +13591,14 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRadiusFocused = false;
         this->vfxTrailPopupIdleRingRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
-        this->statusMessage =
-            "Trainee : ecart lateral aleatoire (perpendiculaire a la marche). Remplis la demi-largeur ci-dessous.";
+        this->openVfxTrailConePopupForInstanceIndex(this->vfxTrailPopupParentInstanceIndex);
         return true;
     }
 
     if (this->pointInRect(x, y, lay.everyNTilesInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = true;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11357,10 +13608,10 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
         return true;
     }
-    if (this->pointInRect(x, y, lay.lifetimeMsInputRect))
+    if (this->pointInRect(x, y, lay.lifetimeTilesInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = true;
+        this->vfxTrailPopupLifetimeTilesFocused = true;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11373,20 +13624,21 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     if (lay.lateralSectionVisible && this->pointInRect(x, y, lay.lateralJitterInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
-        this->vfxTrailPopupLateralJitterFocused = true;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
+        this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
         this->vfxTrailPopupIdlePeriodMsFocused = false;
         this->vfxTrailPopupIdleRadiusFocused = false;
         this->vfxTrailPopupIdleRingRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
+        this->openVfxTrailConePopupForInstanceIndex(this->vfxTrailPopupParentInstanceIndex);
         return true;
     }
     if (this->pointInRect(x, y, lay.rotationPctInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = true;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11400,7 +13652,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     {
         this->vfxTrailPopupIdleRingWhenStationary = false;
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11415,7 +13667,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     {
         this->vfxTrailPopupIdleRingWhenStationary = true;
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11424,13 +13676,13 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRingRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
         this->statusMessage =
-            "Couronne a l'arret : activee (pilotage ON, arrete le navire pour des salves autour du layer).";
+            "Couronne a l'arret : activee (preview popup).";
         return true;
     }
     if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPieceCountInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = true;
@@ -11440,23 +13692,10 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         this->vfxTrailPopupIdleRingPosJitterFocused = false;
         return true;
     }
-    if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPeriodMsInputRect))
-    {
-        this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
-        this->vfxTrailPopupLateralJitterFocused = false;
-        this->vfxTrailPopupRotationPctFocused = false;
-        this->vfxTrailPopupIdleRingPieceCountFocused = false;
-        this->vfxTrailPopupIdlePeriodMsFocused = true;
-        this->vfxTrailPopupIdleRadiusFocused = false;
-        this->vfxTrailPopupIdleRingRotationPctFocused = false;
-        this->vfxTrailPopupIdleRingPosJitterFocused = false;
-        return true;
-    }
     if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingRadiusInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11469,7 +13708,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingRotationPctInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11482,7 +13721,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     if (lay.idleRingInputsVisible && this->pointInRect(x, y, lay.idleRingPosJitterInputRect))
     {
         this->vfxTrailPopupEveryNTilesFocused = false;
-        this->vfxTrailPopupLifetimeMsFocused = false;
+        this->vfxTrailPopupLifetimeTilesFocused = false;
         this->vfxTrailPopupLateralJitterFocused = false;
         this->vfxTrailPopupRotationPctFocused = false;
         this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11493,7 +13732,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         return true;
     }
     this->vfxTrailPopupEveryNTilesFocused = false;
-    this->vfxTrailPopupLifetimeMsFocused = false;
+    this->vfxTrailPopupLifetimeTilesFocused = false;
     this->vfxTrailPopupLateralJitterFocused = false;
     this->vfxTrailPopupRotationPctFocused = false;
     this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11509,14 +13748,17 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         int nTiles = 0;
         if (endN != this->vfxTrailPopupEveryNTilesInput.c_str())
         {
-            nTiles = static_cast<int>(std::clamp(parsedN, 0L, 32L));
+            nTiles = static_cast<int>(std::clamp(
+                parsedN,
+                static_cast<long>(kMotionTrailEveryNTilesMin),
+                static_cast<long>(kMotionTrailEveryNTilesMax)));
         }
-        char* endMs = nullptr;
-        const long parsedMs = std::strtol(this->vfxTrailPopupLifetimeMsInput.c_str(), &endMs, 10);
-        int lifeMs = 2000;
-        if (endMs != this->vfxTrailPopupLifetimeMsInput.c_str())
+        char* endLife = nullptr;
+        const long parsedLife = std::strtol(this->vfxTrailPopupLifetimeTilesInput.c_str(), &endLife, 10);
+        int lifeTiles = 12;
+        if (endLife != this->vfxTrailPopupLifetimeTilesInput.c_str())
         {
-            lifeMs = static_cast<int>(std::clamp(parsedMs, 1L, 9999999L));
+            lifeTiles = static_cast<int>(std::clamp(parsedLife, 1L, 4096L));
         }
         char* endJit = nullptr;
         const long parsedJit = std::strtol(this->vfxTrailPopupLateralJitterInput.c_str(), &endJit, 10);
@@ -11540,13 +13782,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         {
             idleRingPc = static_cast<int>(std::clamp(parsedIdlePc, 1L, 32L));
         }
-        char* endIdlePer = nullptr;
-        const long parsedIdlePer = std::strtol(this->vfxTrailPopupIdlePeriodMsInput.c_str(), &endIdlePer, 10);
-        int idlePerMs = 600;
-        if (endIdlePer != this->vfxTrailPopupIdlePeriodMsInput.c_str())
-        {
-            idlePerMs = static_cast<int>(std::clamp(parsedIdlePer, 100L, 60000L));
-        }
+        constexpr int idlePerMs = 600;
         char* endIdleRad = nullptr;
         const long parsedIdleRad = std::strtol(this->vfxTrailPopupIdleRadiusInput.c_str(), &endIdleRad, 10);
         float idleRad = 48.0f;
@@ -11577,7 +13813,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
             ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
             const bool needInitialSpawnCapture = !t.motionSpawnCaptured;
             t.motionTrailEveryNTiles = nTiles;
-            t.motionTrailLifetimeMs = lifeMs;
+            t.motionTrailLifetimeTiles = lifeTiles;
             t.motionTrailStrictTilePlacement = this->vfxTrailPopupStrictTilePlacement;
             t.motionTrailLateralJitterRadius =
                 this->vfxTrailPopupStrictTilePlacement ? 0.0f : jitterR;
@@ -11602,27 +13838,22 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         const bool trailStrictForStatus = this->vfxTrailPopupStrictTilePlacement;
         const bool trailIdleForStatus = this->vfxTrailPopupIdleRingWhenStationary;
         this->closeVfxTrailPopup();
-        const std::string spawnTail =
-            didMemorizeSpawnDecal
-                ? (trailStrictForStatus ? std::string("Reference SPAWN enregistree.")
-                                        : std::string("Decal SPAWN memorise depuis la position actuelle du layer."))
-                : (trailStrictForStatus
-                       ? std::string("Reference SPAWN inchangée (EFFACER puis VALIDER pour recapturer).")
-                       : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+        const std::string spawnTail = didMemorizeSpawnDecal
+            ? std::string("Reference SPAWN technique enregistree.")
+            : std::string("Reference SPAWN technique conservee.");
         this->statusMessage =
-            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
-            (trailStrictForStatus ? std::string("emplacement du layer")
-                                  : (std::string("decal lat. max ") +
-                                     std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", vie=" + std::to_string(lifeTiles) + " tuiles, " +
+            (trailStrictForStatus ? std::string("SPAWN (EMPLACEMENT DU LAYER)")
+                                  : (std::string("SPAWN (OFFSET CONE) (rayon ") +
+                                     std::to_string(static_cast<int>(std::lround(jitterR))) + ")")) +
             ", rotation " + std::to_string(rotPct) + "%" +
-            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
-                                    std::to_string(idlePerMs) + " ms, rayon " +
-                                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) +
+                                    " pcs, rayon " + std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
                                     std::to_string(idleRingRotPct) +
                                     " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) +
                                     ")")
                                  : std::string(", couronne arret OFF")) +
-            ". " + spawnTail;
+            ". Base trainee: layer courant. " + spawnTail;
         return true;
     }
 
@@ -11646,13 +13877,12 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
     if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
     {
         this->closeVfxTrailPopup();
-        this->statusMessage = "Traînée : annule.";
+        this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
         return true;
     }
 
     if (!isrepeat && scancode == SDL_SCANCODE_TAB)
     {
-        const bool spread = !this->vfxTrailPopupStrictTilePlacement;
         const bool idleIn = this->vfxTrailPopupIdleRingWhenStationary;
         auto clearIdle = [this]() {
             this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11664,27 +13894,23 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         if (this->vfxTrailPopupEveryNTilesFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = true;
+            this->vfxTrailPopupLifetimeTilesFocused = true;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             clearIdle();
         }
-        else if (this->vfxTrailPopupLifetimeMsFocused)
+        else if (this->vfxTrailPopupLifetimeTilesFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
-            this->vfxTrailPopupRotationPctFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
+            this->vfxTrailPopupLateralJitterFocused = false;
+            this->vfxTrailPopupRotationPctFocused = true;
             clearIdle();
-            this->vfxTrailPopupLateralJitterFocused = spread;
-            if (!spread)
-            {
-                this->vfxTrailPopupRotationPctFocused = true;
-            }
         }
         else if (this->vfxTrailPopupLateralJitterFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = true;
             clearIdle();
@@ -11692,7 +13918,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else if (this->vfxTrailPopupRotationPctFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             if (idleIn)
@@ -11709,19 +13935,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else if (this->vfxTrailPopupIdleRingPieceCountFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
-            this->vfxTrailPopupLateralJitterFocused = false;
-            this->vfxTrailPopupRotationPctFocused = false;
-            this->vfxTrailPopupIdleRingPieceCountFocused = false;
-            this->vfxTrailPopupIdlePeriodMsFocused = true;
-            this->vfxTrailPopupIdleRadiusFocused = false;
-            this->vfxTrailPopupIdleRingRotationPctFocused = false;
-            this->vfxTrailPopupIdleRingPosJitterFocused = false;
-        }
-        else if (this->vfxTrailPopupIdlePeriodMsFocused)
-        {
-            this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11733,7 +13947,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else if (this->vfxTrailPopupIdleRadiusFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11745,7 +13959,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else if (this->vfxTrailPopupIdleRingRotationPctFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = false;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             this->vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -11757,7 +13971,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else if (this->vfxTrailPopupIdleRingPosJitterFocused)
         {
             this->vfxTrailPopupEveryNTilesFocused = true;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             clearIdle();
@@ -11765,7 +13979,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         else
         {
             this->vfxTrailPopupEveryNTilesFocused = true;
-            this->vfxTrailPopupLifetimeMsFocused = false;
+            this->vfxTrailPopupLifetimeTilesFocused = false;
             this->vfxTrailPopupLateralJitterFocused = false;
             this->vfxTrailPopupRotationPctFocused = false;
             clearIdle();
@@ -11780,14 +13994,17 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         int nTiles = 0;
         if (endN != this->vfxTrailPopupEveryNTilesInput.c_str())
         {
-            nTiles = static_cast<int>(std::clamp(parsedN, 0L, 32L));
+            nTiles = static_cast<int>(std::clamp(
+                parsedN,
+                static_cast<long>(kMotionTrailEveryNTilesMin),
+                static_cast<long>(kMotionTrailEveryNTilesMax)));
         }
-        char* endMs = nullptr;
-        const long parsedMs = std::strtol(this->vfxTrailPopupLifetimeMsInput.c_str(), &endMs, 10);
-        int lifeMs = 2000;
-        if (endMs != this->vfxTrailPopupLifetimeMsInput.c_str())
+        char* endLife = nullptr;
+        const long parsedLife = std::strtol(this->vfxTrailPopupLifetimeTilesInput.c_str(), &endLife, 10);
+        int lifeTiles = 12;
+        if (endLife != this->vfxTrailPopupLifetimeTilesInput.c_str())
         {
-            lifeMs = static_cast<int>(std::clamp(parsedMs, 1L, 9999999L));
+            lifeTiles = static_cast<int>(std::clamp(parsedLife, 1L, 4096L));
         }
         char* endJit = nullptr;
         const long parsedJit = std::strtol(this->vfxTrailPopupLateralJitterInput.c_str(), &endJit, 10);
@@ -11811,13 +14028,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         {
             idleRingPc = static_cast<int>(std::clamp(parsedIdlePc, 1L, 32L));
         }
-        char* endIdlePer = nullptr;
-        const long parsedIdlePer = std::strtol(this->vfxTrailPopupIdlePeriodMsInput.c_str(), &endIdlePer, 10);
-        int idlePerMs = 600;
-        if (endIdlePer != this->vfxTrailPopupIdlePeriodMsInput.c_str())
-        {
-            idlePerMs = static_cast<int>(std::clamp(parsedIdlePer, 100L, 60000L));
-        }
+        constexpr int idlePerMs = 600;
         char* endIdleRad = nullptr;
         const long parsedIdleRad = std::strtol(this->vfxTrailPopupIdleRadiusInput.c_str(), &endIdleRad, 10);
         float idleRad = 48.0f;
@@ -11848,7 +14059,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
             ShipVfxInstance& t = this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
             const bool needInitialSpawnCapture = !t.motionSpawnCaptured;
             t.motionTrailEveryNTiles = nTiles;
-            t.motionTrailLifetimeMs = lifeMs;
+            t.motionTrailLifetimeTiles = lifeTiles;
             t.motionTrailStrictTilePlacement = this->vfxTrailPopupStrictTilePlacement;
             t.motionTrailLateralJitterRadius =
                 this->vfxTrailPopupStrictTilePlacement ? 0.0f : jitterR;
@@ -11873,27 +14084,22 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         const bool trailStrictForStatus = this->vfxTrailPopupStrictTilePlacement;
         const bool trailIdleForStatus = this->vfxTrailPopupIdleRingWhenStationary;
         this->closeVfxTrailPopup();
-        const std::string spawnTail =
-            didMemorizeSpawnDecal
-                ? (trailStrictForStatus ? std::string("Reference SPAWN enregistree.")
-                                        : std::string("Decal SPAWN memorise depuis la position actuelle du layer."))
-                : (trailStrictForStatus
-                       ? std::string("Reference SPAWN inchangée (EFFACER puis VALIDER pour recapturer).")
-                       : std::string("Decal SPAWN inchangé (EFFACER puis VALIDER pour le recapturer)."));
+        const std::string spawnTail = didMemorizeSpawnDecal
+            ? std::string("Reference SPAWN technique enregistree.")
+            : std::string("Reference SPAWN technique conservee.");
         this->statusMessage =
-            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", " + std::to_string(lifeMs) + " ms, " +
-            (trailStrictForStatus ? std::string("emplacement du layer")
-                                  : (std::string("decal lat. max ") +
-                                     std::to_string(static_cast<int>(std::lround(jitterR))))) +
+            "SPAWN / trainee : N=" + std::to_string(nTiles) + ", vie=" + std::to_string(lifeTiles) + " tuiles, " +
+            (trailStrictForStatus ? std::string("SPAWN (EMPLACEMENT DU LAYER)")
+                                  : (std::string("SPAWN (OFFSET CONE) (rayon ") +
+                                     std::to_string(static_cast<int>(std::lround(jitterR))) + ")")) +
             ", rotation " + std::to_string(rotPct) + "%" +
-            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) + " pcs, salves " +
-                                    std::to_string(idlePerMs) + " ms, rayon " +
-                                    std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
+            (trailIdleForStatus ? (std::string(", couronne arret ON (") + std::to_string(idleRingPc) +
+                                    " pcs, rayon " + std::to_string(static_cast<int>(std::lround(idleRad))) + ", rot. " +
                                     std::to_string(idleRingRotPct) +
                                     " %, pos. alea. max " + std::to_string(static_cast<int>(std::lround(idleRingPosJit))) +
                                     ")")
                                  : std::string(", couronne arret OFF")) +
-            ". " + spawnTail;
+            ". Base trainee: layer courant. " + spawnTail;
         return true;
     }
 
@@ -11903,9 +14109,9 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         {
             this->vfxTrailPopupEveryNTilesInput.pop_back();
         }
-        else if (this->vfxTrailPopupLifetimeMsFocused && !this->vfxTrailPopupLifetimeMsInput.empty())
+        else if (this->vfxTrailPopupLifetimeTilesFocused && !this->vfxTrailPopupLifetimeTilesInput.empty())
         {
-            this->vfxTrailPopupLifetimeMsInput.pop_back();
+            this->vfxTrailPopupLifetimeTilesInput.pop_back();
         }
         else if (this->vfxTrailPopupLateralJitterFocused && !this->vfxTrailPopupLateralJitterInput.empty())
         {
@@ -11951,13 +14157,13 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
             this->vfxTrailPopupEveryNTilesInput.push_back(digit);
             return true;
         }
-        if (this->vfxTrailPopupLifetimeMsFocused)
+        if (this->vfxTrailPopupLifetimeTilesFocused)
         {
-            if (this->vfxTrailPopupLifetimeMsInput.size() >= 8U)
+            if (this->vfxTrailPopupLifetimeTilesInput.size() >= 4U)
             {
                 return true;
             }
-            this->vfxTrailPopupLifetimeMsInput.push_back(digit);
+            this->vfxTrailPopupLifetimeTilesInput.push_back(digit);
             return true;
         }
         if (this->vfxTrailPopupLateralJitterFocused)
@@ -12026,7 +14232,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
     };
 
     const bool nFocus = this->vfxTrailPopupEveryNTilesFocused;
-    const bool msFocus = this->vfxTrailPopupLifetimeMsFocused;
+    const bool lifeTilesFocus = this->vfxTrailPopupLifetimeTilesFocused;
     const bool jitFocus = this->vfxTrailPopupLateralJitterFocused;
     const bool rotFocus = this->vfxTrailPopupRotationPctFocused;
     const bool idlePcFocus = this->vfxTrailPopupIdleRingPieceCountFocused;
@@ -12034,7 +14240,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
     const bool idleRadFocus = this->vfxTrailPopupIdleRadiusFocused;
     const bool idleRingRotFocus = this->vfxTrailPopupIdleRingRotationPctFocused;
     const bool idleRingJitFocus = this->vfxTrailPopupIdleRingPosJitterFocused;
-    if ((nFocus || msFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
+    if ((nFocus || lifeTilesFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
          idleRingRotFocus || idleRingJitFocus) &&
         !isrepeat)
     {
@@ -12065,7 +14271,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
         }
     }
 
-    if ((nFocus || msFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
+    if ((nFocus || lifeTilesFocus || jitFocus || rotFocus || idlePcFocus || idlePerFocus || idleRadFocus ||
          idleRingRotFocus || idleRingJitFocus) &&
         key != nullptr && std::strlen(key) == 1U)
     {
@@ -12077,9 +14283,9 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
                 this->vfxTrailPopupEveryNTilesInput.push_back(c);
                 return true;
             }
-            if (msFocus && this->vfxTrailPopupLifetimeMsInput.size() < 8U)
+            if (lifeTilesFocus && this->vfxTrailPopupLifetimeTilesInput.size() < 4U)
             {
-                this->vfxTrailPopupLifetimeMsInput.push_back(c);
+                this->vfxTrailPopupLifetimeTilesInput.push_back(c);
                 return true;
             }
             if (jitFocus && this->vfxTrailPopupLateralJitterInput.size() < 4U)
@@ -12556,8 +14762,8 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
         ShipVfxInstance& placeInstance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         placeInstance.placementSnapClickToTile = !placeInstance.placementSnapClickToTile;
         this->statusMessage = placeInstance.placementSnapClickToTile
-            ? "Layer: TILE — fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
-            : "Layer: PIXEL — pas de snap tuile au clic.";
+            ? "Layer: TILE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
+            : "Layer: PIXEL ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pas de snap tuile au clic.";
         return true;
     }
 
@@ -12622,7 +14828,7 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
             return true;
         }
 
-        this->openVfxDuplicateToPagesPopupFromSelectedVfx();
+        (void)this->duplicateVfxInstanceAtIndexInCurrentPage(clickedInstanceIndex);
         clearLayerDragState();
         return true;
     }
@@ -12875,11 +15081,6 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->adjustShipVfxPreviewZoom(0.05f);
             return true;
         }
-        if (this->pointInRect(x, y, this->buttonShipPilotRect))
-        {
-            this->togglePreviewShipPilotControl();
-            return true;
-        }
     }
 
     if (this->editorMode == EditorMode::LOOSE_SPRITES)
@@ -13018,19 +15219,6 @@ bool EditorMapVfxScene::handlePreviewClick(float x, float y, RC2D_MouseButton bu
     if (!this->pointInRect(x, y, GetCurrentMap().rect))
     {
         return false;
-    }
-
-    if (this->previewShipPilotActive && this->previewShipLoaded && button == RC2D_MOUSE_BUTTON_LEFT)
-    {
-        const int vfxHitForMove = this->findTopmostVfxInstanceIndexAtPoint(x, y);
-        if (vfxHitForMove < 0 && !this->vfxRotationDialActive)
-        {
-            Map& mapMut = GetCurrentMap();
-            const SDL_Point t = mapMut.screenToTileNearest(x, y);
-            this->previewShip.moveToTile(mapMut, t.x, t.y);
-            this->statusMessage = "Navire : ordre de deplacement (pilotage actif).";
-            return true;
-        }
     }
 
     auto isPointInsideInstanceBounds = [this, x, y](int instanceIndex) -> bool {
@@ -13579,6 +15767,8 @@ void EditorMapVfxScene::update(double dt)
         }
 
         this->updatePreviewShipPilotAndVfxMotion(dt);
+        this->updateVfxTrailPopupMarcheSimulation(dt);
+        this->updateVfxTrailConePopupDragFromMouse();
 
     }
     else
@@ -13619,6 +15809,11 @@ void EditorMapVfxScene::update(double dt)
     }
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        if (this->previewShipPilotActive)
+        {
+            this->previewShipPilotActive = false;
+            this->clearShipVfxTrailPieces();
+        }
         this->shipVfxPreviewZoomFactor = std::clamp(
             camera.getZoomFactor(),
             kLoosePreviewZoomMin,
@@ -13698,6 +15893,10 @@ void EditorMapVfxScene::keypressed(
     (void)keyboardID;
 
     if (this->handleVfxDuplicateToPagesPopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
+    if (this->handleVfxTrailConePopupKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
     }
@@ -14105,6 +16304,12 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
         return;
     }
 
+    if (this->vfxTrailConePopupVisible)
+    {
+        (void)this->handleVfxTrailConePopupMouseClick(x, y, button);
+        return;
+    }
+
     if (this->vfxTrailPopupVisible)
     {
         (void)this->handleVfxTrailPopupMouseClick(x, y, button);
@@ -14357,3 +16562,8 @@ void EditorMapVfxScene::mousewheelmoved(
 }
 
 #endif // GAME_ENV_DEV
+
+
+
+
+

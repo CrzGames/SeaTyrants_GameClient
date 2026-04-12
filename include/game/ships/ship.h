@@ -268,6 +268,13 @@ public:
      */
     bool getCurrentSpriteCenterOffsetPixels(float* outOffsetX, float* outOffsetY) const;
     /**
+     * @brief Meme logique que getCurrentSpriteCenterOffsetPixels avec un facteur d'echelle impose
+     *        (ex. zoom preview trainee), au lieu du zoom camera courant * drawScale.
+     */
+    bool getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(float effectiveZoom,
+                                                            float* outOffsetX,
+                                                            float* outOffsetY) const;
+    /**
      * @brief Retourne la taille brute du sprite courant en pixels texture.
      * @param outWidth Recoit la largeur.
      * @param outHeight Recoit la hauteur.
@@ -339,4 +346,10 @@ public:
      * @param map Map utilisee pour la projection ecran.
      */
     void draw(const Map& map) const;
+
+    /**
+     * @brief Editeur: dessine le sprite courant centre sur un point ecran (largeur cible en pixels).
+     * N'altere pas drawScale du navire (independant du rendu carte).
+     */
+    void drawEditorPreviewAt(float screenCenterX, float screenCenterY, float targetWidthPixels) const;
 };

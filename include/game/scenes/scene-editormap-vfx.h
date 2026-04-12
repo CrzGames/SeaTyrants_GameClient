@@ -112,22 +112,33 @@ private:
         bool motionSpawnCaptured = false;
         float motionSpawnOffsetX = 0.0f;
         float motionSpawnOffsetY = 0.0f;
-        /** 0 = pas de trainee ; sinon distance minimale en tuiles entre deux rejets (pilotage actif). */
+        /** 0 = pas de trainee ; sinon distance minimale (tuiles) entre deux rejets en marche. */
         int motionTrailEveryNTiles = 0;
-        /** Duree de vie en millisecondes de chaque rejet de trainee sur la carte. */
-        int motionTrailLifetimeMs = 2000;
+        /** Longueur de trainee conservee par rejet (en tuiles parcourues). */
+        int motionTrailLifetimeTiles = 12;
         /**
          * Si true : en marche, ancrage sur les tuiles du parcours + meme decal X/Y que le layer (comme la preview sur le navire).
-         * Si false : decal lateral aleatoire perpendiculaire a la marche (voir motionTrailLateralJitterRadius) ;
-         *   decal trace = offsets SPAWN memorises.
+         * Si false : rejets echantillonnes dans un cone arriere base sur l'offset courant du layer
+         *   (voir motionTrailLateralJitterRadius), puis dispersion dans le cone.
          */
         bool motionTrailStrictTilePlacement = true;
         /**
-         * Demi-amplitude (meme unite que offsetX/Y) du decal aleatoire perpendiculaire a la marche ; ignore si strict.
+         * Rayon du cone arriere en mode non strict (meme unite que offsetX/Y) :
+         * controle la largeur et la profondeur max du nuage de spawn ; ignore si strict.
          */
         float motionTrailLateralJitterRadius = 0.0f;
+        /** Decal X local du point d'origine du cone par rapport au layer (meme unite que offsetX/Y). */
+        float motionTrailConeOffsetX = 0.0f;
+        /** Decal Y local du point d'origine du cone par rapport au layer (meme unite que offsetX/Y). */
+        float motionTrailConeOffsetY = 0.0f;
+        /** Orientation du cone (deg) relative a l'arriere de la marche : 0 = plein arriere. */
+        float motionTrailConeDirectionOffsetDeg = 0.0f;
+        /** Demi-angle d'ouverture du cone (deg), controle la largeur (serre/large). */
+        float motionTrailConeHalfAngleDeg = 28.0f;
+        /** Nombre de rejets aleatoires par declenchement (mode cone). */
+        int motionTrailConeSpawnCount = 1;
         /**
-         * 0-100 : intensite d'une rotation aleatoire par rejet au spawn (100 % = jusqu'a ±45 deg par rapport au layer).
+         * 0-100 : intensite d'une rotation aleatoire par rejet au spawn (100 % = jusqu'a Ã‚Â±45 deg par rapport au layer).
          */
         int motionTrailRotationRandomPercent = 0;
         /**
@@ -148,7 +159,7 @@ private:
          * Rayon max d'un decal 2D aleatoire ajoute a chaque piece sur la couronne (memes unites qu'offsetX/Y ; 0 = cercle regulier).
          */
         float motionTrailIdleRingPositionJitterRadius = 0.0f;
-        /** Accumulateur de distance (tuiles) depuis le dernier rejet ; non serialise. */
+        /** Accumulateur de distance (tuiles) depuis le dernier rejet en marche ; non serialise. */
         float motionTrailDistanceAcc = 0.0f;
         /** Accumulateur temps pour couronne a l'arret ; non serialise. */
         float motionTrailIdleSpawnAccSec = 0.0f;
@@ -329,8 +340,12 @@ private:
     {
         SDL_FRect dimFullMap{};
         SDL_FRect popup{};
+        /** Ligne horizontale sous la ligne instance (separe en-tete / bloc marche). */
+        float trailRuleAfterInstanceY = 0.0f;
+        /** Ligne horizontale avant le bloc couronne (separe marche / arret). */
+        float trailRuleBeforeArretY = 0.0f;
         SDL_FRect everyNTilesInputRect{};
-        SDL_FRect lifetimeMsInputRect{};
+        SDL_FRect lifetimeTilesInputRect{};
         SDL_FRect trailStrictTileBtn{};
         SDL_FRect trailLateralSpreadBtn{};
         bool lateralSectionVisible = false;
@@ -347,6 +362,34 @@ private:
         SDL_FRect validateBtn{};
         SDL_FRect clearBtn{};
         SDL_FRect cancelBtn{};
+        /** Colonne droite : apercu des rejets en marche (live depuis les champs du popup). */
+        SDL_FRect previewMarcheRect{};
+        /** Colonne droite : apercu couronne a l'arret. */
+        SDL_FRect previewArretRect{};
+        /** Bouton afficher / masquer le navire dans l'apercu rejets en marche. */
+        SDL_FRect previewMarcheShipToggleBtn{};
+        /** Vitesse preview marche (MoveSpeedTilesPerSecond) : boutons - / +. */
+        SDL_FRect previewSpeedMinusBtn{};
+        SDL_FRect previewSpeedPlusBtn{};
+        /** Zoom commun aux deux previews (independant du zoom carte). */
+        SDL_FRect previewZoomMinusBtn{};
+        SDL_FRect previewZoomPlusBtn{};
+        /** Bouton afficher / masquer le navire dans l'apercu couronne. */
+        SDL_FRect previewCrownShipToggleBtn{};
+    };
+    struct VfxTrailConePopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect previewRect{};
+        SDL_FRect centerHandleRect{};
+        SDL_FRect tipHandleRect{};
+        SDL_FRect sideHandleRect{};
+        SDL_FRect spawnCountMinusBtn{};
+        SDL_FRect spawnCountPlusBtn{};
+        SDL_FRect validateBtn{};
+        SDL_FRect resetBtn{};
+        SDL_FRect cancelBtn{};
     };
     bool vfxRelativeTimingPopupVisible = false;
     bool vfxRelativeTimingPopupIsShipRow = false;
@@ -361,7 +404,7 @@ private:
     bool vfxTrailPopupVisible = false;
     int vfxTrailPopupParentInstanceIndex = -1;
     std::string vfxTrailPopupEveryNTilesInput;
-    std::string vfxTrailPopupLifetimeMsInput;
+    std::string vfxTrailPopupLifetimeTilesInput;
     std::string vfxTrailPopupLateralJitterInput;
     std::string vfxTrailPopupRotationPctInput;
     std::string vfxTrailPopupIdleRingPieceCountInput;
@@ -372,7 +415,7 @@ private:
     bool vfxTrailPopupStrictTilePlacement = true;
     bool vfxTrailPopupIdleRingWhenStationary = false;
     bool vfxTrailPopupEveryNTilesFocused = false;
-    bool vfxTrailPopupLifetimeMsFocused = false;
+    bool vfxTrailPopupLifetimeTilesFocused = false;
     bool vfxTrailPopupLateralJitterFocused = false;
     bool vfxTrailPopupRotationPctFocused = false;
     bool vfxTrailPopupIdleRingPieceCountFocused = false;
@@ -380,7 +423,27 @@ private:
     bool vfxTrailPopupIdleRadiusFocused = false;
     bool vfxTrailPopupIdleRingRotationPctFocused = false;
     bool vfxTrailPopupIdleRingPosJitterFocused = false;
+    /** Apercu rejets en marche : dessine le navire sur la trajectoire (toggle dans le popup). */
+    bool vfxTrailPopupPreviewMarcheShipVisible = true;
+    /** Apercu rejets en marche : vitesse de deplacement en tuiles/s (independante du gameplay). */
+    float vfxTrailPopupPreviewMarcheSpeedTilesPerSec = 0.0f;
+    /** Apercu couronne : dessine le navire au centre (toggle dans le popup). */
+    bool vfxTrailPopupPreviewCrownShipVisible = true;
+    /** Zoom Ã‚Â« monde Ã‚Â» des previews trainee (0.40 .. 1.00, comme la camera carte) pour navire + VFX. */
+    float vfxTrailPopupPreviewZoom = 1.0f;
     mutable VfxTrailPopupLayout vfxTrailPopupLastLayout;
+    bool vfxTrailConePopupVisible = false;
+    int vfxTrailConePopupParentInstanceIndex = -1;
+    float vfxTrailConePopupLength = 96.0f;
+    float vfxTrailConePopupOffsetX = 0.0f;
+    float vfxTrailConePopupOffsetY = 0.0f;
+    float vfxTrailConePopupDirectionOffsetDeg = 0.0f;
+    float vfxTrailConePopupHalfAngleDeg = 28.0f;
+    int vfxTrailConePopupSpawnCount = 1;
+    bool vfxTrailConePopupCenterDragActive = false;
+    bool vfxTrailConePopupTipDragActive = false;
+    bool vfxTrailConePopupSideDragActive = false;
+    mutable VfxTrailConePopupLayout vfxTrailConePopupLastLayout{};
 
     struct ShipVfxTrailPiece {
         uint32_t sourceVfxInstanceId = 0;
@@ -403,14 +466,35 @@ private:
         float trailPerpendicularJitterY = 0.0f;
         /** Ecart de rotation (deg) ajoute au layer pour ce rejet, fige au spawn. */
         float trailRotationJitterDeg = 0.0f;
-        /** Identifiant stable pour la ligne « sous-instance » dans le panneau Layers. */
+        /** Phase initiale (s) de l'instance source au spawn, pour synchroniser piece <-> layer. */
+        float trailInitialPhaseSec = 0.0f;
+        /** Identifiant stable pour la ligne Ã‚Â« sous-instance Ã‚Â» dans le panneau Layers. */
         uint32_t layerPanelUiId = 0;
         /** True si cree par la couronne a l'arret ; supprime des que le navire reprend sa marche. */
         bool fromIdleRingCrown = false;
+        /**
+         * Preview popup Ã‚Â« en marche Ã‚Â» uniquement : si >= 0, position du rejet sur le segment [0..1]
+         * (haut-droite -> bas-gauche pour page Bas-Gauche, etc.) au lieu des tuiles d'ancrage carte.
+         */
+        float marchePopupPreviewPathU = -1.0f;
     };
     /** Rejets de trainee / sous-instances : une liste par page calques (direction x HP), comme shipVfxLayerPages. */
     std::array<std::vector<ShipVfxTrailPiece>, 8> shipVfxTrailPiecesByPage{};
     uint32_t nextShipVfxTrailLayerPanelUiId = 1;
+    /**
+     * Simulation "en marche" pour la preview popup : accumulateur de distance (tuiles),
+     * avec les valeurs des champs du popup (appendMotionTrailPieceFromStep).
+     */
+    mutable std::vector<ShipVfxTrailPiece> vfxTrailPopupMarcheSimPieces{};
+    /** Position normalisee [0..1) le long du parcours preview pour la tete / le spawn (boucle). */
+    mutable float vfxTrailPopupMarcheDistAlongPathPx = 0.0f;
+    mutable float vfxTrailPopupMarcheSimDistanceAcc = 0.0f;
+    mutable std::string vfxTrailPopupMarcheSimParamSignature{};
+    mutable uint32_t vfxTrailPopupMarcheSimNextUiId = 1U;
+    /** Dernier deplacement tuile (normalise) pendant PILOTER : oriente jitter comme sur la carte. */
+    mutable float vfxTrailPopupMarcheLastPilotMoveDirX = 0.0f;
+    mutable float vfxTrailPopupMarcheLastPilotMoveDirY = 1.0f;
+    mutable bool vfxTrailPopupMarcheLastPilotMoveDirValid = false;
     std::array<SDL_FPoint, 8> shipVfxTrailPrevShipTileByPage{};
     std::array<bool, 8> shipVfxTrailPrevShipTileValidByPage{};
 
@@ -585,7 +669,7 @@ private:
     void resetEditorState(void);
     /** Remet interactions (drag, focus) sans toucher aux imports ni au mode courant. */
     void clearEditorTransientInteractionState(void);
-    /** Vue caméra + tuile navire comme au chargement (mode Ship / VFX). */
+    /** Vue camÃƒÂ©ra + tuile navire comme au chargement (mode Ship / VFX). */
     void applyShipVfxModeViewportReset(void);
     /** Recharge le navire preview si decharge, sans vider les calques VFX. */
     void reloadPreviewShipIfUnloadedKeepVfxLayers(void);
@@ -622,9 +706,17 @@ private:
     void openVfxTrailPopupForInstanceIndex(int vfxInstanceIndex);
     void closeVfxTrailPopup(void);
     bool computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) const;
+    void drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay) const;
     void drawVfxTrailPopup(void) const;
     bool handleVfxTrailPopupMouseClick(float x, float y, RC2D_MouseButton button);
     bool handleVfxTrailPopupKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    void openVfxTrailConePopupForInstanceIndex(int vfxInstanceIndex);
+    void closeVfxTrailConePopup(void);
+    bool computeVfxTrailConePopupLayout(VfxTrailConePopupLayout* out) const;
+    void drawVfxTrailConePopup(void) const;
+    bool handleVfxTrailConePopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleVfxTrailConePopupKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    void updateVfxTrailConePopupDragFromMouse(void);
     std::vector<int> expandLayerPanelDisplayRows(const std::vector<int>& coreOrdered) const;
     int findVfxLayerIndexByInstanceId(uint32_t instanceId) const;
     int findTrailPieceIndexByLayerPanelUiId(uint32_t uiId) const;
@@ -634,6 +726,8 @@ private:
         float timeSeconds,
         const std::vector<ShipVfxInstance>& layerVec,
         const ImportedSfx& imported) const;
+    /** Index de frame pour une sous-instance trainee/couronne (age depuis spawn). */
+    int computeTrailPieceFrameIndex(const ImportedSfx& imported, float elapsedSinceSpawnSec) const;
     bool shouldSkipDrawImportedSfxForPilotMaxLifetime(const ImportedSfx& imported, float timeSeconds) const;
     /** Phase [0, periode) en secondes pour une instance, en enchainant les RELATIF (A->B->C). */
     float computeVfxPreviewPhaseSecondsInCycle(
@@ -659,6 +753,20 @@ private:
         const DirectionOverride* resolvedOverride,
         float* outOffsetX,
         float* outOffsetY) const;
+    void appendMotionTrailPieceFromStep(
+        const ShipVfxInstance& inst,
+        float anchorShipTileX,
+        float anchorShipTileY,
+        float moveDxTiles,
+        float moveDyTiles,
+        float timeSec,
+        std::vector<ShipVfxTrailPiece>& outPieces,
+        uint32_t& nextUiId,
+        float marchePopupPreviewPathU = -1.0f,
+        float anchorShipCenterOffsetEffectiveZoom = -1.0f,
+        float spawnSpeedTilesPerSec = -1.0f) const;
+    void updateVfxTrailPopupMarcheSimulation(double dt);
+    void resetVfxTrailPopupMarcheSimulationState(const std::string& signature);
     void updatePreviewShipPilotAndVfxMotion(double dt);
     void togglePreviewShipPilotControl(void);
     void clearShipVfxTrailPieces(void);
@@ -675,6 +783,7 @@ private:
         SDL_Keymod mod,
         bool isrepeat);
     ShipVfxInstance duplicateShipVfxInstanceFreshId(const ShipVfxInstance& src);
+    bool duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex);
     void drawShipVfxTrailPieces(void) const;
     void captureVfxMotionSpawnAtIndex(int instanceIndex);
     void resetSelectedVfxTransform(void);
@@ -871,3 +980,8 @@ public:
 };
 
 #endif // GAME_ENV_DEV
+
+
+
+
+
