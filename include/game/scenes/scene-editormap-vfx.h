@@ -185,6 +185,8 @@ private:
         float tileX;
         float tileY;
         float fps;
+        /** Horloge SDL_GetTicks (s) au spawn ; utilise avec duree totale ms > 0 pour retirer l'instance. */
+        float spawnTimeSeconds = 0.0f;
     };
 
     RC2D_Image backgroundUiImage;
@@ -418,6 +420,9 @@ private:
     uint32_t nextLoosePreviewPlacementId;
     std::string loosePreviewFpsInput;
     bool loosePreviewFpsInputFocused;
+    /** Vide = desactive ; sinon duree d'une boucle complete de l'anim (ms), pour preview + export fps derive. */
+    std::string loosePreviewTotalDurationMsInput;
+    bool loosePreviewTotalDurationMsInputFocused;
     bool looseExportNamePopupVisible;
     std::string looseExportNameInput;
     std::string pendingLooseExportAnimationName;
@@ -505,6 +510,7 @@ private:
     SDL_FRect buttonLooseZoomPlusRect;
     SDL_FRect buttonLoosePreviewModeRect;
     SDL_FRect buttonLoosePreviewFpsInputRect;
+    SDL_FRect buttonLoosePreviewTotalDurationMsInputRect;
     SDL_FRect buttonLooseClearAllVfxRect;
     SDL_FRect buttonLoosePreviewPlacementSnapRect;
 
@@ -699,7 +705,9 @@ private:
 
     bool importLooseFolderFromAbsolutePath(const char* absolutePath);
     bool importLooseFoldersFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);
+    bool reloadImportedLooseFolderFromAbsolutePath(const char* absolutePath);
     void refreshLooseFolderUnionCrop(ImportedLooseFolder& folder);
+    void updateLoosePreviewPlacementExpirations(void);
 
     void spawnSelectedSfxAtShipCenter(void);
     void setSelectedVfxInstanceIndex(int index);
@@ -726,6 +734,10 @@ private:
     void drawShipVfxTilePlacementGhost(void) const;
     bool applyLoosePreviewFpsInput(void);
     float getLoosePreviewFpsOrDefault(void) const;
+    int getLoosePreviewTotalDurationMsActive(void) const;
+    bool applyLoosePreviewTotalDurationMsInput(void);
+    int computeLooseAnimatedFrameIndex(float nowSeconds, int frameCount, float fpsFallback) const;
+    float computeLooseExportSpritesheetFps(int frameCount) const;
     bool handleLayerNameInputKey(
         const char* key,
         SDL_Scancode scancode,
@@ -733,6 +745,12 @@ private:
         SDL_Keymod mod,
         bool isrepeat);
     bool handleLoosePreviewFpsInputKey(
+        const char* key,
+        SDL_Scancode scancode,
+        SDL_Keycode keycode,
+        SDL_Keymod mod,
+        bool isrepeat);
+    bool handleLoosePreviewTotalDurationMsInputKey(
         const char* key,
         SDL_Scancode scancode,
         SDL_Keycode keycode,

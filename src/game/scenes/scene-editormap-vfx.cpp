@@ -171,6 +171,8 @@ constexpr float kLoosePreviewZoomMin = 0.40f;
 constexpr float kLoosePreviewZoomMax = 1.00f;
 constexpr float kLoosePreviewZoomDefault = 1.00f;
 constexpr float kLoosePreviewFpsDefault = 12.0f;
+constexpr int kLoosePreviewDurationMsMin = 1;
+constexpr int kLoosePreviewDurationMsMax = 99999999;
 /** Opacite du VFX sous le curseur (preview non pose) vs instances placees (255). */
 constexpr Uint8 kLoosePlacementCursorPreviewAlpha = 168;
 
@@ -577,6 +579,9 @@ struct CustomSpritesheetParseResult
     std::string imageFileName;
     float fps;
     std::vector<CustomSpritesheetFrame> frames;
+    /** true si cle absente, JSON null, ou valeur invalide : duree de boucle d'anim infinie cote data. */
+    bool animationTotalDurationInfinite = true;
+    int animationTotalDurationMs = 0;
 };
 
 static bool tryParseCustomSpritesheetJson(
@@ -624,6 +629,24 @@ static bool tryParseCustomSpritesheetJson(
     if (cJSON_IsNumber(fpsNode) && std::isfinite(fpsNode->valuedouble))
     {
         fps = std::clamp(static_cast<float>(fpsNode->valuedouble), kSfxFpsMin, kSfxFpsMax);
+    }
+
+    bool animationTotalDurationInfinite = true;
+    int animationTotalDurationMsValue = 0;
+    const cJSON* animMsNode = cJSON_GetObjectItemCaseSensitive(root, "animationTotalDurationMs");
+    if (cJSON_IsNull(animMsNode))
+    {
+        animationTotalDurationInfinite = true;
+    }
+    else if (cJSON_IsNumber(animMsNode) && std::isfinite(animMsNode->valuedouble))
+    {
+        const long long v = std::llround(animMsNode->valuedouble);
+        if (v >= static_cast<long long>(kLoosePreviewDurationMsMin) &&
+            v <= static_cast<long long>(kLoosePreviewDurationMsMax))
+        {
+            animationTotalDurationInfinite = false;
+            animationTotalDurationMsValue = static_cast<int>(v);
+        }
     }
 
     std::string imageFileName;
@@ -729,6 +752,8 @@ static bool tryParseCustomSpritesheetJson(
     outResult->imageFileName = imageFileName;
     outResult->fps = fps;
     outResult->frames = std::move(parsedFrames);
+    outResult->animationTotalDurationInfinite = animationTotalDurationInfinite;
+    outResult->animationTotalDurationMs = animationTotalDurationMsValue;
     return true;
 }
 
@@ -926,6 +951,8 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       nextLoosePreviewPlacementId(1U),
       loosePreviewFpsInput("12"),
       loosePreviewFpsInputFocused(false),
+      loosePreviewTotalDurationMsInput{},
+      loosePreviewTotalDurationMsInputFocused(false),
       looseExportNamePopupVisible(false),
       looseExportNameInput{},
       pendingLooseExportAnimationName{},
@@ -989,6 +1016,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonLooseZoomPlusRect{},
       buttonLoosePreviewModeRect{},
       buttonLoosePreviewFpsInputRect{},
+      buttonLoosePreviewTotalDurationMsInputRect{},
       buttonLooseClearAllVfxRect{},
       buttonLoosePreviewPlacementSnapRect{},
       shipListRect{},
@@ -1181,6 +1209,8 @@ void EditorMapVfxScene::resetEditorState(void)
     this->nextLoosePreviewPlacementId = 1U;
     this->loosePreviewFpsInput = "12";
     this->loosePreviewFpsInputFocused = false;
+    this->loosePreviewTotalDurationMsInput.clear();
+    this->loosePreviewTotalDurationMsInputFocused = false;
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
@@ -1201,6 +1231,7 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
 {
     this->layerNameInputFocused = false;
     this->loosePreviewFpsInputFocused = false;
+    this->loosePreviewTotalDurationMsInputFocused = false;
     this->vfxDragActive = false;
     this->vfxRotationDialActive = false;
     this->layerRowDragActive = false;
@@ -2462,9 +2493,10 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->buttonImportLooseRect = SDL_FRect{looseImportX, row1Y, looseImportW, h};
 
     float looseRow2X = gs.x + startX;
-    setNextButton(&this->buttonLoosePreviewModeRect, &looseRow2X, row2Y, 280.0f);
-    setNextButton(&this->buttonLoosePreviewFpsInputRect, &looseRow2X, row2Y, 240.0f);
-    setNextButton(&this->buttonLooseClearAllVfxRect, &looseRow2X, row2Y, 170.0f);
+    setNextButton(&this->buttonLoosePreviewModeRect, &looseRow2X, row2Y, 250.0f);
+    setNextButton(&this->buttonLoosePreviewFpsInputRect, &looseRow2X, row2Y, 210.0f);
+    setNextButton(&this->buttonLoosePreviewTotalDurationMsInputRect, &looseRow2X, row2Y, 290.0f);
+    setNextButton(&this->buttonLooseClearAllVfxRect, &looseRow2X, row2Y, 160.0f);
     if (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
     {
         setNextButton(&this->buttonLoosePreviewPlacementSnapRect, &looseRow2X, row2Y, 230.0f);
@@ -4311,6 +4343,7 @@ void EditorMapVfxScene::openLooseExportNamePopup(void)
 
     this->looseExportNamePopupVisible = true;
     this->loosePreviewFpsInputFocused = false;
+    this->loosePreviewTotalDurationMsInputFocused = false;
     this->statusMessage = "Nom animation export: tape un nom puis ENTREE.";
 }
 
@@ -5396,6 +5429,169 @@ bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePa
     return true;
 }
 
+bool EditorMapVfxScene::reloadImportedLooseFolderFromAbsolutePath(const char* absolutePath)
+{
+    if (absolutePath == nullptr || absolutePath[0] == '\0')
+    {
+        return false;
+    }
+
+    auto makePathKey = [](const std::string& path) {
+        std::string key = normalizePathSlashes(path);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return key;
+    };
+
+    const std::string targetKey = makePathKey(std::string(absolutePath));
+    int foundIndex = -1;
+    for (int i = 0; i < static_cast<int>(this->importedLooseFolders.size()); ++i)
+    {
+        if (makePathKey(this->importedLooseFolders[static_cast<size_t>(i)].folderAbsolutePath) == targetKey)
+        {
+            foundIndex = i;
+            break;
+        }
+    }
+    if (foundIndex < 0)
+    {
+        return false;
+    }
+
+    std::filesystem::path folderPath(absolutePath);
+    std::error_code fsError;
+    if (!std::filesystem::exists(folderPath, fsError) || !std::filesystem::is_directory(folderPath, fsError))
+    {
+        this->statusMessage = "Reimport sprites: dossier introuvable.";
+        return false;
+    }
+
+    std::vector<std::filesystem::path> spritePaths;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(folderPath, fsError))
+    {
+        if (fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        if (entry.is_regular_file(fsError) && !fsError && isPngFilePath(entry.path()))
+        {
+            spritePaths.push_back(entry.path());
+        }
+    }
+
+    if (spritePaths.empty())
+    {
+        this->statusMessage = "Reimport sprites: aucun PNG dans le dossier.";
+        return false;
+    }
+
+    std::sort(spritePaths.begin(), spritePaths.end(), [](const auto& a, const auto& b) {
+        const std::string aName = a.filename().string();
+        const std::string bName = b.filename().string();
+
+        unsigned long long aNumericValue = 0;
+        unsigned long long bNumericValue = 0;
+        const bool aIsNumeric = tryParseNumericFrameName(aName, &aNumericValue);
+        const bool bIsNumeric = tryParseNumericFrameName(bName, &bNumericValue);
+
+        if (aIsNumeric && bIsNumeric)
+        {
+            if (aNumericValue != bNumericValue)
+            {
+                return aNumericValue < bNumericValue;
+            }
+            return aName < bName;
+        }
+        if (aIsNumeric != bIsNumeric)
+        {
+            return aIsNumeric;
+        }
+        return aName < bName;
+    });
+
+    ImportedLooseFolder& folder = this->importedLooseFolders[static_cast<size_t>(foundIndex)];
+    for (ImportedLooseSprite& sprite : folder.sprites)
+    {
+        rc2d_graphics_freeImage(&sprite.image);
+    }
+    folder.sprites.clear();
+    folder.looseUnionCropReady = false;
+    folder.looseUnionCropX = 0;
+    folder.looseUnionCropY = 0;
+    folder.looseUnionCropW = 0;
+    folder.looseUnionCropH = 0;
+
+    folder.displayName = folderPath.filename().string();
+    if (folder.displayName.empty())
+    {
+        folder.displayName = normalizePathSlashes(folderPath.string());
+    }
+    folder.folderAbsolutePath = normalizePathSlashes(folderPath.string());
+
+    this->ensureUserStorageFolders();
+
+    for (const std::filesystem::path& spritePath : spritePaths)
+    {
+        std::ifstream input(spritePath, std::ios::binary | std::ios::ate);
+        if (!input.is_open())
+        {
+            continue;
+        }
+
+        const std::streamsize size = input.tellg();
+        if (size <= 0)
+        {
+            continue;
+        }
+        input.seekg(0, std::ios::beg);
+        std::vector<char> bytes(static_cast<size_t>(size));
+        if (!input.read(bytes.data(), size))
+        {
+            continue;
+        }
+
+        const std::string fileName = spritePath.filename().string();
+        const std::string storagePath = folder.storageFolderPath + "/" + fileName;
+        if (!rc2d_storage_userWriteFile(storagePath.c_str(), bytes.data(), static_cast<Uint64>(bytes.size())))
+        {
+            continue;
+        }
+
+        RC2D_Image image = rc2d_graphics_loadImageFromStorage(storagePath.c_str(), RC2D_STORAGE_USER);
+        if (image.sdl_texture == nullptr)
+        {
+            continue;
+        }
+        SDL_SetTextureScaleMode(image.sdl_texture, SDL_SCALEMODE_LINEAR);
+
+        float widthPx = 0.0f;
+        float heightPx = 0.0f;
+        SDL_GetTextureSize(image.sdl_texture, &widthPx, &heightPx);
+
+        ImportedLooseSprite sprite{};
+        sprite.fileName = fileName;
+        sprite.storagePath = storagePath;
+        sprite.image = image;
+        sprite.widthPx = widthPx;
+        sprite.heightPx = heightPx;
+        folder.sprites.push_back(std::move(sprite));
+    }
+
+    if (folder.sprites.empty())
+    {
+        this->statusMessage = "Reimport sprites: aucune image chargeable.";
+        return false;
+    }
+
+    this->refreshLooseFolderUnionCrop(folder);
+    this->selectedLooseFolderIndex = foundIndex;
+    this->ensureSelectionVisible(this->selectedLooseFolderIndex, &this->looseListScrollOffset, static_cast<int>(this->importedLooseFolders.size()));
+    this->statusMessage = "Dossier sprites recharge: " + folder.displayName;
+    return true;
+}
+
 bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath)
 {
     if (rootFolderAbsolutePath == nullptr || rootFolderAbsolutePath[0] == '\0')
@@ -5476,12 +5672,21 @@ bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char*
     });
 
     int addedCount = 0;
+    int reloadedCount = 0;
     int failedCount = 0;
     for (const std::filesystem::path& folderPath : discoveredFolders)
     {
         const std::string key = makePathKey(folderPath.string());
         if (std::find(knownPathKeys.begin(), knownPathKeys.end(), key) != knownPathKeys.end())
         {
+            if (this->reloadImportedLooseFolderFromAbsolutePath(folderPath.string().c_str()))
+            {
+                reloadedCount += 1;
+            }
+            else
+            {
+                failedCount += 1;
+            }
             continue;
         }
 
@@ -5496,14 +5701,27 @@ bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char*
         }
     }
 
-    if (addedCount > 0 && failedCount == 0)
+    if (addedCount > 0 || reloadedCount > 0)
     {
-        this->statusMessage = std::to_string(addedCount) + " dossier(s) sprites importe(s).";
-        return true;
-    }
-    if (addedCount > 0 && failedCount > 0)
-    {
-        this->statusMessage = std::to_string(addedCount) + " dossier(s) sprites importe(s), " + std::to_string(failedCount) + " en echec.";
+        std::string msg;
+        if (addedCount > 0)
+        {
+            msg += std::to_string(addedCount) + " dossier(s) importe(s)";
+        }
+        if (reloadedCount > 0)
+        {
+            if (!msg.empty())
+            {
+                msg += ", ";
+            }
+            msg += std::to_string(reloadedCount) + " recharge(s) depuis le disque";
+        }
+        if (failedCount > 0)
+        {
+            msg += " (" + std::to_string(failedCount) + " en echec)";
+        }
+        msg += ".";
+        this->statusMessage = msg;
         return true;
     }
 
@@ -6127,6 +6345,93 @@ bool EditorMapVfxScene::applyLoosePreviewFpsInput(void)
     return true;
 }
 
+int EditorMapVfxScene::getLoosePreviewTotalDurationMsActive(void) const
+{
+    const std::string trimmed = trimAscii(this->loosePreviewTotalDurationMsInput);
+    if (trimmed.empty())
+    {
+        return 0;
+    }
+
+    char* endPtr = nullptr;
+    const long long parsed = std::strtoll(trimmed.c_str(), &endPtr, 10);
+    if (endPtr == trimmed.c_str() || *endPtr != '\0')
+    {
+        return 0;
+    }
+    if (parsed < static_cast<long long>(kLoosePreviewDurationMsMin) ||
+        parsed > static_cast<long long>(kLoosePreviewDurationMsMax))
+    {
+        return 0;
+    }
+    return static_cast<int>(parsed);
+}
+
+bool EditorMapVfxScene::applyLoosePreviewTotalDurationMsInput(void)
+{
+    const std::string trimmed = trimAscii(this->loosePreviewTotalDurationMsInput);
+    if (trimmed.empty())
+    {
+        this->loosePreviewTotalDurationMsInput.clear();
+        return true;
+    }
+
+    char* endPtr = nullptr;
+    const long long parsed = std::strtoll(trimmed.c_str(), &endPtr, 10);
+    if (endPtr == trimmed.c_str() || *endPtr != '\0' || parsed < static_cast<long long>(kLoosePreviewDurationMsMin) ||
+        parsed > static_cast<long long>(kLoosePreviewDurationMsMax))
+    {
+        this->statusMessage = "Duree totale ms invalide (entier 1.." + std::to_string(kLoosePreviewDurationMsMax) + ").";
+        return false;
+    }
+
+    this->loosePreviewTotalDurationMsInput = std::to_string(static_cast<int>(parsed));
+    this->statusMessage = "Duree totale animation: " + this->loosePreviewTotalDurationMsInput + " ms.";
+    return true;
+}
+
+void EditorMapVfxScene::updateLoosePreviewPlacementExpirations(void)
+{
+    if (this->editorMode != EditorMode::LOOSE_SPRITES ||
+        this->loosePreviewMode != LoosePreviewMode::PLACEMENT_PREVIEW)
+    {
+        return;
+    }
+    const int lifeMs = this->getLoosePreviewTotalDurationMsActive();
+    if (lifeMs <= 0)
+    {
+        return;
+    }
+    const float nowSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const float lifeSec = static_cast<float>(lifeMs) * 0.001f;
+    std::vector<LoosePreviewPlacement>& vec = this->loosePreviewPlacements;
+    vec.erase(
+        std::remove_if(
+            vec.begin(),
+            vec.end(),
+            [nowSec, lifeSec](const LoosePreviewPlacement& p) {
+                return (nowSec - p.spawnTimeSeconds) >= lifeSec;
+            }),
+        vec.end());
+}
+
+int EditorMapVfxScene::computeLooseAnimatedFrameIndex(float nowSeconds, int frameCount, float fpsFallback) const
+{
+    if (frameCount <= 0)
+    {
+        return 0;
+    }
+
+    const float clampedFps = std::clamp(fpsFallback, kSfxFpsMin, kSfxFpsMax);
+    return static_cast<int>(std::floor(nowSeconds * (std::max)(clampedFps, 1.0f))) % frameCount;
+}
+
+float EditorMapVfxScene::computeLooseExportSpritesheetFps(int frameCount) const
+{
+    (void)frameCount;
+    return this->getLoosePreviewFpsOrDefault();
+}
+
 bool EditorMapVfxScene::handleLayerNameInputKey(
     const char* key,
     SDL_Scancode scancode,
@@ -6302,6 +6607,102 @@ bool EditorMapVfxScene::handleLoosePreviewFpsInputKey(
         return true;
     }
     return appendCharIfAllowed(key[0]);
+}
+
+bool EditorMapVfxScene::handleLoosePreviewTotalDurationMsInputKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    if (!this->loosePreviewTotalDurationMsInputFocused)
+    {
+        return false;
+    }
+
+    (void)mod;
+    if (scancode == SDL_SCANCODE_ESCAPE)
+    {
+        this->loosePreviewTotalDurationMsInputFocused = false;
+        const int active = this->getLoosePreviewTotalDurationMsActive();
+        this->loosePreviewTotalDurationMsInput = active > 0 ? std::to_string(active) : std::string{};
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER)
+    {
+        this->applyLoosePreviewTotalDurationMsInput();
+        this->loosePreviewTotalDurationMsInputFocused = false;
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_BACKSPACE && !this->loosePreviewTotalDurationMsInput.empty() && !isrepeat)
+    {
+        this->loosePreviewTotalDurationMsInput.pop_back();
+        return true;
+    }
+    if (scancode == SDL_SCANCODE_DELETE && !this->loosePreviewTotalDurationMsInput.empty() && !isrepeat)
+    {
+        this->loosePreviewTotalDurationMsInput.clear();
+        return true;
+    }
+
+    auto appendDigit = [this](char c) -> bool {
+        if (this->loosePreviewTotalDurationMsInput.size() >= 12U)
+        {
+            return true;
+        }
+        if (c >= '0' && c <= '9')
+        {
+            this->loosePreviewTotalDurationMsInput.push_back(c);
+        }
+        return true;
+    };
+
+    auto appendKeypadDigitIfAny = [&appendDigit, keycode, scancode]() -> bool {
+        switch (keycode)
+        {
+        case SDLK_KP_0: return appendDigit('0');
+        case SDLK_KP_1: return appendDigit('1');
+        case SDLK_KP_2: return appendDigit('2');
+        case SDLK_KP_3: return appendDigit('3');
+        case SDLK_KP_4: return appendDigit('4');
+        case SDLK_KP_5: return appendDigit('5');
+        case SDLK_KP_6: return appendDigit('6');
+        case SDLK_KP_7: return appendDigit('7');
+        case SDLK_KP_8: return appendDigit('8');
+        case SDLK_KP_9: return appendDigit('9');
+        default: break;
+        }
+        switch (scancode)
+        {
+        case SDL_SCANCODE_KP_0: return appendDigit('0');
+        case SDL_SCANCODE_KP_1: return appendDigit('1');
+        case SDL_SCANCODE_KP_2: return appendDigit('2');
+        case SDL_SCANCODE_KP_3: return appendDigit('3');
+        case SDL_SCANCODE_KP_4: return appendDigit('4');
+        case SDL_SCANCODE_KP_5: return appendDigit('5');
+        case SDL_SCANCODE_KP_6: return appendDigit('6');
+        case SDL_SCANCODE_KP_7: return appendDigit('7');
+        case SDL_SCANCODE_KP_8: return appendDigit('8');
+        case SDL_SCANCODE_KP_9: return appendDigit('9');
+        default: break;
+        }
+        return false;
+    };
+
+    if (appendKeypadDigitIfAny())
+    {
+        return true;
+    }
+    if (key == nullptr || key[0] == '\0')
+    {
+        return true;
+    }
+    if (std::strlen(key) != 1U)
+    {
+        return true;
+    }
+    return appendDigit(key[0]);
 }
 
 bool EditorMapVfxScene::handleLooseExportNameInputKey(
@@ -8408,7 +8809,19 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         return false;
     }
 
-    cJSON_AddNumberToObject(jsonRoot, "fps", this->getLoosePreviewFpsOrDefault());
+    cJSON_AddNumberToObject(
+        jsonRoot,
+        "fps",
+        this->computeLooseExportSpritesheetFps(static_cast<int>(exportedFrames.size())));
+    const int exportAnimMs = this->getLoosePreviewTotalDurationMsActive();
+    if (exportAnimMs > 0)
+    {
+        cJSON_AddNumberToObject(jsonRoot, "animationTotalDurationMs", static_cast<double>(exportAnimMs));
+    }
+    else
+    {
+        cJSON_AddNullToObject(jsonRoot, "animationTotalDurationMs");
+    }
     cJSON_AddStringToObject(jsonRoot, "image", sheetFileName.c_str());
 
     cJSON* framesArray = cJSON_CreateArray();
@@ -9208,7 +9621,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     const float requestedScale = static_cast<float>(this->looseScalePercent) / 100.0f;
     const float zoomMultiplier = std::clamp(GetCamera().getZoomFactor(), kLoosePreviewZoomMin, kLoosePreviewZoomMax);
     const float previewScale = requestedScale * zoomMultiplier;
-    const float nowSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const float nowSecondsPl = static_cast<float>(SDL_GetTicks()) * 0.001f;
     const int frameCount = static_cast<int>(folder.sprites.size());
 
     const bool useUnionCrop =
@@ -9236,7 +9649,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
         }
 
         const float clampedFps = std::clamp(fps, kSfxFpsMin, kSfxFpsMax);
-        const int frameIndex = static_cast<int>(std::floor(nowSeconds * (std::max)(clampedFps, 1.0f))) % frameCount;
+        const int frameIndex = this->computeLooseAnimatedFrameIndex(nowSecondsPl, frameCount, clampedFps);
         const ImportedLooseSprite& sprite = folder.sprites[static_cast<size_t>(frameIndex)];
         RC2D_Image* spriteImage = const_cast<RC2D_Image*>(&sprite.image);
 
@@ -9559,7 +9972,6 @@ void EditorMapVfxScene::drawHud(void) const
             "AFFICHER ILE+NAVIRES+TOURS",
             this->looseReferencePreviewVisible);
 
-        if (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
         {
             const RC2D_Color fpsFillColor = this->loosePreviewFpsInputFocused
                 ? RC2D_Color{58, 88, 122, 210}
@@ -9587,7 +9999,43 @@ void EditorMapVfxScene::drawHud(void) const
             rc2d_graphics_setTextColor(&fpsInputText);
             rc2d_graphics_drawText(&fpsInputText, this->buttonLoosePreviewFpsInputRect.x + 6.0f, this->buttonLoosePreviewFpsInputRect.y + 2.0f);
             rc2d_graphics_destroyText(&fpsInputText);
+        }
 
+        {
+            const RC2D_Color durFillColor = this->loosePreviewTotalDurationMsInputFocused
+                ? RC2D_Color{58, 88, 122, 210}
+                : RC2D_Color{28, 38, 50, 205};
+            const RC2D_Color durBorderColor = this->loosePreviewTotalDurationMsInputFocused
+                ? RC2D_Color{124, 186, 236, 245}
+                : RC2D_Color{108, 126, 148, 220};
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            rc2d_graphics_setColor(durFillColor);
+            rc2d_graphics_rectangle("fill", &this->buttonLoosePreviewTotalDurationMsInputRect);
+            rc2d_graphics_setColor(durBorderColor);
+            rc2d_graphics_rectangle("line", &this->buttonLoosePreviewTotalDurationMsInputRect);
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+            const int durActive = this->getLoosePreviewTotalDurationMsActive();
+            std::string durValue = this->loosePreviewTotalDurationMsInputFocused
+                ? this->loosePreviewTotalDurationMsInput
+                : (durActive > 0 ? std::to_string(durActive) : std::string("-"));
+            std::string durLabel = "Duree totale (ms): " + durValue;
+            if (this->loosePreviewTotalDurationMsInputFocused)
+            {
+                durLabel += "_";
+            }
+            RC2D_Text durInputText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), durLabel.c_str());
+            durInputText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&durInputText);
+            rc2d_graphics_drawText(
+                &durInputText,
+                this->buttonLoosePreviewTotalDurationMsInputRect.x + 6.0f,
+                this->buttonLoosePreviewTotalDurationMsInputRect.y + 2.0f);
+            rc2d_graphics_destroyText(&durInputText);
+        }
+
+        if (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
+        {
             this->drawToolbarButton(this->buttonLooseClearAllVfxRect, "CLEAR ALL VFX", false);
             this->drawToolbarButton(
                 this->buttonLoosePreviewPlacementSnapRect,
@@ -9609,7 +10057,7 @@ void EditorMapVfxScene::drawHud(void) const
         return;
     }
 
-    char infoBuffer[512] = {};
+    char infoBuffer[768] = {};
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
     if (shipMode)
     {
@@ -9640,16 +10088,27 @@ void EditorMapVfxScene::drawHud(void) const
             (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
             ? "Preview clic"
             : "Spritesheet centree";
+        char durInfoBuf[32] = {};
+        const int durAct = this->getLoosePreviewTotalDurationMsActive();
+        if (durAct > 0)
+        {
+            SDL_snprintf(durInfoBuf, sizeof(durInfoBuf), "%d ms", durAct);
+        }
+        else
+        {
+            SDL_snprintf(durInfoBuf, sizeof(durInfoBuf), "FPS");
+        }
         SDL_snprintf(
             infoBuffer,
             sizeof(infoBuffer),
-            "Mode Downscale Sprites VFX | Sous-mode: %s | Dossier: %s | Scale export: %d%% | Zoom: %.2f | Placements: %d | Frame/S: %s | Ocean: %s",
+            "Mode Downscale Sprites VFX | Sous-mode: %s | Dossier: %s | Scale export: %d%% | Zoom: %.2f | Placements: %d | Frame/S: %s | Anim: %s | Ocean: %s",
             looseSubMode,
             folderName,
             this->looseScalePercent,
             this->loosePreviewZoomFactor,
             static_cast<int>(this->loosePreviewPlacements.size()),
             this->loosePreviewFpsInput.c_str(),
+            durInfoBuf,
             oceanLabel);
     }
 
@@ -11851,6 +12310,8 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
     }
     if (this->pointInRect(x, y, this->buttonExportRect))
     {
+        this->loosePreviewFpsInputFocused = false;
+        this->loosePreviewTotalDurationMsInputFocused = false;
         if (this->editorMode == EditorMode::LOOSE_SPRITES)
         {
             this->openLooseExportNamePopup();
@@ -11939,6 +12400,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         if (this->pointInRect(x, y, this->buttonImportLooseRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->openImportLooseFolderDialog();
             return true;
         }
@@ -11948,6 +12410,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
                 ? LoosePreviewMode::PLACEMENT_PREVIEW
                 : LoosePreviewMode::CENTER_SPRITESHEET;
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             if (this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET)
             {
                 Camera& camera = GetCamera();
@@ -11972,9 +12435,17 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             }
             return true;
         }
-        if (this->pointInRect(x, y, this->buttonLoosePreviewFpsInputRect) &&
-            this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
+        if (this->pointInRect(x, y, this->buttonLoosePreviewTotalDurationMsInputRect))
         {
+            this->loosePreviewFpsInputFocused = false;
+            const int durActive = this->getLoosePreviewTotalDurationMsActive();
+            this->loosePreviewTotalDurationMsInput = durActive > 0 ? std::to_string(durActive) : std::string{};
+            this->loosePreviewTotalDurationMsInputFocused = true;
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonLoosePreviewFpsInputRect))
+        {
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->loosePreviewFpsInput = formatSfxFpsValue(this->getLoosePreviewFpsOrDefault());
             this->loosePreviewFpsInputFocused = true;
             return true;
@@ -11983,6 +12454,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->loosePreviewPlacements.clear();
             this->nextLoosePreviewPlacementId = 1U;
             this->statusMessage = "Toutes les instances preview VFX ont ete supprimees.";
@@ -11992,6 +12464,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
             this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->loosePreviewPlacementSnapToTile = !this->loosePreviewPlacementSnapToTile;
             this->statusMessage = this->loosePreviewPlacementSnapToTile
                 ? "Preview VFX: ancrage centre tuile (sous le curseur)."
@@ -12001,30 +12474,35 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         if (this->pointInRect(x, y, this->buttonLooseScaleMinusRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->looseScalePercent = std::clamp(this->looseScalePercent - kLooseScaleStepPercent, kLooseScaleMinPercent, kLooseScaleMaxPercent);
             return true;
         }
         if (this->pointInRect(x, y, this->buttonLooseScalePlusRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->looseScalePercent = std::clamp(this->looseScalePercent + kLooseScaleStepPercent, kLooseScaleMinPercent, kLooseScaleMaxPercent);
             return true;
         }
         if (this->pointInRect(x, y, this->buttonLooseZoomMinusRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->adjustLoosePreviewZoom(-0.05f);
             return true;
         }
         if (this->pointInRect(x, y, this->buttonLooseZoomPlusRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->adjustLoosePreviewZoom(0.05f);
             return true;
         }
         if (this->pointInRect(x, y, this->buttonLooseReferencePreviewRect))
         {
             this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             if (!this->looseReferencePreviewLoaded)
             {
                 this->statusMessage = "References visuelles indisponibles (assets manquants).";
@@ -12040,6 +12518,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
 
     this->layerNameInputFocused = false;
     this->loosePreviewFpsInputFocused = false;
+    this->loosePreviewTotalDurationMsInputFocused = false;
     return false;
 }
 
@@ -12224,6 +12703,10 @@ bool EditorMapVfxScene::handleLoosePlacementPreviewClick(float x, float y, RC2D_
         {
             return true;
         }
+        if (!this->applyLoosePreviewTotalDurationMsInput())
+        {
+            return true;
+        }
 
         LoosePreviewPlacement placement{};
         placement.instanceId = this->nextLoosePreviewPlacementId++;
@@ -12240,6 +12723,7 @@ bool EditorMapVfxScene::handleLoosePlacementPreviewClick(float x, float y, RC2D_
             placement.tileY = tileF.y;
         }
         placement.fps = this->getLoosePreviewFpsOrDefault();
+        placement.spawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
         this->loosePreviewPlacements.push_back(placement);
 
         this->statusMessage =
@@ -12616,6 +13100,7 @@ void EditorMapVfxScene::update(double dt)
 
         this->scrollBarOverlay.update(dt, camera, map, map.rect);
         GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect);
+        this->updateLoosePreviewPlacementExpirations();
 
         if (this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET &&
             std::fabs(camera.getZoomFactor() - kLoosePreviewZoomDefault) > 0.0001f)
@@ -12736,6 +13221,10 @@ void EditorMapVfxScene::keypressed(
     {
         return;
     }
+    if (this->handleLoosePreviewTotalDurationMsInputKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     if (this->handleLoosePreviewFpsInputKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
@@ -12756,6 +13245,7 @@ void EditorMapVfxScene::keypressed(
         }
         this->layerNameInputFocused = false;
         this->loosePreviewFpsInputFocused = false;
+        this->loosePreviewTotalDurationMsInputFocused = false;
         return;
     }
 
@@ -13033,6 +13523,8 @@ void EditorMapVfxScene::keypressed(
         }
         if (!isrepeat && scancode == SDL_SCANCODE_P)
         {
+            this->loosePreviewFpsInputFocused = false;
+            this->loosePreviewTotalDurationMsInputFocused = false;
             this->loosePreviewMode = (this->loosePreviewMode == LoosePreviewMode::CENTER_SPRITESHEET)
                 ? LoosePreviewMode::PLACEMENT_PREVIEW
                 : LoosePreviewMode::CENTER_SPRITESHEET;
@@ -13135,10 +13627,13 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     {
         const bool wasLayerNameFocused = this->layerNameInputFocused;
         const bool wasLoosePreviewFpsInputFocused = this->loosePreviewFpsInputFocused;
+        const bool wasLoosePreviewDurationMsInputFocused = this->loosePreviewTotalDurationMsInputFocused;
         const bool clickInLoosePreviewFpsInput =
             (this->editorMode == EditorMode::LOOSE_SPRITES) &&
-            (this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW) &&
             this->pointInRect(x, y, this->buttonLoosePreviewFpsInputRect);
+        const bool clickInLoosePreviewDurationMsInput =
+            (this->editorMode == EditorMode::LOOSE_SPRITES) &&
+            this->pointInRect(x, y, this->buttonLoosePreviewTotalDurationMsInputRect);
 
         if (wasLayerNameFocused)
         {
@@ -13149,6 +13644,11 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
         {
             this->loosePreviewFpsInputFocused = false;
             this->applyLoosePreviewFpsInput();
+        }
+        if (wasLoosePreviewDurationMsInputFocused && !clickInLoosePreviewDurationMsInput)
+        {
+            this->loosePreviewTotalDurationMsInputFocused = false;
+            this->applyLoosePreviewTotalDurationMsInput();
         }
     }
 

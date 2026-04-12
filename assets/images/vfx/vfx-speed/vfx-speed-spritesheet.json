@@ -1,5 +1,6 @@
 {
-	"fps":	50,
+	"fps":	28,
+	"animationTotalDurationMs":	4000,
 	"image":	"vfx-speed-spritesheet.png",
 	"frames":	[{
 			"index":	0,
