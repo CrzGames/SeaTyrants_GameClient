@@ -863,6 +863,62 @@ void OceanShader::draw(const SDL_FRect& visibleRect)
     }
 }
 
+void OceanShader::drawUiScreenRect(const SDL_FRect& screenRect, float worldPreviewZoom)
+{
+    if (!this->isReady() || screenRect.w < 1.0f || screenRect.h < 1.0f)
+    {
+        return;
+    }
+
+    const float saveP10 = this->oceanUniforms.params1[0];
+    const float saveP11 = this->oceanUniforms.params1[1];
+    const float saveP40 = this->oceanUniforms.params4[0];
+    const float saveP41 = this->oceanUniforms.params4[1];
+    const float saveP42 = this->oceanUniforms.params4[2];
+    const float saveP43 = this->oceanUniforms.params4[3];
+    const float saveP02 = this->oceanUniforms.params0[2];
+    const float saveP03 = this->oceanUniforms.params0[3];
+    const float saveP30 = this->oceanUniforms.params3[0];
+    const float saveP52 = this->oceanUniforms.params5[2];
+    const float saveP53 = this->oceanUniforms.params5[3];
+
+    Map& map = GetCurrentMap();
+    Camera& camera = GetCamera();
+    const float mapW = (std::max)(map.rect.w, 1.0f);
+    const float rel = (std::clamp)(screenRect.w / mapW, 0.22f, 2.5f);
+    const float camZ = (std::max)(camera.getZoomFactor(), 0.001f);
+    const float wz = (std::clamp)(worldPreviewZoom, 0.05f, 4.0f);
+
+    this->oceanUniforms.params1[0] = (std::max)(screenRect.w, 1.0f);
+    this->oceanUniforms.params1[1] = (std::max)(screenRect.h, 1.0f);
+    this->oceanUniforms.params4[0] = screenRect.x;
+    this->oceanUniforms.params4[1] = screenRect.y;
+    this->oceanUniforms.params4[2] = screenRect.w;
+    this->oceanUniforms.params4[3] = screenRect.h;
+    /** Meme logique que editorMapVfxBuildMarchePopupGrid : tuiles ecran = mapTile/camera * zoom apercu. */
+    this->oceanUniforms.params5[2] = map.getTileWidth() / camZ * wz;
+    this->oceanUniforms.params5[3] = map.getTileHeight() / camZ * wz;
+    this->oceanUniforms.params0[2] = 3.6f * camZ * rel * wz;
+    this->oceanUniforms.params0[3] = (std::max)(2.35f / (std::max)(wz, 0.25f), 0.85f);
+    this->oceanUniforms.params3[0] = 0.0f;
+
+    this->uploadUniforms();
+    this->draw(screenRect);
+
+    this->oceanUniforms.params1[0] = saveP10;
+    this->oceanUniforms.params1[1] = saveP11;
+    this->oceanUniforms.params4[0] = saveP40;
+    this->oceanUniforms.params4[1] = saveP41;
+    this->oceanUniforms.params4[2] = saveP42;
+    this->oceanUniforms.params4[3] = saveP43;
+    this->oceanUniforms.params0[2] = saveP02;
+    this->oceanUniforms.params0[3] = saveP03;
+    this->oceanUniforms.params3[0] = saveP30;
+    this->oceanUniforms.params5[2] = saveP52;
+    this->oceanUniforms.params5[3] = saveP53;
+    this->uploadUniforms();
+}
+
 bool OceanShader::isReady(void) const
 {
     // Verifie la presence de la texture base.

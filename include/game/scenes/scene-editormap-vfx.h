@@ -371,6 +371,9 @@ private:
         /** Vitesse preview marche (MoveSpeedTilesPerSecond) : boutons - / +. */
         SDL_FRect previewSpeedMinusBtn{};
         SDL_FRect previewSpeedPlusBtn{};
+        /** Couleur ocean (meme cycle que la barre d'outils) : pas / pas. */
+        SDL_FRect previewOceanPrevBtn{};
+        SDL_FRect previewOceanNextBtn{};
         /** Zoom commun aux deux previews (independant du zoom carte). */
         SDL_FRect previewZoomMinusBtn{};
         SDL_FRect previewZoomPlusBtn{};

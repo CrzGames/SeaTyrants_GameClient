@@ -192,6 +192,14 @@ public:
     void draw(const SDL_FRect& visibleRect);
 
     /**
+     * @brief Dessine l'ocean dans un rectangle ecran (ex. apercus UI) avec des uniforms adaptes a sa taille.
+     * @param screenRect Destination en pixels ecran ; params4 / resolution sont alignes dessus pour ce trace.
+     * @param worldPreviewZoom Zoom monde des apercus (ex. 0.40..1.00) : meme echelle que les tuiles preview.
+     * @note Restaure les uniforms apres le trace pour ne pas perturber le rendu carte du meme frame.
+     */
+    void drawUiScreenRect(const SDL_FRect& screenRect, float worldPreviewZoom = 1.0f);
+
+    /**
      * @brief Indique si le module ocean est pret.
      * @return True si les ressources critiques sont valides.
      */

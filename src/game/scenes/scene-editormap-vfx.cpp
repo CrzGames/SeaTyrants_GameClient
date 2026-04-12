@@ -1180,6 +1180,45 @@ static void destroySurfaceVector(std::vector<SDL_Surface*>& surfaces)
     }
     surfaces.clear();
 }
+
+/** Fond des apercus popup trainee : shader ocean dans le rectangle (clip SDL), bordure legere. */
+static void editorMapVfxDrawTrailPopupPreviewOceanBackground(const SDL_FRect& r, float worldPreviewZoom)
+{
+    if (r.w < 4.0f || r.h < 4.0f)
+    {
+        return;
+    }
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer != nullptr)
+    {
+        SDL_Rect clip{};
+        clip.x = static_cast<int>(std::floor(r.x));
+        clip.y = static_cast<int>(std::floor(r.y));
+        clip.w = (std::max)(static_cast<int>(std::ceil(r.x + r.w)) - clip.x, 1);
+        clip.h = (std::max)(static_cast<int>(std::ceil(r.y + r.h)) - clip.y, 1);
+        SDL_SetRenderClipRect(renderer, &clip);
+    }
+    OceanShader& ocean = GetOceanShader();
+    if (ocean.isReady())
+    {
+        ocean.drawUiScreenRect(r, worldPreviewZoom);
+    }
+    else
+    {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(RC2D_Color{16, 22, 30, 245});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    }
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{100, 122, 148, 210});
+    rc2d_graphics_rectangle("line", &r);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
 } // namespace
 
 EditorMapVfxScene* EditorMapVfxScene::activeInstance = nullptr;
@@ -2984,6 +3023,26 @@ bool EditorMapVfxScene::computeVfxTrailPopupLayout(VfxTrailPopupLayout* out) con
                                           zmY,
                                           kPreviewZoomBtnW,
                                           kPreviewZoomBtnH};
+    /** Boutons ocean a gauche du libelle vitesse : [ < > ][ spd .. ][ - + vitesse ] */
+    constexpr float kSpdLabelReserveX = 82.0f;
+    constexpr float kGapSpdTextToSpeedBtns = 8.0f;
+    constexpr float kGapOceanPair = 6.0f;
+    constexpr float kGapOceanToSpdText = 8.0f;
+    const float spdTextRight = out->previewSpeedMinusBtn.x - kGapSpdTextToSpeedBtns;
+    const float spdTextLeft = spdTextRight - kSpdLabelReserveX;
+    float oceanNextX = spdTextLeft - kGapOceanToSpdText - kPreviewZoomBtnW;
+    float oceanPrevX = oceanNextX - kGapOceanPair - kPreviewZoomBtnW;
+    const float oceanRowMinX = previewX + 2.0f;
+    if (oceanPrevX < oceanRowMinX)
+    {
+        const float push = oceanRowMinX - oceanPrevX;
+        oceanPrevX += push;
+        oceanNextX += push;
+    }
+    out->previewOceanNextBtn =
+        SDL_FRect{oceanNextX, zmY, kPreviewZoomBtnW, kPreviewZoomBtnH};
+    out->previewOceanPrevBtn =
+        SDL_FRect{oceanPrevX, zmY, kPreviewZoomBtnW, kPreviewZoomBtnH};
     out->previewMarcheShipToggleBtn = SDL_FRect{
         out->previewMarcheRect.x + out->previewMarcheRect.w - 120.0f,
         out->previewMarcheRect.y + 4.0f,
@@ -13301,16 +13360,13 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         rc2d_graphics_line(dividerX, divY0, dividerX, divY1);
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 
-        auto fillPreviewBack = [](const SDL_FRect& r) {
-            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-            rc2d_graphics_setColor(RC2D_Color{16, 22, 30, 245});
-            rc2d_graphics_rectangle("fill", &r);
-            rc2d_graphics_setColor(RC2D_Color{100, 122, 148, 210});
-            rc2d_graphics_rectangle("line", &r);
-            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-        };
-        fillPreviewBack(lay.previewMarcheRect);
-        fillPreviewBack(lay.previewArretRect);
+        constexpr float kTrailPopupPreviewWorldZoomMinDraw = 0.4f;
+        constexpr float kTrailPopupPreviewWorldZoomMaxDraw = 1.0f;
+        const float trailPopupWorldZ = (std::clamp)(this->vfxTrailPopupPreviewZoom,
+                                                    kTrailPopupPreviewWorldZoomMinDraw,
+                                                    kTrailPopupPreviewWorldZoomMaxDraw);
+        editorMapVfxDrawTrailPopupPreviewOceanBackground(lay.previewMarcheRect, trailPopupWorldZ);
+        editorMapVfxDrawTrailPopupPreviewOceanBackground(lay.previewArretRect, trailPopupWorldZ);
 
         RC2D_Text pm = rc2d_graphics_createText(
             const_cast<RC2D_Font*>(&this->overlayFont),
@@ -13348,10 +13404,20 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
                     &t, r.x + ((r.w - static_cast<float>(tw)) * 0.5f), r.y + ((r.h - static_cast<float>(th)) * 0.5f));
                 rc2d_graphics_destroyText(&t);
             };
+            drawTinyBtn(lay.previewOceanPrevBtn, "<");
+            drawTinyBtn(lay.previewOceanNextBtn, ">");
             drawTinyBtn(lay.previewSpeedMinusBtn, "-");
             drawTinyBtn(lay.previewSpeedPlusBtn, "+");
             drawTinyBtn(lay.previewZoomMinusBtn, "-");
             drawTinyBtn(lay.previewZoomPlusBtn, "+");
+            RC2D_Text ocLbl = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Ocean");
+            ocLbl.color = RC2D_Color{190, 200, 212, 238};
+            rc2d_graphics_setTextColor(&ocLbl);
+            rc2d_graphics_drawText(
+                &ocLbl,
+                lay.previewOceanPrevBtn.x - 48.0f,
+                lay.previewOceanPrevBtn.y + ((lay.previewOceanPrevBtn.h - 16.0f) * 0.5f));
+            rc2d_graphics_destroyText(&ocLbl);
             char sl[32] = {};
             SDL_snprintf(sl,
                          sizeof(sl),
@@ -13363,7 +13429,7 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
             rc2d_graphics_setTextColor(&st);
             rc2d_graphics_drawText(
                 &st,
-                lay.previewSpeedMinusBtn.x - 76.0f,
+                lay.previewOceanNextBtn.x + lay.previewOceanNextBtn.w + 8.0f,
                 lay.previewSpeedMinusBtn.y + ((lay.previewSpeedMinusBtn.h - 16.0f) * 0.5f));
             rc2d_graphics_destroyText(&st);
             char zl[28] = {};
@@ -13448,6 +13514,16 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     }
     this->vfxTrailPopupLastLayout = lay;
 
+    if (this->pointInRect(x, y, lay.previewOceanPrevBtn))
+    {
+        this->cycleOceanColor(-1);
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.previewOceanNextBtn))
+    {
+        this->cycleOceanColor(1);
+        return true;
+    }
     if (this->pointInRect(x, y, lay.previewSpeedMinusBtn))
     {
         this->vfxTrailPopupPreviewMarcheSpeedTilesPerSec =
