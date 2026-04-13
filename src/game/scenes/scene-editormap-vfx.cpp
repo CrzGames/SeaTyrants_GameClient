@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -42,16 +43,24 @@ std::mt19937& editorMapVfxTrailJitterRng(void)
 constexpr float kMotionTrailRotationJitterMaxDeg = 45.0f;
 /** Echelle min (fraction taille au spawn) pour un rejet en fin de vie. */
 constexpr float kTrailPieceDrawScaleLifeMin = 0.08f;
+/** Amplitude max (unites offset) du bruit lisse des rejets (derive non figee). */
+constexpr float kTrailPieceMotionNoiseAmp = 2.15f;
+/** Echelles temporelles du bruit 1D (plus bas = variation plus lente). */
+constexpr float kTrailPieceMotionNoiseRateX = 0.48f;
+constexpr float kTrailPieceMotionNoiseRateY = 0.39f;
+/** Envergure max de l'inertie visuelle le long du pas (t * exp(-kt), memes unites que offsets). */
+constexpr float kTrailPieceWakeImpulseUnits = 1.75f;
+constexpr float kTrailPieceWakeDecayPerSec = 1.32f;
+constexpr float kTrailPieceSpinDecayPerSec = 2.05f;
+constexpr float kTrailPieceSpinOmegaMaxDegPerSec = 5.2f;
 /** Ecart temporel entre deux pieces d'une meme rafale couronne (secondes). */
 constexpr float kIdleRingPieceStaggerSec = 0.055f;
 /** Cadence fixe entre deux rafales couronne a l'arret (secondes). */
 constexpr float kIdleRingSalvoPeriodSec = 0.60f;
 constexpr int kMotionTrailEveryNTilesMin = 0;
 constexpr int kMotionTrailEveryNTilesMax = 64;
-/** Longueur max du cone arriere en fonction du rayon lateral saisi (meme unite que les offsets). */
+/** Echelle max de profondeur du cone (meme unite que motionTrailLateralJitterRadius) avant plafond geometrique. */
 constexpr float kMotionTrailConeDepthBySpreadRatio = 1.0f;
-/** Exposant de repartition de la profondeur du cone (1.0 = uniforme, >1 = plus proche de l'origine). */
-constexpr float kMotionTrailConeDepthUExponent = 1.35f;
 constexpr float kTrailConePopupLengthMin = 1.0f;
 constexpr float kTrailConePopupLengthMax = 2048.0f;
 constexpr float kTrailConePopupOffsetMin = -2048.0f;
@@ -243,38 +252,72 @@ EditorMapVfxTrailConePreviewGeom editorMapVfxBuildTrailConePreviewGeom(
     return geom;
 }
 
-float editorMapVfxSampleTrailConeDepth(float lateralSpread)
+/**
+ * Echantillon (profondeur le long de l'axe, ecart lateral) pour un rejet dans le cone :
+ * repartition uniforme en aire du triangle (apex -> profondeur max), donc largeur equilibree
+ * (plus de masse au centre comme avec une Gaussienne). La profondeur max est bornee pour que,
+ * au fond du cone, la demi-largeur ne depasse pas |lateralSpread| (aligne demi-angle + "rayon").
+ */
+void editorMapVfxSampleTrailConeDepthAndLateral(
+    float lateralSpread,
+    float coneHalfAngleRad,
+    float* outDepth,
+    float* outLateral)
 {
+    if (outDepth == nullptr || outLateral == nullptr)
+    {
+        return;
+    }
+    *outDepth = 0.0f;
+    *outLateral = 0.0f;
     const float spreadAbs = std::fabs(lateralSpread);
     if (spreadAbs <= 0.0001f)
     {
-        return 0.0f;
+        return;
     }
-
-    const float maxDepth = spreadAbs * kMotionTrailConeDepthBySpreadRatio;
+    const float tanHalf = std::tan(coneHalfAngleRad);
+    const float depthFromSpread = spreadAbs * kMotionTrailConeDepthBySpreadRatio;
+    float maxDepth = depthFromSpread;
+    if (tanHalf > 1.0e-5f)
+    {
+        const float depthCapForSpread = spreadAbs / tanHalf;
+        maxDepth = (std::min)(depthFromSpread, depthCapForSpread);
+    }
+    if (maxDepth <= 1.0e-6f)
+    {
+        return;
+    }
     std::uniform_real_distribution<float> u01(0.0f, 1.0f);
-    const float u = std::pow((std::max)(u01(editorMapVfxTrailJitterRng()), 1.0e-6f), kMotionTrailConeDepthUExponent);
-    return maxDepth * u;
+    const float u1 = (std::max)(u01(editorMapVfxTrailJitterRng()), 1.0e-6f);
+    const float u2 = u01(editorMapVfxTrailJitterRng());
+    const float depth = maxDepth * std::sqrt(u1);
+    *outDepth = depth;
+    *outLateral = (2.0f * u2 - 1.0f) * depth * tanHalf;
 }
 
-float editorMapVfxSampleTrailConeLateral(float halfWidth)
+uint32_t editorMapVfxHashU32(uint32_t x)
 {
-    const float hw = (std::max)(halfWidth, 0.0f);
-    if (hw <= 0.0001f)
-    {
-        return 0.0f;
-    }
-    // Densite plus naturelle vers l'axe du cone, tout en restant strictement dans [-halfWidth, +halfWidth].
-    std::normal_distribution<float> gauss(0.0f, hw * 0.36f);
-    for (int i = 0; i < 4; ++i)
-    {
-        const float v = gauss(editorMapVfxTrailJitterRng());
-        if (std::fabs(v) <= hw)
-        {
-            return v;
-        }
-    }
-    return (std::clamp)(gauss(editorMapVfxTrailJitterRng()), -hw, hw);
+    x ^= x >> 16U;
+    x *= 0x85ebca6bu;
+    x ^= x >> 13U;
+    x *= 0xc2b2ae35u;
+    x ^= x >> 16U;
+    return x;
+}
+
+float editorMapVfxSmoothNoise1D(uint32_t seed, float t)
+{
+    const int k0 = static_cast<int>(std::floor(t));
+    const int k1 = k0 + 1;
+    const float f = t - static_cast<float>(k0);
+    const float u = f * f * (3.0f - 2.0f * f);
+    const uint32_t h0 =
+        editorMapVfxHashU32(seed ^ (0x27d4eb2du + static_cast<uint32_t>(k0) * 0x9e3779b9u));
+    const uint32_t h1 =
+        editorMapVfxHashU32(seed ^ (0x27d4eb2du + static_cast<uint32_t>(k1) * 0x9e3779b9u));
+    const float v0 = static_cast<float>(h0) * (2.0f / 4294967296.0f) - 1.0f;
+    const float v1 = static_cast<float>(h1) * (2.0f / 4294967296.0f) - 1.0f;
+    return v0 + (v1 - v0) * u;
 }
 
 int editorMapVfxParseIntClamped(const char* str, int lo, int hi, int fallback)
@@ -3305,6 +3348,97 @@ float EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(const ShipVfxTrailPiece&
     const float linear = (std::clamp)(u, 0.0f, 1.0f);
     const float eased = std::sqrt(linear);
     return (std::max)(kTrailPieceDrawScaleLifeMin, eased);
+}
+
+void EditorMapVfxScene::trailPieceAmbientDriftOffsets(
+    const ShipVfxTrailPiece& piece,
+    float ageSec,
+    float lifeScaleMul,
+    float* outAddX,
+    float* outAddY)
+{
+    if (outAddX == nullptr || outAddY == nullptr)
+    {
+        return;
+    }
+    *outAddX = 0.0f;
+    *outAddY = 0.0f;
+    const float lifeS = (std::clamp)(lifeScaleMul, 0.0f, 1.0f);
+    if (lifeS <= 1.0e-4f)
+    {
+        return;
+    }
+    const float t = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+    const uint32_t seed = piece.trailNoiseSeed;
+    const float tx =
+        t * kTrailPieceMotionNoiseRateX + piece.trailAmbientDriftPhase0 * 0.18f;
+    const float ty =
+        t * kTrailPieceMotionNoiseRateY + piece.trailAmbientDriftPhase1 * 0.21f + 19.7f;
+    *outAddX = editorMapVfxSmoothNoise1D(seed ^ 0x1a2b3c4du, tx) * kTrailPieceMotionNoiseAmp * lifeS;
+    *outAddY = editorMapVfxSmoothNoise1D(seed ^ 0x5d6e7f8au, ty) * kTrailPieceMotionNoiseAmp * lifeS;
+}
+
+void EditorMapVfxScene::trailPieceWakeInertiaOffsets(
+    const ShipVfxTrailPiece& piece,
+    float ageSec,
+    float lifeScaleMul,
+    float* outAddX,
+    float* outAddY)
+{
+    if (outAddX == nullptr || outAddY == nullptr)
+    {
+        return;
+    }
+    *outAddX = 0.0f;
+    *outAddY = 0.0f;
+    const float lifeS = (std::clamp)(lifeScaleMul, 0.0f, 1.0f);
+    if (lifeS <= 1.0e-4f)
+    {
+        return;
+    }
+    float dx = piece.trailWakeDirX;
+    float dy = piece.trailWakeDirY;
+    const float len = std::sqrt((dx * dx) + (dy * dy));
+    if (len < 1.0e-4f)
+    {
+        return;
+    }
+    dx /= len;
+    dy /= len;
+    const float wt = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+    const float envelope = wt * std::exp(-kTrailPieceWakeDecayPerSec * wt);
+    const float mag = kTrailPieceWakeImpulseUnits * envelope * lifeS;
+    *outAddX = dx * mag;
+    *outAddY = dy * mag;
+}
+
+float EditorMapVfxScene::trailPieceSpinExtraDeg(const ShipVfxTrailPiece& piece, float ageSec)
+{
+    const float omega0 = piece.trailSpinOmega0;
+    constexpr float k = kTrailPieceSpinDecayPerSec;
+    if (std::fabs(omega0) < 1.0e-5f || k < 1.0e-5f)
+    {
+        return 0.0f;
+    }
+    const float wt = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+    return (omega0 / k) * (1.0f - std::exp(-k * wt));
+}
+
+void EditorMapVfxScene::initTrailPieceMotionExtras(ShipVfxTrailPiece* piece, float moveDxTiles, float moveDyTiles)
+{
+    if (piece == nullptr)
+    {
+        return;
+    }
+    std::uniform_real_distribution<float> ph(0.0f, 6.28318530718f);
+    piece->trailAmbientDriftPhase0 = ph(editorMapVfxTrailJitterRng());
+    piece->trailAmbientDriftPhase1 = ph(editorMapVfxTrailJitterRng());
+    std::uniform_int_distribution<uint32_t> u32(0u, 0xFFFFFFFFu);
+    piece->trailNoiseSeed = u32(editorMapVfxTrailJitterRng());
+    piece->trailWakeDirX = moveDxTiles;
+    piece->trailWakeDirY = moveDyTiles;
+    std::uniform_real_distribution<float> spinU(-kTrailPieceSpinOmegaMaxDegPerSec, kTrailPieceSpinOmegaMaxDegPerSec);
+    piece->trailSpinOmega0 = spinU(editorMapVfxTrailJitterRng());
 }
 
 bool EditorMapVfxScene::shouldPreviewHideShipForRelativeTiming(float timeSeconds) const
@@ -8528,8 +8662,6 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
     float anchorShipCenterOffsetEffectiveZoom,
     float spawnSpeedTilesPerSec) const
 {
-    (void)moveDxTiles;
-    (void)moveDyTiles;
     ShipVfxTrailPiece piece{};
     piece.sourceVfxInstanceId = inst.instanceId;
     piece.anchorShipTileX = anchorShipTileX;
@@ -8581,11 +8713,11 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
             const float conePerpX = -coneAxisY;
             const float conePerpY = coneAxisX;
 
-            const float depth = editorMapVfxSampleTrailConeDepth(spread);
             const float coneHalfAngleDeg = std::clamp(inst.motionTrailConeHalfAngleDeg, 2.0f, 85.0f);
             const float coneHalfAngleRad = coneHalfAngleDeg * (3.14159265359f / 180.0f);
-            const float widthAtDepth = std::tan(coneHalfAngleRad) * depth;
-            const float lateral = editorMapVfxSampleTrailConeLateral(widthAtDepth);
+            float depth = 0.0f;
+            float lateral = 0.0f;
+            editorMapVfxSampleTrailConeDepthAndLateral(spread, coneHalfAngleRad, &depth, &lateral);
 
             piece.trailDrawOffsetX += coneAxisX * depth;
             piece.trailDrawOffsetY += coneAxisY * depth;
@@ -8602,6 +8734,7 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
             -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
         piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
     }
+    EditorMapVfxScene::initTrailPieceMotionExtras(&piece, moveDxTiles, moveDyTiles);
     uint32_t nid = ++nextUiId;
     if (nid == 0U)
     {
@@ -9099,6 +9232,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                     -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
                 piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
             }
+            EditorMapVfxScene::initTrailPieceMotionExtras(&piece, 0.0f, 0.0f);
             uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
             if (nid == 0U)
             {
@@ -11400,16 +11534,26 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
         const int frameIndex = this->computeTrailPieceFrameIndex(imported, trailPlaybackSec);
         const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
 
-        const float ox = (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX) * scale;
-        const float oy = (piece.trailDrawOffsetY + piece.trailPerpendicularJitterY) * scale;
+        const float lifeScale = EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
+        float driftX = 0.0f;
+        float driftY = 0.0f;
+        EditorMapVfxScene::trailPieceAmbientDriftOffsets(piece, phaseTime, lifeScale, &driftX, &driftY);
+        float wakeX = 0.0f;
+        float wakeY = 0.0f;
+        EditorMapVfxScene::trailPieceWakeInertiaOffsets(piece, phaseTime, lifeScale, &wakeX, &wakeY);
+        const float ox =
+            (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX + driftX + wakeX) * scale;
+        const float oy =
+            (piece.trailDrawOffsetY + piece.trailPerpendicularJitterY + driftY + wakeY) * scale;
         const float resolvedRotation = (override != nullptr) ? override->rotationDeg : inst->rotationDeg;
-        const float trailDrawRotationDeg = resolvedRotation + piece.trailRotationJitterDeg;
+        const float trailDrawRotationDeg =
+            resolvedRotation + piece.trailRotationJitterDeg +
+            EditorMapVfxScene::trailPieceSpinExtraDeg(piece, phaseTime);
         const bool resolvedFlipH = (override != nullptr) ? override->flipHorizontal : inst->flipHorizontal;
         const bool resolvedFlipV = (override != nullptr) ? override->flipVertical : inst->flipVertical;
 
         const float sourceW = frame.w;
         const float sourceH = frame.h;
-        const float lifeScale = EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
         const float drawScaleX = scale * lifeScale;
         const float drawScaleY = scale * lifeScale;
         const float drawX = shipCenter.x + ox - ((sourceW * drawScaleX) * 0.5f);
@@ -11926,12 +12070,12 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
         const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(spriteImage, subX, subY, subW, subH);
 
         Uint8 prevTexAlpha = 255;
-        const bool applyAlphaMod =
-            textureAlpha255 < 255 && spriteImage->sdl_texture != nullptr;
-        if (applyAlphaMod)
+        SDL_Texture* const tex = spriteImage->sdl_texture;
+        const bool canAlphaMod = tex != nullptr;
+        if (canAlphaMod)
         {
-            SDL_GetTextureAlphaMod(spriteImage->sdl_texture, &prevTexAlpha);
-            SDL_SetTextureAlphaMod(spriteImage->sdl_texture, textureAlpha255);
+            SDL_GetTextureAlphaMod(tex, &prevTexAlpha);
+            SDL_SetTextureAlphaMod(tex, textureAlpha255);
         }
 
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
@@ -11949,9 +12093,9 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
             false);
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 
-        if (applyAlphaMod)
+        if (canAlphaMod)
         {
-            SDL_SetTextureAlphaMod(spriteImage->sdl_texture, prevTexAlpha);
+            SDL_SetTextureAlphaMod(tex, prevTexAlpha);
         }
     };
 
@@ -11964,23 +12108,55 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
     float mouseY = 0.0f;
     if (this->getMouseRenderPosition(&mouseX, &mouseY) && this->pointInRect(mouseX, mouseY, map.rect))
     {
+        auto loosePlacementPreviewTileOccupied = [this](float tix, float tiy) -> bool {
+            constexpr float kSameTileEps = 1.0e-4f;
+            for (const LoosePreviewPlacement& placement : this->loosePreviewPlacements)
+            {
+                if (this->loosePreviewPlacementSnapToTile)
+                {
+                    if (std::lround(placement.tileX) == std::lround(tix) && std::lround(placement.tileY) == std::lround(tiy))
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    const float dx = placement.tileX - tix;
+                    const float dy = placement.tileY - tiy;
+                    if ((dx * dx) + (dy * dy) <= kSameTileEps * kSameTileEps)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
         if (this->loosePreviewPlacementSnapToTile)
         {
             const SDL_Point hoveredTile = map.screenToTileNearest(mouseX, mouseY);
-            drawAnimatedAtTile(
-                static_cast<float>(hoveredTile.x),
-                static_cast<float>(hoveredTile.y),
-                this->getLoosePreviewFpsOrDefault(),
-                kLoosePlacementCursorPreviewAlpha);
+            const float htx = static_cast<float>(hoveredTile.x);
+            const float hty = static_cast<float>(hoveredTile.y);
+            if (!loosePlacementPreviewTileOccupied(htx, hty))
+            {
+                drawAnimatedAtTile(
+                    htx,
+                    hty,
+                    this->getLoosePreviewFpsOrDefault(),
+                    kLoosePlacementCursorPreviewAlpha);
+            }
         }
         else
         {
             const SDL_FPoint hoveredTileF = map.screenToTile(mouseX, mouseY);
-            drawAnimatedAtTile(
-                hoveredTileF.x,
-                hoveredTileF.y,
-                this->getLoosePreviewFpsOrDefault(),
-                kLoosePlacementCursorPreviewAlpha);
+            if (!loosePlacementPreviewTileOccupied(hoveredTileF.x, hoveredTileF.y))
+            {
+                drawAnimatedAtTile(
+                    hoveredTileF.x,
+                    hoveredTileF.y,
+                    this->getLoosePreviewFpsOrDefault(),
+                    kLoosePlacementCursorPreviewAlpha);
+            }
         }
     }
 }
@@ -12912,18 +13088,28 @@ void EditorMapVfxScene::drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay
 
             auto drawMarcheSimQuadAt = [&](float centerX, float centerY, const ShipVfxTrailPiece& piece) {
                 const float resolvedRot = (ovr != nullptr) ? ovr->rotationDeg : inst.rotationDeg;
-                const float trailRot = resolvedRot + piece.trailRotationJitterDeg;
                 const bool fh = (ovr != nullptr) ? ovr->flipHorizontal : inst.flipHorizontal;
                 const bool fv = (ovr != nullptr) ? ovr->flipVertical : inst.flipVertical;
                 const float phaseT = (std::max)(0.0f, timeSeconds - piece.bornTimeSeconds);
+                const float trailRot = resolvedRot + piece.trailRotationJitterDeg +
+                                       EditorMapVfxScene::trailPieceSpinExtraDeg(piece, phaseT);
                 const float trailPlaybackSec = piece.trailInitialPhaseSec + phaseT;
                 const int frameIndex = this->computeTrailPieceFrameIndex(imported, trailPlaybackSec);
                 const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
                 const float sourceW = frame.w;
                 const float sourceH = frame.h;
-                const float pieceZ = worldZ * EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
-                const float drawX = centerX - ((sourceW * pieceZ) * 0.5f);
-                const float drawY = centerY - ((sourceH * pieceZ) * 0.5f);
+                const float lifeScaleMarche = EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
+                float driftMx = 0.0f;
+                float driftMy = 0.0f;
+                EditorMapVfxScene::trailPieceAmbientDriftOffsets(piece, phaseT, lifeScaleMarche, &driftMx, &driftMy);
+                float wakeMx = 0.0f;
+                float wakeMy = 0.0f;
+                EditorMapVfxScene::trailPieceWakeInertiaOffsets(piece, phaseT, lifeScaleMarche, &wakeMx, &wakeMy);
+                const float pieceZ = worldZ * lifeScaleMarche;
+                const float drawX =
+                    centerX + (driftMx + wakeMx) * worldZ - ((sourceW * pieceZ) * 0.5f);
+                const float drawY =
+                    centerY + (driftMy + wakeMy) * worldZ - ((sourceH * pieceZ) * 0.5f);
                 const float pivotX = sourceW * 0.5f;
                 const float pivotY = sourceH * 0.5f;
                 const RC2D_Quad sourceQuad =
@@ -13010,7 +13196,7 @@ void EditorMapVfxScene::drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay
     }
 
     const SDL_FRect& ra = lay.previewArretRect;
-    if (ra.w > 4.0f && ra.h > 4.0f)
+    if (ra.w > 4.0f && ra.h > 4.0f && this->vfxTrailPopupIdleRingWhenStationary)
     {
         if (renderer != nullptr)
         {
@@ -13361,6 +13547,11 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
         const float trailPopupWorldZ = (std::clamp)(this->vfxTrailPopupPreviewZoom,
                                                     kTrailPopupPreviewWorldZoomMinDraw,
                                                     kTrailPopupPreviewWorldZoomMaxDraw);
+        const int popupMarcheEveryNForUi = editorMapVfxParseIntClamped(
+            this->vfxTrailPopupEveryNTilesInput.c_str(),
+            kMotionTrailEveryNTilesMin,
+            kMotionTrailEveryNTilesMax,
+            (pInst != nullptr) ? pInst->motionTrailEveryNTiles : 0);
         editorMapVfxDrawTrailPopupPreviewOceanBackground(lay.previewMarcheRect, trailPopupWorldZ);
         editorMapVfxDrawTrailPopupPreviewOceanBackground(lay.previewArretRect, trailPopupWorldZ);
 
@@ -13374,7 +13565,8 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
 
         RC2D_Text pa = rc2d_graphics_createText(
             const_cast<RC2D_Font*>(&this->overlayFont),
-            "Preview : couronne (live)");
+            this->vfxTrailPopupIdleRingWhenStationary ? "Preview : couronne (live)"
+                                                      : "Preview : couronne OFF (ocean seul)");
         pa.color = RC2D_Color{190, 200, 212, 238};
         rc2d_graphics_setTextColor(&pa);
         rc2d_graphics_drawText(&pa, lay.previewArretRect.x + 8.0f, lay.previewArretRect.y + 30.0f);
@@ -13465,8 +13657,14 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
                     tb.y + ((tb.h - static_cast<float>(tth)) * 0.5f));
                 rc2d_graphics_destroyText(&tt);
             };
-            drawShipToggleBtn(lay.previewMarcheShipToggleBtn, this->vfxTrailPopupPreviewMarcheShipVisible);
-            drawShipToggleBtn(lay.previewCrownShipToggleBtn, this->vfxTrailPopupPreviewCrownShipVisible);
+            if (popupMarcheEveryNForUi > 0)
+            {
+                drawShipToggleBtn(lay.previewMarcheShipToggleBtn, this->vfxTrailPopupPreviewMarcheShipVisible);
+            }
+            if (this->vfxTrailPopupIdleRingWhenStationary)
+            {
+                drawShipToggleBtn(lay.previewCrownShipToggleBtn, this->vfxTrailPopupPreviewCrownShipVisible);
+            }
         }
     }
 
@@ -13509,6 +13707,18 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         return true;
     }
     this->vfxTrailPopupLastLayout = lay;
+
+    const ShipVfxInstance* pInstClick = nullptr;
+    if (this->vfxTrailPopupParentInstanceIndex >= 0 &&
+        this->vfxTrailPopupParentInstanceIndex < static_cast<int>(this->currentShipVfxLayers().size()))
+    {
+        pInstClick = &this->currentShipVfxLayers()[static_cast<size_t>(this->vfxTrailPopupParentInstanceIndex)];
+    }
+    const int popupMarcheEveryNClick = editorMapVfxParseIntClamped(
+        this->vfxTrailPopupEveryNTilesInput.c_str(),
+        kMotionTrailEveryNTilesMin,
+        kMotionTrailEveryNTilesMax,
+        (pInstClick != nullptr) ? pInstClick->motionTrailEveryNTiles : 0);
 
     if (this->pointInRect(x, y, lay.previewOceanPrevBtn))
     {
@@ -13561,7 +13771,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         return true;
     }
 
-    if (this->pointInRect(x, y, lay.previewCrownShipToggleBtn))
+    if (this->vfxTrailPopupIdleRingWhenStationary && this->pointInRect(x, y, lay.previewCrownShipToggleBtn))
     {
         this->vfxTrailPopupPreviewCrownShipVisible = !this->vfxTrailPopupPreviewCrownShipVisible;
         this->statusMessage = this->vfxTrailPopupPreviewCrownShipVisible
@@ -13569,7 +13779,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
                                   : "Apercu couronne : navire masque.";
         return true;
     }
-    if (this->pointInRect(x, y, lay.previewMarcheShipToggleBtn))
+    if (popupMarcheEveryNClick > 0 && this->pointInRect(x, y, lay.previewMarcheShipToggleBtn))
     {
         this->vfxTrailPopupPreviewMarcheShipVisible = !this->vfxTrailPopupPreviewMarcheShipVisible;
         this->statusMessage = this->vfxTrailPopupPreviewMarcheShipVisible

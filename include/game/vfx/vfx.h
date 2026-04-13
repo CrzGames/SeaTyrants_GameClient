@@ -17,7 +17,8 @@
  * Le pipeline charge:
  * - le JSON gameplay du couple (vfx, ship) a partir des dossiers fournis;
  * - la spritesheet JSON (frames + image);
- * - la liste d'instances par direction/state avec timings relatifs.
+ * - la liste d'instances par direction/state avec timings relatifs;
+ * - les champs trainee / cone / couronne a l'arret et le rendu des rejets (aligne editeur).
  *
  * Convention du nom de fichier config:
  * - json config: `<shipFolderPath>/fx-<vfxSlug>_<shipFolderName>.json`
@@ -58,9 +59,35 @@ private:
         float h = 0.0f; /**< Hauteur source (pixels). */
     };
 
+    /** Rejet de trainee / couronne : meme payload logique que l'editeur (scene-editormap-vfx). */
+    struct TrailPiece {
+        uint32_t sourceVfxInstanceId = 0U;
+        float anchorShipTileX = 0.0f;
+        float anchorShipTileY = 0.0f;
+        float bornTimeSeconds = 0.0f;
+        float timeRemainingSec = 0.0f;
+        float trailLifetimeInitialSec = 0.0f;
+        float trailDrawOffsetX = 0.0f;
+        float trailDrawOffsetY = 0.0f;
+        float anchorShipSpriteCenterOffXPx = 0.0f;
+        float anchorShipSpriteCenterOffYPx = 0.0f;
+        bool anchorShipSpriteCenterOffValid = false;
+        float trailPerpendicularJitterX = 0.0f;
+        float trailPerpendicularJitterY = 0.0f;
+        float trailRotationJitterDeg = 0.0f;
+        float trailInitialPhaseSec = 0.0f;
+        float trailAmbientDriftPhase0 = 0.0f;
+        float trailAmbientDriftPhase1 = 0.0f;
+        uint32_t trailNoiseSeed = 0U;
+        float trailWakeDirX = 0.0f;
+        float trailWakeDirY = 0.0f;
+        float trailSpinOmega0 = 0.0f;
+        bool fromIdleRingCrown = false;
+    };
+
     /**
      * @struct Instance
-     * @brief Une instance VFX runtime (placement + rendu + timing relatif).
+     * @brief Une instance VFX runtime (placement + rendu + timing relatif + trainee exportee).
      */
     struct Instance {
         uint32_t instanceId = 0U;          /**< ID unique de l'instance. */
@@ -73,6 +100,29 @@ private:
         bool visible = true;               /**< Visibilite runtime de l'instance. */
         uint32_t spawnAfterInstanceId = 0U;/**< ID de reference pour le timing relatif (0 = absolu). */
         int spawnAfterDelayMs = 0;         /**< Delai relatif en millisecondes. */
+        bool motionSpawnCaptured = false;
+        float motionSpawnOffsetX = 0.0f;
+        float motionSpawnOffsetY = 0.0f;
+        int motionTrailEveryNTiles = 0;
+        int motionTrailLifetimeTiles = 12;
+        bool motionTrailStrictTilePlacement = true;
+        float motionTrailLateralJitterRadius = 0.0f;
+        float motionTrailConeOffsetX = 0.0f;
+        float motionTrailConeOffsetY = 0.0f;
+        float motionTrailConeDirectionOffsetDeg = 0.0f;
+        float motionTrailConeHalfAngleDeg = 28.0f;
+        int motionTrailConeSpawnCount = 1;
+        int motionTrailRotationRandomPercent = 0;
+        bool motionTrailIdleRingWhenStationary = false;
+        float motionTrailIdleRingRadius = 48.0f;
+        int motionTrailIdleSpawnPeriodMs = 600;
+        int motionTrailIdleRingPieceCount = 8;
+        int motionTrailIdleRingRotationRandomPercent = 0;
+        float motionTrailIdleRingPositionJitterRadius = 0.0f;
+        float motionTrailDistanceAcc = 0.0f;
+        float motionTrailIdleSpawnAccSec = 0.0f;
+        int motionTrailIdleRingSalvoPiecesRemaining = 0;
+        float motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
     };
 
     /**
@@ -97,6 +147,28 @@ private:
     std::string configJsonPath;       /**< Chemin config gameplay charge. */
     std::string spritesheetJsonPath;  /**< Chemin JSON spritesheet charge. */
     std::string spritesheetImagePath; /**< Chemin image spritesheet chargee. */
+
+    std::vector<TrailPiece> trailPieces{};
+    float trailPrevShipTileX = 0.0f;
+    float trailPrevShipTileY = 0.0f;
+    bool trailPrevShipTileValid = false;
+    int trailPrevDirectionStateKey = -1;
+
+    static int runtimeTrailFrameIndex(float defaultFps, int frameCount, float ageSec);
+    static void runtimeInitTrailMotionExtras(TrailPiece* piece, float moveDxTiles, float moveDyTiles);
+    static void runtimeAppendTrailPieceFromStep(
+        const Instance& inst,
+        float anchorShipTileX,
+        float anchorShipTileY,
+        float moveDxTiles,
+        float moveDyTiles,
+        float timeSec,
+        float effectiveZoom,
+        const Ship& ship,
+        float spawnSpeedTilesPerSec,
+        std::vector<TrailPiece>& outPieces);
+    void updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship);
+    void drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const;
 
     /**
      * @brief Construit la cle [0..7] a partir (direction, state).

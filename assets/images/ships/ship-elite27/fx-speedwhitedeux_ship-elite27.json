@@ -1,0 +1,271 @@
+{
+	"editor":	{
+		"schema":	"scene-editormap-vfx",
+		"schemaVersion":	1,
+		"ship":	{
+			"displayName":	"ship-elite27",
+			"folderPath":	"assets/images/ships/ship-elite27"
+		},
+		"animation":	{
+			"displayName":	"vfx-speedwhitedeux",
+			"sourceJsonPath":	"assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-spritesheet.json",
+			"defaultVfxFps":	48
+		},
+		"layerPages":	[{
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	false,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[{
+						"instanceId":	2,
+						"label":	"speedwhitedeux #1 (1)",
+						"displayName":	"vfx-speedwhitedeux",
+						"sourceJsonPath":	"assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-spritesheet.json",
+						"offsetX":	11,
+						"offsetY":	38,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	-1,
+						"visible":	true,
+						"debugBoundsVisible":	false,
+						"placementSnapClickToTile":	false,
+						"locked":	false,
+						"followShip":	true,
+						"sharedForAllDirections":	true,
+						"sharedForAllStates":	true,
+						"spawnAfterInstanceId":	0,
+						"spawnAfterDelayMs":	0,
+						"motionOffsetPreviewEnabled":	true,
+						"motionSpawnCaptured":	true,
+						"motionSpawnOffsetX":	11,
+						"motionSpawnOffsetY":	38,
+						"motionTrailEveryNTiles":	1,
+						"motionTrailLifetimeTiles":	7,
+						"motionTrailLateralJitterRadius":	134,
+						"motionTrailConeOffsetX":	-4.5,
+						"motionTrailConeOffsetY":	15.5,
+						"motionTrailConeDirectionOffsetDeg":	-133.63966369628906,
+						"motionTrailConeHalfAngleDeg":	41.4720115661621,
+						"motionTrailConeSpawnCount":	3,
+						"motionTrailStrictTilePlacement":	false,
+						"motionTrailRotationRandomPercent":	0,
+						"motionTrailIdleRingWhenStationary":	true,
+						"motionTrailIdleRingRadius":	48,
+						"motionTrailIdleSpawnPeriodMs":	600,
+						"motionTrailIdleRingPieceCount":	8,
+						"motionTrailIdleRingRotationRandomPercent":	0,
+						"motionTrailIdleRingPositionJitterRadius":	0,
+						"directionOverrides":	{
+							"down_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"up_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"up_left":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							},
+							"down_right":	{
+								"enabled":	false,
+								"offsetX":	0,
+								"offsetY":	0,
+								"rotationDeg":	0,
+								"flipHorizontal":	false,
+								"flipVertical":	false,
+								"drawOrder":	2,
+								"visible":	true
+							}
+						}
+					}]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}, {
+				"shipLayer":	{
+					"drawOrder":	0,
+					"visible":	true,
+					"locked":	false,
+					"debugBoundsVisible":	true,
+					"spawnAfterVfxInstanceId":	0,
+					"spawnAfterDelayMs":	0
+				},
+				"vfxInstances":	[]
+			}]
+	},
+	"gameplay":	{
+		"shipFolderPath":	"assets/images/ships/ship-elite27",
+		"vfxFolderPath":	"assets/images/vfx/vfx-speedwhitedeux",
+		"defaultVfxFps":	48,
+		"directionStates":	[{
+				"ship":	{
+					"direction":	"down_left",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[{
+						"instanceId":	2,
+						"offsetX":	11,
+						"offsetY":	38,
+						"rotationDeg":	0,
+						"flipHorizontal":	false,
+						"flipVertical":	false,
+						"drawOrder":	-1,
+						"visible":	true,
+						"spawnAfterInstanceId":	0,
+						"spawnAfterDelayMs":	0,
+						"motionOffsetPreviewEnabled":	true,
+						"motionSpawnCaptured":	true,
+						"motionSpawnOffsetX":	11,
+						"motionSpawnOffsetY":	38,
+						"motionTrailEveryNTiles":	1,
+						"motionTrailLifetimeTiles":	7,
+						"motionTrailLateralJitterRadius":	134,
+						"motionTrailConeOffsetX":	-4.5,
+						"motionTrailConeOffsetY":	15.5,
+						"motionTrailConeDirectionOffsetDeg":	-133.63966369628906,
+						"motionTrailConeHalfAngleDeg":	41.4720115661621,
+						"motionTrailConeSpawnCount":	3,
+						"motionTrailStrictTilePlacement":	false,
+						"motionTrailRotationRandomPercent":	0,
+						"motionTrailIdleRingWhenStationary":	true,
+						"motionTrailIdleRingRadius":	48,
+						"motionTrailIdleSpawnPeriodMs":	600,
+						"motionTrailIdleRingPieceCount":	8,
+						"motionTrailIdleRingRotationRandomPercent":	0,
+						"motionTrailIdleRingPositionJitterRadius":	0
+					}]
+			}, {
+				"ship":	{
+					"direction":	"up_right",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_left",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_right",
+					"state":	"healthy",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_left",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_right",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"up_left",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}, {
+				"ship":	{
+					"direction":	"down_right",
+					"state":	"damaged",
+					"drawOrder":	0
+				},
+				"instances":	[]
+			}]
+	}
+}

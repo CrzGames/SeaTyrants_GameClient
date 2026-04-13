@@ -6,7 +6,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <random>
 #include <utility>
+
+#include <SDL3/SDL.h>
 
 #include <RC2D/RC2D_storage.h>
 #include <cJSON.h>
@@ -322,6 +325,94 @@ static bool parseSpritesheetJson(
     return true;
 }
 
+namespace
+{
+constexpr float kMotionTrailRotationJitterMaxDeg = 45.0f;
+constexpr float kTrailPieceDrawScaleLifeMin = 0.08f;
+constexpr float kTrailPieceMotionNoiseAmp = 2.15f;
+constexpr float kTrailPieceMotionNoiseRateX = 0.48f;
+constexpr float kTrailPieceMotionNoiseRateY = 0.39f;
+constexpr float kTrailPieceWakeImpulseUnits = 1.75f;
+constexpr float kTrailPieceWakeDecayPerSec = 1.32f;
+constexpr float kTrailPieceSpinDecayPerSec = 2.05f;
+constexpr float kTrailPieceSpinOmegaMaxDegPerSec = 5.2f;
+constexpr float kMotionTrailConeDepthBySpreadRatio = 1.0f;
+constexpr float kTrailConePopupRearAxisRad = 1.57079632679f;
+constexpr float kIdleRingPieceStaggerSec = 0.055f;
+
+std::mt19937& vfxTrailRng(void)
+{
+    static std::mt19937 gen = []() {
+        std::random_device rd;
+        std::seed_seq seed{rd(), rd(), rd(), rd()};
+        return std::mt19937(seed);
+    }();
+    return gen;
+}
+
+uint32_t vfxHashU32(uint32_t x)
+{
+    x ^= x >> 16U;
+    x *= 0x85ebca6bu;
+    x ^= x >> 13U;
+    x *= 0xc2b2ae35u;
+    x ^= x >> 16U;
+    return x;
+}
+
+float vfxSmoothNoise1D(uint32_t seed, float t)
+{
+    const int k0 = static_cast<int>(std::floor(t));
+    const int k1 = k0 + 1;
+    const float f = t - static_cast<float>(k0);
+    const float u = f * f * (3.0f - 2.0f * f);
+    const uint32_t h0 =
+        vfxHashU32(seed ^ (0x27d4eb2du + static_cast<uint32_t>(k0) * 0x9e3779b9u));
+    const uint32_t h1 =
+        vfxHashU32(seed ^ (0x27d4eb2du + static_cast<uint32_t>(k1) * 0x9e3779b9u));
+    const float v0 = static_cast<float>(h0) * (2.0f / 4294967296.0f) - 1.0f;
+    const float v1 = static_cast<float>(h1) * (2.0f / 4294967296.0f) - 1.0f;
+    return v0 + (v1 - v0) * u;
+}
+
+void vfxSampleTrailConeDepthAndLateral(
+    float lateralSpread,
+    float coneHalfAngleRad,
+    float* outDepth,
+    float* outLateral)
+{
+    if (outDepth == nullptr || outLateral == nullptr)
+    {
+        return;
+    }
+    *outDepth = 0.0f;
+    *outLateral = 0.0f;
+    const float spreadAbs = std::fabs(lateralSpread);
+    if (spreadAbs <= 0.0001f)
+    {
+        return;
+    }
+    const float tanHalf = std::tan(coneHalfAngleRad);
+    const float depthFromSpread = spreadAbs * kMotionTrailConeDepthBySpreadRatio;
+    float maxDepth = depthFromSpread;
+    if (tanHalf > 1.0e-5f)
+    {
+        const float depthCapForSpread = spreadAbs / tanHalf;
+        maxDepth = (std::min)(depthFromSpread, depthCapForSpread);
+    }
+    if (maxDepth <= 1.0e-6f)
+    {
+        return;
+    }
+    std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+    const float u1 = (std::max)(u01(vfxTrailRng()), 1.0e-6f);
+    const float u2 = u01(vfxTrailRng());
+    const float depth = maxDepth * std::sqrt(u1);
+    *outDepth = depth;
+    *outLateral = (2.0f * u2 - 1.0f) * depth * tanHalf;
+}
+} // namespace
+
 // =============================================================================
 // Lifecycle
 // =============================================================================
@@ -519,6 +610,125 @@ int VFX::computeFrameIndex(const DirectionStateData& directionState, const Insta
         index += frameCount;
     }
     return index;
+}
+
+int VFX::runtimeTrailFrameIndex(float defaultFps, int frameCount, float ageSec)
+{
+    if (frameCount <= 0)
+    {
+        return 0;
+    }
+    const float fps = (std::max)(defaultFps, 1.0f);
+    const float t =
+        (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+    const float frameFloat = t * fps;
+    const float frameCountF = static_cast<float>(frameCount);
+    float frameInCycle = std::fmod(frameFloat, frameCountF);
+    if (frameInCycle < 0.0f)
+    {
+        frameInCycle += frameCountF;
+    }
+    const int frameIndex = static_cast<int>(std::floor(frameInCycle));
+    return (std::clamp)(frameIndex, 0, frameCount - 1);
+}
+
+void VFX::runtimeInitTrailMotionExtras(TrailPiece* piece, float moveDxTiles, float moveDyTiles)
+{
+    if (piece == nullptr)
+    {
+        return;
+    }
+    std::uniform_real_distribution<float> ph(0.0f, 6.28318530718f);
+    piece->trailAmbientDriftPhase0 = ph(vfxTrailRng());
+    piece->trailAmbientDriftPhase1 = ph(vfxTrailRng());
+    std::uniform_int_distribution<uint32_t> u32(0u, 0xFFFFFFFFu);
+    piece->trailNoiseSeed = u32(vfxTrailRng());
+    piece->trailWakeDirX = moveDxTiles;
+    piece->trailWakeDirY = moveDyTiles;
+    std::uniform_real_distribution<float> spinU(-kTrailPieceSpinOmegaMaxDegPerSec, kTrailPieceSpinOmegaMaxDegPerSec);
+    piece->trailSpinOmega0 = spinU(vfxTrailRng());
+}
+
+void VFX::runtimeAppendTrailPieceFromStep(
+    const Instance& inst,
+    float anchorShipTileX,
+    float anchorShipTileY,
+    float moveDxTiles,
+    float moveDyTiles,
+    float timeSec,
+    float effectiveZoom,
+    const Ship& ship,
+    float spawnSpeedTilesPerSec,
+    std::vector<TrailPiece>& outPieces)
+{
+    TrailPiece piece{};
+    piece.sourceVfxInstanceId = inst.instanceId;
+    piece.anchorShipTileX = anchorShipTileX;
+    piece.anchorShipTileY = anchorShipTileY;
+    piece.bornTimeSeconds = timeSec;
+    piece.fromIdleRingCrown = false;
+    float speedTilesPerSec = spawnSpeedTilesPerSec;
+    if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+    {
+        speedTilesPerSec = ship.getSpeedTilesPerSecond();
+    }
+    if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+    {
+        speedTilesPerSec = 6.0f;
+    }
+    const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
+    piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
+    piece.trailLifetimeInitialSec = piece.timeRemainingSec;
+    piece.trailDrawOffsetX = inst.offsetX;
+    piece.trailDrawOffsetY = inst.offsetY;
+    if (std::isfinite(effectiveZoom) && effectiveZoom > 0.0f)
+    {
+        piece.anchorShipSpriteCenterOffValid = ship.getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(
+            effectiveZoom,
+            &piece.anchorShipSpriteCenterOffXPx,
+            &piece.anchorShipSpriteCenterOffYPx);
+    }
+    else
+    {
+        piece.anchorShipSpriteCenterOffValid =
+            ship.getCurrentSpriteCenterOffsetPixels(&piece.anchorShipSpriteCenterOffXPx, &piece.anchorShipSpriteCenterOffYPx);
+    }
+    piece.trailPerpendicularJitterX = 0.0f;
+    piece.trailPerpendicularJitterY = 0.0f;
+    if (!inst.motionTrailStrictTilePlacement)
+    {
+        piece.trailDrawOffsetX += inst.motionTrailConeOffsetX;
+        piece.trailDrawOffsetY += inst.motionTrailConeOffsetY;
+        const float spread = (std::max)(inst.motionTrailLateralJitterRadius, 0.0f);
+        if (spread > 0.0001f)
+        {
+            const float dirOffRad = inst.motionTrailConeDirectionOffsetDeg * (3.14159265359f / 180.0f);
+            const float coneAxisRad = kTrailConePopupRearAxisRad + dirOffRad;
+            const float coneAxisX = std::cos(coneAxisRad);
+            const float coneAxisY = std::sin(coneAxisRad);
+            const float conePerpX = -coneAxisY;
+            const float conePerpY = coneAxisX;
+            const float coneHalfAngleDeg = std::clamp(inst.motionTrailConeHalfAngleDeg, 2.0f, 85.0f);
+            const float coneHalfAngleRad = coneHalfAngleDeg * (3.14159265359f / 180.0f);
+            float depth = 0.0f;
+            float lateral = 0.0f;
+            vfxSampleTrailConeDepthAndLateral(spread, coneHalfAngleRad, &depth, &lateral);
+            piece.trailDrawOffsetX += coneAxisX * depth;
+            piece.trailDrawOffsetY += coneAxisY * depth;
+            piece.trailPerpendicularJitterX = conePerpX * lateral;
+            piece.trailPerpendicularJitterY = conePerpY * lateral;
+        }
+    }
+    piece.trailRotationJitterDeg = 0.0f;
+    if (inst.motionTrailRotationRandomPercent > 0)
+    {
+        const float p =
+            static_cast<float>(std::clamp(inst.motionTrailRotationRandomPercent, 0, 100)) / 100.0f;
+        std::uniform_real_distribution<float> rotU(-kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
+        piece.trailRotationJitterDeg = p * rotU(vfxTrailRng());
+    }
+    VFX::runtimeInitTrailMotionExtras(&piece, moveDxTiles, moveDyTiles);
+    outPieces.push_back(std::move(piece));
 }
 
 bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
@@ -799,6 +1009,131 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
                     instance.spawnAfterDelayMs = static_cast<int>(std::llround(spawnAfterDelayNode->valuedouble));
                 }
 
+                const cJSON* motionSpawnCapNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionSpawnCaptured");
+                if (!cJSON_IsBool(motionSpawnCapNode))
+                {
+                    const cJSON* motionEnNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionOffsetPreviewEnabled");
+                    instance.motionSpawnCaptured = cJSON_IsBool(motionEnNode) && cJSON_IsTrue(motionEnNode);
+                }
+                else
+                {
+                    instance.motionSpawnCaptured = cJSON_IsTrue(motionSpawnCapNode);
+                }
+                const cJSON* mSx = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionSpawnOffsetX");
+                const cJSON* mSy = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionSpawnOffsetY");
+                if (cJSON_IsNumber(mSx) && std::isfinite(mSx->valuedouble))
+                {
+                    instance.motionSpawnOffsetX = static_cast<float>(mSx->valuedouble);
+                }
+                if (cJSON_IsNumber(mSy) && std::isfinite(mSy->valuedouble))
+                {
+                    instance.motionSpawnOffsetY = static_cast<float>(mSy->valuedouble);
+                }
+
+                const cJSON* trailNNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailEveryNTiles");
+                if (cJSON_IsNumber(trailNNode) && std::isfinite(trailNNode->valuedouble))
+                {
+                    instance.motionTrailEveryNTiles =
+                        static_cast<int>(std::clamp(std::llround(trailNNode->valuedouble), 0LL, 64LL));
+                }
+                const cJSON* trailLifeNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailLifetimeTiles");
+                if (cJSON_IsNumber(trailLifeNode) && std::isfinite(trailLifeNode->valuedouble) && trailLifeNode->valuedouble > 0.0)
+                {
+                    instance.motionTrailLifetimeTiles =
+                        static_cast<int>(std::clamp(std::llround(trailLifeNode->valuedouble), 1LL, 4096LL));
+                }
+                instance.motionTrailDistanceAcc = 0.0f;
+                const cJSON* trailJitNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailLateralJitterRadius");
+                if (cJSON_IsNumber(trailJitNode) && std::isfinite(trailJitNode->valuedouble))
+                {
+                    instance.motionTrailLateralJitterRadius =
+                        static_cast<float>(std::clamp(trailJitNode->valuedouble, 0.0, 2048.0));
+                }
+                const cJSON* coneOffXNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailConeOffsetX");
+                if (cJSON_IsNumber(coneOffXNode) && std::isfinite(coneOffXNode->valuedouble))
+                {
+                    instance.motionTrailConeOffsetX =
+                        static_cast<float>(std::clamp(coneOffXNode->valuedouble, -2048.0, 2048.0));
+                }
+                const cJSON* coneOffYNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailConeOffsetY");
+                if (cJSON_IsNumber(coneOffYNode) && std::isfinite(coneOffYNode->valuedouble))
+                {
+                    instance.motionTrailConeOffsetY =
+                        static_cast<float>(std::clamp(coneOffYNode->valuedouble, -2048.0, 2048.0));
+                }
+                const cJSON* coneDirNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailConeDirectionOffsetDeg");
+                if (cJSON_IsNumber(coneDirNode) && std::isfinite(coneDirNode->valuedouble))
+                {
+                    instance.motionTrailConeDirectionOffsetDeg =
+                        static_cast<float>(std::clamp(coneDirNode->valuedouble, -179.0, 179.0));
+                }
+                const cJSON* coneHalfNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailConeHalfAngleDeg");
+                if (cJSON_IsNumber(coneHalfNode) && std::isfinite(coneHalfNode->valuedouble))
+                {
+                    instance.motionTrailConeHalfAngleDeg =
+                        static_cast<float>(std::clamp(coneHalfNode->valuedouble, 2.0, 85.0));
+                }
+                const cJSON* coneCountNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailConeSpawnCount");
+                if (cJSON_IsNumber(coneCountNode) && std::isfinite(coneCountNode->valuedouble))
+                {
+                    instance.motionTrailConeSpawnCount =
+                        std::clamp(static_cast<int>(std::llround(coneCountNode->valuedouble)), 1, 32);
+                }
+                const cJSON* strictTileNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailStrictTilePlacement");
+                if (cJSON_IsBool(strictTileNode))
+                {
+                    instance.motionTrailStrictTilePlacement = cJSON_IsTrue(strictTileNode);
+                }
+                else
+                {
+                    instance.motionTrailStrictTilePlacement = (instance.motionTrailLateralJitterRadius <= 0.0001f);
+                }
+                const cJSON* rotPctNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailRotationRandomPercent");
+                if (cJSON_IsNumber(rotPctNode) && std::isfinite(rotPctNode->valuedouble))
+                {
+                    instance.motionTrailRotationRandomPercent =
+                        std::clamp(static_cast<int>(std::llround(rotPctNode->valuedouble)), 0, 100);
+                }
+                const cJSON* idleRingNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleRingWhenStationary");
+                instance.motionTrailIdleRingWhenStationary =
+                    cJSON_IsBool(idleRingNode) && cJSON_IsTrue(idleRingNode);
+                const cJSON* idleRadNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleRingRadius");
+                if (cJSON_IsNumber(idleRadNode) && std::isfinite(idleRadNode->valuedouble))
+                {
+                    instance.motionTrailIdleRingRadius =
+                        static_cast<float>(std::clamp(idleRadNode->valuedouble, 1.0, 2048.0));
+                }
+                const cJSON* idlePerNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleSpawnPeriodMs");
+                if (cJSON_IsNumber(idlePerNode) && std::isfinite(idlePerNode->valuedouble))
+                {
+                    instance.motionTrailIdleSpawnPeriodMs =
+                        static_cast<int>(std::clamp(std::llround(idlePerNode->valuedouble), 100LL, 60000LL));
+                }
+                const cJSON* idleRingPcNode = cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleRingPieceCount");
+                if (cJSON_IsNumber(idleRingPcNode) && std::isfinite(idleRingPcNode->valuedouble))
+                {
+                    instance.motionTrailIdleRingPieceCount =
+                        std::clamp(static_cast<int>(std::llround(idleRingPcNode->valuedouble)), 1, 32);
+                }
+                instance.motionTrailIdleRingRotationRandomPercent = instance.motionTrailRotationRandomPercent;
+                const cJSON* idleRingRotPctNode =
+                    cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleRingRotationRandomPercent");
+                if (cJSON_IsNumber(idleRingRotPctNode) && std::isfinite(idleRingRotPctNode->valuedouble))
+                {
+                    instance.motionTrailIdleRingRotationRandomPercent =
+                        std::clamp(static_cast<int>(std::llround(idleRingRotPctNode->valuedouble)), 0, 100);
+                }
+                const cJSON* idleRingPosJitNode =
+                    cJSON_GetObjectItemCaseSensitive(instanceNode, "motionTrailIdleRingPositionJitterRadius");
+                if (cJSON_IsNumber(idleRingPosJitNode) && std::isfinite(idleRingPosJitNode->valuedouble))
+                {
+                    instance.motionTrailIdleRingPositionJitterRadius = static_cast<float>(
+                        std::clamp(idleRingPosJitNode->valuedouble, 0.0, 2048.0));
+                }
+                instance.motionTrailIdleSpawnAccSec = 0.0f;
+                instance.motionTrailIdleRingSalvoPiecesRemaining = 0;
+                instance.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+
                 stateData.instances.push_back(instance);
             }
         }
@@ -879,6 +1214,9 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     this->defaultVfxFps = parsedDefaultFps;
     this->playbackSeconds = 0.0f;
     this->activeDirectionStateKey = hasFirstDirectionStateKey ? firstDirectionStateKey : 0;
+    this->trailPieces.clear();
+    this->trailPrevShipTileValid = false;
+    this->trailPrevDirectionStateKey = -1;
     this->loaded = true;
 
     this->shipFolderPath = parsedShipFolderPath;
@@ -912,6 +1250,9 @@ void VFX::unload(void)
         directionState.instances.clear();
         directionState.shipDrawOrder = 0;
     }
+    this->trailPieces.clear();
+    this->trailPrevShipTileValid = false;
+    this->trailPrevDirectionStateKey = -1;
 
     // 3) Reset variables de lecture.
     this->defaultVfxFps = 12.0f;
@@ -951,14 +1292,446 @@ void VFX::update(double dt, const Ship& ship)
         return;
     }
 
+    const float dtf = static_cast<float>(dt);
+    const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    this->updateTrailsAndIdle(dtf, timeSec, ship);
+
     // 4) Faire avancer l'horloge d'animation.
-    this->playbackSeconds += static_cast<float>(dt);
+    this->playbackSeconds += dtf;
 
     // 5) Normaliser periodiquement pour eviter des floats trop grands.
     const float period = this->resolvedPlaybackPeriodSeconds();
     if (period > 0.0001f && this->playbackSeconds > (period * 8192.0f))
     {
         this->playbackSeconds = std::fmod(this->playbackSeconds, period);
+    }
+}
+
+void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship)
+{
+    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, 7);
+    if (this->trailPrevDirectionStateKey != activeKey)
+    {
+        this->trailPrevDirectionStateKey = activeKey;
+        this->trailPrevShipTileValid = false;
+        for (DirectionStateData& ds : this->directionStates)
+        {
+            for (Instance& inst : ds.instances)
+            {
+                inst.motionTrailDistanceAcc = 0.0f;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < this->trailPieces.size();)
+    {
+        this->trailPieces[i].timeRemainingSec -= dtf;
+        if (this->trailPieces[i].timeRemainingSec <= 0.0f)
+        {
+            this->trailPieces.erase(this->trailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
+    DirectionStateData& activeState = this->directionStates[static_cast<size_t>(activeKey)];
+    const SDL_FPoint shipTile = ship.getPositionTile();
+    const bool moving = ship.isMoving();
+
+    if (moving)
+    {
+        for (size_t i = 0; i < this->trailPieces.size();)
+        {
+            if (this->trailPieces[i].fromIdleRingCrown)
+            {
+                this->trailPieces.erase(this->trailPieces.begin() + static_cast<std::ptrdiff_t>(i));
+            }
+            else
+            {
+                ++i;
+            }
+        }
+        for (Instance& inst : activeState.instances)
+        {
+            inst.motionTrailIdleSpawnAccSec = 0.0f;
+            inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+        }
+
+        if (this->trailPrevShipTileValid)
+        {
+            const float dx = shipTile.x - this->trailPrevShipTileX;
+            const float dy = shipTile.y - this->trailPrevShipTileY;
+            const float dist = std::sqrt((dx * dx) + (dy * dy));
+            if (dist > 0.00001f)
+            {
+                const float effZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f) * ship.getDrawScale();
+                for (Instance& inst : activeState.instances)
+                {
+                    if (inst.motionTrailEveryNTiles <= 0)
+                    {
+                        continue;
+                    }
+                    const float thresholdTiles = static_cast<float>(inst.motionTrailEveryNTiles);
+                    inst.motionTrailDistanceAcc += dist;
+                    int spawnGuard = 0;
+                    while (thresholdTiles > 0.0f && inst.motionTrailDistanceAcc >= thresholdTiles && spawnGuard < 1024)
+                    {
+                        const float invDist = 1.0f / dist;
+                        const float nx = dx * invDist;
+                        const float ny = dy * invDist;
+                        const float overshoot = inst.motionTrailDistanceAcc - thresholdTiles;
+                        const float spawnTileX = shipTile.x - (nx * overshoot);
+                        const float spawnTileY = shipTile.y - (ny * overshoot);
+                        inst.motionTrailDistanceAcc -= thresholdTiles;
+                        float speedTilesPerSec =
+                            (dtf > 0.000001f) ? (dist / dtf) : ship.getSpeedTilesPerSecond();
+                        if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+                        {
+                            speedTilesPerSec = 6.0f;
+                        }
+                        const int spawnCount = inst.motionTrailStrictTilePlacement
+                            ? 1
+                            : (std::clamp)(inst.motionTrailConeSpawnCount, 1, 32);
+                        for (int burst = 0; burst < spawnCount && spawnGuard < 1024; ++burst)
+                        {
+                            VFX::runtimeAppendTrailPieceFromStep(inst,
+                                                                   spawnTileX,
+                                                                   spawnTileY,
+                                                                   dx,
+                                                                   dy,
+                                                                   timeSec,
+                                                                   effZoom,
+                                                                   ship,
+                                                                   speedTilesPerSec,
+                                                                   this->trailPieces);
+                            ++spawnGuard;
+                        }
+                    }
+                    if (thresholdTiles > 0.0f)
+                    {
+                        inst.motionTrailDistanceAcc =
+                            (std::clamp)(inst.motionTrailDistanceAcc, 0.0f, thresholdTiles);
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        constexpr float kTwoPi = 6.28318530718f;
+        const float effZoom = (std::max)(GetCamera().getZoomFactor(), 0.01f) * ship.getDrawScale();
+
+        auto spawnIdleRingCrownPiece = [&](Instance& inst, int k) -> bool {
+            const int pieceCount = (std::clamp)(inst.motionTrailIdleRingPieceCount, 1, 32);
+            const float R = (std::max)(inst.motionTrailIdleRingRadius, 2.0f);
+            const float ang = kTwoPi * (static_cast<float>(k) / static_cast<float>(pieceCount));
+            float ox = inst.offsetX + std::cos(ang) * R;
+            float oy = inst.offsetY + std::sin(ang) * R;
+            if (inst.motionTrailIdleRingPositionJitterRadius > 0.0001f)
+            {
+                std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+                std::uniform_real_distribution<float> uAng(0.0f, kTwoPi);
+                const float rr =
+                    std::sqrt((std::max)(u01(vfxTrailRng()), 1.0e-8f)) *
+                    inst.motionTrailIdleRingPositionJitterRadius;
+                const float ja = uAng(vfxTrailRng());
+                ox += std::cos(ja) * rr;
+                oy += std::sin(ja) * rr;
+            }
+            TrailPiece piece{};
+            piece.sourceVfxInstanceId = inst.instanceId;
+            piece.anchorShipTileX = shipTile.x;
+            piece.anchorShipTileY = shipTile.y;
+            piece.bornTimeSeconds = timeSec;
+            float speedTilesPerSec = ship.getSpeedTilesPerSecond();
+            if (!std::isfinite(speedTilesPerSec) || speedTilesPerSec <= 0.0f)
+            {
+                speedTilesPerSec = 6.0f;
+            }
+            const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
+            piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
+            piece.trailLifetimeInitialSec = piece.timeRemainingSec;
+            piece.trailDrawOffsetX = ox;
+            piece.trailDrawOffsetY = oy;
+            piece.anchorShipSpriteCenterOffValid = ship.getCurrentSpriteCenterOffsetPixelsForEffectiveZoom(
+                effZoom,
+                &piece.anchorShipSpriteCenterOffXPx,
+                &piece.anchorShipSpriteCenterOffYPx);
+            if (!piece.anchorShipSpriteCenterOffValid)
+            {
+                piece.anchorShipSpriteCenterOffValid =
+                    ship.getCurrentSpriteCenterOffsetPixels(&piece.anchorShipSpriteCenterOffXPx, &piece.anchorShipSpriteCenterOffYPx);
+            }
+            piece.trailPerpendicularJitterX = 0.0f;
+            piece.trailPerpendicularJitterY = 0.0f;
+            piece.trailRotationJitterDeg = 0.0f;
+            if (inst.motionTrailIdleRingRotationRandomPercent > 0)
+            {
+                const float p =
+                    static_cast<float>((std::clamp)(inst.motionTrailIdleRingRotationRandomPercent, 0, 100)) /
+                    100.0f;
+                std::uniform_real_distribution<float> rotU(-kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
+                piece.trailRotationJitterDeg = p * rotU(vfxTrailRng());
+            }
+            VFX::runtimeInitTrailMotionExtras(&piece, 0.0f, 0.0f);
+            piece.fromIdleRingCrown = true;
+            this->trailPieces.push_back(std::move(piece));
+            return true;
+        };
+
+        for (Instance& inst : activeState.instances)
+        {
+            if (!inst.motionTrailIdleRingWhenStationary)
+            {
+                inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+                inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+                continue;
+            }
+            const int pieceCount = (std::clamp)(inst.motionTrailIdleRingPieceCount, 1, 32);
+            const float periodSec =
+                (std::max)(static_cast<float>(inst.motionTrailIdleSpawnPeriodMs) * 0.001f, 0.05f);
+            const float staggerSec = kIdleRingPieceStaggerSec;
+
+            if (inst.motionTrailIdleRingSalvoPiecesRemaining > 0)
+            {
+                inst.motionTrailIdleRingSalvoStaggerAccSec += dtf;
+                while (inst.motionTrailIdleRingSalvoPiecesRemaining > 0 &&
+                       inst.motionTrailIdleRingSalvoStaggerAccSec >= staggerSec)
+                {
+                    inst.motionTrailIdleRingSalvoStaggerAccSec -= staggerSec;
+                    const int k = pieceCount - inst.motionTrailIdleRingSalvoPiecesRemaining;
+                    inst.motionTrailIdleRingSalvoPiecesRemaining -= 1;
+                    if (!spawnIdleRingCrownPiece(inst, k))
+                    {
+                        inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                inst.motionTrailIdleSpawnAccSec += dtf;
+                while (inst.motionTrailIdleSpawnAccSec >= periodSec)
+                {
+                    inst.motionTrailIdleSpawnAccSec -= periodSec;
+                    if (!spawnIdleRingCrownPiece(inst, 0))
+                    {
+                        break;
+                    }
+                    inst.motionTrailIdleRingSalvoPiecesRemaining = pieceCount - 1;
+                    inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+                }
+            }
+        }
+    }
+
+    this->trailPrevShipTileX = shipTile.x;
+    this->trailPrevShipTileY = shipTile.y;
+    this->trailPrevShipTileValid = true;
+}
+
+void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const
+{
+    if (this->trailPieces.empty())
+    {
+        return;
+    }
+
+    const DirectionStateData& directionState = this->currentDirectionState();
+    const int shipDrawOrder = directionState.shipDrawOrder;
+
+    auto findInst = [&directionState](uint32_t id) -> const Instance* {
+        for (const Instance& inst : directionState.instances)
+        {
+            if (inst.instanceId == id)
+            {
+                return &inst;
+            }
+        }
+        return nullptr;
+    };
+
+    std::vector<const TrailPiece*> sorted;
+    sorted.reserve(this->trailPieces.size());
+    for (const TrailPiece& p : this->trailPieces)
+    {
+        sorted.push_back(&p);
+    }
+    std::sort(sorted.begin(), sorted.end(), [&findInst, shipDrawOrder](const TrailPiece* a, const TrailPiece* b) {
+        const Instance* ia = findInst(a->sourceVfxInstanceId);
+        const Instance* ib = findInst(b->sourceVfxInstanceId);
+        int oa = shipDrawOrder;
+        int ob = shipDrawOrder;
+        if (ia != nullptr)
+        {
+            oa = ia->drawOrder;
+        }
+        if (ib != nullptr)
+        {
+            ob = ib->drawOrder;
+        }
+        if (oa != ob)
+        {
+            return oa < ob;
+        }
+        return a->bornTimeSeconds < b->bornTimeSeconds;
+    });
+
+    const float scale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+
+    auto lifetimeScaleMul = [](const TrailPiece& piece) -> float {
+        if (piece.trailLifetimeInitialSec <= 1.0e-4f)
+        {
+            return 1.0f;
+        }
+        const float u = piece.timeRemainingSec / piece.trailLifetimeInitialSec;
+        const float linear = (std::clamp)(u, 0.0f, 1.0f);
+        const float eased = std::sqrt(linear);
+        return (std::max)(kTrailPieceDrawScaleLifeMin, eased);
+    };
+
+    auto trailDrift = [](const TrailPiece& piece, float ageSec, float lifeScaleMul, float* outAddX, float* outAddY) {
+        if (outAddX == nullptr || outAddY == nullptr)
+        {
+            return;
+        }
+        *outAddX = 0.0f;
+        *outAddY = 0.0f;
+        const float lifeS = (std::clamp)(lifeScaleMul, 0.0f, 1.0f);
+        if (lifeS <= 1.0e-4f)
+        {
+            return;
+        }
+        const float t = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+        const uint32_t seed = piece.trailNoiseSeed;
+        const float tx = t * kTrailPieceMotionNoiseRateX + piece.trailAmbientDriftPhase0 * 0.18f;
+        const float ty = t * kTrailPieceMotionNoiseRateY + piece.trailAmbientDriftPhase1 * 0.21f + 19.7f;
+        *outAddX = vfxSmoothNoise1D(seed ^ 0x1a2b3c4du, tx) * kTrailPieceMotionNoiseAmp * lifeS;
+        *outAddY = vfxSmoothNoise1D(seed ^ 0x5d6e7f8au, ty) * kTrailPieceMotionNoiseAmp * lifeS;
+    };
+
+    auto trailWake = [](const TrailPiece& piece, float ageSec, float lifeScaleMul, float* outAddX, float* outAddY) {
+        if (outAddX == nullptr || outAddY == nullptr)
+        {
+            return;
+        }
+        *outAddX = 0.0f;
+        *outAddY = 0.0f;
+        const float lifeS = (std::clamp)(lifeScaleMul, 0.0f, 1.0f);
+        if (lifeS <= 1.0e-4f)
+        {
+            return;
+        }
+        float dx = piece.trailWakeDirX;
+        float dy = piece.trailWakeDirY;
+        const float len = std::sqrt((dx * dx) + (dy * dy));
+        if (len < 1.0e-4f)
+        {
+            return;
+        }
+        dx /= len;
+        dy /= len;
+        const float wt = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+        const float envelope = wt * std::exp(-kTrailPieceWakeDecayPerSec * wt);
+        const float mag = kTrailPieceWakeImpulseUnits * envelope * lifeS;
+        *outAddX = dx * mag;
+        *outAddY = dy * mag;
+    };
+
+    auto trailSpin = [](const TrailPiece& piece, float ageSec) -> float {
+        const float omega0 = piece.trailSpinOmega0;
+        constexpr float k = kTrailPieceSpinDecayPerSec;
+        if (std::fabs(omega0) < 1.0e-5f || k < 1.0e-5f)
+        {
+            return 0.0f;
+        }
+        const float wt = (std::isfinite(ageSec) && ageSec > 0.0f) ? ageSec : 0.0f;
+        return (omega0 / k) * (1.0f - std::exp(-k * wt));
+    };
+
+    for (const TrailPiece* piecePtr : sorted)
+    {
+        const TrailPiece& piece = *piecePtr;
+        const Instance* inst = findInst(piece.sourceVfxInstanceId);
+        if (inst == nullptr || !inst->visible)
+        {
+            continue;
+        }
+        const bool isBehindShip = inst->drawOrder < shipDrawOrder;
+        if (isBehindShip != drawBehindShip)
+        {
+            continue;
+        }
+
+        SDL_FPoint shipCenter = map.tileToScreenCenterFloat(piece.anchorShipTileX, piece.anchorShipTileY);
+        if (piece.anchorShipSpriteCenterOffValid)
+        {
+            shipCenter.x += piece.anchorShipSpriteCenterOffXPx;
+            shipCenter.y += piece.anchorShipSpriteCenterOffYPx;
+        }
+        else
+        {
+            float shipCenterOffsetX = 0.0f;
+            float shipCenterOffsetY = 0.0f;
+            if (ship.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+            {
+                shipCenter.x += shipCenterOffsetX;
+                shipCenter.y += shipCenterOffsetY;
+            }
+        }
+
+        const float phaseTime = (std::max)(0.0f, timeSec - piece.bornTimeSeconds);
+        const float trailPlaybackSec = piece.trailInitialPhaseSec + phaseTime;
+        const int frameCount = static_cast<int>(this->frames.size());
+        const int frameIndex =
+            VFX::runtimeTrailFrameIndex(this->defaultVfxFps, frameCount, trailPlaybackSec);
+        if (frameIndex < 0 || frameIndex >= frameCount)
+        {
+            continue;
+        }
+
+        const Frame& frame = this->frames[static_cast<size_t>(frameIndex)];
+        const float lifeScale = lifetimeScaleMul(piece);
+        float driftX = 0.0f;
+        float driftY = 0.0f;
+        trailDrift(piece, phaseTime, lifeScale, &driftX, &driftY);
+        float wakeX = 0.0f;
+        float wakeY = 0.0f;
+        trailWake(piece, phaseTime, lifeScale, &wakeX, &wakeY);
+        const float ox =
+            (piece.trailDrawOffsetX + piece.trailPerpendicularJitterX + driftX + wakeX) * scale;
+        const float oy =
+            (piece.trailDrawOffsetY + piece.trailPerpendicularJitterY + driftY + wakeY) * scale;
+        const float trailDrawRotationDeg =
+            inst->rotationDeg + piece.trailRotationJitterDeg + trailSpin(piece, phaseTime);
+        const float drawScaleX = scale * lifeScale;
+        const float drawScaleY = scale * lifeScale;
+        const float drawX = shipCenter.x + ox - ((frame.w * drawScaleX) * 0.5f);
+        const float drawY = shipCenter.y + oy - ((frame.h * drawScaleY) * 0.5f);
+        const float pivotX = frame.w * 0.5f;
+        const float pivotY = frame.h * 0.5f;
+
+        RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+            const_cast<RC2D_Image*>(&this->spritesheetImage),
+            frame.x,
+            frame.y,
+            frame.w,
+            frame.h);
+        rc2d_graphics_drawQuad(
+            const_cast<RC2D_Image*>(&this->spritesheetImage),
+            &sourceQuad,
+            drawX,
+            drawY,
+            trailDrawRotationDeg,
+            drawScaleX,
+            drawScaleY,
+            pivotX,
+            pivotY,
+            inst->flipHorizontal,
+            inst->flipVertical);
     }
 }
 
@@ -969,6 +1742,9 @@ void VFX::draw(const Map& map, const Ship& ship, bool drawBehindShip) const
     {
         return;
     }
+
+    const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    this->drawTrailPieces(map, ship, drawBehindShip, timeSec);
 
     // 2) Recuperer la page active et sortir si aucune instance.
     const DirectionStateData& directionState = this->currentDirectionState();

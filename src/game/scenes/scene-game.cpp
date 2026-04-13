@@ -11,7 +11,7 @@ GameScene::GameScene(void)
       shipAutoFollowEnabled(true),
       hudOverlay{},
       playerShipFolderPath("assets/images/ships/ship-elite27"),
-      playerVfxFolderPath("assets/images/vfx/vfx-cannon"),
+      playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
       shipVfx{}
 {
 }

@@ -476,6 +476,16 @@ private:
          * 0 : chaque rejet lit l'anim depuis la frame 0 a son apparition, independamment du layer.
          */
         float trailInitialPhaseSec = 0.0f;
+        /** Phases aleatoires pour une petite derive ondulante X/Y (memes unites que trailDrawOffset). */
+        float trailAmbientDriftPhase0 = 0.0f;
+        float trailAmbientDriftPhase1 = 0.0f;
+        /** Graine pour le bruit spatial/temporel leger des rejets (derive non figee). */
+        uint32_t trailNoiseSeed = 0U;
+        /** Direction du pas au spawn (tuiles), pour l'inertie visuelle ; (0,0) si immobile / couronne. */
+        float trailWakeDirX = 0.0f;
+        float trailWakeDirY = 0.0f;
+        /** Vitesse angulaire initiale (deg/s) pour le spin amorti ; 0 = pas de spin supplementaire. */
+        float trailSpinOmega0 = 0.0f;
         /** Identifiant stable pour la ligne Ã‚Â« sous-instance Ã‚Â» dans le panneau Layers. */
         uint32_t layerPanelUiId = 0;
         /** True si cree par la couronne a l'arret ; supprime des que le navire reprend sa marche. */
@@ -738,6 +748,23 @@ private:
     int computeTrailPieceFrameIndex(const ImportedSfx& imported, float elapsedSinceSpawnSec) const;
     /** Echelle 0..1 pour dessiner un rejet : retrecit quand la vie restante diminue. */
     static float trailPieceLifetimeDrawScaleMul(const ShipVfxTrailPiece& piece);
+    /** Petite derive X/Y (memes unites que offsets) amortie par lifeScaleMul. */
+    static void trailPieceAmbientDriftOffsets(
+        const ShipVfxTrailPiece& piece,
+        float ageSec,
+        float lifeScaleMul,
+        float* outAddX,
+        float* outAddY);
+    /** Glissement le long de trailWakeDir amorti dans le temps (memes unites que trailDrawOffset). */
+    static void trailPieceWakeInertiaOffsets(
+        const ShipVfxTrailPiece& piece,
+        float ageSec,
+        float lifeScaleMul,
+        float* outAddX,
+        float* outAddY);
+    /** Angle supplementaire (deg) : integration d'un spin qui ralentit exponentiellement. */
+    static float trailPieceSpinExtraDeg(const ShipVfxTrailPiece& piece, float ageSec);
+    static void initTrailPieceMotionExtras(ShipVfxTrailPiece* piece, float moveDxTiles, float moveDyTiles);
     bool shouldSkipDrawImportedSfxForPilotMaxLifetime(const ImportedSfx& imported, float timeSeconds) const;
     /** Phase [0, periode) en secondes pour une instance, en enchainant les RELATIF (A->B->C). */
     float computeVfxPreviewPhaseSecondsInCycle(
