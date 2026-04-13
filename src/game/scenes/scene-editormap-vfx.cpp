@@ -3735,6 +3735,46 @@ EditorMapVfxScene::ShipVfxInstance EditorMapVfxScene::duplicateShipVfxInstanceFr
     return duplicate;
 }
 
+void EditorMapVfxScene::remapTrailConeForShipDirectionChange(
+    ShipVfxInstance& inst, int srcDirectionIndex4, int tgtDirectionIndex4)
+{
+    if (inst.motionTrailStrictTilePlacement)
+    {
+        return;
+    }
+    if (!(inst.motionTrailLateralJitterRadius > 0.0001f))
+    {
+        return;
+    }
+    const int sd = ((srcDirectionIndex4 % 4) + 4) % 4;
+    const int td = ((tgtDirectionIndex4 % 4) + 4) % 4;
+    if (sd == td)
+    {
+        return;
+    }
+    float sx0 = 0.0f;
+    float sy0 = 0.0f;
+    editorMapVfxDirectionIndexToTileStep(sd, &sx0, &sy0);
+    const float h0 = std::atan2(sy0, sx0) * (180.0f / 3.14159265359f);
+    float sx1 = 0.0f;
+    float sy1 = 0.0f;
+    editorMapVfxDirectionIndexToTileStep(td, &sx1, &sy1);
+    const float h1 = std::atan2(sy1, sx1) * (180.0f / 3.14159265359f);
+    const float deltaDeg = editorMapVfxNormalizeSignedAngleDeg(h1 - h0);
+    constexpr float kDegToRad = 3.14159265359f / 180.0f;
+    const float rad = deltaDeg * kDegToRad;
+    const float c = std::cos(rad);
+    const float s = std::sin(rad);
+    const float ox = inst.motionTrailConeOffsetX;
+    const float oy = inst.motionTrailConeOffsetY;
+    inst.motionTrailConeOffsetX = ox * c - oy * s;
+    inst.motionTrailConeOffsetY = ox * s + oy * c;
+    inst.motionTrailConeOffsetX = (std::clamp)(inst.motionTrailConeOffsetX, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    inst.motionTrailConeOffsetY = (std::clamp)(inst.motionTrailConeOffsetY, kTrailConePopupOffsetMin, kTrailConePopupOffsetMax);
+    inst.motionTrailConeDirectionOffsetDeg = (std::clamp)(
+        editorMapVfxNormalizeSignedAngleDeg(inst.motionTrailConeDirectionOffsetDeg + deltaDeg), -179.0f, 179.0f);
+}
+
 bool EditorMapVfxScene::duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex)
 {
     if (instanceIndex < 0 || instanceIndex >= static_cast<int>(this->currentShipVfxLayers().size()))
@@ -3873,6 +3913,7 @@ void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
             {
                 dup.spawnAfterInstanceId = remapInstanceId(dup.spawnAfterInstanceId);
             }
+            this->remapTrailConeForShipDirectionChange(dup, srcPage % 4, p % 4);
             if (p == srcPage)
             {
                 dup.offsetX += 12.0f;

@@ -820,6 +820,7 @@ private:
         SDL_Keymod mod,
         bool isrepeat);
     ShipVfxInstance duplicateShipVfxInstanceFreshId(const ShipVfxInstance& src);
+    void remapTrailConeForShipDirectionChange(ShipVfxInstance& inst, int srcDirectionIndex4, int tgtDirectionIndex4);
     bool duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex);
     void drawShipVfxTrailPieces(void) const;
     void captureVfxMotionSpawnAtIndex(int instanceIndex);
