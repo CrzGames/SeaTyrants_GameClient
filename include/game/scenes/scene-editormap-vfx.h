@@ -454,6 +454,8 @@ private:
         float anchorShipTileY = 0.0f;
         float bornTimeSeconds = 0.0f;
         float timeRemainingSec = 0.0f;
+        /** Vie totale (s) figee au spawn ; sert au retrecissement progressif du dessin. */
+        float trailLifetimeInitialSec = 0.0f;
         /** Decal affiche (copie au spawn) : ne pas relire l'instance au dessin si le SPAWN est re-valide. */
         float trailDrawOffsetX = 0.0f;
         float trailDrawOffsetY = 0.0f;
@@ -469,7 +471,10 @@ private:
         float trailPerpendicularJitterY = 0.0f;
         /** Ecart de rotation (deg) ajoute au layer pour ce rejet, fige au spawn. */
         float trailRotationJitterDeg = 0.0f;
-        /** Phase initiale (s) de l'instance source au spawn, pour synchroniser piece <-> layer. */
+        /**
+         * Offset (s) au debut de la timeline d'animation de ce rejet uniquement.
+         * 0 : chaque rejet lit l'anim depuis la frame 0 a son apparition, independamment du layer.
+         */
         float trailInitialPhaseSec = 0.0f;
         /** Identifiant stable pour la ligne Ã‚Â« sous-instance Ã‚Â» dans le panneau Layers. */
         uint32_t layerPanelUiId = 0;
@@ -731,6 +736,8 @@ private:
         const ImportedSfx& imported) const;
     /** Index de frame pour une sous-instance trainee/couronne (age depuis spawn). */
     int computeTrailPieceFrameIndex(const ImportedSfx& imported, float elapsedSinceSpawnSec) const;
+    /** Echelle 0..1 pour dessiner un rejet : retrecit quand la vie restante diminue. */
+    static float trailPieceLifetimeDrawScaleMul(const ShipVfxTrailPiece& piece);
     bool shouldSkipDrawImportedSfxForPilotMaxLifetime(const ImportedSfx& imported, float timeSeconds) const;
     /** Phase [0, periode) en secondes pour une instance, en enchainant les RELATIF (A->B->C). */
     float computeVfxPreviewPhaseSecondsInCycle(

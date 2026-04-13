@@ -40,6 +40,8 @@ std::mt19937& editorMapVfxTrailJitterRng(void)
 
 /** Amplitude max de rotation aleatoire par rejet (deg) lorsque motionTrailRotationRandomPercent vaut 100. */
 constexpr float kMotionTrailRotationJitterMaxDeg = 45.0f;
+/** Echelle min (fraction taille au spawn) pour un rejet en fin de vie. */
+constexpr float kTrailPieceDrawScaleLifeMin = 0.08f;
 /** Ecart temporel entre deux pieces d'une meme rafale couronne (secondes). */
 constexpr float kIdleRingPieceStaggerSec = 0.055f;
 /** Cadence fixe entre deux rafales couronne a l'arret (secondes). */
@@ -3291,6 +3293,18 @@ int EditorMapVfxScene::computeTrailPieceFrameIndex(const ImportedSfx& imported, 
     }
     const int frameIndex = static_cast<int>(std::floor(frameInCycle));
     return (std::clamp)(frameIndex, 0, frameCount - 1);
+}
+
+float EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(const ShipVfxTrailPiece& piece)
+{
+    if (piece.trailLifetimeInitialSec <= 1.0e-4f)
+    {
+        return 1.0f;
+    }
+    const float u = piece.timeRemainingSec / piece.trailLifetimeInitialSec;
+    const float linear = (std::clamp)(u, 0.0f, 1.0f);
+    const float eased = std::sqrt(linear);
+    return (std::max)(kTrailPieceDrawScaleLifeMin, eased);
 }
 
 bool EditorMapVfxScene::shouldPreviewHideShipForRelativeTiming(float timeSeconds) const
@@ -8532,6 +8546,7 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
     }
     const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
     piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
+    piece.trailLifetimeInitialSec = piece.timeRemainingSec;
     const DirectionOverride* movOvr = this->getResolvedDirectionOverride(&inst);
     // Base commune des rejets : ancrage sur le decal courant du layer.
     this->getVfxPreviewDrawOffsets(inst, movOvr, &piece.trailDrawOffsetX, &piece.trailDrawOffsetY);
@@ -8586,17 +8601,6 @@ void EditorMapVfxScene::appendMotionTrailPieceFromStep(
         std::uniform_real_distribution<float> rotU(
             -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
         piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
-    }
-    piece.trailInitialPhaseSec = 0.0f;
-    if (inst.importedSfxIndex >= 0 && inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
-    {
-        const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
-        piece.trailInitialPhaseSec = this->computeVfxPreviewPhaseSecondsInCycle(
-            inst,
-            timeSec,
-            this->currentShipVfxLayers(),
-            imported,
-            0);
     }
     uint32_t nid = ++nextUiId;
     if (nid == 0U)
@@ -9064,6 +9068,7 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
             }
             const float lifetimeTiles = static_cast<float>((std::max)(inst.motionTrailLifetimeTiles, 1));
             piece.timeRemainingSec = (std::max)(lifetimeTiles / speedTilesPerSec, 0.05f);
+            piece.trailLifetimeInitialSec = piece.timeRemainingSec;
             float ox = baseOx + std::cos(ang) * R;
             float oy = baseOy + std::sin(ang) * R;
             if (inst.motionTrailIdleRingPositionJitterRadius > 0.0001f)
@@ -9093,17 +9098,6 @@ void EditorMapVfxScene::updatePreviewShipPilotAndVfxMotion(double dt)
                 std::uniform_real_distribution<float> rotU(
                     -kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
                 piece.trailRotationJitterDeg = p * rotU(editorMapVfxTrailJitterRng());
-            }
-            piece.trailInitialPhaseSec = 0.0f;
-            if (inst.importedSfxIndex >= 0 && inst.importedSfxIndex < static_cast<int>(this->importedSfx.size()))
-            {
-                const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(inst.importedSfxIndex)];
-                piece.trailInitialPhaseSec = this->computeVfxPreviewPhaseSecondsInCycle(
-                    inst,
-                    timeSec,
-                    this->currentShipVfxLayers(),
-                    imported,
-                    0);
             }
             uint32_t nid = ++this->nextShipVfxTrailLayerPanelUiId;
             if (nid == 0U)
@@ -11415,8 +11409,9 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
 
         const float sourceW = frame.w;
         const float sourceH = frame.h;
-        const float drawScaleX = scale;
-        const float drawScaleY = scale;
+        const float lifeScale = EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
+        const float drawScaleX = scale * lifeScale;
+        const float drawScaleY = scale * lifeScale;
         const float drawX = shipCenter.x + ox - ((sourceW * drawScaleX) * 0.5f);
         const float drawY = shipCenter.y + oy - ((sourceH * drawScaleY) * 0.5f);
         const float pivotX = sourceW * 0.5f;
@@ -12926,8 +12921,9 @@ void EditorMapVfxScene::drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay
                 const ImportedSfxFrame& frame = imported.frames[static_cast<size_t>(frameIndex)];
                 const float sourceW = frame.w;
                 const float sourceH = frame.h;
-                const float drawX = centerX - ((sourceW * worldZ) * 0.5f);
-                const float drawY = centerY - ((sourceH * worldZ) * 0.5f);
+                const float pieceZ = worldZ * EditorMapVfxScene::trailPieceLifetimeDrawScaleMul(piece);
+                const float drawX = centerX - ((sourceW * pieceZ) * 0.5f);
+                const float drawY = centerY - ((sourceH * pieceZ) * 0.5f);
                 const float pivotX = sourceW * 0.5f;
                 const float pivotY = sourceH * 0.5f;
                 const RC2D_Quad sourceQuad =
@@ -12937,8 +12933,8 @@ void EditorMapVfxScene::drawVfxTrailPopupPreviews(const VfxTrailPopupLayout& lay
                                        drawX,
                                        drawY,
                                        trailRot,
-                                       worldZ,
-                                       worldZ,
+                                       pieceZ,
+                                       pieceZ,
                                        pivotX,
                                        pivotY,
                                        fh,
