@@ -1542,13 +1542,33 @@ void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip,
 
     const DirectionStateData& directionState = this->currentDirectionState();
     const int shipDrawOrder = directionState.shipDrawOrder;
+    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, 7);
 
-    auto findInst = [&directionState](uint32_t id) -> const Instance* {
-        for (const Instance& inst : directionState.instances)
+    // Rejets nes sur une autre page direction : l'instance peut n'exister que sur cette page
+    // (instanceId differents par export). On resout d'abord sur la page active, puis sur les 7 autres
+    // pour laisser les pieces vivre jusqu'a fin de vie au lieu de les "eteindre" au changement de cap.
+    auto findInst = [this, activeKey](uint32_t id) -> const Instance* {
+        if (id == 0U)
         {
-            if (inst.instanceId == id)
+            return nullptr;
+        }
+        const Instance* onActive =
+            this->findInstanceById(this->directionStates[static_cast<size_t>(activeKey)], id);
+        if (onActive != nullptr)
+        {
+            return onActive;
+        }
+        for (int k = 0; k < 8; ++k)
+        {
+            if (k == activeKey)
             {
-                return &inst;
+                continue;
+            }
+            const Instance* found =
+                this->findInstanceById(this->directionStates[static_cast<size_t>(k)], id);
+            if (found != nullptr)
+            {
+                return found;
             }
         }
         return nullptr;
