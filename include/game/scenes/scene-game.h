@@ -26,11 +26,6 @@ private:
     std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */
     std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
     VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
-    Ship debugTargetShip;              /**< 2e navire de test servant de cible runtime. */
-    bool debugTargetShipLoaded;        /**< True si le navire cible est charge. */
-    bool debugTargetAutoPatrolEnabled; /**< Patrouille auto de la cible (toggle clavier T). */
-    std::array<SDL_Point, 4> debugTargetPatrolTiles;
-    size_t debugTargetPatrolCursor;
 
 public:
     /**

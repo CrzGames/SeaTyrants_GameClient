@@ -11,13 +11,8 @@ GameScene::GameScene(void)
       shipAutoFollowEnabled(true),
       hudOverlay{},
       playerShipFolderPath("assets/images/ships/ship-elite27"),
-      playerVfxFolderPath("assets/images/vfx/vfx-cannon"),
-      shipVfx{},
-      debugTargetShip{},
-      debugTargetShipLoaded(false),
-      debugTargetAutoPatrolEnabled(true),
-      debugTargetPatrolTiles{},
-      debugTargetPatrolCursor(0U)
+      playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
+      shipVfx{}
 {
 }
 
@@ -37,7 +32,7 @@ void GameScene::initializePlayerSpawnAndCamera(void)
             shipFolderPath.c_str());
     }
 
-    // Load le VFX de tir du joueur.
+    // Load le VFX du navire du joueur.
     if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
     {
         RC2D_log(
@@ -50,31 +45,6 @@ void GameScene::initializePlayerSpawnAndCamera(void)
 
     // Spawn au secteur 30-AE (centre approximatif).
     player.spawnOnSector(map, 30, 30);
-
-    // Spawn + chargement d'un 2e navire de test (cible runtime pour le resolver target-relative).
-    this->debugTargetShipLoaded = this->debugTargetShip.loadSpritesFromFolder(shipFolderPath.c_str());
-    if (!this->debugTargetShipLoaded)
-    {
-        RC2D_log(
-            RC2D_LOG_WARN,
-            "GameScene: navire cible debug non charge (%s). Le VFX tournera sans target.",
-            shipFolderPath.c_str());
-    }
-    else
-    {
-        this->debugTargetShip.setSpeedTilesPerSecond(3.5f);
-        this->debugTargetShip.setDrawAlpha(210);
-        const SDL_Point spawnTarget = map.sectorToTile(34, 31);
-        this->debugTargetShip.setPositionTileInt(spawnTarget.x, spawnTarget.y);
-        this->debugTargetPatrolTiles[0] = map.sectorToTile(34, 31);
-        this->debugTargetPatrolTiles[1] = map.sectorToTile(36, 29);
-        this->debugTargetPatrolTiles[2] = map.sectorToTile(34, 27);
-        this->debugTargetPatrolTiles[3] = map.sectorToTile(32, 29);
-        this->debugTargetPatrolCursor = 0U;
-        this->debugTargetAutoPatrolEnabled = true;
-        const SDL_Point firstPatrol = this->debugTargetPatrolTiles[1];
-        this->debugTargetShip.moveToTile(map, firstPatrol.x, firstPatrol.y);
-    }
 
     // Centre la camera sur le joueur au debut.
     GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
@@ -90,8 +60,6 @@ void GameScene::unload(void)
     // Libere les ressources du jeu.
     GameplayShaderController::unloadAll();
     this->shipVfx.unload();
-    this->debugTargetShip.unloadSprites();
-    this->debugTargetShipLoaded = false;
     player.unload();
     this->clickMarker.hide();
     this->scrollBarOverlay.unload();
@@ -141,25 +109,10 @@ void GameScene::update(double dt)
     // + synchronisation avec le shader ocean pour les effets de wake.
     oceanShader.beginWakeFrame(dt);
     player.update(dt, map);
-    if (this->debugTargetShipLoaded)
-    {
-        this->debugTargetShip.update(dt, map);
-        if (this->debugTargetAutoPatrolEnabled && !this->debugTargetShip.isMoving())
-        {
-            this->debugTargetPatrolCursor =
-                (this->debugTargetPatrolCursor + 1U) % this->debugTargetPatrolTiles.size();
-            const SDL_Point nextPatrol = this->debugTargetPatrolTiles[this->debugTargetPatrolCursor];
-            this->debugTargetShip.moveToTile(map, nextPatrol.x, nextPatrol.y);
-        }
-    }
     oceanShader.endWakeFrame(map, map.rect);
-    const SDL_FPoint targetTile = this->debugTargetShipLoaded
-        ? this->debugTargetShip.getPositionTile()
-        : SDL_FPoint{0.0f, 0.0f};
-    this->shipVfx.update(
-        dt,
-        player.getShip(),
-        this->debugTargetShipLoaded ? &targetTile : nullptr);
+
+    // Met a jour les VFX du navire du joueur.
+    this->shipVfx.update(dt, player.getShip(), nullptr);
 
     // Met a jour les shaders de visibilite (nuages + fog).
     GameplayShaderController::updateVisibility(dt, player);
@@ -221,26 +174,8 @@ void GameScene::draw(void)
     // Dessine le marqueur de clic.
     this->clickMarker.draw(map);
 
-    if (this->debugTargetShipLoaded)
-    {
-        const SDL_FPoint playerTile = player.getShip().getPositionTile();
-        const SDL_FPoint targetTile = this->debugTargetShip.getPositionTile();
-        const SDL_FPoint playerCenter = map.tileToScreenCenterFloat(playerTile.x, playerTile.y);
-        const SDL_FPoint targetCenter = map.tileToScreenCenterFloat(targetTile.x, targetTile.y);
-        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-        rc2d_graphics_setColor(RC2D_Color{255, 214, 72, 210});
-        rc2d_graphics_line(playerCenter.x, playerCenter.y, targetCenter.x, targetCenter.y);
-        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-    }
-
     // Dessine les VFX derriere le ship.
     this->shipVfx.draw(map, player.getShip(), true);
-
-    // Dessine le navire cible de debug.
-    if (this->debugTargetShipLoaded)
-    {
-        this->debugTargetShip.draw(map);
-    }
 
     // Dessine le joueur.
     player.draw(map);
@@ -303,21 +238,7 @@ void GameScene::keypressed(
         this->shipAutoFollowEnabled = true;
         cameraChanged = true;
     }
-    else if (!isrepeat && scancode == SDL_SCANCODE_T && this->debugTargetShipLoaded)
-    {
-        this->debugTargetAutoPatrolEnabled = !this->debugTargetAutoPatrolEnabled;
-        if (this->debugTargetAutoPatrolEnabled && !this->debugTargetShip.isMoving())
-        {
-            this->debugTargetPatrolCursor =
-                (this->debugTargetPatrolCursor + 1U) % this->debugTargetPatrolTiles.size();
-            const SDL_Point nextPatrol = this->debugTargetPatrolTiles[this->debugTargetPatrolCursor];
-            this->debugTargetShip.moveToTile(map, nextPatrol.x, nextPatrol.y);
-        }
-        RC2D_log(
-            RC2D_LOG_INFO,
-            "GameScene: cible debug %s (T pour toggle).",
-            this->debugTargetAutoPatrolEnabled ? "patrouille AUTO ON" : "patrouille AUTO OFF");
-    }
+
     // Applique la camera si elle a ete modifiee.
     if (cameraChanged)
     {
@@ -344,7 +265,8 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         return;
     }
 
-    if (button != RC2D_MOUSE_BUTTON_LEFT && button != RC2D_MOUSE_BUTTON_RIGHT)
+    // Seuls les clics gauche sont traites pour le gameplay.
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
         return;
     }
@@ -358,31 +280,18 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
 
     // Convertit les coordonnees de clic en coordonnees de tuile.
     const SDL_Point tile = map.screenToTileNearest(x, y);
-
     // Verifie que la tuile est dans la map et traversable.
     if (!map.isInside(tile.x, tile.y) || map.isTileBlocked(tile.x, tile.y))
     {
         return;
     }
-
-    if (button == RC2D_MOUSE_BUTTON_LEFT)
+    else
     {
         // Deplace le joueur vers la tuile cliquee.
         player.moveToTile(map, tile.x, tile.y);
 
         // Affiche le marqueur de clic sur la tuile cliquee.
         this->clickMarker.show(tile.x, tile.y);
-    }
-    else if (button == RC2D_MOUSE_BUTTON_RIGHT && this->debugTargetShipLoaded)
-    {
-        // Clic droit: deplace la cible de test pour valider le resolver target-relative.
-        this->debugTargetShip.moveToTile(map, tile.x, tile.y);
-        this->debugTargetAutoPatrolEnabled = false;
-        RC2D_log(
-            RC2D_LOG_DEBUG,
-            "GameScene: cible debug deplacee vers (%d,%d). Auto-patrol OFF.",
-            tile.x,
-            tile.y);
     }
 }
 
