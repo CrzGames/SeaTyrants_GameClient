@@ -620,7 +620,7 @@ static void shipVfxLayerPageLabelUtf8(int pageIndex, bool targetSectorsAB, char*
 }
 
 /** Cote de la grille iso debug (tuiles) centree sur le navire preview. */
-constexpr int kShipVfxDebugIsoGridTiles = 20;
+constexpr int kShipVfxDebugIsoGridTiles = 30;
 /** Largeur du bouton TILE/PIXEL (panneau layers), a gauche de DEBUG. */
 constexpr float kLayerRowVfxPlaceModeButtonW = 58.0f;
 /** Largeur du bouton ROT (cadran rotation), a gauche de TILE. */
@@ -991,6 +991,120 @@ static std::string makeShipConfigSlug(const std::string& rawName)
         slug = "ship";
     }
     return slug;
+}
+
+static bool readTextFileUtf8(const std::string& absolutePath, std::string* outText)
+{
+    if (outText == nullptr)
+    {
+        return false;
+    }
+    outText->clear();
+    if (absolutePath.empty())
+    {
+        return false;
+    }
+    std::ifstream input(absolutePath, std::ios::binary | std::ios::ate);
+    if (!input.is_open())
+    {
+        return false;
+    }
+    const std::streamsize size = input.tellg();
+    if (size <= 0)
+    {
+        return false;
+    }
+    input.seekg(0, std::ios::beg);
+    outText->assign(static_cast<size_t>(size), '\0');
+    if (!input.read(outText->data(), size))
+    {
+        outText->clear();
+        return false;
+    }
+    return true;
+}
+
+static void setOrReplaceJsonStringField(cJSON* object, const char* key, const std::string& value)
+{
+    if (object == nullptr || key == nullptr || key[0] == '\0')
+    {
+        return;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(object, key);
+    cJSON_AddStringToObject(object, key, value.c_str());
+}
+
+static cJSON* ensureJsonObjectField(cJSON* parentObject, const char* key)
+{
+    if (parentObject == nullptr || key == nullptr || key[0] == '\0')
+    {
+        return nullptr;
+    }
+    cJSON* child = cJSON_GetObjectItemCaseSensitive(parentObject, key);
+    if (cJSON_IsObject(child))
+    {
+        return child;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(parentObject, key);
+    cJSON* created = cJSON_CreateObject();
+    if (created == nullptr)
+    {
+        return nullptr;
+    }
+    cJSON_AddItemToObject(parentObject, key, created);
+    return created;
+}
+
+static std::string buildShipVfxDuplicateTargetFileName(
+    const std::string& sourceFileName,
+    const std::string& sourceShipSlug,
+    const std::string& targetShipSlug,
+    const std::string& animationDisplayName)
+{
+    std::filesystem::path sourcePath(sourceFileName);
+    std::string sourceStem = trimAscii(sourcePath.stem().string());
+    if (sourceStem.empty())
+    {
+        sourceStem = "fx-vfx";
+    }
+    std::string sourceStemLower = makePathKeyLower(sourceStem);
+    const std::string sourceShipLower = makePathKeyLower(sourceShipSlug);
+    const std::string targetShipTrimmed = trimAscii(targetShipSlug);
+
+    std::string targetStem = sourceStem;
+
+    auto replaceSuffix = [&targetStem, &sourceStemLower](const std::string& suffixLower, const std::string& replacement) {
+        if (suffixLower.empty() || sourceStemLower.size() < suffixLower.size())
+        {
+            return false;
+        }
+        if (sourceStemLower.compare(sourceStemLower.size() - suffixLower.size(), suffixLower.size(), suffixLower) != 0)
+        {
+            return false;
+        }
+        targetStem = targetStem.substr(0, targetStem.size() - suffixLower.size()) + replacement;
+        return true;
+    };
+
+    const bool replacedShipPrefixedSuffix = replaceSuffix("_ship-" + sourceShipLower, "_ship-" + targetShipTrimmed);
+    const bool replacedBasicSuffix = replacedShipPrefixedSuffix
+        ? true
+        : replaceSuffix("_" + sourceShipLower, "_" + targetShipTrimmed);
+    if (!replacedBasicSuffix)
+    {
+        std::string animationSlug = makeExportAnimationSlug(animationDisplayName);
+        if (animationSlug.empty())
+        {
+            animationSlug = makeExportAnimationSlug(sourceStem);
+        }
+        if (animationSlug.empty())
+        {
+            animationSlug = "vfx";
+        }
+        targetStem = "fx-" + animationSlug + "_" + targetShipTrimmed;
+    }
+
+    return targetStem + ".json";
 }
 
 static const char* kDirectionIdDownLeft = "down_left";
@@ -1496,7 +1610,6 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       pendingShipVfxConfigMutex{},
       buttonModeShipVfxRect{},
       buttonModeLooseSpritesRect{},
-      buttonImportShipRect{},
       buttonImportSfxRect{},
       buttonImportLooseRect{},
       buttonExportRect{},
@@ -1578,6 +1691,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
     this->invalidShipFolders.clear();
     this->invalidVfxFolders.clear();
     this->buttonReloadAssetsRect = SDL_FRect{};
+    this->buttonShipVfxDuplicateShipsRect = SDL_FRect{};
     this->buttonDirectionPrevRect = SDL_FRect{};
     this->buttonDirectionNextRect = SDL_FRect{};
     this->buttonShipStateToggleRect = SDL_FRect{};
@@ -1726,6 +1840,7 @@ void EditorMapVfxScene::toggleShipVfxEditorTargetSectorsAB(void)
     this->shipVfxEditorTargetingMode = targetingModeFromTargetSectorsAB(next);
     this->shipVfxLayerPagePickerOpen = false;
     this->closeVfxDuplicateToPagesPopup();
+    this->closeShipVfxShipDuplicatePopup();
     this->markShipVfxDirty();
     this->statusMessage = this->shipVfxEditorTargetSectorsABEnabled
         ? "Pages VFX : 16 (direction x HP x cibles A/B)."
@@ -1746,6 +1861,7 @@ void EditorMapVfxScene::toggleShipVfxEditorTargetSectorsOverlayVisible(void)
 
 void EditorMapVfxScene::resetEditorState(void)
 {
+    this->clearShipVfxPairDraftStates();
     this->editorMode = EditorMode::SHIP_VFX;
     this->selectedOceanColorIndex = 24;
     this->pendingOceanColorDelta = 0;
@@ -1797,6 +1913,7 @@ void EditorMapVfxScene::resetEditorState(void)
     this->vfxDragStartOffsetY = 0.0f;
     this->shipVfxLayerPagePickerOpen = false;
     this->closeVfxDuplicateToPagesPopup();
+    this->closeShipVfxShipDuplicatePopup();
     this->shipVfxDirty = false;
     this->loadedShipVfxConfigPath.clear();
     this->invalidShipFolders.clear();
@@ -1826,6 +1943,8 @@ void EditorMapVfxScene::resetEditorState(void)
     this->loosePreviewFpsInputFocused = false;
     this->loosePreviewTotalDurationMsInput.clear();
     this->loosePreviewTotalDurationMsInputFocused = false;
+    this->exportConfirmPopupVisible = false;
+    this->exportConfirmPopupAction = ExportConfirmAction::NONE;
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
@@ -1864,6 +1983,8 @@ void EditorMapVfxScene::clearEditorTransientInteractionState(void)
     this->closeVfxRelativeTimingPopup();
     this->closeVfxTrailPopup();
     this->closeVfxDuplicateToPagesPopup();
+    this->closeShipVfxShipDuplicatePopup();
+    this->closeExportConfirmPopup();
     this->previewShipPilotActive = false;
     this->pilotVfxMaxDurationClockAnchorSeconds = 0.0f;
 }
@@ -1885,8 +2006,8 @@ void EditorMapVfxScene::applyShipVfxModeViewportReset(void)
         map.rect);
     camera.update(map, map.rect);
 
-    const float shipScreenX = map.rect.x + (map.rect.w * 0.5f) + 250.0f;
-    const float shipScreenY = map.rect.y + (map.rect.h * 0.5f);
+    const float shipScreenX = map.rect.x + (map.rect.w * 0.5f) + 450.0f;
+    const float shipScreenY = map.rect.y + (map.rect.h * 0.5f) - 100.0f;
     const SDL_Point shiftedShipTile = map.screenToTileNearest(shipScreenX, shipScreenY);
     this->previewShipTile = SDL_FPoint{
         static_cast<float>(shiftedShipTile.x),
@@ -1926,6 +2047,7 @@ void EditorMapVfxScene::applyLooseSpritesModeEntryReset(void)
     this->looseScalePercent = 100;
     this->loosePreviewZoomFactor = kLoosePreviewZoomDefault;
     this->looseListScrollOffset = 0;
+    this->closeExportConfirmPopup();
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
@@ -2155,26 +2277,151 @@ void EditorMapVfxScene::cycleOceanColor(int delta)
 
 void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
 {
-    this->previewShip.unloadSprites();
-    this->previewShipLoaded = false;
-    this->loadedShipFolderAbsolute.clear();
-    this->clearAllShipVfxLayerPages();
-    this->clearShipVfxTrailPieces();
-    this->setSelectedVfxInstanceIndex(-1);
-    this->nextVfxInstanceId = 1U;
-    this->initDefaultShipLayerSettingsAllPages();
-    this->importedShips.clear();
-    this->unloadImportedSfx();
-    this->selectedShipIndex = -1;
-    this->selectedSfxIndex = -1;
-    this->sfxListActionButtonsVisible = false;
-    this->sfxListActionButtonsSfxIndex = -1;
-    this->shipListScrollOffset = 0;
-    this->sfxListScrollOffset = 0;
-    this->invalidShipFolders.clear();
-    this->invalidVfxFolders.clear();
+    auto makeNormalizedPathKey = [](const std::string& path) -> std::string {
+        return makePathKeyLower(normalizePathSlashes(path));
+    };
+
+    auto findImportedShipIndexByPathKey = [this, &makeNormalizedPathKey](const std::string& pathKey) -> int {
+        if (pathKey.empty())
+        {
+            return -1;
+        }
+        for (int i = 0; i < static_cast<int>(this->importedShips.size()); ++i)
+        {
+            if (makeNormalizedPathKey(this->importedShips[static_cast<size_t>(i)].folderAbsolutePath) == pathKey)
+            {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    auto findImportedSfxIndexByPathKey = [this, &makeNormalizedPathKey](const std::string& pathKey) -> int {
+        if (pathKey.empty())
+        {
+            return -1;
+        }
+        for (int i = 0; i < static_cast<int>(this->importedSfx.size()); ++i)
+        {
+            if (makeNormalizedPathKey(this->importedSfx[static_cast<size_t>(i)].sourceFolderAbsolutePath) == pathKey)
+            {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    const int shipCountBefore = static_cast<int>(this->importedShips.size());
+    const int sfxCountBefore = static_cast<int>(this->importedSfx.size());
+
+    // Sauvegarde du travail en cours avant scan disque.
+    this->saveCurrentShipVfxPairDraft();
+
+    std::string activeShipPathKey;
+    if (this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()))
+    {
+        activeShipPathKey = makeNormalizedPathKey(
+            this->importedShips[static_cast<size_t>(this->selectedShipIndex)].folderAbsolutePath);
+    }
+    else if (!this->loadedShipFolderAbsolute.empty())
+    {
+        activeShipPathKey = makeNormalizedPathKey(this->loadedShipFolderAbsolute);
+    }
+
+    std::string activeSfxPathKey;
+    if (this->selectedSfxIndex >= 0 && this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        activeSfxPathKey = makeNormalizedPathKey(
+            this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].sourceFolderAbsolutePath);
+    }
+
     this->importShipsFromRootFolderAbsolutePath("assets/images/ships");
     this->importSfxFromRootFolderAbsolutePath("assets/images/vfx");
+
+    // Remappe la selection apres tri/ajouts pour garder le meme ship/vfx actif.
+    const int remappedShipIndex = findImportedShipIndexByPathKey(activeShipPathKey);
+    if (remappedShipIndex >= 0)
+    {
+        this->selectedShipIndex = remappedShipIndex;
+        this->ensureSelectionVisible(
+            this->selectedShipIndex,
+            &this->shipListScrollOffset,
+            static_cast<int>(this->importedShips.size()));
+    }
+    else if (!this->importedShips.empty() &&
+             (this->selectedShipIndex < 0 || this->selectedShipIndex >= static_cast<int>(this->importedShips.size())))
+    {
+        (void)this->selectImportedShipAtIndex(0);
+    }
+    else if (this->importedShips.empty())
+    {
+        this->selectedShipIndex = -1;
+    }
+
+    const int remappedSfxIndex = findImportedSfxIndexByPathKey(activeSfxPathKey);
+    if (remappedSfxIndex >= 0)
+    {
+        this->selectedSfxIndex = remappedSfxIndex;
+    }
+    else if (!this->importedSfx.empty() &&
+             (this->selectedSfxIndex < 0 || this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size())))
+    {
+        this->selectedSfxIndex = 0;
+    }
+    else if (this->importedSfx.empty())
+    {
+        this->selectedSfxIndex = -1;
+    }
+
+    if (this->selectedSfxIndex >= 0 && this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        this->ensureSelectionVisible(
+            this->selectedSfxIndex,
+            &this->sfxListScrollOffset,
+            static_cast<int>(this->importedSfx.size()));
+        this->sfxListActionButtonsVisible = true;
+        this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
+    }
+    else
+    {
+        this->sfxListActionButtonsVisible = false;
+        this->sfxListActionButtonsSfxIndex = -1;
+    }
+
+    // Si on est revenu sur le meme couple ship/vfx, restaure l'etat d'edition en cours.
+    if (this->selectedShipIndex >= 0 &&
+        this->selectedShipIndex < static_cast<int>(this->importedShips.size()) &&
+        this->selectedSfxIndex >= 0 &&
+        this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        const std::string currentShipKey = makeNormalizedPathKey(
+            this->importedShips[static_cast<size_t>(this->selectedShipIndex)].folderAbsolutePath);
+        const std::string currentSfxKey = makeNormalizedPathKey(
+            this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].sourceFolderAbsolutePath);
+        if (!activeShipPathKey.empty() &&
+            !activeSfxPathKey.empty() &&
+            currentShipKey == activeShipPathKey &&
+            currentSfxKey == activeSfxPathKey)
+        {
+            (void)this->restoreCurrentShipVfxPairDraft();
+        }
+    }
+
+    const int shipCountAfter = static_cast<int>(this->importedShips.size());
+    const int sfxCountAfter = static_cast<int>(this->importedSfx.size());
+    const int addedShips = (std::max)(0, shipCountAfter - shipCountBefore);
+    const int addedSfx = (std::max)(0, sfxCountAfter - sfxCountBefore);
+
+    if (addedShips > 0 || addedSfx > 0)
+    {
+        this->statusMessage =
+            "Reload assets: +" + std::to_string(addedShips) + " ship(s), +" +
+            std::to_string(addedSfx) + " VFX. Etat courant conserve.";
+    }
+    else
+    {
+        this->statusMessage = "Reload assets: aucun nouvel asset, etat courant conserve.";
+    }
 }
 
 std::string EditorMapVfxScene::buildShipConfigJsonPath(const ImportedShip& ship) const
@@ -2204,6 +2451,142 @@ std::string EditorMapVfxScene::buildShipVfxPairConfigJsonPath(
     const std::string fileName = "fx-" + vfxSlug + "_" + shipSlug + ".json";
     const std::filesystem::path pairPath = std::filesystem::path(ship.folderAbsolutePath) / fileName;
     return normalizePathSlashes(pairPath.string());
+}
+
+std::string EditorMapVfxScene::buildShipVfxPairDraftKey(int shipIndex, int sfxIndex) const
+{
+    if (shipIndex < 0 || shipIndex >= static_cast<int>(this->importedShips.size()) ||
+        sfxIndex < 0 || sfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return {};
+    }
+
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(shipIndex)];
+    const ImportedSfx& sfx = this->importedSfx[static_cast<size_t>(sfxIndex)];
+    const std::string pairPath = this->buildShipVfxPairConfigJsonPath(ship, sfx);
+    if (!pairPath.empty())
+    {
+        return makePathKeyLower(normalizePathSlashes(pairPath));
+    }
+
+    return makePathKeyLower(normalizePathSlashes(ship.folderAbsolutePath)) + "|" +
+        makePathKeyLower(normalizePathSlashes(sfx.sourceJsonPath)) + "|" +
+        makePathKeyLower(sfx.displayName);
+}
+
+void EditorMapVfxScene::saveCurrentShipVfxPairDraft(void)
+{
+    const std::string pairKey = this->buildShipVfxPairDraftKey(this->selectedShipIndex, this->selectedSfxIndex);
+    if (pairKey.empty())
+    {
+        return;
+    }
+
+    ShipVfxPairDraftState* draft = nullptr;
+    for (ShipVfxPairDraftState& candidate : this->shipVfxPairDraftStates)
+    {
+        if (candidate.pairKey == pairKey)
+        {
+            draft = &candidate;
+            break;
+        }
+    }
+    if (draft == nullptr)
+    {
+        this->shipVfxPairDraftStates.push_back(ShipVfxPairDraftState{});
+        draft = &this->shipVfxPairDraftStates.back();
+    }
+
+    draft->pairKey = pairKey;
+    draft->shipIndex = this->selectedShipIndex;
+    draft->sfxIndex = this->selectedSfxIndex;
+    draft->layerPages = this->shipVfxLayerPages;
+    draft->drawOrderByPage = this->shipDrawOrderByPage;
+    draft->layerVisibleByPage = this->shipLayerVisibleByPage;
+    draft->layerLockedByPage = this->shipLayerLockedByPage;
+    draft->debugBoundsVisibleByPage = this->shipDebugBoundsVisibleByPage;
+    draft->shipSpawnAfterInstanceIdByPage = this->shipSpawnAfterVfxInstanceId;
+    draft->shipSpawnAfterDelayMsByPage = this->shipSpawnAfterDelayMs;
+    draft->targetSectorsABEnabled = this->shipVfxEditorTargetSectorsABEnabled;
+    draft->targetingMode = this->shipVfxEditorTargetingMode;
+    draft->dirty = this->shipVfxDirty;
+    draft->loadedConfigPath = this->loadedShipVfxConfigPath;
+}
+
+bool EditorMapVfxScene::restoreCurrentShipVfxPairDraft(void)
+{
+    const std::string pairKey = this->buildShipVfxPairDraftKey(this->selectedShipIndex, this->selectedSfxIndex);
+    if (pairKey.empty())
+    {
+        return false;
+    }
+
+    const ShipVfxPairDraftState* draft = nullptr;
+    for (const ShipVfxPairDraftState& candidate : this->shipVfxPairDraftStates)
+    {
+        if (candidate.pairKey == pairKey)
+        {
+            draft = &candidate;
+            break;
+        }
+    }
+    if (draft == nullptr)
+    {
+        return false;
+    }
+
+    this->shipVfxLayerPages = draft->layerPages;
+    this->shipDrawOrderByPage = draft->drawOrderByPage;
+    this->shipLayerVisibleByPage = draft->layerVisibleByPage;
+    this->shipLayerLockedByPage = draft->layerLockedByPage;
+    this->shipDebugBoundsVisibleByPage = draft->debugBoundsVisibleByPage;
+    this->shipSpawnAfterVfxInstanceId = draft->shipSpawnAfterInstanceIdByPage;
+    this->shipSpawnAfterDelayMs = draft->shipSpawnAfterDelayMsByPage;
+    this->shipVfxEditorTargetSectorsABEnabled = draft->targetSectorsABEnabled;
+    this->shipVfxEditorTargetingMode = draft->targetingMode;
+    if ((this->shipVfxEditorTargetingMode == ShipVfxTargetingMode::TARGET_RELATIVE_AB) !=
+        this->shipVfxEditorTargetSectorsABEnabled)
+    {
+        this->shipVfxEditorTargetingMode =
+            EditorMapVfxScene::targetingModeFromTargetSectorsAB(this->shipVfxEditorTargetSectorsABEnabled);
+    }
+    if (!this->shipVfxEditorTargetSectorsABEnabled)
+    {
+        this->previewTargetFireSectorIndex = 0;
+    }
+    this->shipVfxEditorTargetSectorsOverlayVisible = false;
+    this->clearShipVfxTrailPieces();
+    this->setSelectedVfxInstanceIndex(-1);
+
+    uint32_t maxInstanceId = 0U;
+    for (std::vector<ShipVfxInstance>& page : this->shipVfxLayerPages)
+    {
+        for (ShipVfxInstance& instance : page)
+        {
+            instance.importedSfxIndex = this->selectedSfxIndex;
+            maxInstanceId = (std::max)(maxInstanceId, instance.instanceId);
+        }
+    }
+    this->nextVfxInstanceId = (maxInstanceId < (std::numeric_limits<uint32_t>::max)())
+        ? (maxInstanceId + 1U)
+        : maxInstanceId;
+    this->normalizeShipVfxDrawOrders();
+    this->shipVfxDirty = draft->dirty;
+    this->loadedShipVfxConfigPath = draft->loadedConfigPath;
+    if (this->loadedShipVfxConfigPath.empty() &&
+        this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()) &&
+        this->selectedSfxIndex >= 0 && this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        this->loadedShipVfxConfigPath = this->buildShipVfxPairConfigJsonPath(
+            this->importedShips[static_cast<size_t>(this->selectedShipIndex)],
+            this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)]);
+    }
+    return true;
+}
+
+void EditorMapVfxScene::clearShipVfxPairDraftStates(void)
+{
+    this->shipVfxPairDraftStates.clear();
 }
 
 bool EditorMapVfxScene::tryAutoImportShipVfxConfigForSelectedPair(bool* outPairFileFound)
@@ -4563,6 +4946,888 @@ bool EditorMapVfxScene::handleVfxDuplicateToPagesPopupKey(
     return true;
 }
 
+void EditorMapVfxScene::closeShipVfxShipDuplicatePopup(void)
+{
+    this->shipVfxShipDuplicatePopupVisible = false;
+    this->shipVfxShipDuplicateSourceShipIndex = -1;
+    this->shipVfxShipDuplicateSourceAnimations.clear();
+    this->shipVfxShipDuplicateSourceAnimationSelected.clear();
+    this->shipVfxShipDuplicateTargetShipSelected.clear();
+    this->shipVfxShipDuplicateSourceShipScrollOffset = 0;
+    this->shipVfxShipDuplicateAnimationScrollOffset = 0;
+    this->shipVfxShipDuplicateTargetShipScrollOffset = 0;
+    this->shipVfxShipDuplicateSourceShipScrollDragActive = false;
+    this->shipVfxShipDuplicateAnimationScrollDragActive = false;
+    this->shipVfxShipDuplicateTargetShipScrollDragActive = false;
+    this->shipVfxShipDuplicateSourceShipScrollDragGrabOffsetY = 0.0f;
+    this->shipVfxShipDuplicateAnimationScrollDragGrabOffsetY = 0.0f;
+    this->shipVfxShipDuplicateTargetShipScrollDragGrabOffsetY = 0.0f;
+}
+
+void EditorMapVfxScene::openShipVfxShipDuplicatePopup(void)
+{
+    if (this->editorMode != EditorMode::SHIP_VFX)
+    {
+        this->statusMessage = "Disponible uniquement en mode Ship / VFX.";
+        return;
+    }
+    if (this->importedShips.empty())
+    {
+        this->statusMessage = "Aucun navire importe pour la duplication.";
+        return;
+    }
+
+    this->clearEditorTransientInteractionState();
+    this->shipVfxShipDuplicatePopupVisible = true;
+    this->shipVfxShipDuplicateSourceShipIndex =
+        (this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()))
+        ? this->selectedShipIndex
+        : 0;
+    this->shipVfxShipDuplicateTargetShipSelected.assign(this->importedShips.size(), false);
+    this->shipVfxShipDuplicateSourceShipScrollOffset = 0;
+    this->shipVfxShipDuplicateAnimationScrollOffset = 0;
+    this->shipVfxShipDuplicateTargetShipScrollOffset = 0;
+    this->shipVfxShipDuplicateSourceShipScrollDragActive = false;
+    this->shipVfxShipDuplicateAnimationScrollDragActive = false;
+    this->shipVfxShipDuplicateTargetShipScrollDragActive = false;
+    this->shipVfxShipDuplicateSourceShipScrollDragGrabOffsetY = 0.0f;
+    this->shipVfxShipDuplicateAnimationScrollDragGrabOffsetY = 0.0f;
+    this->shipVfxShipDuplicateTargetShipScrollDragGrabOffsetY = 0.0f;
+    this->ensureSelectionVisible(
+        this->shipVfxShipDuplicateSourceShipIndex,
+        &this->shipVfxShipDuplicateSourceShipScrollOffset,
+        static_cast<int>(this->importedShips.size()));
+    this->statusMessage = "Duplication ships: choisis source, animations, puis cibles et VALIDER.";
+    this->refreshShipVfxShipDuplicatePopupSourceAnimations();
+}
+
+bool EditorMapVfxScene::buildShipVfxShipDuplicateSourceAnimationsForShipIndex(
+    int sourceShipIndex,
+    std::vector<ShipVfxShipDuplicateSourceAnimation>* outAnimations) const
+{
+    if (outAnimations == nullptr)
+    {
+        return false;
+    }
+    outAnimations->clear();
+    if (sourceShipIndex < 0 || sourceShipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        return false;
+    }
+
+    const ImportedShip& sourceShip = this->importedShips[static_cast<size_t>(sourceShipIndex)];
+    const std::filesystem::path shipFolderPath(sourceShip.folderAbsolutePath);
+    std::error_code fsError;
+    if (!std::filesystem::exists(shipFolderPath, fsError) || !std::filesystem::is_directory(shipFolderPath, fsError))
+    {
+        return false;
+    }
+
+    std::vector<std::filesystem::path> candidateJsonPaths;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(shipFolderPath, fsError))
+    {
+        if (fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        if (!entry.is_regular_file(fsError) || fsError)
+        {
+            fsError.clear();
+            continue;
+        }
+        std::string extension = entry.path().extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (extension == ".json")
+        {
+            candidateJsonPaths.push_back(entry.path());
+        }
+    }
+
+    std::sort(candidateJsonPaths.begin(), candidateJsonPaths.end(), [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        return makePathKeyLower(a.filename().string()) < makePathKeyLower(b.filename().string());
+    });
+
+    const std::string sourceShipPathKey = makeComparableSourcePathKey(sourceShip.folderAbsolutePath);
+    for (const std::filesystem::path& jsonPath : candidateJsonPaths)
+    {
+        std::string jsonText;
+        if (!readTextFileUtf8(jsonPath.string(), &jsonText))
+        {
+            continue;
+        }
+        cJSON* root = cJSON_Parse(jsonText.c_str());
+        if (root == nullptr)
+        {
+            continue;
+        }
+
+        bool includeFile = false;
+        const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(root, "format");
+        if (cJSON_IsString(formatNode) &&
+            formatNode->valuestring != nullptr &&
+            SDL_strcasecmp(formatNode->valuestring, "ship_vfx_config") == 0)
+        {
+            includeFile = true;
+        }
+        if (!includeFile)
+        {
+            cJSON_Delete(root);
+            continue;
+        }
+
+        std::string shipPathFromJson;
+        const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(root, "editor");
+        if (cJSON_IsObject(editorNode))
+        {
+            const cJSON* shipNode = cJSON_GetObjectItemCaseSensitive(editorNode, "ship");
+            if (cJSON_IsObject(shipNode))
+            {
+                const cJSON* folderPathNode = cJSON_GetObjectItemCaseSensitive(shipNode, "folderPath");
+                const cJSON* folderAbsoluteNode = cJSON_GetObjectItemCaseSensitive(shipNode, "folderAbsolutePath");
+                if (cJSON_IsString(folderPathNode) && folderPathNode->valuestring != nullptr)
+                {
+                    shipPathFromJson = folderPathNode->valuestring;
+                }
+                else if (cJSON_IsString(folderAbsoluteNode) && folderAbsoluteNode->valuestring != nullptr)
+                {
+                    shipPathFromJson = folderAbsoluteNode->valuestring;
+                }
+            }
+        }
+        if (shipPathFromJson.empty())
+        {
+            const cJSON* gameplayNode = cJSON_GetObjectItemCaseSensitive(root, "gameplay");
+            if (cJSON_IsObject(gameplayNode))
+            {
+                const cJSON* shipFolderPathNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "shipFolderPath");
+                if (cJSON_IsString(shipFolderPathNode) && shipFolderPathNode->valuestring != nullptr)
+                {
+                    shipPathFromJson = shipFolderPathNode->valuestring;
+                }
+            }
+        }
+        if (!shipPathFromJson.empty() &&
+            makeComparableSourcePathKey(shipPathFromJson) != sourceShipPathKey)
+        {
+            cJSON_Delete(root);
+            continue;
+        }
+
+        std::string displayName;
+        if (cJSON_IsObject(editorNode))
+        {
+            const cJSON* animationNode = cJSON_GetObjectItemCaseSensitive(editorNode, "animation");
+            if (cJSON_IsObject(animationNode))
+            {
+                const cJSON* animationNameNode = cJSON_GetObjectItemCaseSensitive(animationNode, "displayName");
+                if (cJSON_IsString(animationNameNode) && animationNameNode->valuestring != nullptr)
+                {
+                    displayName = trimAscii(animationNameNode->valuestring);
+                }
+            }
+        }
+        if (displayName.empty())
+        {
+            displayName = stripListPrefix(jsonPath.stem().string(), "fx-");
+        }
+        if (displayName.empty())
+        {
+            displayName = stripListPrefix(jsonPath.stem().string(), "vfx-");
+        }
+        if (displayName.empty())
+        {
+            displayName = jsonPath.stem().string();
+        }
+
+        ShipVfxShipDuplicateSourceAnimation animationEntry{};
+        animationEntry.fileName = jsonPath.filename().string();
+        animationEntry.absolutePath = normalizePathSlashes(jsonPath.string());
+        animationEntry.displayName = displayName;
+        outAnimations->push_back(std::move(animationEntry));
+        cJSON_Delete(root);
+    }
+
+    std::sort(outAnimations->begin(), outAnimations->end(), [](const ShipVfxShipDuplicateSourceAnimation& a, const ShipVfxShipDuplicateSourceAnimation& b) {
+        const std::string aKey = makePathKeyLower(a.displayName);
+        const std::string bKey = makePathKeyLower(b.displayName);
+        if (aKey != bKey)
+        {
+            return aKey < bKey;
+        }
+        return makePathKeyLower(a.fileName) < makePathKeyLower(b.fileName);
+    });
+    return true;
+}
+
+void EditorMapVfxScene::refreshShipVfxShipDuplicatePopupSourceAnimations(void)
+{
+    this->shipVfxShipDuplicateSourceAnimations.clear();
+    this->shipVfxShipDuplicateSourceAnimationSelected.clear();
+    this->shipVfxShipDuplicateAnimationScrollOffset = 0;
+    this->shipVfxShipDuplicateAnimationScrollDragActive = false;
+    this->shipVfxShipDuplicateAnimationScrollDragGrabOffsetY = 0.0f;
+    if (this->shipVfxShipDuplicateSourceShipIndex < 0 ||
+        this->shipVfxShipDuplicateSourceShipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        return;
+    }
+
+    std::vector<ShipVfxShipDuplicateSourceAnimation> sourceAnimations;
+    if (!this->buildShipVfxShipDuplicateSourceAnimationsForShipIndex(
+            this->shipVfxShipDuplicateSourceShipIndex,
+            &sourceAnimations))
+    {
+        this->statusMessage = "Duplication ships: impossible de lire les animations source.";
+        return;
+    }
+    this->shipVfxShipDuplicateSourceAnimations = std::move(sourceAnimations);
+    this->shipVfxShipDuplicateSourceAnimationSelected.assign(
+        this->shipVfxShipDuplicateSourceAnimations.size(),
+        true);
+    if (this->shipVfxShipDuplicateSourceAnimations.empty())
+    {
+        this->statusMessage = "Duplication ships: aucune animation VFX exportee trouvee pour la source.";
+        return;
+    }
+    this->statusMessage =
+        "Duplication ships: " +
+        std::to_string(static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size())) +
+        " animation(s) source detectee(s).";
+}
+
+bool EditorMapVfxScene::applyShipVfxShipDuplicatePopupValidate(void)
+{
+    if (this->shipVfxShipDuplicateSourceShipIndex < 0 ||
+        this->shipVfxShipDuplicateSourceShipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        this->statusMessage = "Duplication ships: choisis un navire source valide.";
+        return false;
+    }
+    if (this->shipVfxShipDuplicateSourceAnimations.empty() ||
+        this->shipVfxShipDuplicateSourceAnimationSelected.size() != this->shipVfxShipDuplicateSourceAnimations.size())
+    {
+        this->statusMessage = "Duplication ships: aucune animation source disponible.";
+        return false;
+    }
+    if (this->shipVfxShipDuplicateTargetShipSelected.size() != this->importedShips.size())
+    {
+        this->statusMessage = "Duplication ships: liste des cibles invalide.";
+        return false;
+    }
+
+    std::vector<int> selectedAnimationIndices;
+    selectedAnimationIndices.reserve(this->shipVfxShipDuplicateSourceAnimations.size());
+    for (int i = 0; i < static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size()); ++i)
+    {
+        if (this->shipVfxShipDuplicateSourceAnimationSelected[static_cast<size_t>(i)])
+        {
+            selectedAnimationIndices.push_back(i);
+        }
+    }
+    if (selectedAnimationIndices.empty())
+    {
+        this->statusMessage = "Duplication ships: coche au moins une animation.";
+        return false;
+    }
+
+    std::vector<int> selectedTargetShipIndices;
+    selectedTargetShipIndices.reserve(this->shipVfxShipDuplicateTargetShipSelected.size());
+    for (int i = 0; i < static_cast<int>(this->shipVfxShipDuplicateTargetShipSelected.size()); ++i)
+    {
+        if (this->shipVfxShipDuplicateTargetShipSelected[static_cast<size_t>(i)])
+        {
+            selectedTargetShipIndices.push_back(i);
+        }
+    }
+    if (selectedTargetShipIndices.empty())
+    {
+        this->statusMessage = "Duplication ships: coche au moins un navire cible.";
+        return false;
+    }
+
+    const ImportedShip& sourceShip = this->importedShips[static_cast<size_t>(this->shipVfxShipDuplicateSourceShipIndex)];
+    const std::string sourceShipSlug = makeShipConfigSlug(sourceShip.displayName);
+
+    int writtenCount = 0;
+    int failedCount = 0;
+    int targetsWithWrite = 0;
+    for (const int targetShipIndex : selectedTargetShipIndices)
+    {
+        if (targetShipIndex < 0 || targetShipIndex >= static_cast<int>(this->importedShips.size()))
+        {
+            continue;
+        }
+        const ImportedShip& targetShip = this->importedShips[static_cast<size_t>(targetShipIndex)];
+        const std::string targetShipSlug = makeShipConfigSlug(targetShip.displayName);
+        const std::string targetShipFolderRelativePath =
+            buildAssetsRelativePathForExport(targetShip.folderAbsolutePath, targetShip.displayName);
+        const std::string targetShipFolderAbsolutePath =
+            normalizePathSlashes(targetShip.folderAbsolutePath);
+
+        std::error_code fsError;
+        std::filesystem::create_directories(targetShip.folderAbsolutePath, fsError);
+        if (fsError)
+        {
+            failedCount += static_cast<int>(selectedAnimationIndices.size());
+            continue;
+        }
+
+        std::vector<std::string> usedOutputNamesLower;
+        bool wroteForTarget = false;
+        for (const int animationIndex : selectedAnimationIndices)
+        {
+            const ShipVfxShipDuplicateSourceAnimation& sourceAnimation =
+                this->shipVfxShipDuplicateSourceAnimations[static_cast<size_t>(animationIndex)];
+
+            std::string jsonText;
+            if (!readTextFileUtf8(sourceAnimation.absolutePath, &jsonText))
+            {
+                failedCount += 1;
+                continue;
+            }
+
+            cJSON* root = cJSON_Parse(jsonText.c_str());
+            if (root == nullptr)
+            {
+                failedCount += 1;
+                continue;
+            }
+            const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(root, "format");
+            const bool jsonLooksLikeShipVfxConfig =
+                cJSON_IsString(formatNode) &&
+                formatNode->valuestring != nullptr &&
+                SDL_strcasecmp(formatNode->valuestring, "ship_vfx_config") == 0;
+            if (!jsonLooksLikeShipVfxConfig)
+            {
+                cJSON_Delete(root);
+                failedCount += 1;
+                continue;
+            }
+
+            cJSON* editorNode = ensureJsonObjectField(root, "editor");
+            cJSON* gameplayNode = ensureJsonObjectField(root, "gameplay");
+            cJSON* shipNode = ensureJsonObjectField(editorNode, "ship");
+            if (editorNode == nullptr || gameplayNode == nullptr || shipNode == nullptr)
+            {
+                cJSON_Delete(root);
+                failedCount += 1;
+                continue;
+            }
+
+            setOrReplaceJsonStringField(shipNode, "displayName", targetShip.displayName);
+            setOrReplaceJsonStringField(shipNode, "folderPath", targetShipFolderRelativePath);
+            setOrReplaceJsonStringField(shipNode, "folderAbsolutePath", targetShipFolderAbsolutePath);
+            setOrReplaceJsonStringField(shipNode, "id", targetShipSlug);
+            setOrReplaceJsonStringField(gameplayNode, "shipFolderPath", targetShipFolderRelativePath);
+
+            std::string outputFileName = buildShipVfxDuplicateTargetFileName(
+                sourceAnimation.fileName,
+                sourceShipSlug,
+                targetShipSlug,
+                sourceAnimation.displayName);
+            const std::string outputBaseStem = std::filesystem::path(outputFileName).stem().string();
+            int suffix = 2;
+            while (std::find(
+                       usedOutputNamesLower.begin(),
+                       usedOutputNamesLower.end(),
+                       makePathKeyLower(outputFileName)) != usedOutputNamesLower.end())
+            {
+                outputFileName = outputBaseStem + "-" + std::to_string(suffix) + ".json";
+                suffix += 1;
+            }
+            usedOutputNamesLower.push_back(makePathKeyLower(outputFileName));
+
+            const std::filesystem::path outputJsonPath =
+                std::filesystem::path(targetShip.folderAbsolutePath) / outputFileName;
+
+            char* outputJsonText = cJSON_Print(root);
+            cJSON_Delete(root);
+            if (outputJsonText == nullptr)
+            {
+                failedCount += 1;
+                continue;
+            }
+
+            std::ofstream output(outputJsonPath, std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                cJSON_free(outputJsonText);
+                failedCount += 1;
+                continue;
+            }
+            output.write(outputJsonText, static_cast<std::streamsize>(std::strlen(outputJsonText)));
+            const bool writeOk = output.good();
+            output.close();
+            cJSON_free(outputJsonText);
+
+            if (!writeOk)
+            {
+                failedCount += 1;
+                continue;
+            }
+
+            wroteForTarget = true;
+            writtenCount += 1;
+        }
+        if (wroteForTarget)
+        {
+            targetsWithWrite += 1;
+        }
+    }
+
+    if (writtenCount <= 0)
+    {
+        this->statusMessage = "Duplication ships: echec (aucun JSON ecrit).";
+        return false;
+    }
+
+    this->closeShipVfxShipDuplicatePopup();
+    if (failedCount == 0)
+    {
+        this->statusMessage =
+            "Duplication ships OK: " + std::to_string(writtenCount) +
+            " JSON vers " + std::to_string(targetsWithWrite) + " navire(s).";
+    }
+    else
+    {
+        this->statusMessage =
+            "Duplication ships partielle: " + std::to_string(writtenCount) +
+            " JSON OK, " + std::to_string(failedCount) + " echec(s).";
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::computeShipVfxShipDuplicatePopupLayout(ShipVfxShipDuplicatePopupLayout* out) const
+{
+    if (out == nullptr || !this->shipVfxShipDuplicatePopupVisible)
+    {
+        return false;
+    }
+
+    const SDL_FRect mapRect = GetCurrentMap().rect;
+    out->dimFullMap = mapRect;
+
+    const float popupW = (std::clamp)(mapRect.w - 90.0f, 860.0f, 1220.0f);
+    const float popupH = (std::clamp)(mapRect.h - 100.0f, 460.0f, 700.0f);
+    out->popup = SDL_FRect{
+        mapRect.x + ((mapRect.w - popupW) * 0.5f),
+        mapRect.y + ((mapRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+
+    const float pad = 14.0f;
+    const float colGap = 10.0f;
+    const float topHeaderH = 36.0f;
+    const float footerH = 34.0f;
+    const float listButtonsH = 58.0f;
+    const float listTop = out->popup.y + topHeaderH + 20.0f;
+    const float listH = (std::max)(out->popup.h - (topHeaderH + footerH + listButtonsH + 36.0f), 160.0f);
+    const float listW = (out->popup.w - (pad * 2.0f) - (colGap * 2.0f)) / 3.0f;
+
+    const float col1X = out->popup.x + pad;
+    const float col2X = col1X + listW + colGap;
+    const float col3X = col2X + listW + colGap;
+
+    out->sourceShipListRect = SDL_FRect{col1X, listTop, listW, listH};
+    out->sourceAnimationListRect = SDL_FRect{col2X, listTop, listW, listH};
+    out->targetShipListRect = SDL_FRect{col3X, listTop, listW, listH};
+
+    const float listActionsY = listTop + listH + 6.0f;
+    const float halfBtnW = (listW - 6.0f) * 0.5f;
+    out->animationSelectAllRect = SDL_FRect{col2X, listActionsY, halfBtnW, 24.0f};
+    out->animationSelectNoneRect = SDL_FRect{col2X + halfBtnW + 6.0f, listActionsY, halfBtnW, 24.0f};
+    out->targetSelectAllRect = SDL_FRect{col3X, listActionsY, halfBtnW, 24.0f};
+    out->targetSelectNoneRect = SDL_FRect{col3X + halfBtnW + 6.0f, listActionsY, halfBtnW, 24.0f};
+    out->targetSelectAllExceptSourceRect = SDL_FRect{col3X, listActionsY + 28.0f, listW, 24.0f};
+
+    const float footerY = out->popup.y + out->popup.h - footerH + 2.0f;
+    out->cancelBtn = SDL_FRect{out->popup.x + pad, footerY, 140.0f, 28.0f};
+    out->validateBtn = SDL_FRect{out->popup.x + out->popup.w - pad - 210.0f, footerY, 210.0f, 28.0f};
+    return true;
+}
+
+void EditorMapVfxScene::drawShipVfxShipDuplicatePopup(void) const
+{
+    if (!this->shipVfxShipDuplicatePopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    ShipVfxShipDuplicatePopupLayout lay{};
+    if (!this->computeShipVfxShipDuplicatePopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->shipVfxShipDuplicatePopupLastLayout = lay;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 165});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{26, 34, 44, 246});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{148, 170, 194, 246});
+    rc2d_graphics_rectangle("line", &lay.popup);
+
+    RC2D_Text title = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Duplication VFX multi-navires");
+    title.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&title);
+    rc2d_graphics_drawText(&title, lay.popup.x + 14.0f, lay.popup.y + 8.0f);
+    rc2d_graphics_destroyText(&title);
+
+    int selectedAnimationCount = 0;
+    for (bool selected : this->shipVfxShipDuplicateSourceAnimationSelected)
+    {
+        if (selected)
+        {
+            selectedAnimationCount += 1;
+        }
+    }
+    int selectedTargetCount = 0;
+    for (bool selected : this->shipVfxShipDuplicateTargetShipSelected)
+    {
+        if (selected)
+        {
+            selectedTargetCount += 1;
+        }
+    }
+
+    const float headerY = lay.sourceShipListRect.y - 16.0f;
+    RC2D_Text sourceText = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Source ship");
+    sourceText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&sourceText);
+    rc2d_graphics_drawText(&sourceText, lay.sourceShipListRect.x + 2.0f, headerY);
+    rc2d_graphics_destroyText(&sourceText);
+
+    char animationHeader[128] = {};
+    SDL_snprintf(
+        animationHeader,
+        sizeof(animationHeader),
+        "Animations source (%d/%d)",
+        selectedAnimationCount,
+        static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size()));
+    RC2D_Text animationText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), animationHeader);
+    animationText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&animationText);
+    rc2d_graphics_drawText(&animationText, lay.sourceAnimationListRect.x + 2.0f, headerY);
+    rc2d_graphics_destroyText(&animationText);
+
+    char targetHeader[128] = {};
+    SDL_snprintf(
+        targetHeader,
+        sizeof(targetHeader),
+        "Ships cibles (%d/%d)",
+        selectedTargetCount,
+        static_cast<int>(this->importedShips.size()));
+    RC2D_Text targetText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), targetHeader);
+    targetText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&targetText);
+    rc2d_graphics_drawText(&targetText, lay.targetShipListRect.x + 2.0f, headerY);
+    rc2d_graphics_destroyText(&targetText);
+
+    std::vector<std::string> sourceShipLabels;
+    sourceShipLabels.reserve(this->importedShips.size());
+    for (const ImportedShip& ship : this->importedShips)
+    {
+        sourceShipLabels.push_back(stripListPrefix(ship.displayName, "ship-"));
+    }
+    this->drawListPanel(
+        lay.sourceShipListRect,
+        "Navire source",
+        sourceShipLabels,
+        this->shipVfxShipDuplicateSourceShipIndex,
+        this->shipVfxShipDuplicateSourceShipScrollOffset);
+
+    std::vector<std::string> animationLabels;
+    animationLabels.reserve(this->shipVfxShipDuplicateSourceAnimations.size());
+    for (size_t i = 0; i < this->shipVfxShipDuplicateSourceAnimations.size(); ++i)
+    {
+        const bool on =
+            i < this->shipVfxShipDuplicateSourceAnimationSelected.size() &&
+            this->shipVfxShipDuplicateSourceAnimationSelected[i];
+        const ShipVfxShipDuplicateSourceAnimation& animation = this->shipVfxShipDuplicateSourceAnimations[i];
+        animationLabels.push_back(std::string(on ? "[X] " : "[ ] ") + animation.displayName);
+    }
+    this->drawListPanel(
+        lay.sourceAnimationListRect,
+        "Animations",
+        animationLabels,
+        -1,
+        this->shipVfxShipDuplicateAnimationScrollOffset);
+
+    std::vector<std::string> targetShipLabels;
+    targetShipLabels.reserve(this->importedShips.size());
+    for (size_t i = 0; i < this->importedShips.size(); ++i)
+    {
+        const bool on =
+            i < this->shipVfxShipDuplicateTargetShipSelected.size() &&
+            this->shipVfxShipDuplicateTargetShipSelected[i];
+        std::string label = std::string(on ? "[X] " : "[ ] ") +
+            stripListPrefix(this->importedShips[i].displayName, "ship-");
+        if (static_cast<int>(i) == this->shipVfxShipDuplicateSourceShipIndex)
+        {
+            label += " (source)";
+        }
+        targetShipLabels.push_back(std::move(label));
+    }
+    this->drawListPanel(
+        lay.targetShipListRect,
+        "Cibles",
+        targetShipLabels,
+        -1,
+        this->shipVfxShipDuplicateTargetShipScrollOffset);
+
+    this->drawToolbarButton(lay.animationSelectAllRect, "ANIMS TOUT", false);
+    this->drawToolbarButton(lay.animationSelectNoneRect, "ANIMS AUCUNE", false);
+    this->drawToolbarButton(lay.targetSelectAllRect, "SHIPS TOUT", false);
+    this->drawToolbarButton(lay.targetSelectNoneRect, "SHIPS AUCUN", false);
+    this->drawToolbarButton(lay.targetSelectAllExceptSourceRect, "TOUS SAUF SOURCE", false);
+    this->drawToolbarButton(lay.cancelBtn, "ANNULER", false);
+
+    const bool canValidate = (selectedAnimationCount > 0 && selectedTargetCount > 0);
+    this->drawToolbarButton(lay.validateBtn, "VALIDER DUPLICATION", canValidate);
+
+    RC2D_Text hintText = rc2d_graphics_createText(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        "Clic gauche: cocher/decocher | Entree: valider | Echap: annuler");
+    hintText.color = kHudStatusColor;
+    rc2d_graphics_setTextColor(&hintText);
+    rc2d_graphics_drawText(&hintText, lay.popup.x + 14.0f, lay.cancelBtn.y - 18.0f);
+    rc2d_graphics_destroyText(&hintText);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+bool EditorMapVfxScene::handleShipVfxShipDuplicatePopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->shipVfxShipDuplicatePopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+
+    ShipVfxShipDuplicatePopupLayout lay{};
+    if (!this->computeShipVfxShipDuplicatePopupLayout(&lay))
+    {
+        return true;
+    }
+    this->shipVfxShipDuplicatePopupLastLayout = lay;
+
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeShipVfxShipDuplicatePopup();
+        this->statusMessage = "Duplication ships: annulee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.validateBtn))
+    {
+        (void)this->applyShipVfxShipDuplicatePopupValidate();
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.animationSelectAllRect))
+    {
+        for (size_t i = 0; i < this->shipVfxShipDuplicateSourceAnimationSelected.size(); ++i)
+        {
+            this->shipVfxShipDuplicateSourceAnimationSelected[i] = true;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.animationSelectNoneRect))
+    {
+        for (size_t i = 0; i < this->shipVfxShipDuplicateSourceAnimationSelected.size(); ++i)
+        {
+            this->shipVfxShipDuplicateSourceAnimationSelected[i] = false;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.targetSelectAllRect))
+    {
+        for (size_t i = 0; i < this->shipVfxShipDuplicateTargetShipSelected.size(); ++i)
+        {
+            this->shipVfxShipDuplicateTargetShipSelected[i] = true;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.targetSelectNoneRect))
+    {
+        for (size_t i = 0; i < this->shipVfxShipDuplicateTargetShipSelected.size(); ++i)
+        {
+            this->shipVfxShipDuplicateTargetShipSelected[i] = false;
+        }
+        return true;
+    }
+    if (this->pointInRect(x, y, lay.targetSelectAllExceptSourceRect))
+    {
+        for (size_t i = 0; i < this->shipVfxShipDuplicateTargetShipSelected.size(); ++i)
+        {
+            this->shipVfxShipDuplicateTargetShipSelected[i] =
+                (static_cast<int>(i) != this->shipVfxShipDuplicateSourceShipIndex);
+        }
+        return true;
+    }
+
+    int clickedIndex = -1;
+    const bool sourceConsumed = this->handleListPanelClick(
+        x,
+        y,
+        lay.sourceShipListRect,
+        static_cast<int>(this->importedShips.size()),
+        &this->shipVfxShipDuplicateSourceShipScrollOffset,
+        &this->shipVfxShipDuplicateSourceShipScrollDragActive,
+        &this->shipVfxShipDuplicateSourceShipScrollDragGrabOffsetY,
+        &clickedIndex);
+    if (sourceConsumed)
+    {
+        if (clickedIndex >= 0 &&
+            clickedIndex < static_cast<int>(this->importedShips.size()) &&
+            clickedIndex != this->shipVfxShipDuplicateSourceShipIndex)
+        {
+            this->shipVfxShipDuplicateSourceShipIndex = clickedIndex;
+            this->ensureSelectionVisible(
+                this->shipVfxShipDuplicateSourceShipIndex,
+                &this->shipVfxShipDuplicateSourceShipScrollOffset,
+                static_cast<int>(this->importedShips.size()));
+            this->refreshShipVfxShipDuplicatePopupSourceAnimations();
+        }
+        return true;
+    }
+
+    clickedIndex = -1;
+    const bool animationConsumed = this->handleListPanelClick(
+        x,
+        y,
+        lay.sourceAnimationListRect,
+        static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size()),
+        &this->shipVfxShipDuplicateAnimationScrollOffset,
+        &this->shipVfxShipDuplicateAnimationScrollDragActive,
+        &this->shipVfxShipDuplicateAnimationScrollDragGrabOffsetY,
+        &clickedIndex);
+    if (animationConsumed)
+    {
+        if (clickedIndex >= 0 &&
+            clickedIndex < static_cast<int>(this->shipVfxShipDuplicateSourceAnimationSelected.size()))
+        {
+            const size_t selectedIndex = static_cast<size_t>(clickedIndex);
+            this->shipVfxShipDuplicateSourceAnimationSelected[selectedIndex] =
+                !this->shipVfxShipDuplicateSourceAnimationSelected[selectedIndex];
+        }
+        return true;
+    }
+
+    clickedIndex = -1;
+    const bool targetConsumed = this->handleListPanelClick(
+        x,
+        y,
+        lay.targetShipListRect,
+        static_cast<int>(this->importedShips.size()),
+        &this->shipVfxShipDuplicateTargetShipScrollOffset,
+        &this->shipVfxShipDuplicateTargetShipScrollDragActive,
+        &this->shipVfxShipDuplicateTargetShipScrollDragGrabOffsetY,
+        &clickedIndex);
+    if (targetConsumed)
+    {
+        if (clickedIndex >= 0 &&
+            clickedIndex < static_cast<int>(this->shipVfxShipDuplicateTargetShipSelected.size()))
+        {
+            const size_t selectedIndex = static_cast<size_t>(clickedIndex);
+            this->shipVfxShipDuplicateTargetShipSelected[selectedIndex] =
+                !this->shipVfxShipDuplicateTargetShipSelected[selectedIndex];
+        }
+        return true;
+    }
+
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        this->closeShipVfxShipDuplicatePopup();
+        this->statusMessage = "Duplication ships: annulee.";
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::handleShipVfxShipDuplicatePopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+    (void)keycode;
+    (void)mod;
+    if (!this->shipVfxShipDuplicatePopupVisible)
+    {
+        return false;
+    }
+    if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
+    {
+        this->closeShipVfxShipDuplicatePopup();
+        this->statusMessage = "Duplication ships: annulee.";
+        return true;
+    }
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        (void)this->applyShipVfxShipDuplicatePopupValidate();
+        return true;
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::handleShipVfxShipDuplicatePopupMouseWheel(int delta, float mouseX, float mouseY)
+{
+    if (!this->shipVfxShipDuplicatePopupVisible)
+    {
+        return false;
+    }
+    ShipVfxShipDuplicatePopupLayout lay{};
+    if (!this->computeShipVfxShipDuplicatePopupLayout(&lay))
+    {
+        return true;
+    }
+
+    auto scrollIfInside = [this, delta, mouseX, mouseY](const SDL_FRect& rect, int itemCount, int* scrollOffset) -> bool {
+        if (scrollOffset == nullptr || !this->pointInRect(mouseX, mouseY, rect))
+        {
+            return false;
+        }
+        *scrollOffset -= delta;
+        this->clampListScrollOffset(scrollOffset, itemCount);
+        return true;
+    };
+
+    if (scrollIfInside(
+            lay.sourceShipListRect,
+            static_cast<int>(this->importedShips.size()),
+            &this->shipVfxShipDuplicateSourceShipScrollOffset))
+    {
+        return true;
+    }
+    if (scrollIfInside(
+            lay.sourceAnimationListRect,
+            static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size()),
+            &this->shipVfxShipDuplicateAnimationScrollOffset))
+    {
+        return true;
+    }
+    if (scrollIfInside(
+            lay.targetShipListRect,
+            static_cast<int>(this->importedShips.size()),
+            &this->shipVfxShipDuplicateTargetShipScrollOffset))
+    {
+        return true;
+    }
+
+    return this->pointInRect(mouseX, mouseY, lay.popup);
+}
+
 void EditorMapVfxScene::moveSelectedLayerOrder(int delta)
 {
     if (this->shipLayerSelected)
@@ -4667,7 +5932,6 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     setNextButton(&this->buttonModeShipVfxRect, &x, topToolbarY, 210.0f);
     setNextButton(&this->buttonModeLooseSpritesRect, &x, topToolbarY, 460.0f);
     setNextButton(&this->buttonExportRect, &x, topToolbarY, 126.0f);
-    setNextButton(&this->buttonImportShipRect, &x, topToolbarY, 312.0f);
     setNextButton(&this->buttonReloadAssetsRect, &x, topToolbarY, 136.0f);
     setNextButton(&this->buttonOceanPrevRect, &x, topToolbarY, 92.0f);
     setNextButton(&this->buttonOceanNextRect, &x, topToolbarY, 92.0f);
@@ -4744,6 +6008,18 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->shipListRect.h = 276.0f;
     this->shipListRect.x = map.rect.x + map.rect.w - this->shipListRect.w - 40.0f;
     this->shipListRect.y = map.rect.y + map.rect.h - this->shipListRect.h - 40.0f;
+    {
+        float duplicateButtonY = this->shipListRect.y + this->shipListRect.h + 4.0f;
+        if (duplicateButtonY + h > map.rect.y + map.rect.h - 2.0f)
+        {
+            duplicateButtonY = this->shipListRect.y - h - 4.0f;
+        }
+        this->buttonShipVfxDuplicateShipsRect = SDL_FRect{
+            this->shipListRect.x,
+            duplicateButtonY,
+            this->shipListRect.w,
+            h};
+    }
 
     this->sfxListRect = this->shipListRect;
     this->sfxListRect.x = this->shipListRect.x - this->sfxListRect.w - 16.0f;
@@ -6675,6 +7951,51 @@ void EditorMapVfxScene::openExportFolderDialog(void)
     rc2d_filedialog_openFolder(&EditorMapVfxScene::onExportFolderDialogResult, this, &options);
 }
 
+void EditorMapVfxScene::openExportConfirmPopup(ExportConfirmAction action)
+{
+    this->exportConfirmPopupAction = action;
+    this->exportConfirmPopupVisible = (action != ExportConfirmAction::NONE);
+    if (!this->exportConfirmPopupVisible)
+    {
+        return;
+    }
+    this->statusMessage = "Export: confirmation requise.";
+}
+
+void EditorMapVfxScene::closeExportConfirmPopup(void)
+{
+    this->exportConfirmPopupVisible = false;
+    this->exportConfirmPopupAction = ExportConfirmAction::NONE;
+}
+
+bool EditorMapVfxScene::computeExportConfirmPopupLayout(ExportConfirmPopupLayout* out) const
+{
+    if (out == nullptr)
+    {
+        return false;
+    }
+
+    out->dimFullMap = GetCurrentMap().rect;
+
+    const float popupW = std::clamp(out->dimFullMap.w - 220.0f, 460.0f, 860.0f);
+    const float popupH = 180.0f;
+    out->popup = SDL_FRect{
+        out->dimFullMap.x + ((out->dimFullMap.w - popupW) * 0.5f),
+        out->dimFullMap.y + ((out->dimFullMap.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+
+    constexpr float btnW = 170.0f;
+    constexpr float btnH = 34.0f;
+    constexpr float gap = 14.0f;
+    const float rowY = out->popup.y + out->popup.h - btnH - 16.0f;
+    const float totalW = (btnW * 2.0f) + gap;
+    const float startX = out->popup.x + ((out->popup.w - totalW) * 0.5f);
+    out->validateBtn = SDL_FRect{startX, rowY, btnW, btnH};
+    out->cancelBtn = SDL_FRect{startX + btnW + gap, rowY, btnW, btnH};
+    return true;
+}
+
 void EditorMapVfxScene::openLooseExportNamePopup(void)
 {
     if (this->editorMode != EditorMode::LOOSE_SPRITES)
@@ -7441,6 +8762,8 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
     this->importedSfx.push_back(std::move(imported));
     this->selectedSfxIndex = static_cast<int>(this->importedSfx.size()) - 1;
     this->ensureSelectionVisible(this->selectedSfxIndex, &this->sfxListScrollOffset, static_cast<int>(this->importedSfx.size()));
+    this->sfxListActionButtonsVisible = true;
+    this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
     this->statusMessage = "VFX importe: " + this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)].displayName;
     return true;
 }
@@ -7564,6 +8887,18 @@ bool EditorMapVfxScene::importSfxFromRootFolderAbsolutePath(const char* rootFold
     if (!this->importedSfx.empty() && (this->selectedSfxIndex < 0 || this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size())))
     {
         this->selectedSfxIndex = 0;
+    }
+
+    if (this->selectedSfxIndex >= 0 && this->selectedSfxIndex < static_cast<int>(this->importedSfx.size()))
+    {
+        this->ensureSelectionVisible(this->selectedSfxIndex, &this->sfxListScrollOffset, static_cast<int>(this->importedSfx.size()));
+        this->sfxListActionButtonsVisible = true;
+        this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
+    }
+    else
+    {
+        this->sfxListActionButtonsVisible = false;
+        this->sfxListActionButtonsSfxIndex = -1;
     }
 
     if (addedCount <= 0 && this->importedSfx.empty())
@@ -9147,6 +10482,106 @@ bool EditorMapVfxScene::handleLooseExportNameInputKey(
     return appendIfRoom(key[0]);
 }
 
+bool EditorMapVfxScene::handleExportConfirmPopupMouseClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->exportConfirmPopupVisible)
+    {
+        return false;
+    }
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return true;
+    }
+
+    ExportConfirmPopupLayout lay{};
+    if (!this->computeExportConfirmPopupLayout(&lay))
+    {
+        return true;
+    }
+    this->exportConfirmPopupLastLayout = lay;
+
+    if (!this->pointInRect(x, y, lay.popup))
+    {
+        if (this->pointInRect(x, y, lay.dimFullMap))
+        {
+            this->closeExportConfirmPopup();
+            this->statusMessage = "Export annule.";
+        }
+        return true;
+    }
+
+    if (this->pointInRect(x, y, lay.cancelBtn))
+    {
+        this->closeExportConfirmPopup();
+        this->statusMessage = "Export annule.";
+        return true;
+    }
+    if (!this->pointInRect(x, y, lay.validateBtn))
+    {
+        return true;
+    }
+
+    const ExportConfirmAction action = this->exportConfirmPopupAction;
+    this->closeExportConfirmPopup();
+    if (action == ExportConfirmAction::SHIP_VFX_ALL_SHIPS)
+    {
+        this->exportAllShipsVfxJsonToShipFolders();
+    }
+    else if (action == ExportConfirmAction::LOOSE_OPEN_EXPORT_FLOW)
+    {
+        this->openLooseExportNamePopup();
+    }
+    else
+    {
+        this->statusMessage = "Export annule.";
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::handleExportConfirmPopupKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+    (void)keycode;
+    (void)mod;
+    if (!this->exportConfirmPopupVisible)
+    {
+        return false;
+    }
+
+    if (scancode == SDL_SCANCODE_ESCAPE)
+    {
+        this->closeExportConfirmPopup();
+        this->statusMessage = "Export annule.";
+        return true;
+    }
+
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        const ExportConfirmAction action = this->exportConfirmPopupAction;
+        this->closeExportConfirmPopup();
+        if (action == ExportConfirmAction::SHIP_VFX_ALL_SHIPS)
+        {
+            this->exportAllShipsVfxJsonToShipFolders();
+        }
+        else if (action == ExportConfirmAction::LOOSE_OPEN_EXPORT_FLOW)
+        {
+            this->openLooseExportNamePopup();
+        }
+        else
+        {
+            this->statusMessage = "Export annule.";
+        }
+        return true;
+    }
+
+    return true;
+}
+
 void EditorMapVfxScene::getVfxPreviewDrawOffsets(
     const ShipVfxInstance& instance,
     const DirectionOverride* resolvedOverride,
@@ -10664,14 +12099,44 @@ bool EditorMapVfxScene::loadShipVfxConfigForSelectedShip(void)
 
 bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath)
 {
-    if (!this->previewShipLoaded || this->selectedShipIndex < 0 || this->selectedShipIndex >= static_cast<int>(this->importedShips.size()))
+    return this->exportShipVfxJsonToFolderForShipIndex(
+        this->selectedShipIndex,
+        absoluteFolderPath,
+        true,
+        nullptr,
+        nullptr);
+}
+
+bool EditorMapVfxScene::exportShipVfxJsonToFolderForShipIndex(
+    int shipIndex,
+    const char* absoluteFolderPath,
+    bool updateStatusMessage,
+    int* outExportedFileCount,
+    int* outFailedFileCount)
+{
+    if (outExportedFileCount != nullptr)
     {
-        this->statusMessage = "Charge d'abord un navire avant export JSON.";
+        *outExportedFileCount = 0;
+    }
+    if (outFailedFileCount != nullptr)
+    {
+        *outFailedFileCount = 0;
+    }
+
+    if (shipIndex < 0 || shipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        if (updateStatusMessage)
+        {
+            this->statusMessage = "Charge d'abord un navire avant export JSON.";
+        }
         return false;
     }
     if (absoluteFolderPath == nullptr || absoluteFolderPath[0] == '\0')
     {
-        this->statusMessage = "Dossier export invalide.";
+        if (updateStatusMessage)
+        {
+            this->statusMessage = "Dossier export invalide.";
+        }
         return false;
     }
 
@@ -10680,11 +12145,14 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
     std::filesystem::create_directories(folderPath, fsError);
     if (fsError)
     {
-        this->statusMessage = "Impossible de creer le dossier export.";
+        if (updateStatusMessage)
+        {
+            this->statusMessage = "Impossible de creer le dossier export.";
+        }
         return false;
     }
 
-    const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(shipIndex)];
     const std::string shipSlug = makeShipConfigSlug(ship.displayName);
 
     struct ExportAnimationGroup
@@ -10717,12 +12185,106 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         return "id:" + std::to_string(instance.instanceId);
     };
 
-    const int exportPageCount = this->shipVfxEffectiveLayerPageCount();
+    struct ExportSourceState
+    {
+        std::array<std::vector<ShipVfxInstance>, kShipVfxLayerPageCount> layerPages{};
+        std::array<int, kShipVfxLayerPageCount> drawOrderByPage{};
+        std::array<bool, kShipVfxLayerPageCount> layerVisibleByPage{};
+        std::array<bool, kShipVfxLayerPageCount> layerLockedByPage{};
+        std::array<bool, kShipVfxLayerPageCount> debugBoundsVisibleByPage{};
+        std::array<uint32_t, kShipVfxLayerPageCount> shipSpawnAfterVfxInstanceIdByPage{};
+        std::array<int, kShipVfxLayerPageCount> shipSpawnAfterDelayMsByPage{};
+        bool targetSectorsABEnabled = false;
+        ShipVfxTargetingMode targetingMode = ShipVfxTargetingMode::NONE;
+    };
+
+    this->saveCurrentShipVfxPairDraft();
+
+    std::vector<ExportSourceState> exportSources;
+    exportSources.reserve(this->shipVfxPairDraftStates.size() + 1U);
+    for (const ShipVfxPairDraftState& draft : this->shipVfxPairDraftStates)
+    {
+        if (draft.shipIndex != shipIndex)
+        {
+            continue;
+        }
+
+        ExportSourceState source{};
+        source.layerPages = draft.layerPages;
+        source.drawOrderByPage = draft.drawOrderByPage;
+        source.layerVisibleByPage = draft.layerVisibleByPage;
+        source.layerLockedByPage = draft.layerLockedByPage;
+        source.debugBoundsVisibleByPage = draft.debugBoundsVisibleByPage;
+        source.shipSpawnAfterVfxInstanceIdByPage = draft.shipSpawnAfterInstanceIdByPage;
+        source.shipSpawnAfterDelayMsByPage = draft.shipSpawnAfterDelayMsByPage;
+        source.targetSectorsABEnabled = draft.targetSectorsABEnabled;
+        source.targetingMode = draft.targetingMode;
+        exportSources.push_back(std::move(source));
+    }
+
+    if (exportSources.empty() && shipIndex == this->selectedShipIndex)
+    {
+        ExportSourceState currentSource{};
+        currentSource.layerPages = this->shipVfxLayerPages;
+        currentSource.drawOrderByPage = this->shipDrawOrderByPage;
+        currentSource.layerVisibleByPage = this->shipLayerVisibleByPage;
+        currentSource.layerLockedByPage = this->shipLayerLockedByPage;
+        currentSource.debugBoundsVisibleByPage = this->shipDebugBoundsVisibleByPage;
+        currentSource.shipSpawnAfterVfxInstanceIdByPage = this->shipSpawnAfterVfxInstanceId;
+        currentSource.shipSpawnAfterDelayMsByPage = this->shipSpawnAfterDelayMs;
+        currentSource.targetSectorsABEnabled = this->shipVfxEditorTargetSectorsABEnabled;
+        currentSource.targetingMode = this->shipVfxEditorTargetingMode;
+        exportSources.push_back(std::move(currentSource));
+    }
+
+    std::array<std::vector<ShipVfxInstance>, kShipVfxLayerPageCount> mergedLayerPages{};
+    std::array<int, kShipVfxLayerPageCount> shipDrawOrderForExport{};
+    std::array<bool, kShipVfxLayerPageCount> shipLayerVisibleForExport{};
+    std::array<bool, kShipVfxLayerPageCount> shipLayerLockedForExport{};
+    std::array<bool, kShipVfxLayerPageCount> shipDebugBoundsVisibleForExport{};
+    std::array<uint32_t, kShipVfxLayerPageCount> shipSpawnAfterVfxInstanceIdForExport{};
+    std::array<int, kShipVfxLayerPageCount> shipSpawnAfterDelayMsForExport{};
+    shipDrawOrderForExport.fill(0);
+    shipLayerVisibleForExport.fill(true);
+    shipLayerLockedForExport.fill(false);
+    shipDebugBoundsVisibleForExport.fill(false);
+    shipSpawnAfterVfxInstanceIdForExport.fill(0U);
+    shipSpawnAfterDelayMsForExport.fill(0);
+
+    bool targetSectorsABForExport = false;
+    bool haveShipLayerSettingsForExport = false;
+    for (const ExportSourceState& source : exportSources)
+    {
+        if (!haveShipLayerSettingsForExport)
+        {
+            shipDrawOrderForExport = source.drawOrderByPage;
+            shipLayerVisibleForExport = source.layerVisibleByPage;
+            shipLayerLockedForExport = source.layerLockedByPage;
+            shipDebugBoundsVisibleForExport = source.debugBoundsVisibleByPage;
+            shipSpawnAfterVfxInstanceIdForExport = source.shipSpawnAfterVfxInstanceIdByPage;
+            shipSpawnAfterDelayMsForExport = source.shipSpawnAfterDelayMsByPage;
+            haveShipLayerSettingsForExport = true;
+        }
+
+        const int sourcePageCount = source.targetSectorsABEnabled ? kShipVfxLayerPageCount : kShipVfxLayerPageCountNoTargetSectors;
+        for (int p = 0; p < sourcePageCount; ++p)
+        {
+            std::vector<ShipVfxInstance>& mergedPage = mergedLayerPages[static_cast<size_t>(p)];
+            const std::vector<ShipVfxInstance>& sourcePage = source.layerPages[static_cast<size_t>(p)];
+            mergedPage.insert(mergedPage.end(), sourcePage.begin(), sourcePage.end());
+        }
+        targetSectorsABForExport = targetSectorsABForExport || source.targetSectorsABEnabled;
+    }
+
+    const int exportPageCount =
+        targetSectorsABForExport ? kShipVfxLayerPageCount : kShipVfxLayerPageCountNoTargetSectors;
+    ShipVfxTargetingMode targetingModeForExport = targetingModeFromTargetSectorsAB(targetSectorsABForExport);
+    const auto* layerPagesForExport = &mergedLayerPages;
 
     std::vector<ExportAnimationGroup> groups;
     for (int p = 0; p < exportPageCount; ++p)
     {
-        for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+        for (const ShipVfxInstance& instance : (*layerPagesForExport)[static_cast<size_t>(p)])
         {
             const std::string key = buildInstanceGroupKey(instance);
             auto it = std::find_if(groups.begin(), groups.end(), [&key](const ExportAnimationGroup& group) {
@@ -10762,12 +12324,6 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
             }
             groups.push_back(std::move(group));
         }
-    }
-
-    if (groups.empty())
-    {
-        this->statusMessage = "Aucune instance VFX a exporter.";
-        return false;
     }
 
     const std::string shipFolderRelativePath =
@@ -10863,6 +12419,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
 
     std::vector<std::string> usedFileNames;
     std::vector<std::string> exportedPaths;
+    std::vector<std::string> exportedFileNameKeys;
     int failedCount = 0;
     for (const ExportAnimationGroup& group : groups)
     {
@@ -10908,19 +12465,17 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
             previewRoot,
             "targetFireSector",
             static_cast<double>(
-                this->shipVfxEditorTargetSectorsABEnabled ? this->previewTargetFireSectorIndex : 0));
+                targetSectorsABForExport ? this->previewTargetFireSectorIndex : 0));
 
         cJSON* editorJson = cJSON_CreateObject();
         cJSON_AddItemToObject(root, "editor", editorJson);
         cJSON_AddStringToObject(editorJson, "schema", "scene-editormap-vfx");
         cJSON_AddNumberToObject(editorJson, "schemaVersion", 2);
-        cJSON_AddBoolToObject(editorJson, "targetFireSectorsAB", this->shipVfxEditorTargetSectorsABEnabled);
-        this->shipVfxEditorTargetingMode =
-            targetingModeFromTargetSectorsAB(this->shipVfxEditorTargetSectorsABEnabled);
+        cJSON_AddBoolToObject(editorJson, "targetFireSectorsAB", targetSectorsABForExport);
         cJSON_AddStringToObject(
             editorJson,
             "targetingMode",
-            targetingModeToJsonId(this->shipVfxEditorTargetingMode));
+            targetingModeToJsonId(targetingModeForExport));
 
         cJSON* shipNode = cJSON_CreateObject();
         cJSON_AddItemToObject(editorJson, "ship", shipNode);
@@ -10950,7 +12505,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         std::vector<uint32_t> groupInstanceIds;
         for (int p = 0; p < exportPageCount; ++p)
         {
-            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            for (const ShipVfxInstance& instance : (*layerPagesForExport)[static_cast<size_t>(p)])
             {
                 if (buildInstanceGroupKey(instance) == group.key)
                 {
@@ -10966,22 +12521,25 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
 
             cJSON* shipLayerPage = cJSON_CreateObject();
             cJSON_AddItemToObject(pageObj, "shipLayer", shipLayerPage);
-            cJSON_AddNumberToObject(shipLayerPage, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
-            cJSON_AddBoolToObject(shipLayerPage, "visible", this->shipLayerVisibleByPage[static_cast<size_t>(p)]);
-            cJSON_AddBoolToObject(shipLayerPage, "locked", this->shipLayerLockedByPage[static_cast<size_t>(p)]);
-            cJSON_AddBoolToObject(shipLayerPage, "debugBoundsVisible", this->shipDebugBoundsVisibleByPage[static_cast<size_t>(p)]);
+            cJSON_AddNumberToObject(shipLayerPage, "drawOrder", shipDrawOrderForExport[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(shipLayerPage, "visible", shipLayerVisibleForExport[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(shipLayerPage, "locked", shipLayerLockedForExport[static_cast<size_t>(p)]);
+            cJSON_AddBoolToObject(
+                shipLayerPage,
+                "debugBoundsVisible",
+                shipDebugBoundsVisibleForExport[static_cast<size_t>(p)]);
             cJSON_AddNumberToObject(
                 shipLayerPage,
                 "spawnAfterVfxInstanceId",
-                static_cast<double>(this->shipSpawnAfterVfxInstanceId[static_cast<size_t>(p)]));
+                static_cast<double>(shipSpawnAfterVfxInstanceIdForExport[static_cast<size_t>(p)]));
             cJSON_AddNumberToObject(
                 shipLayerPage,
                 "spawnAfterDelayMs",
-                static_cast<double>(this->shipSpawnAfterDelayMs[static_cast<size_t>(p)]));
+                static_cast<double>(shipSpawnAfterDelayMsForExport[static_cast<size_t>(p)]));
 
             cJSON* instancesArray = cJSON_CreateArray();
             cJSON_AddItemToObject(pageObj, "vfxInstances", instancesArray);
-            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            for (const ShipVfxInstance& instance : (*layerPagesForExport)[static_cast<size_t>(p)])
             {
                 if (buildInstanceGroupKey(instance) == group.key)
                 {
@@ -11009,7 +12567,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddStringToObject(
             gameplayJson,
             "targetingMode",
-            targetingModeToJsonId(this->shipVfxEditorTargetingMode));
+            targetingModeToJsonId(targetingModeForExport));
 
         cJSON* gameplayDirectionStatesArray = cJSON_CreateArray();
         cJSON_AddItemToObject(gameplayJson, "directionStates", gameplayDirectionStatesArray);
@@ -11021,16 +12579,16 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
             cJSON* gameplayShipNode = cJSON_CreateObject();
             cJSON_AddItemToObject(gameplayPageObj, "ship", gameplayShipNode);
             const int stateBand = (p / 4) % 2;
-            const int fireSector = this->shipVfxEditorTargetSectorsABEnabled ? (p / 8) : 0;
+            const int fireSector = targetSectorsABForExport ? (p / 8) : 0;
             cJSON_AddStringToObject(gameplayShipNode, "direction", getDirectionIdByIndex(p % 4));
             cJSON_AddStringToObject(gameplayShipNode, "state", (stateBand == 1) ? "damaged" : "healthy");
             cJSON_AddNumberToObject(gameplayShipNode, "targetFireSector", static_cast<double>(fireSector));
-            cJSON_AddNumberToObject(gameplayShipNode, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
+            cJSON_AddNumberToObject(gameplayShipNode, "drawOrder", shipDrawOrderForExport[static_cast<size_t>(p)]);
 
             cJSON* gameplayInstancesArray = cJSON_CreateArray();
             cJSON_AddItemToObject(gameplayPageObj, "instances", gameplayInstancesArray);
             const int directionIndex = p % 4;
-            for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
+            for (const ShipVfxInstance& instance : (*layerPagesForExport)[static_cast<size_t>(p)])
             {
                 if (buildInstanceGroupKey(instance) != group.key)
                 {
@@ -11190,31 +12748,229 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         }
 
         exportedPaths.push_back(normalizePathSlashes(jsonPath.string()));
+        exportedFileNameKeys.push_back(makePathKeyLower(fileName));
+    }
+
+    // Complete l'export avec les JSON "fx-*.json" deja presents dans le dossier du navire
+    // (animations non chargees dans l'editeur, donc non modifiees).
+    const std::filesystem::path shipFolderPath(ship.folderAbsolutePath);
+    if (std::filesystem::exists(shipFolderPath, fsError) && std::filesystem::is_directory(shipFolderPath, fsError))
+    {
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(shipFolderPath, fsError))
+        {
+            if (fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+            if (!entry.is_regular_file(fsError) || fsError)
+            {
+                fsError.clear();
+                continue;
+            }
+
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (ext != ".json")
+            {
+                continue;
+            }
+
+            const std::string sourceFileName = entry.path().filename().string();
+            const std::string sourceFileNameKey = makePathKeyLower(sourceFileName);
+            if (sourceFileNameKey.rfind("fx-", 0U) != 0U)
+            {
+                continue;
+            }
+            if (std::find(exportedFileNameKeys.begin(), exportedFileNameKeys.end(), sourceFileNameKey) != exportedFileNameKeys.end())
+            {
+                continue;
+            }
+
+            std::string sourceText;
+            const std::string sourcePathNorm = normalizePathSlashes(entry.path().string());
+            if (!readTextFileUtf8(sourcePathNorm, &sourceText))
+            {
+                continue;
+            }
+            cJSON* sourceRoot = cJSON_Parse(sourceText.c_str());
+            if (sourceRoot == nullptr)
+            {
+                continue;
+            }
+            const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(sourceRoot, "format");
+            const bool isShipVfxConfig =
+                cJSON_IsString(formatNode) &&
+                formatNode->valuestring != nullptr &&
+                std::strcmp(formatNode->valuestring, "ship_vfx_config") == 0;
+            bool hasAnyInstance = false;
+            if (isShipVfxConfig)
+            {
+                const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(sourceRoot, "editor");
+                const cJSON* layerPagesNode = cJSON_GetObjectItemCaseSensitive(editorNode, "layerPages");
+                if (cJSON_IsArray(layerPagesNode))
+                {
+                    cJSON* layerPageNode = nullptr;
+                    cJSON_ArrayForEach(layerPageNode, layerPagesNode)
+                    {
+                        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(layerPageNode, "vfxInstances");
+                        if (cJSON_IsArray(instancesNode) && cJSON_GetArraySize(instancesNode) > 0)
+                        {
+                            hasAnyInstance = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            cJSON_Delete(sourceRoot);
+            if (!isShipVfxConfig || !hasAnyInstance)
+            {
+                continue;
+            }
+
+            const std::filesystem::path destinationPath = folderPath / sourceFileName;
+            const std::string destinationPathNorm = normalizePathSlashes(destinationPath.string());
+            const bool sameSourceAndDestination =
+                makePathKeyLower(sourcePathNorm) == makePathKeyLower(destinationPathNorm);
+
+            bool copyOk = sameSourceAndDestination;
+            if (!sameSourceAndDestination)
+            {
+                std::error_code copyError;
+                std::filesystem::copy_file(
+                    entry.path(),
+                    destinationPath,
+                    std::filesystem::copy_options::overwrite_existing,
+                    copyError);
+                copyOk = !copyError;
+            }
+
+            if (!copyOk)
+            {
+                failedCount += 1;
+                continue;
+            }
+
+            exportedPaths.push_back(destinationPathNorm);
+            exportedFileNameKeys.push_back(sourceFileNameKey);
+        }
     }
 
     if (exportedPaths.empty())
     {
-        this->statusMessage = "Echec export JSON VFX (aucun fichier ecrit).";
+        if (updateStatusMessage)
+        {
+            this->statusMessage = "Echec export JSON VFX (aucun fichier ecrit).";
+        }
         return false;
     }
 
-    if (failedCount == 0)
+    if (outExportedFileCount != nullptr)
+    {
+        *outExportedFileCount = static_cast<int>(exportedPaths.size());
+    }
+    if (outFailedFileCount != nullptr)
+    {
+        *outFailedFileCount = failedCount;
+    }
+
+    if (failedCount == 0 && shipIndex == this->selectedShipIndex)
     {
         this->shipVfxDirty = false;
     }
-    this->loadedShipVfxConfigPath = exportedPaths.front();
-    if (failedCount == 0)
+    if (shipIndex == this->selectedShipIndex)
+    {
+        this->loadedShipVfxConfigPath = exportedPaths.front();
+    }
+    if (updateStatusMessage)
+    {
+        if (failedCount == 0)
+        {
+            this->statusMessage =
+                "Export OK: " + std::to_string(static_cast<int>(exportedPaths.size())) +
+                " fichier(s) JSON.";
+        }
+        else
+        {
+            this->statusMessage =
+                "Export partiel: " + std::to_string(static_cast<int>(exportedPaths.size())) +
+                " OK, " + std::to_string(failedCount) + " en echec.";
+        }
+    }
+    return true;
+}
+
+bool EditorMapVfxScene::exportAllShipsVfxJsonToShipFolders(void)
+{
+    if (this->importedShips.empty())
+    {
+        this->statusMessage = "Aucun navire importe pour export JSON.";
+        return false;
+    }
+
+    this->saveCurrentShipVfxPairDraft();
+
+    int shipsWithExport = 0;
+    int shipsWithExportErrors = 0;
+    int totalExportedFiles = 0;
+    int totalFailedFiles = 0;
+
+    for (int shipIndex = 0; shipIndex < static_cast<int>(this->importedShips.size()); ++shipIndex)
+    {
+        const ImportedShip& ship = this->importedShips[static_cast<size_t>(shipIndex)];
+        int exportedForShip = 0;
+        int failedForShip = 0;
+        const bool shipExportOk = this->exportShipVfxJsonToFolderForShipIndex(
+            shipIndex,
+            ship.folderAbsolutePath.c_str(),
+            false,
+            &exportedForShip,
+            &failedForShip);
+
+        if (exportedForShip > 0)
+        {
+            shipsWithExport += 1;
+            totalExportedFiles += exportedForShip;
+        }
+        if (failedForShip > 0)
+        {
+            shipsWithExportErrors += 1;
+            totalFailedFiles += failedForShip;
+        }
+
+        // shipExportOk=false peut simplement signifier "aucun json a produire" pour ce navire.
+        (void)shipExportOk;
+    }
+
+    if (totalExportedFiles <= 0)
+    {
+        if (totalFailedFiles > 0)
+        {
+            this->statusMessage =
+                "Export global VFX: 0 fichier JSON, " + std::to_string(totalFailedFiles) + " en echec.";
+        }
+        else
+        {
+            this->statusMessage = "Export global VFX: aucun JSON a exporter.";
+        }
+        return false;
+    }
+
+    if (totalFailedFiles == 0)
     {
         this->statusMessage =
-            "Export OK: " + std::to_string(static_cast<int>(exportedPaths.size())) +
-            " fichier(s) JSON.";
+            "Export global OK: " + std::to_string(totalExportedFiles) + " fichier(s) JSON sur " +
+            std::to_string(shipsWithExport) + " navire(s).";
+        return true;
     }
-    else
-    {
-        this->statusMessage =
-            "Export partiel: " + std::to_string(static_cast<int>(exportedPaths.size())) +
-            " OK, " + std::to_string(failedCount) + " en echec.";
-    }
+
+    this->statusMessage =
+        "Export global partiel: " + std::to_string(totalExportedFiles) + " JSON OK sur " +
+        std::to_string(shipsWithExport) + " navire(s), " +
+        std::to_string(totalFailedFiles) + " echec(s) sur " +
+        std::to_string(shipsWithExportErrors) + " navire(s).";
     return true;
 }
 
@@ -13021,7 +14777,6 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER", false);
     if (shipMode)
     {
-        this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER VFX / SHIP EXISTANT", false);
         this->drawToolbarButton(this->buttonReloadAssetsRect, "RELOAD ASSETS", false);
     }
     this->drawToolbarButton(this->buttonOceanPrevRect, "OCEAN -", false);
@@ -13041,7 +14796,7 @@ void EditorMapVfxScene::drawHud(void) const
         this->drawToolbarButton(this->buttonShipOpacityPlusRect, "OPA +10%", false);
         this->drawToolbarButton(
             this->buttonPreviewIsoGridRect,
-            "GRILLE ISO 20x20",
+            "GRILLE ISO 30x30",
             this->previewIsoGridVisible);
         this->drawToolbarButton(this->buttonShipVfxZoomMinusRect, "ZOOM -", false);
         this->drawToolbarButton(this->buttonShipVfxZoomPlusRect, "ZOOM +", false);
@@ -13053,6 +14808,7 @@ void EditorMapVfxScene::drawHud(void) const
             shipLabels.push_back(stripListPrefix(ship.displayName, "ship-"));
         }
         this->drawListPanel(this->shipListRect, "Navires", shipLabels, this->selectedShipIndex, this->shipListScrollOffset);
+        this->drawToolbarButton(this->buttonShipVfxDuplicateShipsRect, "DUPLIQUER VFX SHIPS", false);
 
         std::vector<std::string> sfxLabels;
         sfxLabels.reserve(this->importedSfx.size());
@@ -13259,6 +15015,8 @@ void EditorMapVfxScene::drawHud(void) const
     this->drawVfxTrailPopup();
     this->drawVfxTrailConePopup();
     this->drawVfxDuplicateToPagesPopup();
+    this->drawShipVfxShipDuplicatePopup();
+    this->drawExportConfirmPopup();
 }
 
 void EditorMapVfxScene::drawLooseExportNamePopup(void) const
@@ -13317,6 +15075,79 @@ void EditorMapVfxScene::drawLooseExportNamePopup(void) const
     rc2d_graphics_setTextColor(&hintText);
     rc2d_graphics_drawText(&hintText, popupRect.x + 18.0f, popupRect.y + 110.0f);
     rc2d_graphics_destroyText(&hintText);
+}
+
+void EditorMapVfxScene::drawExportConfirmPopup(void) const
+{
+    if (!this->exportConfirmPopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    ExportConfirmPopupLayout lay{};
+    if (!this->computeExportConfirmPopupLayout(&lay))
+    {
+        return;
+    }
+    const_cast<EditorMapVfxScene*>(this)->exportConfirmPopupLastLayout = lay;
+
+    const char* title = "EXPORTER - CONFIRMATION";
+    const char* details = "";
+    switch (this->exportConfirmPopupAction)
+    {
+    case ExportConfirmAction::SHIP_VFX_ALL_SHIPS:
+        details = "Etes-vous sur ? Cette action exporte les JSON VFX pour tous les navires.";
+        break;
+    case ExportConfirmAction::LOOSE_OPEN_EXPORT_FLOW:
+        details = "Etes-vous sur ? Vous allez lancer le flux d'export sprites VFX.";
+        break;
+    default:
+        details = "Etes-vous sur de lancer l'export ?";
+        break;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 155});
+    rc2d_graphics_rectangle("fill", &lay.dimFullMap);
+    rc2d_graphics_setColor(RC2D_Color{22, 30, 40, 238});
+    rc2d_graphics_rectangle("fill", &lay.popup);
+    rc2d_graphics_setColor(RC2D_Color{145, 168, 194, 245});
+    rc2d_graphics_rectangle("line", &lay.popup);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    RC2D_Text titleText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
+    titleText.color = kHudTextColor;
+    rc2d_graphics_setTextColor(&titleText);
+    rc2d_graphics_drawText(&titleText, lay.popup.x + 18.0f, lay.popup.y + 18.0f);
+    rc2d_graphics_destroyText(&titleText);
+
+    RC2D_Text detailsText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), details);
+    detailsText.color = RC2D_Color{208, 220, 236, 235};
+    rc2d_graphics_setTextColor(&detailsText);
+    rc2d_graphics_drawText(&detailsText, lay.popup.x + 18.0f, lay.popup.y + 68.0f);
+    rc2d_graphics_destroyText(&detailsText);
+
+    auto drawBtn = [this](const SDL_FRect& r, const char* label, bool danger) {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(danger ? RC2D_Color{96, 58, 46, 236} : RC2D_Color{56, 72, 92, 232});
+        rc2d_graphics_rectangle("fill", &r);
+        rc2d_graphics_setColor(danger ? RC2D_Color{228, 182, 156, 245} : RC2D_Color{150, 170, 190, 235});
+        rc2d_graphics_rectangle("line", &r);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        RC2D_Text txt = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), label);
+        txt.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&txt);
+        int tw = 0;
+        int th = 0;
+        rc2d_graphics_getTextSize(&txt, &tw, &th);
+        rc2d_graphics_drawText(
+            &txt,
+            r.x + ((r.w - static_cast<float>(tw)) * 0.5f),
+            r.y + ((r.h - static_cast<float>(th)) * 0.5f));
+        rc2d_graphics_destroyText(&txt);
+    };
+    drawBtn(lay.validateBtn, "OUI, EXPORTER", true);
+    drawBtn(lay.cancelBtn, "ANNULER", false);
 }
 
 void EditorMapVfxScene::drawVfxRelativeTimingPopup(void) const
@@ -15366,7 +17197,20 @@ bool EditorMapVfxScene::handleShipListClick(float x, float y)
     }
     if (clickedIndex >= 0)
     {
-        this->selectImportedShipAtIndex(clickedIndex);
+        if (clickedIndex == this->selectedShipIndex)
+        {
+            return true;
+        }
+
+        this->saveCurrentShipVfxPairDraft();
+        if (!this->selectImportedShipAtIndex(clickedIndex))
+        {
+            return true;
+        }
+        if (this->restoreCurrentShipVfxPairDraft())
+        {
+            this->statusMessage += " | Brouillon ship+vfx restaure.";
+        }
     }
     return true;
 }
@@ -15395,11 +17239,47 @@ bool EditorMapVfxScene::handleSfxListClick(float x, float y, RC2D_MouseButton bu
     }
     if (clickedIndex >= 0)
     {
+        if (clickedIndex == this->selectedSfxIndex)
+        {
+            this->sfxListActionButtonsVisible = true;
+            this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
+            this->statusMessage = "VFX selectionne. Choisis: AUTO IMPORT ou AJOUTER INSTANCE.";
+            return true;
+        }
+
+        this->saveCurrentShipVfxPairDraft();
         this->selectedSfxIndex = clickedIndex;
         this->ensureSelectionVisible(this->selectedSfxIndex, &this->sfxListScrollOffset, static_cast<int>(this->importedSfx.size()));
         this->sfxListActionButtonsVisible = true;
         this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
-        this->statusMessage = "VFX selectionne. Choisis: AUTO IMPORT ou AJOUTER INSTANCE.";
+
+        if (this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()) &&
+            this->restoreCurrentShipVfxPairDraft())
+        {
+            this->statusMessage = "VFX selectionne. Brouillon ship+vfx restaure.";
+        }
+        else
+        {
+            this->clearAllShipVfxLayerPages();
+            this->clearShipVfxTrailPieces();
+            this->initDefaultShipLayerSettingsAllPages();
+            this->setSelectedVfxInstanceIndex(-1);
+            this->nextVfxInstanceId = 1U;
+            this->shipVfxDirty = false;
+
+            if (this->selectedShipIndex >= 0 && this->selectedShipIndex < static_cast<int>(this->importedShips.size()))
+            {
+                this->loadedShipVfxConfigPath = this->buildShipVfxPairConfigJsonPath(
+                    this->importedShips[static_cast<size_t>(this->selectedShipIndex)],
+                    this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)]);
+                this->statusMessage = "VFX selectionne. Brouillon vide pour ce couple: AUTO IMPORT ou AJOUTER INSTANCE.";
+            }
+            else
+            {
+                this->loadedShipVfxConfigPath.clear();
+                this->statusMessage = "VFX selectionne. Choisis: AUTO IMPORT ou AJOUTER INSTANCE.";
+            }
+        }
     }
     return true;
 }
@@ -16103,11 +17983,11 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         this->loosePreviewTotalDurationMsInputFocused = false;
         if (this->editorMode == EditorMode::LOOSE_SPRITES)
         {
-            this->openLooseExportNamePopup();
+            this->openExportConfirmPopup(ExportConfirmAction::LOOSE_OPEN_EXPORT_FLOW);
         }
         else
         {
-            this->openExportFolderDialog();
+            this->openExportConfirmPopup(ExportConfirmAction::SHIP_VFX_ALL_SHIPS);
         }
         return true;
     }
@@ -16124,11 +18004,6 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
-        if (this->pointInRect(x, y, this->buttonImportShipRect))
-        {
-            this->openImportShipVfxConfigDialog();
-            return true;
-        }
         if (this->pointInRect(x, y, this->buttonReloadAssetsRect))
         {
             this->autoImportAssetsFromDefaultFolders();
@@ -16173,7 +18048,7 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         {
             this->previewIsoGridVisible = !this->previewIsoGridVisible;
             this->statusMessage = this->previewIsoGridVisible
-                ? "Grille isometrique 20x20 (debug) affichee sous le navire."
+                ? "Grille isometrique 30x30 (debug) affichee sous le navire."
                 : "Grille isometrique debug masquee.";
             return true;
         }
@@ -16715,6 +18590,7 @@ void EditorMapVfxScene::unload(void)
         this->pendingShipVfxConfigDialogCanceled = false;
         this->pendingShipVfxConfigAbsolutePath.clear();
     }
+    this->closeExportConfirmPopup();
     this->looseExportNamePopupVisible = false;
     this->looseExportNameInput.clear();
     this->pendingLooseExportAnimationName.clear();
@@ -16780,6 +18656,31 @@ void EditorMapVfxScene::update(double dt)
 
     if (this->editorMode == EditorMode::SHIP_VFX)
     {
+        if (this->shipVfxShipDuplicatePopupVisible)
+        {
+            ShipVfxShipDuplicatePopupLayout popupLayout{};
+            if (this->computeShipVfxShipDuplicatePopupLayout(&popupLayout))
+            {
+                this->handleListPanelScrollDragFromMouse(
+                    popupLayout.sourceShipListRect,
+                    static_cast<int>(this->importedShips.size()),
+                    &this->shipVfxShipDuplicateSourceShipScrollOffset,
+                    &this->shipVfxShipDuplicateSourceShipScrollDragActive,
+                    &this->shipVfxShipDuplicateSourceShipScrollDragGrabOffsetY);
+                this->handleListPanelScrollDragFromMouse(
+                    popupLayout.sourceAnimationListRect,
+                    static_cast<int>(this->shipVfxShipDuplicateSourceAnimations.size()),
+                    &this->shipVfxShipDuplicateAnimationScrollOffset,
+                    &this->shipVfxShipDuplicateAnimationScrollDragActive,
+                    &this->shipVfxShipDuplicateAnimationScrollDragGrabOffsetY);
+                this->handleListPanelScrollDragFromMouse(
+                    popupLayout.targetShipListRect,
+                    static_cast<int>(this->importedShips.size()),
+                    &this->shipVfxShipDuplicateTargetShipScrollOffset,
+                    &this->shipVfxShipDuplicateTargetShipScrollDragActive,
+                    &this->shipVfxShipDuplicateTargetShipScrollDragGrabOffsetY);
+            }
+        }
         this->handleListPanelScrollDragFromMouse(
             this->shipListRect,
             static_cast<int>(this->importedShips.size()),
@@ -16999,6 +18900,14 @@ void EditorMapVfxScene::keypressed(
     (void)keycode;
     (void)keyboardID;
 
+    if (this->handleExportConfirmPopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
+    if (this->handleShipVfxShipDuplicatePopupKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     if (this->handleVfxDuplicateToPagesPopupKey(key, scancode, keycode, mod, isrepeat))
     {
         return;
@@ -17075,19 +18984,6 @@ void EditorMapVfxScene::keypressed(
     {
         const bool reverse = ((mod & SDL_KMOD_SHIFT) != 0);
         this->requestOceanColorStep(reverse ? -1 : 1);
-        return;
-    }
-
-    if (!isrepeat && scancode == SDL_SCANCODE_E)
-    {
-        if (this->editorMode == EditorMode::LOOSE_SPRITES)
-        {
-            this->openLooseExportNamePopup();
-        }
-        else
-        {
-            this->openExportFolderDialog();
-        }
         return;
     }
 
@@ -17405,6 +19301,18 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
     (void)mouseID;
     Map& map = GetCurrentMap();
 
+    if (this->exportConfirmPopupVisible)
+    {
+        (void)this->handleExportConfirmPopupMouseClick(x, y, button);
+        return;
+    }
+
+    if (this->shipVfxShipDuplicatePopupVisible)
+    {
+        (void)this->handleShipVfxShipDuplicatePopupMouseClick(x, y, button);
+        return;
+    }
+
     if (this->vfxDuplicateToPagesPopupVisible)
     {
         (void)this->handleVfxDuplicateToPagesPopupMouseClick(x, y, button);
@@ -17505,6 +19413,11 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
             {
                 return;
             }
+            if (this->pointInRect(x, y, this->buttonShipVfxDuplicateShipsRect))
+            {
+                this->openShipVfxShipDuplicatePopup();
+                return;
+            }
             if (this->handleShipListClick(x, y))
             {
                 return;
@@ -17597,11 +19510,19 @@ void EditorMapVfxScene::mousewheelmoved(
     {
         return;
     }
+    if (this->exportConfirmPopupVisible)
+    {
+        return;
+    }
 
     // Meme espace que mousepressed / handleListPanelClick : coordonnees rendu SDL.
     float wheelMx = 0.0f;
     float wheelMy = 0.0f;
     this->getMouseRenderPosition(&wheelMx, &wheelMy);
+    if (this->handleShipVfxShipDuplicatePopupMouseWheel(delta, wheelMx, wheelMy))
+    {
+        return;
+    }
 
     auto isMouseInsidePanel = [this, wheelMx, wheelMy](const SDL_FRect& panelRect) -> bool {
         return this->pointInRect(wheelMx, wheelMy, panelRect);

@@ -48,6 +48,12 @@ private:
         PLACEMENT_PREVIEW = 1
     };
 
+    enum class ExportConfirmAction {
+        NONE = 0,
+        SHIP_VFX_ALL_SHIPS = 1,
+        LOOSE_OPEN_EXPORT_FLOW = 2
+    };
+
     struct ImportedShip {
         std::string displayName;
         std::string folderAbsolutePath;
@@ -270,7 +276,7 @@ private:
     std::array<uint32_t, kShipVfxLayerPageCount> shipSpawnAfterVfxInstanceId{};
     std::array<int, kShipVfxLayerPageCount> shipSpawnAfterDelayMs{};
     bool shipLayerSelected;
-    /** Debug : grille iso 10x10 au sol sous le navire preview. */
+    /** Debug : grille iso 30x30 au sol sous le navire preview. */
     bool previewIsoGridVisible;
     RC2D_Image looseReferenceGuildIslandImage;
     RC2D_Image looseReferenceTowerLevel1Image;
@@ -283,6 +289,24 @@ private:
     bool looseReferencePreviewLoaded;
 
     std::array<std::vector<ShipVfxInstance>, kShipVfxLayerPageCount> shipVfxLayerPages{};
+    struct ShipVfxPairDraftState
+    {
+        std::string pairKey;
+        int shipIndex = -1;
+        int sfxIndex = -1;
+        std::array<std::vector<ShipVfxInstance>, kShipVfxLayerPageCount> layerPages{};
+        std::array<int, kShipVfxLayerPageCount> drawOrderByPage{};
+        std::array<bool, kShipVfxLayerPageCount> layerVisibleByPage{};
+        std::array<bool, kShipVfxLayerPageCount> layerLockedByPage{};
+        std::array<bool, kShipVfxLayerPageCount> debugBoundsVisibleByPage{};
+        std::array<uint32_t, kShipVfxLayerPageCount> shipSpawnAfterInstanceIdByPage{};
+        std::array<int, kShipVfxLayerPageCount> shipSpawnAfterDelayMsByPage{};
+        bool targetSectorsABEnabled = false;
+        ShipVfxTargetingMode targetingMode = ShipVfxTargetingMode::NONE;
+        bool dirty = false;
+        std::string loadedConfigPath;
+    };
+    std::vector<ShipVfxPairDraftState> shipVfxPairDraftStates{};
     bool shipVfxLayerPagePickerOpen = false;
 
     int getShipVfxLayerPageKey(void) const
@@ -578,6 +602,44 @@ private:
     std::array<bool, kShipVfxLayerPageCount> vfxDuplicateToPagesPageSelected{};
     mutable VfxDuplicateToPagesPopupLayout vfxDuplicateToPagesPopupLastLayout{};
 
+    struct ShipVfxShipDuplicateSourceAnimation
+    {
+        std::string fileName;
+        std::string absolutePath;
+        std::string displayName;
+    };
+
+    struct ShipVfxShipDuplicatePopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect sourceShipListRect{};
+        SDL_FRect sourceAnimationListRect{};
+        SDL_FRect targetShipListRect{};
+        SDL_FRect animationSelectAllRect{};
+        SDL_FRect animationSelectNoneRect{};
+        SDL_FRect targetSelectAllRect{};
+        SDL_FRect targetSelectNoneRect{};
+        SDL_FRect targetSelectAllExceptSourceRect{};
+        SDL_FRect validateBtn{};
+        SDL_FRect cancelBtn{};
+    };
+    bool shipVfxShipDuplicatePopupVisible = false;
+    int shipVfxShipDuplicateSourceShipIndex = -1;
+    std::vector<ShipVfxShipDuplicateSourceAnimation> shipVfxShipDuplicateSourceAnimations{};
+    std::vector<bool> shipVfxShipDuplicateSourceAnimationSelected{};
+    std::vector<bool> shipVfxShipDuplicateTargetShipSelected{};
+    int shipVfxShipDuplicateSourceShipScrollOffset = 0;
+    int shipVfxShipDuplicateAnimationScrollOffset = 0;
+    int shipVfxShipDuplicateTargetShipScrollOffset = 0;
+    bool shipVfxShipDuplicateSourceShipScrollDragActive = false;
+    bool shipVfxShipDuplicateAnimationScrollDragActive = false;
+    bool shipVfxShipDuplicateTargetShipScrollDragActive = false;
+    float shipVfxShipDuplicateSourceShipScrollDragGrabOffsetY = 0.0f;
+    float shipVfxShipDuplicateAnimationScrollDragGrabOffsetY = 0.0f;
+    float shipVfxShipDuplicateTargetShipScrollDragGrabOffsetY = 0.0f;
+    mutable ShipVfxShipDuplicatePopupLayout shipVfxShipDuplicatePopupLastLayout{};
+
     bool vfxDragActive;
     /** Mode cadran ROT (panneau layers) : cercle autour du navire + ligne vers le curseur. */
     bool vfxRotationDialActive;
@@ -602,6 +664,16 @@ private:
     /** Vide = desactive ; sinon duree d'une boucle complete de l'anim (ms), pour preview + export fps derive. */
     std::string loosePreviewTotalDurationMsInput;
     bool loosePreviewTotalDurationMsInputFocused;
+    struct ExportConfirmPopupLayout
+    {
+        SDL_FRect dimFullMap{};
+        SDL_FRect popup{};
+        SDL_FRect validateBtn{};
+        SDL_FRect cancelBtn{};
+    };
+    bool exportConfirmPopupVisible = false;
+    ExportConfirmAction exportConfirmPopupAction = ExportConfirmAction::NONE;
+    mutable ExportConfirmPopupLayout exportConfirmPopupLastLayout{};
     bool looseExportNamePopupVisible;
     std::string looseExportNameInput;
     std::string pendingLooseExportAnimationName;
@@ -640,13 +712,13 @@ private:
 
     SDL_FRect buttonModeShipVfxRect;
     SDL_FRect buttonModeLooseSpritesRect;
-    SDL_FRect buttonImportShipRect;
     SDL_FRect buttonImportSfxRect;
     SDL_FRect buttonReloadAssetsRect;
     SDL_FRect buttonImportLooseRect;
     SDL_FRect buttonExportRect;
     SDL_FRect buttonOceanPrevRect;
     SDL_FRect buttonOceanNextRect;
+    SDL_FRect buttonShipVfxDuplicateShipsRect{};
 
     SDL_FRect buttonDirectionPrevRect;
     SDL_FRect buttonDirectionNextRect;
@@ -746,6 +818,10 @@ private:
     void autoImportAssetsFromDefaultFolders(void);
     std::string buildShipConfigJsonPath(const ImportedShip& ship) const;
     std::string buildShipVfxPairConfigJsonPath(const ImportedShip& ship, const ImportedSfx& sfx) const;
+    std::string buildShipVfxPairDraftKey(int shipIndex, int sfxIndex) const;
+    void saveCurrentShipVfxPairDraft(void);
+    bool restoreCurrentShipVfxPairDraft(void);
+    void clearShipVfxPairDraftStates(void);
     bool tryAutoImportShipVfxConfigForSelectedPair(bool* outPairFileFound = nullptr);
     void applyPreviewDirectionToShip(void);
     void setPreviewDirectionIndex(int directionIndex);
@@ -862,6 +938,23 @@ private:
         SDL_Keycode keycode,
         SDL_Keymod mod,
         bool isrepeat);
+    void closeShipVfxShipDuplicatePopup(void);
+    void openShipVfxShipDuplicatePopup(void);
+    void refreshShipVfxShipDuplicatePopupSourceAnimations(void);
+    bool buildShipVfxShipDuplicateSourceAnimationsForShipIndex(
+        int sourceShipIndex,
+        std::vector<ShipVfxShipDuplicateSourceAnimation>* outAnimations) const;
+    bool applyShipVfxShipDuplicatePopupValidate(void);
+    bool computeShipVfxShipDuplicatePopupLayout(ShipVfxShipDuplicatePopupLayout* out) const;
+    void drawShipVfxShipDuplicatePopup(void) const;
+    bool handleShipVfxShipDuplicatePopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleShipVfxShipDuplicatePopupKey(
+        const char* key,
+        SDL_Scancode scancode,
+        SDL_Keycode keycode,
+        SDL_Keymod mod,
+        bool isrepeat);
+    bool handleShipVfxShipDuplicatePopupMouseWheel(int delta, float mouseX, float mouseY);
     ShipVfxInstance duplicateShipVfxInstanceFreshId(const ShipVfxInstance& src);
     void remapTrailConeForShipDirectionChange(ShipVfxInstance& inst, int srcDirectionIndex4, int tgtDirectionIndex4);
     bool duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex);
@@ -1012,8 +1105,26 @@ private:
         SDL_Keycode keycode,
         SDL_Keymod mod,
         bool isrepeat);
+    void openExportConfirmPopup(ExportConfirmAction action);
+    void closeExportConfirmPopup(void);
+    bool computeExportConfirmPopupLayout(ExportConfirmPopupLayout* out) const;
+    void drawExportConfirmPopup(void) const;
+    bool handleExportConfirmPopupMouseClick(float x, float y, RC2D_MouseButton button);
+    bool handleExportConfirmPopupKey(
+        const char* key,
+        SDL_Scancode scancode,
+        SDL_Keycode keycode,
+        SDL_Keymod mod,
+        bool isrepeat);
 
     bool exportShipVfxJsonToFolder(const char* absoluteFolderPath);
+    bool exportShipVfxJsonToFolderForShipIndex(
+        int shipIndex,
+        const char* absoluteFolderPath,
+        bool updateStatusMessage,
+        int* outExportedFileCount = nullptr,
+        int* outFailedFileCount = nullptr);
+    bool exportAllShipsVfxJsonToShipFolders(void);
     bool exportLooseFolderScaledToFolder(const char* absoluteFolderPath, const std::string& animationName);
 
     void drawShipVfxDebugIsoGrid(void) const;
