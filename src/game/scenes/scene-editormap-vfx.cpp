@@ -10433,8 +10433,7 @@ bool EditorMapVfxScene::handleLooseExportNameInputKey(
         }
         this->pendingLooseExportAnimationName = animationSlug;
         this->looseExportNamePopupVisible = false;
-        this->openExportFolderDialog();
-        this->statusMessage = "Nom animation OK: " + animationSlug + ". Choisis le dossier d'export.";
+        this->exportLooseFolderScaledToFolder("assets/images/vfx", animationSlug);
         return true;
     }
     if (scancode == SDL_SCANCODE_BACKSPACE && !this->looseExportNameInput.empty() && !isrepeat)
