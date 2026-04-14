@@ -239,6 +239,20 @@ public:
      */
     PreviewDirection getCurrentPreviewDirection(void) const;
 
+    /**
+     * @brief Indique si la direction visuelle courante utilise une alternance A/B.
+     * @return True pour les directions pures (gauche/haut/droite/bas), sinon false.
+     */
+    bool isUsingPreviewDirectionPair(void) const;
+
+    /**
+     * @brief Retourne la paire diagonale utilisee par l'alternance visuelle courante.
+     * @param outDirectionA Recoit la direction A de la paire.
+     * @param outDirectionB Recoit la direction B de la paire.
+     * @return True si la paire est active, sinon false.
+     */
+    bool getCurrentPreviewDirectionPair(PreviewDirection* outDirectionA, PreviewDirection* outDirectionB) const;
+
     // ---- Vitesse ----
 
     /**

@@ -25,6 +25,17 @@
  * - LOOSE_SPRITES: import de dossiers de sprites PNG sans spritesheet, preview
  *   de tout le dossier au centre, resize par pas de 5% et export des fichiers.
  */
+
+/** Pages calques max : 4 directions x 2 HP x 2 secteurs cible tir. */
+constexpr int kShipVfxLayerPageCount = 16;
+/** Pages sans demi-plans cible A/B : 4 directions x 2 HP. */
+constexpr int kShipVfxLayerPageCountNoTargetSectors = 8;
+/** Mode de resolution runtime exporte pour les VFX gameplay. */
+enum class ShipVfxTargetingMode {
+    NONE = 0,
+    TARGET_RELATIVE_AB = 1
+};
+
 class EditorMapVfxScene : public Scene {
 private:
     enum class EditorMode {
@@ -238,16 +249,26 @@ private:
     SDL_FPoint previewShipTile;
     int previewDirectionIndex;
     int previewShipStateIndex;
+    /** Secteur cible tir (0 ou 1) pour la page VFX : demi-plan relatif au navire (canon devant / derriere, etc.). */
+    int previewTargetFireSectorIndex;
+    /**
+     * Si false : 8 pages (direction x HP), export/import gameplay a 8 directionStates.
+     * Si true : 16 pages avec cibles A/B.
+     */
+    bool shipVfxEditorTargetSectorsABEnabled = false;
+    ShipVfxTargetingMode shipVfxEditorTargetingMode = ShipVfxTargetingMode::NONE;
+    /** Si true et A/B actif : dessine les secteurs cibles sur la preview (quarts de disque). */
+    bool shipVfxEditorTargetSectorsOverlayVisible = false;
     /** Opacite preview navire 0..100 (pas de 10), appliquee via setDrawAlpha. */
     int previewShipOpacityPercent;
-    /** Une entree par page calques (direction x etat HP), cle = previewDirectionIndex + previewShipStateIndex * 4. */
-    std::array<int, 8> shipDrawOrderByPage{};
-    std::array<bool, 8> shipLayerVisibleByPage{{true, true, true, true, true, true, true, true}};
-    std::array<bool, 8> shipLayerLockedByPage{};
-    std::array<bool, 8> shipDebugBoundsVisibleByPage{{true, true, true, true, true, true, true, true}};
+    /** Une entree par page calques : cle = dir + state*4 + sector*8. */
+    std::array<int, kShipVfxLayerPageCount> shipDrawOrderByPage{};
+    std::array<bool, kShipVfxLayerPageCount> shipLayerVisibleByPage{};
+    std::array<bool, kShipVfxLayerPageCount> shipLayerLockedByPage{};
+    std::array<bool, kShipVfxLayerPageCount> shipDebugBoundsVisibleByPage{};
     /** Par page : navire visible dans la preview seulement apres ce delai (ms) dans le cycle du VFX reference. */
-    std::array<uint32_t, 8> shipSpawnAfterVfxInstanceId{};
-    std::array<int, 8> shipSpawnAfterDelayMs{};
+    std::array<uint32_t, kShipVfxLayerPageCount> shipSpawnAfterVfxInstanceId{};
+    std::array<int, kShipVfxLayerPageCount> shipSpawnAfterDelayMs{};
     bool shipLayerSelected;
     /** Debug : grille iso 10x10 au sol sous le navire preview. */
     bool previewIsoGridVisible;
@@ -261,15 +282,28 @@ private:
     bool looseReferencePreviewVisible;
     bool looseReferencePreviewLoaded;
 
-    std::array<std::vector<ShipVfxInstance>, 8> shipVfxLayerPages{};
+    std::array<std::vector<ShipVfxInstance>, kShipVfxLayerPageCount> shipVfxLayerPages{};
     bool shipVfxLayerPagePickerOpen = false;
 
     int getShipVfxLayerPageKey(void) const
     {
         const int dir = std::clamp(this->previewDirectionIndex, 0, 3);
         const int st = std::clamp(this->previewShipStateIndex, 0, 1);
-        return dir + st * 4;
+        const int sec =
+            this->shipVfxEditorTargetSectorsABEnabled ? std::clamp(this->previewTargetFireSectorIndex, 0, 1) : 0;
+        return dir + st * 4 + sec * 8;
     }
+
+    int shipVfxEffectiveLayerPageCount(void) const
+    {
+        return this->shipVfxEditorTargetSectorsABEnabled ? kShipVfxLayerPageCount : kShipVfxLayerPageCountNoTargetSectors;
+    }
+
+    void toggleShipVfxEditorTargetSectorsAB(void);
+    void toggleShipVfxEditorTargetSectorsOverlayVisible(void);
+    static ShipVfxTargetingMode targetingModeFromTargetSectorsAB(bool enabled);
+    static const char* targetingModeToJsonId(ShipVfxTargetingMode mode);
+    static ShipVfxTargetingMode targetingModeFromJsonId(const char* id, bool* outRecognized);
 
     std::vector<ShipVfxInstance>& currentShipVfxLayers(void)
     {
@@ -497,7 +531,7 @@ private:
         float marchePopupPreviewPathU = -1.0f;
     };
     /** Rejets de trainee / sous-instances : une liste par page calques (direction x HP), comme shipVfxLayerPages. */
-    std::array<std::vector<ShipVfxTrailPiece>, 8> shipVfxTrailPiecesByPage{};
+    std::array<std::vector<ShipVfxTrailPiece>, kShipVfxLayerPageCount> shipVfxTrailPiecesByPage{};
     uint32_t nextShipVfxTrailLayerPanelUiId = 1;
     /**
      * Simulation "en marche" pour la preview popup : accumulateur de distance (tuiles),
@@ -513,8 +547,8 @@ private:
     mutable float vfxTrailPopupMarcheLastPilotMoveDirX = 0.0f;
     mutable float vfxTrailPopupMarcheLastPilotMoveDirY = 1.0f;
     mutable bool vfxTrailPopupMarcheLastPilotMoveDirValid = false;
-    std::array<SDL_FPoint, 8> shipVfxTrailPrevShipTileByPage{};
-    std::array<bool, 8> shipVfxTrailPrevShipTileValidByPage{};
+    std::array<SDL_FPoint, kShipVfxLayerPageCount> shipVfxTrailPrevShipTileByPage{};
+    std::array<bool, kShipVfxLayerPageCount> shipVfxTrailPrevShipTileValidByPage{};
 
     std::vector<ShipVfxTrailPiece>& currentShipVfxTrailPieces(void)
     {
@@ -530,7 +564,7 @@ private:
     {
         SDL_FRect dimFullMap{};
         SDL_FRect popup{};
-        SDL_FRect pageRowRects[8]{};
+        SDL_FRect pageRowRects[kShipVfxLayerPageCount]{};
         SDL_FRect btnAll{};
         SDL_FRect btnNone{};
         SDL_FRect btnOtherPages{};
@@ -541,7 +575,7 @@ private:
     bool vfxDuplicateToPagesPopupVisible = false;
     ShipVfxInstance vfxDuplicateToPagesPopupSourceSnapshot{};
     int vfxDuplicateToPagesPopupSourcePageKey = -1;
-    std::array<bool, 8> vfxDuplicateToPagesPageSelected{};
+    std::array<bool, kShipVfxLayerPageCount> vfxDuplicateToPagesPageSelected{};
     mutable VfxDuplicateToPagesPopupLayout vfxDuplicateToPagesPopupLastLayout{};
 
     bool vfxDragActive;
@@ -617,6 +651,7 @@ private:
     SDL_FRect buttonDirectionPrevRect;
     SDL_FRect buttonDirectionNextRect;
     SDL_FRect buttonShipStateToggleRect;
+    SDL_FRect buttonTargetFireSectorToggleRect;
     SDL_FRect buttonShipOpacityMinusRect;
     SDL_FRect buttonShipOpacityPlusRect;
     SDL_FRect buttonPreviewIsoGridRect;
@@ -710,10 +745,12 @@ private:
     void setPreviewDirectionIndex(int directionIndex);
     void cyclePreviewDirection(int delta);
     void cyclePreviewShipState(int delta);
+    void cyclePreviewTargetFireSector(int delta);
     void applyPreviewShipOpacityPercentToShip(void);
     void adjustPreviewShipOpacityPercentStep(int deltaPercent);
     const char* getPreviewDirectionLabel(void) const;
     const char* getPreviewShipStateLabel(void) const;
+    const char* getPreviewTargetFireSectorLabel(void) const;
     void markShipVfxDirty(void);
     void openVfxRelativeTimingPopup(bool forShipRow, int vfxInstanceIndex);
     void closeVfxRelativeTimingPopup(void);
@@ -823,6 +860,8 @@ private:
     void remapTrailConeForShipDirectionChange(ShipVfxInstance& inst, int srcDirectionIndex4, int tgtDirectionIndex4);
     bool duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex);
     void drawShipVfxTrailPieces(void) const;
+    /** Demi-plans cible A/B (geometrie locale editeur: quart A/B relatif a la proue). */
+    void drawShipVfxTargetFireSectorsOverlay(void) const;
     void captureVfxMotionSpawnAtIndex(int instanceIndex);
     void resetSelectedVfxTransform(void);
     void toggleSelectedVfxVisibility(void);

@@ -339,6 +339,275 @@ constexpr float kTrailPieceSpinOmegaMaxDegPerSec = 5.2f;
 constexpr float kMotionTrailConeDepthBySpreadRatio = 1.0f;
 constexpr float kTrailConePopupRearAxisRad = 1.57079632679f;
 constexpr float kIdleRingPieceStaggerSec = 0.055f;
+constexpr float kRadToDeg = 57.29577951308232f;
+constexpr float kRelativeTargetSameTileEpsilon = 0.00001f;
+
+constexpr std::array<std::array<VFX::TargetRelativeFamily, 4>, 4> kTargetRelativeFamilyBySectorAndDirection = {{
+    // Secteur [0,90): DL(BG)=A, UR(HD)=B, UL(HG)=B, DR(BD)=A
+    {{VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+    // Secteur [90,180): DL(BG)=B, UR(HD)=A, UL(HG)=A, DR(BD)=B
+    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B}},
+    // Secteur [180,270): DL(BG)=B, UR(HD)=A, UL(HG)=B, DR(BD)=A
+    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+    // Secteur [270,360): DL(BG)=B, UR(HD)=A, UL(HG)=B, DR(BD)=A
+    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+}};
+
+constexpr std::array<std::array<VFX::ShipDirection, 4>, 4> kTargetRelativeStationaryDirectionRemapBySector = {{
+    // Secteur [0,90): BD->BG, HG->HD
+    {{VFX::ShipDirection::DOWN_LEFT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::DOWN_LEFT}},
+    // Secteur [90,180): HD->HG, BG->BD
+    {{VFX::ShipDirection::DOWN_RIGHT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::DOWN_RIGHT}},
+    // Secteur [180,270): BD->BG, HG->HD
+    {{VFX::ShipDirection::DOWN_LEFT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::DOWN_LEFT}},
+    // Secteur [270,360): BG->BD, HD->HG
+    {{VFX::ShipDirection::DOWN_RIGHT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::DOWN_RIGHT}},
+}};
+
+enum class PureMoveDirection {
+    LEFT = 0,
+    UP = 1,
+    RIGHT = 2,
+    DOWN = 3
+};
+
+bool previewPairContains(
+    Ship::PreviewDirection a,
+    Ship::PreviewDirection b,
+    Ship::PreviewDirection needle)
+{
+    return a == needle || b == needle;
+}
+
+bool resolvePureMoveDirectionFromPreviewPair(
+    Ship::PreviewDirection pairA,
+    Ship::PreviewDirection pairB,
+    PureMoveDirection* outDirection)
+{
+    if (outDirection == nullptr)
+    {
+        return false;
+    }
+
+    const bool hasDL = previewPairContains(pairA, pairB, Ship::PreviewDirection::DOWN_LEFT);
+    const bool hasUR = previewPairContains(pairA, pairB, Ship::PreviewDirection::UP_RIGHT);
+    const bool hasUL = previewPairContains(pairA, pairB, Ship::PreviewDirection::UP_LEFT);
+    const bool hasDR = previewPairContains(pairA, pairB, Ship::PreviewDirection::DOWN_RIGHT);
+
+    if (hasUL && hasDL && !hasUR && !hasDR)
+    {
+        *outDirection = PureMoveDirection::LEFT;
+        return true;
+    }
+    if (hasUL && hasUR && !hasDL && !hasDR)
+    {
+        *outDirection = PureMoveDirection::UP;
+        return true;
+    }
+    if (hasUR && hasDR && !hasUL && !hasDL)
+    {
+        *outDirection = PureMoveDirection::RIGHT;
+        return true;
+    }
+    if (hasDL && hasDR && !hasUL && !hasUR)
+    {
+        *outDirection = PureMoveDirection::DOWN;
+        return true;
+    }
+
+    return false;
+}
+
+VFX::ShipDirection allowedAnimatedDirectionForPureMoveSlice(
+    int slice45,
+    PureMoveDirection pureDirection)
+{
+    const int s = std::clamp(slice45, 0, 7);
+    switch (s)
+    {
+    case 0: // [0,45)
+    case 1: // [45,90)
+        return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::DOWN)
+            ? VFX::ShipDirection::DOWN_LEFT
+            : VFX::ShipDirection::UP_RIGHT;
+
+    case 2: // [90,135)
+        return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::UP)
+            ? VFX::ShipDirection::UP_LEFT
+            : VFX::ShipDirection::DOWN_RIGHT;
+
+    case 3: // [135,180)
+        switch (pureDirection)
+        {
+        case PureMoveDirection::LEFT:
+            return VFX::ShipDirection::DOWN_LEFT;
+        case PureMoveDirection::UP:
+            return VFX::ShipDirection::UP_LEFT;
+        case PureMoveDirection::RIGHT:
+            return VFX::ShipDirection::DOWN_RIGHT;
+        case PureMoveDirection::DOWN:
+            return VFX::ShipDirection::DOWN_LEFT;
+        default:
+            return VFX::ShipDirection::DOWN_LEFT;
+        }
+
+    case 4: // [180,225)
+    case 5: // [225,270)
+        return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::DOWN)
+            ? VFX::ShipDirection::DOWN_LEFT
+            : VFX::ShipDirection::UP_RIGHT;
+
+    case 6: // [270,315)
+        switch (pureDirection)
+        {
+        case PureMoveDirection::LEFT:
+            return VFX::ShipDirection::UP_LEFT;
+        case PureMoveDirection::UP:
+            return VFX::ShipDirection::UP_LEFT;
+        case PureMoveDirection::RIGHT:
+            return VFX::ShipDirection::UP_RIGHT;
+        case PureMoveDirection::DOWN:
+            return VFX::ShipDirection::DOWN_RIGHT;
+        default:
+            return VFX::ShipDirection::DOWN_LEFT;
+        }
+
+    default: // [315,360)
+        return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::UP)
+            ? VFX::ShipDirection::UP_LEFT
+            : VFX::ShipDirection::DOWN_RIGHT;
+    }
+}
+
+bool shouldPlayMovingPureDirectionAnimation(
+    const Ship& ship,
+    const VFX::DirectionStateResolution& resolution)
+{
+    if (!ship.isMoving() || !resolution.usedTargetRelativeMode || !resolution.hasTargetTile)
+    {
+        return true;
+    }
+    if (!ship.isUsingPreviewDirectionPair())
+    {
+        return true;
+    }
+
+    Ship::PreviewDirection pairA = Ship::PreviewDirection::DOWN_LEFT;
+    Ship::PreviewDirection pairB = Ship::PreviewDirection::DOWN_LEFT;
+    if (!ship.getCurrentPreviewDirectionPair(&pairA, &pairB))
+    {
+        return true;
+    }
+
+    PureMoveDirection pureDirection = PureMoveDirection::LEFT;
+    if (!resolvePureMoveDirectionFromPreviewPair(pairA, pairB, &pureDirection))
+    {
+        return true;
+    }
+
+    const float a = resolution.relativeAngleDeg;
+    const int slice45 = std::clamp(static_cast<int>(std::floor(a / 45.0f)), 0, 7);
+    VFX::ShipDirection allowedDirection =
+        allowedAnimatedDirectionForPureMoveSlice(slice45, pureDirection);
+
+    // Corrections ciblees (directions pures EN MOUVEMENT) :
+    // - [35,90)   : UP->HD, DOWN->BG
+    // - [90,135)  : UP->HG, DOWN->BD
+    // - [180,225) : RIGHT->HD, LEFT->BG
+    // - [225,270) : RIGHT->HD, LEFT->BG
+    if (a >= 35.0f && a < 90.0f)
+    {
+        if (pureDirection == PureMoveDirection::UP)
+        {
+            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+        }
+        else if (pureDirection == PureMoveDirection::DOWN)
+        {
+            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+        }
+    }
+    else if (a >= 90.0f && a < 135.0f)
+    {
+        if (pureDirection == PureMoveDirection::UP)
+        {
+            allowedDirection = VFX::ShipDirection::UP_LEFT;
+        }
+        else if (pureDirection == PureMoveDirection::DOWN)
+        {
+            allowedDirection = VFX::ShipDirection::DOWN_RIGHT;
+        }
+    }
+    else if (a >= 180.0f && a < 225.0f)
+    {
+        if (pureDirection == PureMoveDirection::RIGHT)
+        {
+            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+        }
+        else if (pureDirection == PureMoveDirection::LEFT)
+        {
+            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+        }
+    }
+    else if (a >= 225.0f && a < 270.0f)
+    {
+        if (pureDirection == PureMoveDirection::RIGHT)
+        {
+            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+        }
+        else if (pureDirection == PureMoveDirection::LEFT)
+        {
+            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+        }
+    }
+
+    return resolution.sourceDirection == allowedDirection;
+}
+
+VFX::TargetingMode targetingModeFromString(const char* value, bool* outRecognized)
+{
+    if (outRecognized != nullptr)
+    {
+        *outRecognized = false;
+    }
+    if (value == nullptr)
+    {
+        return VFX::TargetingMode::NONE;
+    }
+
+    const std::string lowered = toLowerAscii(value);
+    if (lowered == "target_relative_ab" || lowered == "target-relative-ab" || lowered == "target_relative")
+    {
+        if (outRecognized != nullptr)
+        {
+            *outRecognized = true;
+        }
+        return VFX::TargetingMode::TARGET_RELATIVE_AB;
+    }
+    if (lowered == "none" || lowered == "legacy")
+    {
+        if (outRecognized != nullptr)
+        {
+            *outRecognized = true;
+        }
+        return VFX::TargetingMode::NONE;
+    }
+    return VFX::TargetingMode::NONE;
+}
+
+bool isSameDirectionStateResolution(
+    const VFX::DirectionStateResolution& a,
+    const VFX::DirectionStateResolution& b)
+{
+    return a.directionStateKey == b.directionStateKey &&
+        a.sourceDirection == b.sourceDirection &&
+        a.resolvedDirection == b.resolvedDirection &&
+        a.state == b.state &&
+        a.family == b.family &&
+        a.targetSectorIndex == b.targetSectorIndex &&
+        a.usedTargetRelativeMode == b.usedTargetRelativeMode &&
+        a.hasTargetTile == b.hasTargetTile &&
+        a.remappedDirectionWhenStationary == b.remappedDirectionWhenStationary;
+}
 
 std::mt19937& vfxTrailRng(void)
 {
@@ -420,6 +689,11 @@ void vfxSampleTrailConeDepthAndLateral(
 VFX::VFX(void)
     : spritesheetImage{},
       frames{},
+      loadedDirectionStateCount(kDirectionStateCount),
+      targetingMode(TargetingMode::NONE),
+      lastDirectionStateResolution{},
+      lastLoggedTargetRelativeResolution{},
+      hasLoggedTargetRelativeResolution(false),
       directionStates{},
       defaultVfxFps(12.0f),
       playbackSeconds(0.0f),
@@ -438,11 +712,118 @@ VFX::~VFX(void)
     this->unload();
 }
 
-int VFX::directionStateKey(ShipDirection direction, ShipState state)
+int VFX::directionStateKey(ShipDirection direction, ShipState state, int targetFireSector)
 {
     const int dir = std::clamp(static_cast<int>(direction), 0, 3);
     const int st = std::clamp(static_cast<int>(state), 0, 1);
-    return dir + (st * 4);
+    const int sec = std::clamp(targetFireSector, 0, 1);
+    return dir + (st * 4) + (sec * 8);
+}
+
+int VFX::shipDirectionToIndex(ShipDirection direction)
+{
+    return std::clamp(static_cast<int>(direction), 0, 3);
+}
+
+VFX::ShipDirection VFX::shipDirectionFromIndex(int directionIndex)
+{
+    switch (std::clamp(directionIndex, 0, 3))
+    {
+    case 0:
+        return ShipDirection::DOWN_LEFT;
+    case 1:
+        return ShipDirection::UP_RIGHT;
+    case 2:
+        return ShipDirection::UP_LEFT;
+    default:
+        return ShipDirection::DOWN_RIGHT;
+    }
+}
+
+float VFX::normalizeDegrees0To360(float deg)
+{
+    if (!std::isfinite(deg))
+    {
+        return 0.0f;
+    }
+    float normalized = std::fmod(deg, 360.0f);
+    if (normalized < 0.0f)
+    {
+        normalized += 360.0f;
+    }
+    return normalized;
+}
+
+int VFX::computeRelativeTargetSectorFromTiles(
+    const SDL_FPoint& controlledShipTile,
+    const SDL_FPoint& targetTile,
+    float* outAngleDeg,
+    bool* outHasTargetGeometry)
+{
+    if (outAngleDeg != nullptr)
+    {
+        *outAngleDeg = 0.0f;
+    }
+    if (outHasTargetGeometry != nullptr)
+    {
+        *outHasTargetGeometry = false;
+    }
+
+    const float dxTile = controlledShipTile.x - targetTile.x;
+    const float dyTile = controlledShipTile.y - targetTile.y;
+    const float lenSq = (dxTile * dxTile) + (dyTile * dyTile);
+    if (!std::isfinite(lenSq) || lenSq <= kRelativeTargetSameTileEpsilon)
+    {
+        return 0;
+    }
+
+    // Delta en repere ecran derive exclusivement des tuiles (pas d'offset visuel sprite):
+    //   screenX ~ tileX - tileY
+    //   screenY ~ tileX + tileY
+    const float dxScreen = dxTile - dyTile;
+    const float dyScreen = dxTile + dyTile;
+
+    // Repere metier demande:
+    // 0° = gauche, 90° = haut, 180° = droite, 270° = bas.
+    const float angle = normalizeDegrees0To360(std::atan2(-dyScreen, -dxScreen) * kRadToDeg);
+    if (outAngleDeg != nullptr)
+    {
+        *outAngleDeg = angle;
+    }
+    if (outHasTargetGeometry != nullptr)
+    {
+        *outHasTargetGeometry = true;
+    }
+
+    if (angle < 90.0f)
+    {
+        return 0;
+    }
+    if (angle < 180.0f)
+    {
+        return 1;
+    }
+    if (angle < 270.0f)
+    {
+        return 2;
+    }
+    return 3;
+}
+
+VFX::ShipDirection VFX::remapDirectionWhenStationaryForTargetSector(
+    int sectorIndex,
+    ShipDirection direction)
+{
+    const int s = std::clamp(sectorIndex, 0, 3);
+    const int d = shipDirectionToIndex(direction);
+    return kTargetRelativeStationaryDirectionRemapBySector[static_cast<size_t>(s)][static_cast<size_t>(d)];
+}
+
+VFX::TargetRelativeFamily VFX::resolveTargetRelativeFamily(int sectorIndex, ShipDirection direction)
+{
+    const int s = std::clamp(sectorIndex, 0, 3);
+    const int d = shipDirectionToIndex(direction);
+    return kTargetRelativeFamilyBySectorAndDirection[static_cast<size_t>(s)][static_cast<size_t>(d)];
 }
 
 VFX::ShipDirection VFX::shipDirectionFromString(const char* value)
@@ -504,22 +885,239 @@ VFX::ShipDirection VFX::shipDirectionFromPreviewDirection(Ship::PreviewDirection
     }
 }
 
+Ship::PreviewDirection VFX::previewDirectionFromShipDirection(ShipDirection direction)
+{
+    switch (direction)
+    {
+    case ShipDirection::DOWN_LEFT:
+        return Ship::PreviewDirection::DOWN_LEFT;
+    case ShipDirection::UP_RIGHT:
+        return Ship::PreviewDirection::UP_RIGHT;
+    case ShipDirection::UP_LEFT:
+        return Ship::PreviewDirection::UP_LEFT;
+    case ShipDirection::DOWN_RIGHT:
+        return Ship::PreviewDirection::DOWN_RIGHT;
+    default:
+        return Ship::PreviewDirection::DOWN_LEFT;
+    }
+}
+
 VFX::ShipState VFX::shipStateFromHealthVisual(Ship::HealthVisual healthVisual)
 {
     return (healthVisual == Ship::HealthVisual::LOW) ? ShipState::DAMAGED : ShipState::HEALTHY;
 }
 
-void VFX::setDirectionStateFromShip(const Ship& ship)
+const char* VFX::targetingModeToString(TargetingMode mode)
 {
-    // Synchronise la page [direction,state] active en se basant sur le ship runtime.
-    this->activeDirectionStateKey = directionStateKey(
-        shipDirectionFromPreviewDirection(ship.getCurrentPreviewDirection()),
-        shipStateFromHealthVisual(ship.getHealthVisual()));
+    return (mode == TargetingMode::TARGET_RELATIVE_AB) ? "target_relative_ab" : "none";
+}
+
+const char* VFX::targetRelativeFamilyToString(TargetRelativeFamily family)
+{
+    return (family == TargetRelativeFamily::B) ? "B" : "A";
+}
+
+const char* VFX::shipDirectionToString(ShipDirection direction)
+{
+    switch (direction)
+    {
+    case ShipDirection::DOWN_LEFT:
+        return "down_left";
+    case ShipDirection::UP_RIGHT:
+        return "up_right";
+    case ShipDirection::UP_LEFT:
+        return "up_left";
+    case ShipDirection::DOWN_RIGHT:
+        return "down_right";
+    default:
+        return "down_left";
+    }
+}
+
+VFX::DirectionStateResolution VFX::resolveDirectionState(
+    const Ship& ship,
+    const SDL_FPoint* targetTile) const
+{
+    DirectionStateResolution resolution{};
+    resolution.sourceDirection = shipDirectionFromPreviewDirection(ship.getCurrentPreviewDirection());
+    resolution.resolvedDirection = resolution.sourceDirection;
+    resolution.state = shipStateFromHealthVisual(ship.getHealthVisual());
+    resolution.family = TargetRelativeFamily::A;
+    resolution.targetSectorIndex = 0;
+    resolution.relativeAngleDeg = 0.0f;
+    resolution.usedTargetRelativeMode = false;
+    resolution.hasTargetTile = false;
+    resolution.remappedDirectionWhenStationary = false;
+
+    const bool canUseTargetRelative = (this->targetingMode == TargetingMode::TARGET_RELATIVE_AB) &&
+        (this->loadedDirectionStateCount == kDirectionStateCount) &&
+        (targetTile != nullptr);
+    if (canUseTargetRelative)
+    {
+        bool hasTargetGeometry = false;
+        const int sector = computeRelativeTargetSectorFromTiles(
+            ship.getPositionTile(),
+            *targetTile,
+            &resolution.relativeAngleDeg,
+            &hasTargetGeometry);
+        resolution.usedTargetRelativeMode = true;
+        resolution.hasTargetTile = hasTargetGeometry;
+        resolution.targetSectorIndex = std::clamp(sector, 0, 3);
+
+        if (!ship.isMoving())
+        {
+            resolution.resolvedDirection = remapDirectionWhenStationaryForTargetSector(
+                resolution.targetSectorIndex,
+                resolution.sourceDirection);
+            resolution.remappedDirectionWhenStationary =
+                (resolution.resolvedDirection != resolution.sourceDirection);
+        }
+
+        resolution.family = resolveTargetRelativeFamily(
+            resolution.targetSectorIndex,
+            resolution.resolvedDirection);
+
+        // Affinage EN MOUVEMENT seulement:
+        // on conserve la logique existante par defaut, puis on surcharge uniquement
+        // les combinaisons explicitement demandees sur les tranches de 45 degres.
+        if (ship.isMoving() && resolution.hasTargetTile)
+        {
+            const float a = resolution.relativeAngleDeg; // deja normalise [0,360)
+            const int slice45 = std::clamp(static_cast<int>(std::floor(a / 45.0f)), 0, 7);
+            switch (slice45)
+            {
+            case 0: // [0,45)
+                if (resolution.resolvedDirection == ShipDirection::UP_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::DOWN_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                break;
+            case 1: // [45,90)
+                if (resolution.resolvedDirection == ShipDirection::UP_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::DOWN_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                break;
+            case 2: // [90,135)
+                if (resolution.resolvedDirection == ShipDirection::DOWN_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::UP_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                break;
+            case 3: // [135,180)
+                if (resolution.resolvedDirection == ShipDirection::DOWN_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::UP_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                break;
+            case 4: // [180,225)
+                if (resolution.resolvedDirection == ShipDirection::UP_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::DOWN_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                break;
+            case 5: // [225,270)
+                if (resolution.resolvedDirection == ShipDirection::UP_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::DOWN_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                break;
+            case 6: // [270,315)
+                if (resolution.resolvedDirection == ShipDirection::DOWN_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::UP_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                break;
+            default: // [315,360)
+                if (resolution.resolvedDirection == ShipDirection::UP_RIGHT)
+                {
+                    resolution.family = TargetRelativeFamily::B;
+                }
+                else if (resolution.resolvedDirection == ShipDirection::DOWN_LEFT)
+                {
+                    resolution.family = TargetRelativeFamily::A;
+                }
+                break;
+            }
+        }
+    }
+
+    const int targetFamilyIndex = (resolution.family == TargetRelativeFamily::B) ? 1 : 0;
+    resolution.directionStateKey = directionStateKey(
+        resolution.resolvedDirection,
+        resolution.state,
+        (resolution.usedTargetRelativeMode ? targetFamilyIndex : 0));
+    return resolution;
+}
+
+void VFX::logTargetRelativeResolutionIfChanged(const DirectionStateResolution& resolution)
+{
+    if (!resolution.usedTargetRelativeMode)
+    {
+        return;
+    }
+    if (this->hasLoggedTargetRelativeResolution &&
+        isSameDirectionStateResolution(this->lastLoggedTargetRelativeResolution, resolution))
+    {
+        return;
+    }
+
+    RC2D_log(
+        RC2D_LOG_DEBUG,
+        "VFX target-relative: mode=%s target=%s angle=%.2f sector=%d srcDir=%s finalDir=%s remap=%s family=%s key=%d",
+        targetingModeToString(this->targetingMode),
+        resolution.hasTargetTile ? "ok" : "same-tile-or-invalid",
+        resolution.relativeAngleDeg,
+        resolution.targetSectorIndex,
+        shipDirectionToString(resolution.sourceDirection),
+        shipDirectionToString(resolution.resolvedDirection),
+        resolution.remappedDirectionWhenStationary ? "yes" : "no",
+        targetRelativeFamilyToString(resolution.family),
+        resolution.directionStateKey);
+
+    this->lastLoggedTargetRelativeResolution = resolution;
+    this->hasLoggedTargetRelativeResolution = true;
+}
+
+void VFX::setDirectionStateFromShip(const Ship& ship, const SDL_FPoint* targetTile)
+{
+    this->lastDirectionStateResolution = this->resolveDirectionState(ship, targetTile);
+    this->activeDirectionStateKey = this->lastDirectionStateResolution.directionStateKey;
+    this->logTargetRelativeResolutionIfChanged(this->lastDirectionStateResolution);
 }
 
 const VFX::DirectionStateData& VFX::currentDirectionState(void) const
 {
-    const int key = std::clamp(this->activeDirectionStateKey, 0, 7);
+    const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
+    const int key = std::clamp(this->activeDirectionStateKey, 0, maxKey);
     return this->directionStates[static_cast<size_t>(key)];
 }
 
@@ -809,11 +1407,14 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         RC2D_log(RC2D_LOG_ERROR, "VFX: key gameplay absente: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
+    const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(root, "editor");
 
     // 8) Lire les infos gameplay globales.
     std::string parsedShipFolderPath;
     std::string parsedVfxFolderPath;
     float parsedDefaultFps = 12.0f;
+    TargetingMode parsedTargetingMode = TargetingMode::NONE;
+    bool parsedTargetingModeExplicit = false;
 
     const cJSON* shipFolderPathNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "shipFolderPath");
     if (cJSON_IsString(shipFolderPathNode) && shipFolderPathNode->valuestring != nullptr)
@@ -832,6 +1433,25 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     {
         parsedDefaultFps = static_cast<float>(defaultFpsNode->valuedouble);
     }
+    const cJSON* targetingModeNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "targetingMode");
+    if (cJSON_IsString(targetingModeNode) && targetingModeNode->valuestring != nullptr)
+    {
+        bool recognized = false;
+        parsedTargetingMode = targetingModeFromString(targetingModeNode->valuestring, &recognized);
+        parsedTargetingModeExplicit = recognized;
+    }
+    if (!parsedTargetingModeExplicit)
+    {
+        const cJSON* legacyUseTargetRelativeNode =
+            cJSON_GetObjectItemCaseSensitive(gameplayNode, "usesTargetRelativeAB");
+        if (cJSON_IsBool(legacyUseTargetRelativeNode))
+        {
+            parsedTargetingMode = cJSON_IsTrue(legacyUseTargetRelativeNode)
+                ? TargetingMode::TARGET_RELATIVE_AB
+                : TargetingMode::NONE;
+            parsedTargetingModeExplicit = true;
+        }
+    }
 
     // Fallbacks si absent dans le JSON.
     if (parsedShipFolderPath.empty())
@@ -844,7 +1464,6 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     }
 
     // 9) Lire le bloc editor.animation pour sourceJsonPath/defaultVfxFps.
-    const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(root, "editor");
     const cJSON* animationNode =
         cJSON_IsObject(editorNode) ? cJSON_GetObjectItemCaseSensitive(editorNode, "animation") : nullptr;
 
@@ -882,20 +1501,63 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     }
 
     // 11) Parser les pages gameplay direction/state.
-    std::array<DirectionStateData, 8> parsedDirectionStates{};
+    std::array<DirectionStateData, kDirectionStateCount> parsedDirectionStates{};
     int firstDirectionStateKey = 0;
     bool hasFirstDirectionStateKey = false;
 
     const cJSON* directionStatesNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "directionStates");
     if (!cJSON_IsArray(directionStatesNode))
     {
-        directionStatesNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "pages");
-    }
-    if (!cJSON_IsArray(directionStatesNode))
-    {
         cJSON_Delete(root);
         RC2D_log(RC2D_LOG_ERROR, "VFX: gameplay.directionStates[] absent: %s", gameplayConfigJsonPath.c_str());
         return false;
+    }
+    const int directionStatesArraySize = cJSON_GetArraySize(directionStatesNode);
+    if (directionStatesArraySize != 8 && directionStatesArraySize != kDirectionStateCount)
+    {
+        cJSON_Delete(root);
+        RC2D_log(
+            RC2D_LOG_ERROR,
+            "VFX: gameplay.directionStates[] doit contenir 8 ou %d entrees (ordre = cle 0..n-1): %s",
+            kDirectionStateCount,
+            gameplayConfigJsonPath.c_str());
+        return false;
+    }
+
+    if (!parsedTargetingModeExplicit && cJSON_IsObject(editorNode))
+    {
+        const cJSON* editorTargetingModeNode = cJSON_GetObjectItemCaseSensitive(editorNode, "targetingMode");
+        if (cJSON_IsString(editorTargetingModeNode) && editorTargetingModeNode->valuestring != nullptr)
+        {
+            bool recognized = false;
+            parsedTargetingMode = targetingModeFromString(editorTargetingModeNode->valuestring, &recognized);
+            parsedTargetingModeExplicit = recognized;
+        }
+        if (!parsedTargetingModeExplicit)
+        {
+            const cJSON* editorTargetAbNode = cJSON_GetObjectItemCaseSensitive(editorNode, "targetFireSectorsAB");
+            if (cJSON_IsBool(editorTargetAbNode))
+            {
+                parsedTargetingMode = cJSON_IsTrue(editorTargetAbNode)
+                    ? TargetingMode::TARGET_RELATIVE_AB
+                    : TargetingMode::NONE;
+                parsedTargetingModeExplicit = true;
+            }
+        }
+    }
+    if (!parsedTargetingModeExplicit && directionStatesArraySize == kDirectionStateCount)
+    {
+        // Compat legacy: 16 pages sans metadata explicite => on active A/B target-relative.
+        parsedTargetingMode = TargetingMode::TARGET_RELATIVE_AB;
+    }
+    if (parsedTargetingMode == TargetingMode::TARGET_RELATIVE_AB &&
+        directionStatesArraySize != kDirectionStateCount)
+    {
+        RC2D_log(
+            RC2D_LOG_WARN,
+            "VFX: targetingMode=target_relative_ab sans 16 pages; fallback none (%s)",
+            gameplayConfigJsonPath.c_str());
+        parsedTargetingMode = TargetingMode::NONE;
     }
 
     int directionStateIndex = 0;
@@ -904,32 +1566,20 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     {
         if (!cJSON_IsObject(directionStateNode))
         {
-            directionStateIndex += 1;
-            continue;
+            cJSON_Delete(root);
+            RC2D_log(
+                RC2D_LOG_ERROR,
+                "VFX: gameplay.directionStates[%d] doit etre un objet: %s",
+                directionStateIndex,
+                gameplayConfigJsonPath.c_str());
+            return false;
         }
 
-        ShipDirection direction = static_cast<ShipDirection>(directionStateIndex % 4);
-        ShipState state = (directionStateIndex >= 4) ? ShipState::DAMAGED : ShipState::HEALTHY;
-
-        const cJSON* shipNode = cJSON_GetObjectItemCaseSensitive(directionStateNode, "ship");
-        if (cJSON_IsObject(shipNode))
-        {
-            const cJSON* directionNode = cJSON_GetObjectItemCaseSensitive(shipNode, "direction");
-            if (cJSON_IsString(directionNode) && directionNode->valuestring != nullptr)
-            {
-                direction = shipDirectionFromString(directionNode->valuestring);
-            }
-
-            const cJSON* stateNode = cJSON_GetObjectItemCaseSensitive(shipNode, "state");
-            if (cJSON_IsString(stateNode) && stateNode->valuestring != nullptr)
-            {
-                state = shipStateFromString(stateNode->valuestring);
-            }
-        }
-
-        const int key = directionStateKey(direction, state);
+        // Cle = index dans le tableau (aligne export editeur : page p -> slot p).
+        const int key = directionStateIndex;
         DirectionStateData stateData{};
 
+        const cJSON* shipNode = cJSON_GetObjectItemCaseSensitive(directionStateNode, "ship");
         if (cJSON_IsObject(shipNode))
         {
             const cJSON* shipDrawOrderNode = cJSON_GetObjectItemCaseSensitive(shipNode, "drawOrder");
@@ -1157,6 +1807,16 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         directionStateIndex += 1;
     }
 
+    if (directionStateIndex != directionStatesArraySize)
+    {
+        cJSON_Delete(root);
+        RC2D_log(
+            RC2D_LOG_ERROR,
+            "VFX: gameplay.directionStates[] taille incoherente: %s",
+            gameplayConfigJsonPath.c_str());
+        return false;
+    }
+
     // 11) Charger la spritesheet (json + png).
     if (parsedSpritesheetJsonPath.empty())
     {
@@ -1211,12 +1871,21 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         this->frames.push_back(Frame{frame.index, frame.x, frame.y, frame.w, frame.h});
     }
     this->directionStates = std::move(parsedDirectionStates);
+    this->loadedDirectionStateCount = directionStatesArraySize;
+    this->targetingMode = parsedTargetingMode;
     this->defaultVfxFps = parsedDefaultFps;
     this->playbackSeconds = 0.0f;
-    this->activeDirectionStateKey = hasFirstDirectionStateKey ? firstDirectionStateKey : 0;
+    {
+        const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
+        const int preferred = hasFirstDirectionStateKey ? firstDirectionStateKey : 0;
+        this->activeDirectionStateKey = std::clamp(preferred, 0, maxKey);
+    }
     this->trailPieces.clear();
     this->trailPrevShipTileValid = false;
     this->trailPrevDirectionStateKey = -1;
+    this->lastDirectionStateResolution = DirectionStateResolution{};
+    this->lastLoggedTargetRelativeResolution = DirectionStateResolution{};
+    this->hasLoggedTargetRelativeResolution = false;
     this->loaded = true;
 
     this->shipFolderPath = parsedShipFolderPath;
@@ -1227,10 +1896,11 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
 
     RC2D_log(
         RC2D_LOG_INFO,
-        "VFX: charge depuis %s (frames=%d, fps=%.2f)",
+        "VFX: charge depuis %s (frames=%d, fps=%.2f, targetingMode=%s)",
         this->configJsonPath.c_str(),
         static_cast<int>(this->frames.size()),
-        this->defaultVfxFps);
+        this->defaultVfxFps,
+        targetingModeToString(this->targetingMode));
     return true;
 }
 
@@ -1258,6 +1928,11 @@ void VFX::unload(void)
     this->defaultVfxFps = 12.0f;
     this->playbackSeconds = 0.0f;
     this->activeDirectionStateKey = 0;
+    this->loadedDirectionStateCount = kDirectionStateCount;
+    this->targetingMode = TargetingMode::NONE;
+    this->lastDirectionStateResolution = DirectionStateResolution{};
+    this->lastLoggedTargetRelativeResolution = DirectionStateResolution{};
+    this->hasLoggedTargetRelativeResolution = false;
     this->loaded = false;
 
     // 4) Nettoyer les chemins de debug.
@@ -1275,7 +1950,7 @@ bool VFX::isLoaded(void) const
         !this->frames.empty();
 }
 
-void VFX::update(double dt, const Ship& ship)
+void VFX::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
 {
     // 1) Pas de ressources chargees => rien a mettre a jour.
     if (!this->isLoaded())
@@ -1284,7 +1959,21 @@ void VFX::update(double dt, const Ship& ship)
     }
 
     // 2) Synchroniser la page direction/state depuis le ship runtime.
-    this->setDirectionStateFromShip(ship);
+    this->setDirectionStateFromShip(ship, targetTile);
+    if (!ship.isMoving() &&
+        this->lastDirectionStateResolution.usedTargetRelativeMode &&
+        this->lastDirectionStateResolution.hasTargetTile)
+    {
+        ship.setPreviewDirection(
+            previewDirectionFromShipDirection(this->lastDirectionStateResolution.resolvedDirection));
+    }
+
+    // Directions pures EN MOUVEMENT: garder l'alternance visuelle du ship,
+    // mais n'autoriser l'animation VFX que sur la diagonale autorisee.
+    if (!shouldPlayMovingPureDirectionAnimation(ship, this->lastDirectionStateResolution))
+    {
+        return;
+    }
 
     // 3) Si dt invalide, on s'arrete ici (direction/state deja synchro).
     if (!std::isfinite(dt) || dt <= 0.0)
@@ -1309,7 +1998,8 @@ void VFX::update(double dt, const Ship& ship)
 
 void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship)
 {
-    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, 7);
+    const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
+    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, maxKey);
     if (this->trailPrevDirectionStateKey != activeKey)
     {
         this->trailPrevDirectionStateKey = activeKey;
@@ -1542,10 +2232,11 @@ void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip,
 
     const DirectionStateData& directionState = this->currentDirectionState();
     const int shipDrawOrder = directionState.shipDrawOrder;
-    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, 7);
+    const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
+    const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, maxKey);
 
     // Rejets nes sur une autre page direction : l'instance peut n'exister que sur cette page
-    // (instanceId differents par export). On resout d'abord sur la page active, puis sur les 7 autres
+    // (instanceId differents par export). On resout d'abord sur la page active, puis sur les autres
     // pour laisser les pieces vivre jusqu'a fin de vie au lieu de les "eteindre" au changement de cap.
     auto findInst = [this, activeKey](uint32_t id) -> const Instance* {
         if (id == 0U)
@@ -1558,7 +2249,7 @@ void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip,
         {
             return onActive;
         }
-        for (int k = 0; k < 8; ++k)
+        for (int k = 0; k < this->loadedDirectionStateCount; ++k)
         {
             if (k == activeKey)
             {
@@ -1759,6 +2450,10 @@ void VFX::draw(const Map& map, const Ship& ship, bool drawBehindShip) const
 {
     // 1) Guard global.
     if (!this->isLoaded())
+    {
+        return;
+    }
+    if (!shouldPlayMovingPureDirectionAnimation(ship, this->lastDirectionStateResolution))
     {
         return;
     }

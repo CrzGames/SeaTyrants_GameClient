@@ -186,6 +186,121 @@ float editorMapVfxNormalizeSignedAngleDeg(float angleDeg)
     return angleDeg;
 }
 
+float editorMapVfxNormalizeDeg0To360(float deg)
+{
+    if (!std::isfinite(deg))
+    {
+        return 0.0f;
+    }
+    float x = std::fmod(deg, 360.0f);
+    if (x < 0.0f)
+    {
+        x += 360.0f;
+    }
+    return x;
+}
+
+float editorMapVfxCircularDeltaDeg(float aDeg, float bDeg)
+{
+    const float da = editorMapVfxNormalizeDeg0To360(aDeg);
+    const float db = editorMapVfxNormalizeDeg0To360(bDeg);
+    const float d = std::fabs(da - db);
+    return (std::min)(d, 360.0f - d);
+}
+
+void editorMapVfxBowForwardScreenUnit(Ship::PreviewDirection bow, float* outFx, float* outFy)
+{
+    if (outFx == nullptr || outFy == nullptr)
+    {
+        return;
+    }
+    float x = -1.0f;
+    float y = 1.0f;
+    switch (bow)
+    {
+    case Ship::PreviewDirection::DOWN_LEFT:
+        x = -1.0f;
+        y = 1.0f;
+        break;
+    case Ship::PreviewDirection::UP_RIGHT:
+        x = 1.0f;
+        y = -1.0f;
+        break;
+    case Ship::PreviewDirection::UP_LEFT:
+        x = -1.0f;
+        y = -1.0f;
+        break;
+    case Ship::PreviewDirection::DOWN_RIGHT:
+        x = 1.0f;
+        y = 1.0f;
+        break;
+    default:
+        break;
+    }
+    const float inv = 1.0f / std::sqrt((x * x) + (y * y));
+    *outFx = x * inv;
+    *outFy = y * inv;
+}
+
+float editorMapVfxAdjustedTargetFireDegFromBowScreenDelta(Ship::PreviewDirection bow, float dScreenX, float dScreenY)
+{
+    constexpr float kRadToDeg = 57.29577951308232f;
+    const float targetDeg = editorMapVfxNormalizeDeg0To360(std::atan2(dScreenY, dScreenX) * kRadToDeg);
+    float fx = 0.0f;
+    float fy = 0.0f;
+    editorMapVfxBowForwardScreenUnit(bow, &fx, &fy);
+    const float bowDeg = editorMapVfxNormalizeDeg0To360(std::atan2(fy, fx) * kRadToDeg);
+    return editorMapVfxNormalizeDeg0To360(targetDeg - bowDeg + 135.0f);
+}
+
+int editorMapVfxTargetFireSectorFromAdjustedDeg(float adjDeg)
+{
+    const float a = editorMapVfxNormalizeDeg0To360(adjDeg);
+    if (a >= 0.0f && a < 90.0f)
+    {
+        return 0;
+    }
+    if (a >= 180.0f && a < 270.0f)
+    {
+        return 1;
+    }
+    return (editorMapVfxCircularDeltaDeg(a, 45.0f) <= editorMapVfxCircularDeltaDeg(a, 225.0f)) ? 0 : 1;
+}
+
+int editorMapVfxTargetFireSectorFromScreenDelta(Ship::PreviewDirection bow, float dScreenX, float dScreenY)
+{
+    const float adj = editorMapVfxAdjustedTargetFireDegFromBowScreenDelta(bow, dScreenX, dScreenY);
+    return editorMapVfxTargetFireSectorFromAdjustedDeg(adj);
+}
+
+void editorMapVfxTargetFireSectorQuarterBoundsScreenDeg(
+    Ship::PreviewDirection bow,
+    int sector,
+    float* outDeg0,
+    float* outDeg1)
+{
+    if (outDeg0 == nullptr || outDeg1 == nullptr)
+    {
+        return;
+    }
+    constexpr float kRadToDeg = 57.29577951308232f;
+    float fx = 0.0f;
+    float fy = 0.0f;
+    editorMapVfxBowForwardScreenUnit(bow, &fx, &fy);
+    const float bowDeg = editorMapVfxNormalizeDeg0To360(std::atan2(fy, fx) * kRadToDeg);
+    const int s = std::clamp(sector, 0, 1);
+    if (s == 0)
+    {
+        *outDeg0 = editorMapVfxNormalizeDeg0To360(bowDeg - 135.0f);
+        *outDeg1 = editorMapVfxNormalizeDeg0To360(bowDeg - 45.0f);
+    }
+    else
+    {
+        *outDeg0 = editorMapVfxNormalizeDeg0To360(bowDeg + 45.0f);
+        *outDeg1 = editorMapVfxNormalizeDeg0To360(bowDeg + 135.0f);
+    }
+}
+
 float editorMapVfxTrailConeLengthToPreviewPx(float lengthValue, float maxLengthPx)
 {
     const float maxPx = (std::max)(maxLengthPx, 1.0f);
@@ -381,7 +496,6 @@ constexpr float kListScrollBarWidth = 10.0f;
 constexpr int kVisibleListRows = 10;
 /** Espacement vertical entre les lignes du panneau Layers (aligne dessin, clic, drag). */
 constexpr float kLayerListPanelRowGap = 6.0f;
-constexpr int kShipVfxLayerPageCount = 8;
 /**
  * Sentinel dans la liste d'affichage Layers : une ligne Ãƒâ€šÃ‚Â« sous-instance Ãƒâ€šÃ‚Â» par rejet de trainee actif.
  * code = kLayerPanelTrailPieceRowMarker - (int)layerPanelUiId (uiId > 0, raisonnable pour rester dans int32).
@@ -405,6 +519,8 @@ inline int layerPanelTrailPieceRowCodeFromUiId(uint32_t uiId)
 
 struct ShipVfxLayerPagePickerLayout
 {
+    SDL_FRect targetSectorsOverlayToggleRect{};
+    SDL_FRect targetSectorsToggleRect{};
     SDL_FRect duplicateToPagesButtonRect{};
     SDL_FRect pageButtonRect{};
     SDL_FRect popupRect{};
@@ -415,12 +531,15 @@ static ShipVfxLayerPagePickerLayout buildShipVfxLayerPagePickerLayout(
     const SDL_FRect& layerListRect,
     float panelPadding,
     float headerHeight,
-    bool pickerOpen)
+    bool pickerOpen,
+    int pickerPageRowCount)
 {
     ShipVfxLayerPagePickerLayout out{};
     const float rowsWidth = layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
     constexpr float kPageBtnW = 56.0f;
     constexpr float kDupPagesBtnW = 52.0f;
+    constexpr float kAbToggleBtnW = 44.0f;
+    constexpr float kOverlayToggleBtnW = 40.0f;
     constexpr float kHeaderPageBtnGap = 4.0f;
     out.pageButtonRect.x = layerListRect.x + panelPadding + rowsWidth - kPageBtnW;
     out.pageButtonRect.y = layerListRect.y + 1.0f;
@@ -430,25 +549,35 @@ static ShipVfxLayerPagePickerLayout buildShipVfxLayerPagePickerLayout(
     out.duplicateToPagesButtonRect.h = headerHeight + 2.0f;
     out.duplicateToPagesButtonRect.x = out.pageButtonRect.x - kDupPagesBtnW - kHeaderPageBtnGap;
     out.duplicateToPagesButtonRect.y = layerListRect.y + 1.0f;
+    out.targetSectorsToggleRect.w = kAbToggleBtnW;
+    out.targetSectorsToggleRect.h = headerHeight + 2.0f;
+    out.targetSectorsToggleRect.x = out.duplicateToPagesButtonRect.x - kAbToggleBtnW - kHeaderPageBtnGap;
+    out.targetSectorsToggleRect.y = layerListRect.y + 1.0f;
+    out.targetSectorsOverlayToggleRect.w = kOverlayToggleBtnW;
+    out.targetSectorsOverlayToggleRect.h = headerHeight + 2.0f;
+    out.targetSectorsOverlayToggleRect.x =
+        out.targetSectorsToggleRect.x - kOverlayToggleBtnW - kHeaderPageBtnGap;
+    out.targetSectorsOverlayToggleRect.y = layerListRect.y + 1.0f;
 
     if (!pickerOpen)
     {
         return out;
     }
 
+    const int rowCount = std::clamp(pickerPageRowCount, 1, kShipVfxLayerPageCount);
     const float popPad = 4.0f;
     const float rowH = 16.0f;
     const float rowGap = 2.0f;
     const float popW = (std::min)(layerListRect.w - (panelPadding * 2.0f), 420.0f);
-    const float popH = popPad * 2.0f + (rowH * static_cast<float>(kShipVfxLayerPageCount)) +
-        (rowGap * static_cast<float>(kShipVfxLayerPageCount - 1));
+    const float popH = popPad * 2.0f + (rowH * static_cast<float>(rowCount)) +
+        (rowGap * static_cast<float>(rowCount - 1));
     out.popupRect.x = layerListRect.x + panelPadding;
     out.popupRect.y = layerListRect.y + panelPadding + headerHeight + 2.0f;
     out.popupRect.w = popW;
     out.popupRect.h = popH;
 
     float y = out.popupRect.y + popPad;
-    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    for (int i = 0; i < rowCount; ++i)
     {
         out.pageRowRects[i].x = out.popupRect.x + popPad;
         out.pageRowRects[i].y = y;
@@ -459,13 +588,35 @@ static ShipVfxLayerPagePickerLayout buildShipVfxLayerPagePickerLayout(
     return out;
 }
 
-static void shipVfxLayerPageLabelUtf8(int pageIndex, char* buf, size_t bufSize)
+static void shipVfxLayerPageLabelUtf8(int pageIndex, bool targetSectorsAB, char* buf, size_t bufSize)
 {
     static const char* kDir[] = {"Bas-Gauche", "Haut-Droite", "Haut-Gauche", "Bas-Droite"};
     const int dir = pageIndex % 4;
-    const int st = pageIndex / 4;
+    const int st = (pageIndex / 4) % 2;
     const char* hp = (st == 0) ? "HP PLEIN" : "HP BAS";
-    SDL_snprintf(buf, bufSize, "%d/8  %s  |  %s", pageIndex + 1, kDir[dir], hp);
+    if (!targetSectorsAB)
+    {
+        SDL_snprintf(
+            buf,
+            bufSize,
+            "%d/%d  %s  |  %s",
+            pageIndex + 1,
+            kShipVfxLayerPageCountNoTargetSectors,
+            kDir[dir],
+            hp);
+        return;
+    }
+    const int sec = pageIndex / 8;
+    const char* zone = (sec == 0) ? "CIBLE A" : "CIBLE B";
+    SDL_snprintf(
+        buf,
+        bufSize,
+        "%d/%d  %s  |  %s  |  %s",
+        pageIndex + 1,
+        kShipVfxLayerPageCount,
+        kDir[dir],
+        hp,
+        zone);
 }
 
 /** Cote de la grille iso debug (tuiles) centree sur le navire preview. */
@@ -1402,6 +1553,10 @@ EditorMapVfxScene::EditorMapVfxScene(void)
 {
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
+    this->previewTargetFireSectorIndex = 0;
+    this->shipVfxEditorTargetSectorsABEnabled = false;
+    this->shipVfxEditorTargetingMode = targetingModeFromTargetSectorsAB(false);
+    this->shipVfxEditorTargetSectorsOverlayVisible = false;
     this->previewShipOpacityPercent = 100;
     this->initDefaultShipLayerSettingsAllPages();
     this->shipLayerSelected = false;
@@ -1422,6 +1577,7 @@ EditorMapVfxScene::EditorMapVfxScene(void)
     this->buttonDirectionPrevRect = SDL_FRect{};
     this->buttonDirectionNextRect = SDL_FRect{};
     this->buttonShipStateToggleRect = SDL_FRect{};
+    this->buttonTargetFireSectorToggleRect = SDL_FRect{};
     this->buttonShipOpacityMinusRect = SDL_FRect{};
     this->buttonShipOpacityPlusRect = SDL_FRect{};
     this->buttonLayerOrderMinusRect = SDL_FRect{};
@@ -1492,16 +1648,96 @@ void EditorMapVfxScene::clearShipVfxLayerUiTransientStateForPageChange(void)
     this->layerRowDragStartMouseY = 0.0f;
 }
 
+ShipVfxTargetingMode EditorMapVfxScene::targetingModeFromTargetSectorsAB(bool enabled)
+{
+    return enabled ? ShipVfxTargetingMode::TARGET_RELATIVE_AB : ShipVfxTargetingMode::NONE;
+}
+
+const char* EditorMapVfxScene::targetingModeToJsonId(ShipVfxTargetingMode mode)
+{
+    return (mode == ShipVfxTargetingMode::TARGET_RELATIVE_AB) ? "target_relative_ab" : "none";
+}
+
+ShipVfxTargetingMode EditorMapVfxScene::targetingModeFromJsonId(const char* id, bool* outRecognized)
+{
+    if (outRecognized != nullptr)
+    {
+        *outRecognized = false;
+    }
+    if (id == nullptr)
+    {
+        return ShipVfxTargetingMode::NONE;
+    }
+    if (SDL_strcasecmp(id, "target_relative_ab") == 0 ||
+        SDL_strcasecmp(id, "target-relative-ab") == 0 ||
+        SDL_strcasecmp(id, "target_relative") == 0)
+    {
+        if (outRecognized != nullptr)
+        {
+            *outRecognized = true;
+        }
+        return ShipVfxTargetingMode::TARGET_RELATIVE_AB;
+    }
+    if (SDL_strcasecmp(id, "none") == 0 || SDL_strcasecmp(id, "legacy") == 0)
+    {
+        if (outRecognized != nullptr)
+        {
+            *outRecognized = true;
+        }
+        return ShipVfxTargetingMode::NONE;
+    }
+    return ShipVfxTargetingMode::NONE;
+}
+
 void EditorMapVfxScene::applyShipVfxLayerPageIndex(int pageIndex)
 {
-    const int p = std::clamp(pageIndex, 0, 7);
+    const int p = std::clamp(pageIndex, 0, kShipVfxLayerPageCount - 1);
     this->previewDirectionIndex = p % 4;
-    this->previewShipStateIndex = p / 4;
+    this->previewShipStateIndex = (p / 4) % 2;
+    this->previewTargetFireSectorIndex = (p / 8) % 2;
     this->applyPreviewDirectionToShip();
     this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
     this->clearShipVfxLayerUiTransientStateForPageChange();
     this->shipVfxLayerPagePickerOpen = false;
     this->markShipVfxDirty();
+}
+
+void EditorMapVfxScene::toggleShipVfxEditorTargetSectorsAB(void)
+{
+    const bool next = !this->shipVfxEditorTargetSectorsABEnabled;
+    if (!next)
+    {
+        const int key = this->getShipVfxLayerPageKey();
+        if (key >= kShipVfxLayerPageCountNoTargetSectors)
+        {
+            this->applyShipVfxLayerPageIndex(key % kShipVfxLayerPageCountNoTargetSectors);
+        }
+        else
+        {
+            this->previewTargetFireSectorIndex = 0;
+        }
+        this->shipVfxEditorTargetSectorsOverlayVisible = false;
+    }
+    this->shipVfxEditorTargetSectorsABEnabled = next;
+    this->shipVfxEditorTargetingMode = targetingModeFromTargetSectorsAB(next);
+    this->shipVfxLayerPagePickerOpen = false;
+    this->closeVfxDuplicateToPagesPopup();
+    this->markShipVfxDirty();
+    this->statusMessage = this->shipVfxEditorTargetSectorsABEnabled
+        ? "Pages VFX : 16 (direction x HP x cibles A/B)."
+        : "Pages VFX : 8 (direction x HP, sans A/B).";
+}
+
+void EditorMapVfxScene::toggleShipVfxEditorTargetSectorsOverlayVisible(void)
+{
+    if (!this->shipVfxEditorTargetSectorsABEnabled)
+    {
+        return;
+    }
+    this->shipVfxEditorTargetSectorsOverlayVisible = !this->shipVfxEditorTargetSectorsOverlayVisible;
+    this->statusMessage = this->shipVfxEditorTargetSectorsOverlayVisible
+        ? "Secteurs cibles A/B : affichage sur la preview active."
+        : "Secteurs cibles A/B : affichage sur la preview masque.";
 }
 
 void EditorMapVfxScene::resetEditorState(void)
@@ -1526,6 +1762,10 @@ void EditorMapVfxScene::resetEditorState(void)
     this->loadedShipFolderAbsolute.clear();
     this->previewDirectionIndex = 0;
     this->previewShipStateIndex = 0;
+    this->previewTargetFireSectorIndex = 0;
+    this->shipVfxEditorTargetSectorsABEnabled = false;
+    this->shipVfxEditorTargetingMode = targetingModeFromTargetSectorsAB(false);
+    this->shipVfxEditorTargetSectorsOverlayVisible = false;
     this->previewShipOpacityPercent = 100;
     this->initDefaultShipLayerSettingsAllPages();
     this->shipLayerSelected = false;
@@ -1992,6 +2232,27 @@ void EditorMapVfxScene::cyclePreviewShipState(int delta)
     this->clearShipVfxLayerUiTransientStateForPageChange();
 }
 
+void EditorMapVfxScene::cyclePreviewTargetFireSector(int delta)
+{
+    if (!this->shipVfxEditorTargetSectorsABEnabled)
+    {
+        return;
+    }
+    const int count = 2;
+    int index = this->previewTargetFireSectorIndex + delta;
+    while (index < 0)
+    {
+        index += count;
+    }
+    while (index >= count)
+    {
+        index -= count;
+    }
+    this->previewTargetFireSectorIndex = index;
+    this->clearShipVfxLayerUiTransientStateForPageChange();
+    this->markShipVfxDirty();
+}
+
 void EditorMapVfxScene::applyPreviewShipOpacityPercentToShip(void)
 {
     const int p = std::clamp(this->previewShipOpacityPercent, 0, 100);
@@ -2036,6 +2297,11 @@ const char* EditorMapVfxScene::getPreviewShipStateLabel(void) const
     return (this->previewShipStateIndex == 1)
         ? "SPRITES 5-8 (HP BAS)"
         : "SPRITES 1-4 (HP PLEIN)";
+}
+
+const char* EditorMapVfxScene::getPreviewTargetFireSectorLabel(void) const
+{
+    return (this->previewTargetFireSectorIndex == 1) ? "SECTEUR TIR B" : "SECTEUR TIR A";
 }
 
 void EditorMapVfxScene::markShipVfxDirty(void)
@@ -3844,6 +4110,11 @@ void EditorMapVfxScene::openVfxDuplicateToPagesPopupFromSelectedVfx(void)
     {
         this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == srcPage);
     }
+    const int dupEff = this->shipVfxEffectiveLayerPageCount();
+    for (int i = dupEff; i < kShipVfxLayerPageCount; ++i)
+    {
+        this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = false;
+    }
     this->vfxDuplicateToPagesPopupVisible = true;
     this->statusMessage =
         "DUP+ : dupliquer toute la page courante vers les pages cochees, puis VALIDER.";
@@ -3880,7 +4151,8 @@ void EditorMapVfxScene::applyVfxDuplicateToPagesPopupValidate(void)
     }
 
     int copiedLayersTotal = 0;
-    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    const int dupMaxPage = this->shipVfxEffectiveLayerPageCount();
+    for (int p = 0; p < dupMaxPage; ++p)
     {
         if (!this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(p)])
         {
@@ -3974,7 +4246,8 @@ bool EditorMapVfxScene::computeVfxDuplicateToPagesPopupLayout(VfxDuplicateToPage
     const float presetH = 26.0f;
     const float presetGap = 6.0f;
     const float bottomBtns = 36.0f;
-    const float popupH = topPad + (rowH + rowGap) * static_cast<float>(kShipVfxLayerPageCount) + presetGap +
+    const int pageRows = this->shipVfxEffectiveLayerPageCount();
+    const float popupH = topPad + (rowH + rowGap) * static_cast<float>(pageRows) + presetGap +
         presetH + presetGap + bottomBtns;
     out->popup = SDL_FRect{
         mapRect.x + ((mapRect.w - popupW) * 0.5f),
@@ -3983,7 +4256,7 @@ bool EditorMapVfxScene::computeVfxDuplicateToPagesPopupLayout(VfxDuplicateToPage
         popupH};
     const float pad = 12.0f;
     float y = out->popup.y + topPad;
-    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    for (int i = 0; i < pageRows; ++i)
     {
         out->pageRowRects[i] = SDL_FRect{out->popup.x + pad, y, popupW - pad * 2.0f, rowH};
         y += rowH + rowGap;
@@ -4029,7 +4302,8 @@ void EditorMapVfxScene::drawVfxDuplicateToPagesPopup(void) const
     rc2d_graphics_drawText(&titleText, lay.popup.x + 12.0f, lay.popup.y + 8.0f);
     rc2d_graphics_destroyText(&titleText);
 
-    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    const int dupPageRows = this->shipVfxEffectiveLayerPageCount();
+    for (int i = 0; i < dupPageRows; ++i)
     {
         const bool on = this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)];
         rc2d_graphics_setColor(on ? RC2D_Color{64, 108, 86, 235} : RC2D_Color{44, 52, 64, 230});
@@ -4037,7 +4311,7 @@ void EditorMapVfxScene::drawVfxDuplicateToPagesPopup(void) const
         rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
         rc2d_graphics_rectangle("line", &lay.pageRowRects[i]);
         char rowBuf[180] = {};
-        shipVfxLayerPageLabelUtf8(i, rowBuf, sizeof(rowBuf));
+        shipVfxLayerPageLabelUtf8(i, this->shipVfxEditorTargetSectorsABEnabled, rowBuf, sizeof(rowBuf));
         char lineBuf[220] = {};
         SDL_snprintf(lineBuf, sizeof(lineBuf), "%s  [%s]", rowBuf, on ? "X" : " ");
         RC2D_Text rowT = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), lineBuf);
@@ -4116,9 +4390,14 @@ bool EditorMapVfxScene::handleVfxDuplicateToPagesPopupMouseClick(float x, float 
     }
     if (this->pointInRect(x, y, lay.btnAll))
     {
-        for (bool& s : this->vfxDuplicateToPagesPageSelected)
+        const int n = this->shipVfxEffectiveLayerPageCount();
+        for (int i = 0; i < n; ++i)
         {
-            s = true;
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = true;
+        }
+        for (int i = n; i < kShipVfxLayerPageCount; ++i)
+        {
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = false;
         }
         return true;
     }
@@ -4133,21 +4412,33 @@ bool EditorMapVfxScene::handleVfxDuplicateToPagesPopupMouseClick(float x, float 
     if (this->pointInRect(x, y, lay.btnOtherPages))
     {
         const int src = this->vfxDuplicateToPagesPopupSourcePageKey;
-        for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+        const int n = this->shipVfxEffectiveLayerPageCount();
+        for (int i = 0; i < n; ++i)
         {
             this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = (i != src);
+        }
+        for (int i = n; i < kShipVfxLayerPageCount; ++i)
+        {
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = false;
         }
         return true;
     }
     if (this->pointInRect(x, y, lay.btnSourceOnly))
     {
-        for (size_t i = 0; i < this->vfxDuplicateToPagesPageSelected.size(); ++i)
+        const int n = this->shipVfxEffectiveLayerPageCount();
+        const int srcKey = this->vfxDuplicateToPagesPopupSourcePageKey;
+        for (int i = 0; i < n; ++i)
         {
-            this->vfxDuplicateToPagesPageSelected[i] = (static_cast<int>(i) == this->vfxDuplicateToPagesPopupSourcePageKey);
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = (i == srcKey);
+        }
+        for (int i = n; i < kShipVfxLayerPageCount; ++i)
+        {
+            this->vfxDuplicateToPagesPageSelected[static_cast<size_t>(i)] = false;
         }
         return true;
     }
-    for (int i = 0; i < kShipVfxLayerPageCount; ++i)
+    const int dupClickRows = this->shipVfxEffectiveLayerPageCount();
+    for (int i = 0; i < dupClickRows; ++i)
     {
         if (this->pointInRect(x, y, lay.pageRowRects[i]))
         {
@@ -4305,7 +4596,8 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     x = gs.x + startX;
     setNextButton(&this->buttonDirectionPrevRect, &x, shipRow1Y, 158.0f);
     setNextButton(&this->buttonDirectionNextRect, &x, shipRow1Y, 158.0f);
-    setNextButton(&this->buttonShipStateToggleRect, &x, shipRow1Y, 268.0f);
+    setNextButton(&this->buttonShipStateToggleRect, &x, shipRow1Y, 220.0f);
+    setNextButton(&this->buttonTargetFireSectorToggleRect, &x, shipRow1Y, 200.0f);
     setNextButton(&this->buttonShipOpacityMinusRect, &x, shipRow1Y, 88.0f);
     setNextButton(&this->buttonShipOpacityPlusRect, &x, shipRow1Y, 88.0f);
     setNextButton(&this->buttonPreviewIsoGridRect, &x, shipRow1Y, 152.0f);
@@ -4896,17 +5188,94 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
     const float rowsLeftX = this->layerListRect.x + panelPadding;
     const float rowsWidth = this->layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
 
+    const ShipVfxLayerPagePickerLayout pagePickHeader = buildShipVfxLayerPagePickerLayout(
+        this->layerListRect,
+        panelPadding,
+        headerHeight,
+        false,
+        this->shipVfxEffectiveLayerPageCount());
+
     if (this->overlayFont.sdl_font != nullptr)
     {
-        RC2D_Text headerText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Layers (drag souris)");
+        char pageLab[200] = {};
+        shipVfxLayerPageLabelUtf8(
+            this->getShipVfxLayerPageKey(),
+            this->shipVfxEditorTargetSectorsABEnabled,
+            pageLab,
+            sizeof(pageLab));
+        char headerLine[280] = {};
+        const size_t plen = std::strlen(pageLab);
+        if (plen > 52U)
+        {
+            SDL_snprintf(headerLine, sizeof(headerLine), "LAYERS (%.52s...)", pageLab);
+        }
+        else
+        {
+            SDL_snprintf(headerLine, sizeof(headerLine), "LAYERS (%s)", pageLab);
+        }
+        RC2D_Text headerText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), headerLine);
         headerText.color = kHudTextColor;
         rc2d_graphics_setTextColor(&headerText);
-        rc2d_graphics_drawText(&headerText, this->layerListRect.x + panelPadding, this->layerListRect.y + 1.0f);
+        int hw = 0;
+        int hh = 0;
+        rc2d_graphics_getTextSize(&headerText, &hw, &hh);
+        const float maxTextRight = pagePickHeader.targetSectorsOverlayToggleRect.x - 4.0f;
+        float drawX = this->layerListRect.x + panelPadding;
+        if (maxTextRight > drawX && static_cast<float>(hw) > (maxTextRight - drawX))
+        {
+            drawX = (std::max)(this->layerListRect.x + panelPadding, maxTextRight - static_cast<float>(hw));
+        }
+        rc2d_graphics_drawText(&headerText, drawX, this->layerListRect.y + 1.0f);
         rc2d_graphics_destroyText(&headerText);
     }
 
-    const ShipVfxLayerPagePickerLayout pagePickHeader =
-        buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, false);
+    rc2d_graphics_setColor(
+        !this->shipVfxEditorTargetSectorsABEnabled
+            ? RC2D_Color{42, 48, 56, 200}
+            : (this->shipVfxEditorTargetSectorsOverlayVisible ? RC2D_Color{72, 108, 120, 230}
+                                                              : RC2D_Color{52, 72, 96, 230}));
+    rc2d_graphics_rectangle("fill", &pagePickHeader.targetSectorsOverlayToggleRect);
+    rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+    rc2d_graphics_rectangle("line", &pagePickHeader.targetSectorsOverlayToggleRect);
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const char* ovlLab = !this->shipVfxEditorTargetSectorsABEnabled
+            ? "—"
+            : (this->shipVfxEditorTargetSectorsOverlayVisible ? "TRC" : "trc");
+        RC2D_Text ovlText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), ovlLab);
+        ovlText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&ovlText);
+        int ow = 0;
+        int oh = 0;
+        rc2d_graphics_getTextSize(&ovlText, &ow, &oh);
+        rc2d_graphics_drawText(
+            &ovlText,
+            pagePickHeader.targetSectorsOverlayToggleRect.x +
+                ((pagePickHeader.targetSectorsOverlayToggleRect.w - static_cast<float>(ow)) * 0.5f),
+            pagePickHeader.targetSectorsOverlayToggleRect.y + 1.0f);
+        rc2d_graphics_destroyText(&ovlText);
+    }
+    rc2d_graphics_setColor(
+        this->shipVfxEditorTargetSectorsABEnabled ? RC2D_Color{52, 92, 86, 230} : RC2D_Color{52, 72, 96, 230});
+    rc2d_graphics_rectangle("fill", &pagePickHeader.targetSectorsToggleRect);
+    rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
+    rc2d_graphics_rectangle("line", &pagePickHeader.targetSectorsToggleRect);
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const char* abLab = this->shipVfxEditorTargetSectorsABEnabled ? "A/B" : "8pg";
+        RC2D_Text abText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), abLab);
+        abText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&abText);
+        int abW = 0;
+        int abH = 0;
+        rc2d_graphics_getTextSize(&abText, &abW, &abH);
+        rc2d_graphics_drawText(
+            &abText,
+            pagePickHeader.targetSectorsToggleRect.x +
+                ((pagePickHeader.targetSectorsToggleRect.w - static_cast<float>(abW)) * 0.5f),
+            pagePickHeader.targetSectorsToggleRect.y + 1.0f);
+        rc2d_graphics_destroyText(&abText);
+    }
     rc2d_graphics_setColor(RC2D_Color{52, 72, 96, 230});
     rc2d_graphics_rectangle("fill", &pagePickHeader.duplicateToPagesButtonRect);
     rc2d_graphics_setColor(RC2D_Color{130, 145, 162, 230});
@@ -5574,14 +5943,19 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
 
     if (this->shipVfxLayerPagePickerOpen)
     {
-        const ShipVfxLayerPagePickerLayout pagePick =
-            buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, true);
+        const int pickRows = this->shipVfxEffectiveLayerPageCount();
+        const ShipVfxLayerPagePickerLayout pagePick = buildShipVfxLayerPagePickerLayout(
+            this->layerListRect,
+            panelPadding,
+            headerHeight,
+            true,
+            pickRows);
         rc2d_graphics_setColor(RC2D_Color{10, 14, 18, 240});
         rc2d_graphics_rectangle("fill", &pagePick.popupRect);
         rc2d_graphics_setColor(RC2D_Color{150, 165, 182, 240});
         rc2d_graphics_rectangle("line", &pagePick.popupRect);
         const int curPage = this->getShipVfxLayerPageKey();
-        for (int pi = 0; pi < kShipVfxLayerPageCount; ++pi)
+        for (int pi = 0; pi < pickRows; ++pi)
         {
             const bool isActive = (pi == curPage);
             rc2d_graphics_setColor(isActive ? RC2D_Color{72, 108, 152, 235} : RC2D_Color{38, 48, 60, 220});
@@ -5591,7 +5965,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
             if (this->overlayFont.sdl_font != nullptr)
             {
                 char rowBuf[160] = {};
-                shipVfxLayerPageLabelUtf8(pi, rowBuf, sizeof(rowBuf));
+                shipVfxLayerPageLabelUtf8(pi, this->shipVfxEditorTargetSectorsABEnabled, rowBuf, sizeof(rowBuf));
                 RC2D_Text rowPickText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), rowBuf);
                 rowPickText.color = kHudTextColor;
                 rc2d_graphics_setTextColor(&rowPickText);
@@ -9595,23 +9969,70 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     };
     trySelectShipFromJson();
 
-    const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "format");
-    const cJSON* versionNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "version");
+    const cJSON* formatNode = cJSON_GetObjectItemCaseSensitive(root, "format");
+    const cJSON* versionNode = cJSON_GetObjectItemCaseSensitive(root, "version");
     const bool isNewFormat =
         cJSON_IsString(formatNode) &&
         formatNode->valuestring != nullptr &&
         SDL_strcasecmp(formatNode->valuestring, "ship_vfx_config") == 0;
     const int formatVersion = cJSON_IsNumber(versionNode)
         ? static_cast<int>(std::llround(versionNode->valuedouble))
-        : 1;
-    const bool hasLayerPages =
-        cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parseRoot, "layerPages"));
+        : 0;
+
+    if (!cJSON_IsObject(editorNode))
+    {
+        this->statusMessage = "Import JSON refuse: cle \"editor\" obligatoire.";
+        cJSON_Delete(root);
+        return false;
+    }
+    cJSON* pagesNode = cJSON_GetObjectItemCaseSensitive(editorNode, "layerPages");
+    const int layerPageCount = cJSON_IsArray(pagesNode) ? cJSON_GetArraySize(pagesNode) : 0;
+    if (!isNewFormat || formatVersion < 3 ||
+        (layerPageCount != kShipVfxLayerPageCount && layerPageCount != kShipVfxLayerPageCountNoTargetSectors))
+    {
+        this->statusMessage =
+            "Import JSON refuse: attendu racine { format:\"ship_vfx_config\", version>=3 } et "
+            "editor.layerPages[] de exactement " +
+            std::to_string(kShipVfxLayerPageCountNoTargetSectors) + " ou " +
+            std::to_string(kShipVfxLayerPageCount) + " entrees.";
+        cJSON_Delete(root);
+        return false;
+    }
+
+    this->shipVfxEditorTargetSectorsABEnabled = (layerPageCount == kShipVfxLayerPageCount);
+    this->shipVfxEditorTargetingMode =
+        targetingModeFromTargetSectorsAB(this->shipVfxEditorTargetSectorsABEnabled);
+    this->shipVfxEditorTargetSectorsOverlayVisible = false;
+    const cJSON* targetingModeNode = cJSON_GetObjectItemCaseSensitive(editorNode, "targetingMode");
+    if (cJSON_IsString(targetingModeNode) && targetingModeNode->valuestring != nullptr)
+    {
+        bool recognizedMode = false;
+        const ShipVfxTargetingMode parsedMode =
+            targetingModeFromJsonId(targetingModeNode->valuestring, &recognizedMode);
+        if (recognizedMode)
+        {
+            const bool modeExpectsAB = (parsedMode == ShipVfxTargetingMode::TARGET_RELATIVE_AB);
+            if (modeExpectsAB != this->shipVfxEditorTargetSectorsABEnabled)
+            {
+                this->statusMessage =
+                    "Import: editor.targetingMode ne correspond pas au nombre de pages ; on suit layerPages[].";
+            }
+        }
+    }
+    const cJSON* targetAbNode = cJSON_GetObjectItemCaseSensitive(editorNode, "targetFireSectorsAB");
+    if (cJSON_IsBool(targetAbNode) &&
+        ((cJSON_IsTrue(targetAbNode) != 0) != this->shipVfxEditorTargetSectorsABEnabled))
+    {
+        this->statusMessage =
+            "Import: editor.targetFireSectorsAB ne correspond pas au nombre de pages ; on suit layerPages[].";
+    }
 
     this->clearAllShipVfxLayerPages();
     this->clearShipVfxTrailPieces();
     this->initDefaultShipLayerSettingsAllPages();
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
+    this->previewTargetFireSectorIndex = 0;
 
     auto findImportedSfxIndex = [this](const std::string& sourceJsonPath, const std::string& displayName) -> int {
         const std::string sourceKey = makeComparableSourcePathKey(sourceJsonPath);
@@ -9984,8 +10405,8 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         targetVec.push_back(std::move(instance));
     };
 
-    auto applyPreviewFromJsonRoot = [this](const cJSON* r) {
-        const cJSON* previewNode = cJSON_GetObjectItemCaseSensitive(r, "preview");
+    auto applyPreviewFromJsonRoot = [this](const cJSON* fileRoot) {
+        const cJSON* previewNode = cJSON_GetObjectItemCaseSensitive(fileRoot, "preview");
         if (!cJSON_IsObject(previewNode))
         {
             return;
@@ -10002,6 +10423,12 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
             this->previewShipStateIndex = (SDL_strcasecmp(stateNode->valuestring, "damaged") == 0) ? 1 : 0;
             this->previewShip.setHealthVisual((this->previewShipStateIndex == 1) ? Ship::HealthVisual::LOW : Ship::HealthVisual::FULL);
         }
+        const cJSON* sectorNode = cJSON_GetObjectItemCaseSensitive(previewNode, "targetFireSector");
+        if (cJSON_IsNumber(sectorNode) && std::isfinite(sectorNode->valuedouble))
+        {
+            this->previewTargetFireSectorIndex =
+                std::clamp(static_cast<int>(std::llround(sectorNode->valuedouble)), 0, 1);
+        }
     };
 
     auto applyShipLayerToPage = [this](const cJSON* shipLayerNode, int pageIndex) {
@@ -10009,7 +10436,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         {
             return;
         }
-        const size_t pi = static_cast<size_t>(std::clamp(pageIndex, 0, 7));
+        const size_t pi = static_cast<size_t>(std::clamp(pageIndex, 0, kShipVfxLayerPageCount - 1));
         const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "drawOrder");
         const cJSON* shipVisibleNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "visible");
         const cJSON* shipLockedNode = cJSON_GetObjectItemCaseSensitive(shipLayerNode, "locked");
@@ -10044,82 +10471,39 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         }
     };
 
-    if ((isNewFormat && formatVersion >= 3) || (!isNewFormat && hasLayerPages))
+    applyPreviewFromJsonRoot(root);
+
+    int pageIdx = 0;
+    cJSON* pageEntry = nullptr;
+    cJSON_ArrayForEach(pageEntry, pagesNode)
     {
-        applyPreviewFromJsonRoot(parseRoot);
-
-        const cJSON* pagesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "layerPages");
-        if (cJSON_IsArray(pagesNode))
+        if (!cJSON_IsObject(pageEntry))
         {
-            int pageIdx = 0;
-            cJSON* pageEntry = nullptr;
-            cJSON_ArrayForEach(pageEntry, pagesNode)
-            {
-                if (pageIdx >= kShipVfxLayerPageCount)
-                {
-                    break;
-                }
-                if (cJSON_IsObject(pageEntry))
-                {
-                    const cJSON* pageShipLayer = cJSON_GetObjectItemCaseSensitive(pageEntry, "shipLayer");
-                    applyShipLayerToPage(pageShipLayer, pageIdx);
-
-                    const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(pageIdx)];
-                    std::vector<ShipVfxInstance>& pageVec = this->shipVfxLayerPages[static_cast<size_t>(pageIdx)];
-                    const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(pageEntry, "vfxInstances");
-                    if (cJSON_IsArray(instancesNode))
-                    {
-                        cJSON* instNode = nullptr;
-                        cJSON_ArrayForEach(instNode, instancesNode)
-                        {
-                            pushParsedInstance(instNode, pageVec, shipZ);
-                        }
-                    }
-                }
-                pageIdx += 1;
-            }
+            this->statusMessage =
+                "Import JSON refuse: editor.layerPages[" + std::to_string(pageIdx) + "] doit etre un objet.";
+            cJSON_Delete(root);
+            return false;
         }
-    }
-    else if (isNewFormat && formatVersion >= 2)
-    {
-        applyPreviewFromJsonRoot(parseRoot);
+        const cJSON* pageShipLayer = cJSON_GetObjectItemCaseSensitive(pageEntry, "shipLayer");
+        applyShipLayerToPage(pageShipLayer, pageIdx);
 
-        const cJSON* shipLayerNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "shipLayer");
-        if (cJSON_IsObject(shipLayerNode))
-        {
-            applyShipLayerToPage(shipLayerNode, this->getShipVfxLayerPageKey());
-        }
-
-        const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
-        std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
-        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "vfxInstances");
+        const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(pageIdx)];
+        std::vector<ShipVfxInstance>& pageVec = this->shipVfxLayerPages[static_cast<size_t>(pageIdx)];
+        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(pageEntry, "vfxInstances");
         if (cJSON_IsArray(instancesNode))
         {
-            cJSON* node = nullptr;
-            cJSON_ArrayForEach(node, instancesNode)
+            cJSON* instNode = nullptr;
+            cJSON_ArrayForEach(instNode, instancesNode)
             {
-                pushParsedInstance(node, importVec, shipZ);
+                pushParsedInstance(instNode, pageVec, shipZ);
             }
         }
+        pageIdx += 1;
     }
-    else
+
+    if (!this->shipVfxEditorTargetSectorsABEnabled)
     {
-        const cJSON* shipOrderNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "shipDrawOrder");
-        if (cJSON_IsNumber(shipOrderNode))
-        {
-            this->activeShipDrawOrder() = static_cast<int>(std::llround(shipOrderNode->valuedouble));
-        }
-        const int shipZ = this->shipDrawOrderByPage[static_cast<size_t>(this->getShipVfxLayerPageKey())];
-        std::vector<ShipVfxInstance>& importVec = this->currentShipVfxLayers();
-        const cJSON* instancesNode = cJSON_GetObjectItemCaseSensitive(parseRoot, "vfxInstances");
-        if (cJSON_IsArray(instancesNode))
-        {
-            cJSON* node = nullptr;
-            cJSON_ArrayForEach(node, instancesNode)
-            {
-                pushParsedInstance(node, importVec, shipZ);
-            }
-        }
+        this->previewTargetFireSectorIndex = 0;
     }
 
     cJSON_Delete(root);
@@ -10232,8 +10616,10 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         return "id:" + std::to_string(instance.instanceId);
     };
 
+    const int exportPageCount = this->shipVfxEffectiveLayerPageCount();
+
     std::vector<ExportAnimationGroup> groups;
-    for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+    for (int p = 0; p < exportPageCount; ++p)
     {
         for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
         {
@@ -10406,10 +10792,32 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
             continue;
         }
 
+        cJSON_AddStringToObject(root, "format", "ship_vfx_config");
+        cJSON_AddNumberToObject(root, "version", 3);
+        cJSON* previewRoot = cJSON_CreateObject();
+        cJSON_AddItemToObject(root, "preview", previewRoot);
+        cJSON_AddStringToObject(previewRoot, "direction", getDirectionIdByIndex(this->previewDirectionIndex));
+        cJSON_AddStringToObject(
+            previewRoot,
+            "state",
+            (this->previewShipStateIndex == 1) ? "damaged" : "healthy");
+        cJSON_AddNumberToObject(
+            previewRoot,
+            "targetFireSector",
+            static_cast<double>(
+                this->shipVfxEditorTargetSectorsABEnabled ? this->previewTargetFireSectorIndex : 0));
+
         cJSON* editorJson = cJSON_CreateObject();
         cJSON_AddItemToObject(root, "editor", editorJson);
         cJSON_AddStringToObject(editorJson, "schema", "scene-editormap-vfx");
-        cJSON_AddNumberToObject(editorJson, "schemaVersion", 1);
+        cJSON_AddNumberToObject(editorJson, "schemaVersion", 2);
+        cJSON_AddBoolToObject(editorJson, "targetFireSectorsAB", this->shipVfxEditorTargetSectorsABEnabled);
+        this->shipVfxEditorTargetingMode =
+            targetingModeFromTargetSectorsAB(this->shipVfxEditorTargetSectorsABEnabled);
+        cJSON_AddStringToObject(
+            editorJson,
+            "targetingMode",
+            targetingModeToJsonId(this->shipVfxEditorTargetingMode));
 
         cJSON* shipNode = cJSON_CreateObject();
         cJSON_AddItemToObject(editorJson, "ship", shipNode);
@@ -10437,7 +10845,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddItemToObject(editorJson, "layerPages", layerPagesArray);
 
         std::vector<uint32_t> groupInstanceIds;
-        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        for (int p = 0; p < exportPageCount; ++p)
         {
             for (const ShipVfxInstance& instance : this->shipVfxLayerPages[static_cast<size_t>(p)])
             {
@@ -10448,7 +10856,7 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
             }
         }
 
-        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        for (int p = 0; p < exportPageCount; ++p)
         {
             cJSON* pageObj = cJSON_CreateObject();
             cJSON_AddItemToArray(layerPagesArray, pageObj);
@@ -10484,18 +10892,25 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddStringToObject(gameplayJson, "shipFolderPath", shipFolderRelativePath.c_str());
         cJSON_AddStringToObject(gameplayJson, "vfxFolderPath", vfxFolderPathForGroup.c_str());
         cJSON_AddNumberToObject(gameplayJson, "defaultVfxFps", group.defaultFps);
+        cJSON_AddStringToObject(
+            gameplayJson,
+            "targetingMode",
+            targetingModeToJsonId(this->shipVfxEditorTargetingMode));
 
         cJSON* gameplayDirectionStatesArray = cJSON_CreateArray();
         cJSON_AddItemToObject(gameplayJson, "directionStates", gameplayDirectionStatesArray);
-        for (int p = 0; p < kShipVfxLayerPageCount; ++p)
+        for (int p = 0; p < exportPageCount; ++p)
         {
             cJSON* gameplayPageObj = cJSON_CreateObject();
             cJSON_AddItemToArray(gameplayDirectionStatesArray, gameplayPageObj);
 
             cJSON* gameplayShipNode = cJSON_CreateObject();
             cJSON_AddItemToObject(gameplayPageObj, "ship", gameplayShipNode);
+            const int stateBand = (p / 4) % 2;
+            const int fireSector = this->shipVfxEditorTargetSectorsABEnabled ? (p / 8) : 0;
             cJSON_AddStringToObject(gameplayShipNode, "direction", getDirectionIdByIndex(p % 4));
-            cJSON_AddStringToObject(gameplayShipNode, "state", (p >= 4) ? "damaged" : "healthy");
+            cJSON_AddStringToObject(gameplayShipNode, "state", (stateBand == 1) ? "damaged" : "healthy");
+            cJSON_AddNumberToObject(gameplayShipNode, "targetFireSector", static_cast<double>(fireSector));
             cJSON_AddNumberToObject(gameplayShipNode, "drawOrder", this->shipDrawOrderByPage[static_cast<size_t>(p)]);
 
             cJSON* gameplayInstancesArray = cJSON_CreateArray();
@@ -11624,6 +12039,161 @@ void EditorMapVfxScene::drawShipVfxTrailPieces(void) const
     }
 }
 
+void EditorMapVfxScene::drawShipVfxTargetFireSectorsOverlay(void) const
+{
+    if (!this->previewShipLoaded || !this->shipVfxEditorTargetSectorsABEnabled ||
+        !this->shipVfxEditorTargetSectorsOverlayVisible)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    SDL_FPoint shipCenter = map.tileToScreenCenterFloat(this->previewShipTile.x, this->previewShipTile.y);
+    float shipCenterOffsetX = 0.0f;
+    float shipCenterOffsetY = 0.0f;
+    if (this->previewShip.getCurrentSpriteCenterOffsetPixels(&shipCenterOffsetX, &shipCenterOffsetY))
+    {
+        shipCenter.x += shipCenterOffsetX;
+        shipCenter.y += shipCenterOffsetY;
+    }
+
+    const float zoom = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+    float radius = ((map.getTileWidth() + map.getTileHeight()) * 0.5f) * zoom * 0.85f;
+    float shipSpriteW = 0.0f;
+    float shipSpriteH = 0.0f;
+    if (this->previewShip.getCurrentSpriteSizePixels(&shipSpriteW, &shipSpriteH))
+    {
+        const float shipScale = zoom * this->previewShip.getDrawScale();
+        const float rSprite = 0.52f * (std::max)(shipSpriteW, shipSpriteH) * shipScale;
+        radius = (std::max)(radius, rSprite);
+    }
+
+    const Ship::PreviewDirection bow = this->previewShip.getCurrentPreviewDirection();
+    float fx = 0.0f;
+    float fy = 0.0f;
+    editorMapVfxBowForwardScreenUnit(bow, &fx, &fy);
+
+    constexpr float kPi = 3.14159265f;
+    constexpr float kDegToRad = kPi / 180.0f;
+    const int activeSec = std::clamp(this->previewTargetFireSectorIndex, 0, 1);
+
+    int hoverSec = -1;
+    float mx = 0.0f;
+    float my = 0.0f;
+    if (this->getMouseRenderPosition(&mx, &my) && this->pointInRect(mx, my, map.rect))
+    {
+        const SDL_Point hoverTile = map.screenToTileNearest(mx, my);
+        const SDL_FPoint hoverCenter = map.tileToScreenCenterFloat(hoverTile.x, hoverTile.y);
+        const float dx = hoverCenter.x - shipCenter.x;
+        const float dy = hoverCenter.y - shipCenter.y;
+        const float len2 = (dx * dx) + (dy * dy);
+        if (std::isfinite(len2) && len2 >= 9.0f)
+        {
+            hoverSec = editorMapVfxTargetFireSectorFromScreenDelta(bow, dx, dy);
+        }
+    }
+
+    auto drawQuarterWedgeOutline = [&](float deg0, float deg1, RC2D_Color color, int seg) {
+        rc2d_graphics_setColor(color);
+        float r0 = deg0 * kDegToRad;
+        float r1 = deg1 * kDegToRad;
+        if (r1 < r0)
+        {
+            r1 += 2.0f * kPi;
+        }
+        const float x0 = shipCenter.x + radius * std::cos(r0);
+        const float y0 = shipCenter.y + radius * std::sin(r0);
+        const float x1 = shipCenter.x + radius * std::cos(r1);
+        const float y1 = shipCenter.y + radius * std::sin(r1);
+        rc2d_graphics_line(shipCenter.x, shipCenter.y, x0, y0);
+        rc2d_graphics_line(shipCenter.x, shipCenter.y, x1, y1);
+        float prevX = x0;
+        float prevY = y0;
+        for (int i = 1; i <= seg; ++i)
+        {
+            const float u = static_cast<float>(i) / static_cast<float>(seg);
+            const float t = r0 + ((r1 - r0) * u);
+            const float x = shipCenter.x + radius * std::cos(t);
+            const float y = shipCenter.y + radius * std::sin(t);
+            rc2d_graphics_line(prevX, prevY, x, y);
+            prevX = x;
+            prevY = y;
+        }
+    };
+
+    auto wedgeLabelPos = [&](float deg0, float deg1, float dist) -> SDL_FPoint {
+        float r0 = deg0 * kDegToRad;
+        float r1 = deg1 * kDegToRad;
+        if (r1 < r0)
+        {
+            r1 += 2.0f * kPi;
+        }
+        const float tm = r0 + ((r1 - r0) * 0.5f);
+        return SDL_FPoint{shipCenter.x + dist * std::cos(tm), shipCenter.y + dist * std::sin(tm)};
+    };
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+
+    // Fleche proue (avant du navire, repere ecran).
+    const float arrowLen = radius * 0.38f;
+    rc2d_graphics_setColor(RC2D_Color{255, 255, 255, 210});
+    rc2d_graphics_line(shipCenter.x, shipCenter.y, shipCenter.x + arrowLen * fx, shipCenter.y + arrowLen * fy);
+
+    const int arcSeg = 24;
+    float degA0 = 0.0f;
+    float degA1 = 0.0f;
+    float degB0 = 0.0f;
+    float degB1 = 0.0f;
+    editorMapVfxTargetFireSectorQuarterBoundsScreenDeg(bow, 0, &degA0, &degA1);
+    editorMapVfxTargetFireSectorQuarterBoundsScreenDeg(bow, 1, &degB0, &degB1);
+
+    // Secteur A : quart de disque (90 deg) en coordonnees ecran.
+    {
+        const bool hi = (hoverSec == 0);
+        const bool act = (activeSec == 0);
+        const Uint8 baseA = static_cast<Uint8>(hi ? 215 : (act ? 185 : 115));
+        drawQuarterWedgeOutline(degA0, degA1, RC2D_Color{70, 200, 255, baseA}, arcSeg);
+    }
+    // Secteur B : quart oppose (90 deg).
+    {
+        const bool hi = (hoverSec == 1);
+        const bool act = (activeSec == 1);
+        const Uint8 baseA = static_cast<Uint8>(hi ? 215 : (act ? 185 : 115));
+        drawQuarterWedgeOutline(degB0, degB1, RC2D_Color{255, 170, 90, baseA}, arcSeg);
+    }
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const float labelDist = radius * 0.78f;
+        const SDL_FPoint pa = wedgeLabelPos(degA0, degA1, labelDist);
+        const SDL_FPoint pb = wedgeLabelPos(degB0, degB1, labelDist);
+
+        auto drawLabel = [this](const char* ch, float x, float y, RC2D_Color col) {
+            RC2D_Text t = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), ch);
+            t.color = col;
+            rc2d_graphics_setTextColor(&t);
+            int tw = 0;
+            int th = 0;
+            rc2d_graphics_getTextSize(&t, &tw, &th);
+            rc2d_graphics_drawText(&t, x - (static_cast<float>(tw) * 0.5f), y - (static_cast<float>(th) * 0.5f));
+            rc2d_graphics_destroyText(&t);
+        };
+
+        drawLabel(
+            "A",
+            pa.x,
+            pa.y,
+            RC2D_Color{210, 250, 255, static_cast<Uint8>((activeSec == 0) ? 255 : 220)});
+        drawLabel(
+            "B",
+            pb.x,
+            pb.y,
+            RC2D_Color{255, 230, 200, static_cast<Uint8>((activeSec == 1) ? 255 : 220)});
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
 void EditorMapVfxScene::drawShipVfxRotationDialOverlay(void) const
 {
     if (!this->vfxRotationDialActive || !this->previewShipLoaded || !this->hasSelectedVfxInstance())
@@ -12348,6 +12918,11 @@ void EditorMapVfxScene::drawHud(void) const
         this->drawToolbarButton(this->buttonDirectionPrevRect, "NAV DIRECTION -", false);
         this->drawToolbarButton(this->buttonDirectionNextRect, "NAV DIRECTION +", false);
         this->drawToolbarButton(this->buttonShipStateToggleRect, this->getPreviewShipStateLabel(), this->previewShipStateIndex == 1);
+        this->drawToolbarButton(
+            this->buttonTargetFireSectorToggleRect,
+            this->shipVfxEditorTargetSectorsABEnabled ? this->getPreviewTargetFireSectorLabel()
+                                                     : "CIBLE (8 pg)",
+            this->shipVfxEditorTargetSectorsABEnabled && (this->previewTargetFireSectorIndex == 1));
         this->drawToolbarButton(this->buttonShipOpacityMinusRect, "OPA -10%", false);
         this->drawToolbarButton(this->buttonShipOpacityPlusRect, "OPA +10%", false);
         this->drawToolbarButton(
@@ -14726,8 +15301,30 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
     const float rowsLeftX = this->layerListRect.x + panelPadding;
     const float rowsWidth = this->layerListRect.w - ((panelPadding * 2.0f) + kListScrollBarWidth + 4.0f);
 
-    const ShipVfxLayerPagePickerLayout pagePickLayout =
-        buildShipVfxLayerPagePickerLayout(this->layerListRect, panelPadding, headerHeight, this->shipVfxLayerPagePickerOpen);
+    const int pickRowCount = this->shipVfxEffectiveLayerPageCount();
+    const ShipVfxLayerPagePickerLayout pagePickLayout = buildShipVfxLayerPagePickerLayout(
+        this->layerListRect,
+        panelPadding,
+        headerHeight,
+        this->shipVfxLayerPagePickerOpen,
+        pickRowCount);
+
+    if (button == RC2D_MOUSE_BUTTON_LEFT && this->pointInRect(x, y, pagePickLayout.targetSectorsOverlayToggleRect))
+    {
+        if (!this->shipVfxEditorTargetSectorsABEnabled)
+        {
+            this->statusMessage = "Active d'abord A/B (16 pages) pour afficher les secteurs sur la preview.";
+            return true;
+        }
+        this->toggleShipVfxEditorTargetSectorsOverlayVisible();
+        return true;
+    }
+
+    if (button == RC2D_MOUSE_BUTTON_LEFT && this->pointInRect(x, y, pagePickLayout.targetSectorsToggleRect))
+    {
+        this->toggleShipVfxEditorTargetSectorsAB();
+        return true;
+    }
 
     if (this->shipVfxLayerPagePickerOpen)
     {
@@ -14736,13 +15333,13 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
             this->shipVfxLayerPagePickerOpen = false;
             return true;
         }
-        for (int pi = 0; pi < kShipVfxLayerPageCount; ++pi)
+        for (int pi = 0; pi < pickRowCount; ++pi)
         {
             if (this->pointInRect(x, y, pagePickLayout.pageRowRects[pi]))
             {
                 this->applyShipVfxLayerPageIndex(pi);
                 char buf[180] = {};
-                shipVfxLayerPageLabelUtf8(pi, buf, sizeof(buf));
+                shipVfxLayerPageLabelUtf8(pi, this->shipVfxEditorTargetSectorsABEnabled, buf, sizeof(buf));
                 this->statusMessage = std::string("Page calques: ") + buf;
                 return true;
             }
@@ -15374,6 +15971,16 @@ bool EditorMapVfxScene::handleToolbarClick(float x, float y)
         if (this->pointInRect(x, y, this->buttonShipStateToggleRect))
         {
             this->cyclePreviewShipState(1);
+            return true;
+        }
+        if (this->pointInRect(x, y, this->buttonTargetFireSectorToggleRect))
+        {
+            if (!this->shipVfxEditorTargetSectorsABEnabled)
+            {
+                this->statusMessage = "Cibles A/B desactivees : active le bouton A/B/8pg a cote de DUP+.";
+                return true;
+            }
+            this->cyclePreviewTargetFireSector(1);
             return true;
         }
         if (this->pointInRect(x, y, this->buttonShipOpacityMinusRect))
@@ -16177,6 +16784,7 @@ void EditorMapVfxScene::draw(void)
             this->drawShipVfxDebugIsoGrid();
         }
         this->drawShipVfxTrailPieces();
+        this->drawShipVfxTargetFireSectorsOverlay();
         this->drawShipVfxPreview();
         this->drawShipVfxRotationDialOverlay();
     }

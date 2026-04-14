@@ -46,6 +46,41 @@ public:
         DAMAGED = 1  /**< Coque endommagee. */
     };
 
+    /**
+     * @enum TargetingMode
+     * @brief Strategie de resolution de page VFX.
+     */
+    enum class TargetingMode {
+        NONE = 0,               /**< Legacy: selection direction/state classique (secteur A force). */
+        TARGET_RELATIVE_AB = 1  /**< Resolution par rapport a une cible + variantes A/B. */
+    };
+
+    /**
+     * @enum TargetRelativeFamily
+     * @brief Famille de variante cible resolue pour les pages A/B.
+     */
+    enum class TargetRelativeFamily {
+        A = 0,
+        B = 1
+    };
+
+    /**
+     * @struct DirectionStateResolution
+     * @brief Resultat detaille du resolver de page runtime.
+     */
+    struct DirectionStateResolution {
+        int directionStateKey = 0;
+        ShipDirection sourceDirection = ShipDirection::DOWN_LEFT;
+        ShipDirection resolvedDirection = ShipDirection::DOWN_LEFT;
+        ShipState state = ShipState::HEALTHY;
+        TargetRelativeFamily family = TargetRelativeFamily::A;
+        int targetSectorIndex = 0; /**< [0..3] : [0,90), [90,180), [180,270), [270,360). */
+        float relativeAngleDeg = 0.0f; /**< Angle normalise [0, 360). */
+        bool usedTargetRelativeMode = false;
+        bool hasTargetTile = false;
+        bool remappedDirectionWhenStationary = false;
+    };
+
 private:
     /**
      * @struct Frame
@@ -127,19 +162,27 @@ private:
 
     /**
      * @struct DirectionStateData
-     * @brief Donnees gameplay pour un couple (direction, state).
+     * @brief Donnees gameplay pour un triplet (direction, state, secteur cible tir).
      */
     struct DirectionStateData {
         int shipDrawOrder = 0;             /**< Draw order du ship pour ce state. */
         std::vector<Instance> instances;   /**< Toutes les instances VFX de ce state. */
     };
 
+    static constexpr int kDirectionStateCount = 16; /**< Taille max du tableau (4x2x2). */
+    /** Nombre d'entrees chargees depuis gameplay.directionStates (8 sans A/B, 16 avec). */
+    int loadedDirectionStateCount = kDirectionStateCount;
+    TargetingMode targetingMode = TargetingMode::NONE;
+    DirectionStateResolution lastDirectionStateResolution{};
+    DirectionStateResolution lastLoggedTargetRelativeResolution{};
+    bool hasLoggedTargetRelativeResolution = false;
+
     RC2D_Image spritesheetImage;                      /**< Texture spritesheet chargee. */
     std::vector<Frame> frames;                        /**< Frames source de l'animation. */
-    std::array<DirectionStateData, 8> directionStates;/**< 4 directions x 2 states. */
+    std::array<DirectionStateData, kDirectionStateCount> directionStates;/**< Pages gameplay VFX. */
     float defaultVfxFps;                              /**< FPS par defaut gameplay. */
     float playbackSeconds;                            /**< Horloge runtime accumulatee (sec). */
-    int activeDirectionStateKey;                      /**< Cle active [0..7] selectionnee par le ship. */
+    int activeDirectionStateKey;                      /**< Cle active [0..15] selectionnee par le ship. */
     bool loaded;                                      /**< True si toutes les ressources sont pretes. */
 
     std::string shipFolderPath;       /**< Chemin ship resolu (debug/trace). */
@@ -171,12 +214,34 @@ private:
     void drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const;
 
     /**
-     * @brief Construit la cle [0..7] a partir (direction, state).
+     * @brief Construit la cle [0..15] a partir (direction, state, secteur cible tir).
      * @param direction Direction diagonale.
      * @param state Etat coque.
+     * @param targetFireSector Secteur cible (0 ou 1), ex. demi-plan pour layering canon.
      * @return Cle indexant directionStates.
      */
-    static int directionStateKey(ShipDirection direction, ShipState state);
+    static int directionStateKey(ShipDirection direction, ShipState state, int targetFireSector = 0);
+    static int shipDirectionToIndex(ShipDirection direction);
+    static ShipDirection shipDirectionFromIndex(int directionIndex);
+    static float normalizeDegrees0To360(float deg);
+    static int computeRelativeTargetSectorFromTiles(
+        const SDL_FPoint& controlledShipTile,
+        const SDL_FPoint& targetTile,
+        float* outAngleDeg,
+        bool* outHasTargetGeometry);
+    static ShipDirection remapDirectionWhenStationaryForTargetSector(
+        int sectorIndex,
+        ShipDirection direction);
+    static TargetRelativeFamily resolveTargetRelativeFamily(
+        int sectorIndex,
+        ShipDirection direction);
+    DirectionStateResolution resolveDirectionState(
+        const Ship& ship,
+        const SDL_FPoint* targetTile) const;
+    void logTargetRelativeResolutionIfChanged(const DirectionStateResolution& resolution);
+    static const char* targetingModeToString(TargetingMode mode);
+    static const char* targetRelativeFamilyToString(TargetRelativeFamily family);
+    static const char* shipDirectionToString(ShipDirection direction);
 
     /**
      * @brief Convertit une string JSON vers ShipDirection.
@@ -198,6 +263,7 @@ private:
      * @return Direction runtime VFX.
      */
     static ShipDirection shipDirectionFromPreviewDirection(Ship::PreviewDirection direction);
+    static Ship::PreviewDirection previewDirectionFromShipDirection(ShipDirection direction);
 
     /**
      * @brief Convertit l'etat visuel du ship vers ShipState runtime.
@@ -207,10 +273,11 @@ private:
     static ShipState shipStateFromHealthVisual(Ship::HealthVisual healthVisual);
 
     /**
-     * @brief Synchronise la cle active [direction,state] depuis le ship.
+     * @brief Synchronise la cle active [direction, state, secteur cible tir] depuis le ship.
      * @param ship Ship runtime courant.
+     * @param targetTile Tuile cible optionnelle (requise en mode target-relative).
      */
-    void setDirectionStateFromShip(const Ship& ship);
+    void setDirectionStateFromShip(const Ship& ship, const SDL_FPoint* targetTile);
 
     /**
      * @brief Retourne les donnees du state actuellement actif.
@@ -296,8 +363,9 @@ public:
      * @brief Met a jour direction/state active + horloge d'animation.
      * @param dt Delta time en secondes.
      * @param ship Ship runtime de reference.
+     * @param targetTile Tuile cible optionnelle pour la resolution target-relative.
      */
-    void update(double dt, const Ship& ship);
+    void update(double dt, Ship& ship, const SDL_FPoint* targetTile);
 
     /**
      * @brief Dessine les instances selon leur relation avec le drawOrder du ship.

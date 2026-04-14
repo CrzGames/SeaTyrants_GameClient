@@ -1146,6 +1146,41 @@ Ship::PreviewDirection Ship::getCurrentPreviewDirection(void) const
     }
 }
 
+bool Ship::isUsingPreviewDirectionPair(void) const
+{
+    return this->directionUsesPair;
+}
+
+bool Ship::getCurrentPreviewDirectionPair(
+    PreviewDirection* outDirectionA,
+    PreviewDirection* outDirectionB) const
+{
+    if (!this->directionUsesPair || outDirectionA == nullptr || outDirectionB == nullptr)
+    {
+        return false;
+    }
+
+    auto diagonalToPreview = [](DiagonalDirection direction) -> PreviewDirection {
+        switch (direction)
+        {
+        case DiagonalDirection::DOWN_LEFT:
+            return PreviewDirection::DOWN_LEFT;
+        case DiagonalDirection::UP_RIGHT:
+            return PreviewDirection::UP_RIGHT;
+        case DiagonalDirection::UP_LEFT:
+            return PreviewDirection::UP_LEFT;
+        case DiagonalDirection::DOWN_RIGHT:
+            return PreviewDirection::DOWN_RIGHT;
+        default:
+            return PreviewDirection::DOWN_LEFT;
+        }
+    };
+
+    *outDirectionA = diagonalToPreview(this->directionA);
+    *outDirectionB = diagonalToPreview(this->directionB);
+    return true;
+}
+
 void Ship::setSpeedTilesPerSecond(float speed)
 {
     if (speed > 0.0f)
