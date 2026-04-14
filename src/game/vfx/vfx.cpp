@@ -696,6 +696,7 @@ VFX::VFX(void)
       hasLoggedTargetRelativeResolution(false),
       directionStates{},
       defaultVfxFps(12.0f),
+      animationTotalDurationMs(0),
       playbackSeconds(0.0f),
       activeDirectionStateKey(0),
       loaded(false),
@@ -1413,6 +1414,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     std::string parsedShipFolderPath;
     std::string parsedVfxFolderPath;
     float parsedDefaultFps = 12.0f;
+    int parsedAnimationTotalDurationMs = 0;
     TargetingMode parsedTargetingMode = TargetingMode::NONE;
     bool parsedTargetingModeExplicit = false;
 
@@ -1432,6 +1434,13 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (cJSON_IsNumber(defaultFpsNode) && std::isfinite(defaultFpsNode->valuedouble))
     {
         parsedDefaultFps = static_cast<float>(defaultFpsNode->valuedouble);
+    }
+    const cJSON* animationDurationNode =
+        cJSON_GetObjectItemCaseSensitive(gameplayNode, "animationTotalDurationMs");
+    if (cJSON_IsNumber(animationDurationNode) && std::isfinite(animationDurationNode->valuedouble))
+    {
+        const long long durationMs = std::llround(animationDurationNode->valuedouble);
+        parsedAnimationTotalDurationMs = static_cast<int>((std::clamp)(durationMs, 0LL, 86400000LL));
     }
     const cJSON* targetingModeNode = cJSON_GetObjectItemCaseSensitive(gameplayNode, "targetingMode");
     if (cJSON_IsString(targetingModeNode) && targetingModeNode->valuestring != nullptr)
@@ -1874,6 +1883,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     this->loadedDirectionStateCount = directionStatesArraySize;
     this->targetingMode = parsedTargetingMode;
     this->defaultVfxFps = parsedDefaultFps;
+    this->animationTotalDurationMs = parsedAnimationTotalDurationMs;
     this->playbackSeconds = 0.0f;
     {
         const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
@@ -1896,10 +1906,11 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
 
     RC2D_log(
         RC2D_LOG_INFO,
-        "VFX: charge depuis %s (frames=%d, fps=%.2f, targetingMode=%s)",
+        "VFX: charge depuis %s (frames=%d, fps=%.2f, durationMs=%d, targetingMode=%s)",
         this->configJsonPath.c_str(),
         static_cast<int>(this->frames.size()),
         this->defaultVfxFps,
+        this->animationTotalDurationMs,
         targetingModeToString(this->targetingMode));
     return true;
 }
@@ -1926,6 +1937,7 @@ void VFX::unload(void)
 
     // 3) Reset variables de lecture.
     this->defaultVfxFps = 12.0f;
+    this->animationTotalDurationMs = 0;
     this->playbackSeconds = 0.0f;
     this->activeDirectionStateKey = 0;
     this->loadedDirectionStateCount = kDirectionStateCount;
@@ -1983,20 +1995,43 @@ void VFX::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
 
     const float dtf = static_cast<float>(dt);
     const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
-    this->updateTrailsAndIdle(dtf, timeSec, ship);
+    const float maxDurationSec = (this->animationTotalDurationMs > 0)
+        ? static_cast<float>(this->animationTotalDurationMs) * 0.001f
+        : 0.0f;
+    const float periodSec = this->resolvedPlaybackPeriodSeconds();
+    float animationStopSec = maxDurationSec;
+    if (maxDurationSec > 0.0f && periodSec > 0.0001f)
+    {
+        const float phaseInCycle = std::fmod(maxDurationSec, periodSec);
+        if (phaseInCycle > 0.0001f && (periodSec - phaseInCycle) > 0.0001f)
+        {
+            const float cycleIndex = std::floor(maxDurationSec / periodSec);
+            animationStopSec = (cycleIndex + 1.0f) * periodSec;
+        }
+    }
+    const bool allowSpawn = !(maxDurationSec > 0.0f && this->playbackSeconds >= maxDurationSec);
+    this->updateTrailsAndIdle(dtf, timeSec, ship, allowSpawn);
+    if (maxDurationSec > 0.0f && this->playbackSeconds >= animationStopSec)
+    {
+        return;
+    }
 
     // 4) Faire avancer l'horloge d'animation.
     this->playbackSeconds += dtf;
+    if (maxDurationSec > 0.0f && this->playbackSeconds >= animationStopSec)
+    {
+        this->playbackSeconds = animationStopSec;
+        return;
+    }
 
     // 5) Normaliser periodiquement pour eviter des floats trop grands.
-    const float period = this->resolvedPlaybackPeriodSeconds();
-    if (period > 0.0001f && this->playbackSeconds > (period * 8192.0f))
+    if (maxDurationSec <= 0.0f && periodSec > 0.0001f && this->playbackSeconds > (periodSec * 8192.0f))
     {
-        this->playbackSeconds = std::fmod(this->playbackSeconds, period);
+        this->playbackSeconds = std::fmod(this->playbackSeconds, periodSec);
     }
 }
 
-void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship)
+void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool allowSpawn)
 {
     const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
     const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, maxKey);
@@ -2028,6 +2063,20 @@ void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship)
 
     DirectionStateData& activeState = this->directionStates[static_cast<size_t>(activeKey)];
     const SDL_FPoint shipTile = ship.getPositionTile();
+    if (!allowSpawn)
+    {
+        for (Instance& inst : activeState.instances)
+        {
+            inst.motionTrailDistanceAcc = 0.0f;
+            inst.motionTrailIdleSpawnAccSec = 0.0f;
+            inst.motionTrailIdleRingSalvoPiecesRemaining = 0;
+            inst.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
+        }
+        this->trailPrevShipTileX = shipTile.x;
+        this->trailPrevShipTileY = shipTile.y;
+        this->trailPrevShipTileValid = true;
+        return;
+    }
     const bool moving = ship.isMoving();
 
     if (moving)
@@ -2460,6 +2509,24 @@ void VFX::draw(const Map& map, const Ship& ship, bool drawBehindShip) const
 
     const float timeSec = static_cast<float>(SDL_GetTicks()) * 0.001f;
     this->drawTrailPieces(map, ship, drawBehindShip, timeSec);
+    const float maxDurationSec = (this->animationTotalDurationMs > 0)
+        ? static_cast<float>(this->animationTotalDurationMs) * 0.001f
+        : 0.0f;
+    const float periodSec = this->resolvedPlaybackPeriodSeconds();
+    float animationStopSec = maxDurationSec;
+    if (maxDurationSec > 0.0f && periodSec > 0.0001f)
+    {
+        const float phaseInCycle = std::fmod(maxDurationSec, periodSec);
+        if (phaseInCycle > 0.0001f && (periodSec - phaseInCycle) > 0.0001f)
+        {
+            const float cycleIndex = std::floor(maxDurationSec / periodSec);
+            animationStopSec = (cycleIndex + 1.0f) * periodSec;
+        }
+    }
+    if (maxDurationSec > 0.0f && this->playbackSeconds >= animationStopSec)
+    {
+        return;
+    }
 
     // 2) Recuperer la page active et sortir si aucune instance.
     const DirectionStateData& directionState = this->currentDirectionState();

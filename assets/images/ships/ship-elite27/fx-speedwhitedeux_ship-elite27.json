@@ -762,6 +762,7 @@
 		"shipFolderPath":	"assets/images/ships/ship-elite27",
 		"vfxFolderPath":	"assets/images/vfx/vfx-speedwhitedeux",
 		"defaultVfxFps":	48,
+		"animationTotalDurationMs":	4000,
 		"targetingMode":	"none",
 		"directionStates":	[{
 				"ship":	{

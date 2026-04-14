@@ -1,6 +1,6 @@
 {
 	"fps":	48,
-	"animationTotalDurationMs":	300,
+	"animationTotalDurationMs":	4000,
 	"image":	"vfx-speedwhitedeux-spritesheet.png",
 	"frames":	[{
 			"index":	0,

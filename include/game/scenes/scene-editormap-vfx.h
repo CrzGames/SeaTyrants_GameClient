@@ -698,6 +698,10 @@ private:
 
     SDL_FRect shipListRect;
     SDL_FRect sfxListRect;
+    bool sfxListActionButtonsVisible = false;
+    int sfxListActionButtonsSfxIndex = -1;
+    SDL_FRect sfxListActionAutoImportRect{};
+    SDL_FRect sfxListActionAddInstanceRect{};
     SDL_FRect layerListRect;
     SDL_FRect looseListRect;
     SDL_FRect invalidVfxListRect;
@@ -741,6 +745,8 @@ private:
     void cycleOceanColor(int delta);
     void autoImportAssetsFromDefaultFolders(void);
     std::string buildShipConfigJsonPath(const ImportedShip& ship) const;
+    std::string buildShipVfxPairConfigJsonPath(const ImportedShip& ship, const ImportedSfx& sfx) const;
+    bool tryAutoImportShipVfxConfigForSelectedPair(bool* outPairFileFound = nullptr);
     void applyPreviewDirectionToShip(void);
     void setPreviewDirectionIndex(int directionIndex);
     void cyclePreviewDirection(int delta);
@@ -1022,7 +1028,8 @@ private:
     std::vector<int> getOrderedVfxInstanceIndicesForLayerPanel(void) const;
 
     bool handleShipListClick(float x, float y);
-    bool handleSfxListClick(float x, float y);
+    bool handleSfxListClick(float x, float y, RC2D_MouseButton button);
+    bool handleSfxListActionButtonsClick(float x, float y, RC2D_MouseButton button);
     bool handleLayerListClick(float x, float y, RC2D_MouseButton button);
     bool handleLooseListClick(float x, float y);
     bool handleToolbarClick(float x, float y);

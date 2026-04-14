@@ -181,6 +181,7 @@ private:
     std::vector<Frame> frames;                        /**< Frames source de l'animation. */
     std::array<DirectionStateData, kDirectionStateCount> directionStates;/**< Pages gameplay VFX. */
     float defaultVfxFps;                              /**< FPS par defaut gameplay. */
+    int animationTotalDurationMs;                     /**< Duree totale de lecture (ms), 0 = infini. */
     float playbackSeconds;                            /**< Horloge runtime accumulatee (sec). */
     int activeDirectionStateKey;                      /**< Cle active [0..15] selectionnee par le ship. */
     bool loaded;                                      /**< True si toutes les ressources sont pretes. */
@@ -210,7 +211,7 @@ private:
         const Ship& ship,
         float spawnSpeedTilesPerSec,
         std::vector<TrailPiece>& outPieces);
-    void updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship);
+    void updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool allowSpawn);
     void drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const;
 
     /**

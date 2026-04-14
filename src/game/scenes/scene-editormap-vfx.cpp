@@ -1536,6 +1536,10 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       buttonLoosePreviewPlacementSnapRect{},
       shipListRect{},
       sfxListRect{},
+      sfxListActionButtonsVisible(false),
+      sfxListActionButtonsSfxIndex(-1),
+      sfxListActionAutoImportRect{},
+      sfxListActionAddInstanceRect{},
       looseListRect{},
       invalidVfxListRect{},
       invalidShipListRect{},
@@ -1747,6 +1751,10 @@ void EditorMapVfxScene::resetEditorState(void)
     this->pendingOceanColorDelta = 0;
     this->selectedShipIndex = -1;
     this->selectedSfxIndex = -1;
+    this->sfxListActionButtonsVisible = false;
+    this->sfxListActionButtonsSfxIndex = -1;
+    this->sfxListActionAutoImportRect = SDL_FRect{};
+    this->sfxListActionAddInstanceRect = SDL_FRect{};
     this->selectedLooseFolderIndex = -1;
     this->shipListScrollOffset = 0;
     this->sfxListScrollOffset = 0;
@@ -1779,6 +1787,8 @@ void EditorMapVfxScene::resetEditorState(void)
     this->nextVfxInstanceId = 1U;
     this->layerNameInput.clear();
     this->layerNameInputFocused = false;
+    this->sfxListActionButtonsVisible = false;
+    this->sfxListActionButtonsSfxIndex = -1;
     this->vfxDragActive = false;
     this->vfxRotationDialActive = false;
     this->vfxDragStartMouseX = 0.0f;
@@ -1949,6 +1959,9 @@ void EditorMapVfxScene::unloadImportedSfx(void)
         sfx.frames.clear();
     }
     this->importedSfx.clear();
+    this->selectedSfxIndex = -1;
+    this->sfxListActionButtonsVisible = false;
+    this->sfxListActionButtonsSfxIndex = -1;
 }
 
 void EditorMapVfxScene::unloadImportedLooseFolders(void)
@@ -2154,6 +2167,8 @@ void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
     this->unloadImportedSfx();
     this->selectedShipIndex = -1;
     this->selectedSfxIndex = -1;
+    this->sfxListActionButtonsVisible = false;
+    this->sfxListActionButtonsSfxIndex = -1;
     this->shipListScrollOffset = 0;
     this->sfxListScrollOffset = 0;
     this->invalidShipFolders.clear();
@@ -2168,6 +2183,71 @@ std::string EditorMapVfxScene::buildShipConfigJsonPath(const ImportedShip& ship)
     const std::string slug = makeShipConfigSlug(ship.displayName);
     const std::string fileName = "animations_vfx_" + slug + ".json";
     return normalizePathSlashes((base / fileName).string());
+}
+
+std::string EditorMapVfxScene::buildShipVfxPairConfigJsonPath(
+    const ImportedShip& ship,
+    const ImportedSfx& sfx) const
+{
+    const std::string shipSlug = makeShipConfigSlug(ship.displayName);
+    std::string normalizedVfxName = stripListPrefix(sfx.displayName, "vfx-");
+    if (trimAscii(normalizedVfxName).empty())
+    {
+        normalizedVfxName = extractFileName(sfx.sourceFolderAbsolutePath);
+    }
+    std::string vfxSlug = makeExportAnimationSlug(normalizedVfxName);
+    if (vfxSlug.empty())
+    {
+        return {};
+    }
+
+    const std::string fileName = "fx-" + vfxSlug + "_" + shipSlug + ".json";
+    const std::filesystem::path pairPath = std::filesystem::path(ship.folderAbsolutePath) / fileName;
+    return normalizePathSlashes(pairPath.string());
+}
+
+bool EditorMapVfxScene::tryAutoImportShipVfxConfigForSelectedPair(bool* outPairFileFound)
+{
+    if (outPairFileFound != nullptr)
+    {
+        *outPairFileFound = false;
+    }
+
+    if (this->selectedShipIndex < 0 || this->selectedShipIndex >= static_cast<int>(this->importedShips.size()) ||
+        this->selectedSfxIndex < 0 || this->selectedSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        return false;
+    }
+
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(this->selectedShipIndex)];
+    const ImportedSfx& sfx = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
+    const std::string pairConfigPath = this->buildShipVfxPairConfigJsonPath(ship, sfx);
+    if (pairConfigPath.empty())
+    {
+        return false;
+    }
+
+    std::error_code fsError;
+    if (!std::filesystem::exists(pairConfigPath, fsError) || !std::filesystem::is_regular_file(pairConfigPath, fsError))
+    {
+        return false;
+    }
+
+    if (outPairFileFound != nullptr)
+    {
+        *outPairFileFound = true;
+    }
+
+    const bool loaded = this->importShipVfxConfigFromPath(pairConfigPath.c_str());
+    if (loaded)
+    {
+        this->loadedShipVfxConfigPath = normalizePathSlashes(pairConfigPath);
+        this->statusMessage = "Configuration VFX chargee: " + this->loadedShipVfxConfigPath;
+        return true;
+    }
+
+    this->statusMessage = "JSON VFX present mais invalide: " + pairConfigPath;
+    return false;
 }
 
 void EditorMapVfxScene::applyPreviewDirectionToShip(void)
@@ -4668,6 +4748,25 @@ void EditorMapVfxScene::updateToolbarLayout(void)
     this->sfxListRect = this->shipListRect;
     this->sfxListRect.x = this->shipListRect.x - this->sfxListRect.w - 16.0f;
     this->sfxListRect.x = (std::max)(this->sfxListRect.x, map.rect.x + 12.0f);
+    {
+        const float actionGap = 8.0f;
+        const float actionW = (this->sfxListRect.w - actionGap) * 0.5f;
+        float actionY = this->sfxListRect.y + this->sfxListRect.h + 4.0f;
+        if (actionY + h > map.rect.y + map.rect.h - 2.0f)
+        {
+            actionY = this->sfxListRect.y - h - 4.0f;
+        }
+        this->sfxListActionAutoImportRect = SDL_FRect{
+            this->sfxListRect.x,
+            actionY,
+            actionW,
+            h};
+        this->sfxListActionAddInstanceRect = SDL_FRect{
+            this->sfxListRect.x + actionW + actionGap,
+            actionY,
+            actionW,
+            h};
+    }
 
     this->layerListRect = this->shipListRect;
     this->layerListRect.w = 1040.0f;
@@ -10595,6 +10694,8 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         std::string displayName;
         std::string sourceJsonPath;
         float defaultFps = 12.0f;
+        bool animationTotalDurationInfinite = true;
+        int animationTotalDurationMs = 0;
     };
 
     auto buildInstanceGroupKey = [this](const ShipVfxInstance& instance) -> std::string {
@@ -10642,6 +10743,8 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
                 group.displayName = imported.displayName;
                 group.sourceJsonPath = imported.sourceJsonPath;
                 group.defaultFps = imported.defaultFps;
+                group.animationTotalDurationInfinite = imported.animationTotalDurationInfinite;
+                group.animationTotalDurationMs = imported.animationTotalDurationMs;
             }
             else
             {
@@ -10892,6 +10995,17 @@ bool EditorMapVfxScene::exportShipVfxJsonToFolder(const char* absoluteFolderPath
         cJSON_AddStringToObject(gameplayJson, "shipFolderPath", shipFolderRelativePath.c_str());
         cJSON_AddStringToObject(gameplayJson, "vfxFolderPath", vfxFolderPathForGroup.c_str());
         cJSON_AddNumberToObject(gameplayJson, "defaultVfxFps", group.defaultFps);
+        if (!group.animationTotalDurationInfinite && group.animationTotalDurationMs > 0)
+        {
+            cJSON_AddNumberToObject(
+                gameplayJson,
+                "animationTotalDurationMs",
+                static_cast<double>(group.animationTotalDurationMs));
+        }
+        else
+        {
+            cJSON_AddNullToObject(gameplayJson, "animationTotalDurationMs");
+        }
         cJSON_AddStringToObject(
             gameplayJson,
             "targetingMode",
@@ -12947,6 +13061,13 @@ void EditorMapVfxScene::drawHud(void) const
             sfxLabels.push_back(stripListPrefix(sfx.displayName, "vfx-"));
         }
         this->drawListPanel(this->sfxListRect, "VFX", sfxLabels, this->selectedSfxIndex, this->sfxListScrollOffset);
+        if (this->sfxListActionButtonsVisible &&
+            this->sfxListActionButtonsSfxIndex >= 0 &&
+            this->sfxListActionButtonsSfxIndex < static_cast<int>(this->importedSfx.size()))
+        {
+            this->drawToolbarButton(this->sfxListActionAutoImportRect, "AUTO IMPORT", false);
+            this->drawToolbarButton(this->sfxListActionAddInstanceRect, "AJOUTER INSTANCE", false);
+        }
 
         const std::vector<int> orderedLayerIndices = this->expandLayerPanelDisplayRows(
             this->getOrderedVfxInstanceIndicesForLayerPanel());
@@ -15251,8 +15372,13 @@ bool EditorMapVfxScene::handleShipListClick(float x, float y)
 }
 
 
-bool EditorMapVfxScene::handleSfxListClick(float x, float y)
+bool EditorMapVfxScene::handleSfxListClick(float x, float y, RC2D_MouseButton button)
 {
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return false;
+    }
+
     int clickedIndex = -1;
     const bool consumed = this->handleListPanelClick(
         x,
@@ -15271,8 +15397,58 @@ bool EditorMapVfxScene::handleSfxListClick(float x, float y)
     {
         this->selectedSfxIndex = clickedIndex;
         this->ensureSelectionVisible(this->selectedSfxIndex, &this->sfxListScrollOffset, static_cast<int>(this->importedSfx.size()));
-        this->spawnSelectedSfxAtShipCenter();
+        this->sfxListActionButtonsVisible = true;
+        this->sfxListActionButtonsSfxIndex = this->selectedSfxIndex;
+        this->statusMessage = "VFX selectionne. Choisis: AUTO IMPORT ou AJOUTER INSTANCE.";
     }
+    return true;
+}
+
+bool EditorMapVfxScene::handleSfxListActionButtonsClick(float x, float y, RC2D_MouseButton button)
+{
+    if (button != RC2D_MOUSE_BUTTON_LEFT ||
+        !this->sfxListActionButtonsVisible ||
+        this->editorMode != EditorMode::SHIP_VFX)
+    {
+        return false;
+    }
+
+    if (!this->pointInRect(x, y, this->sfxListActionAutoImportRect) &&
+        !this->pointInRect(x, y, this->sfxListActionAddInstanceRect))
+    {
+        return false;
+    }
+
+    if (this->sfxListActionButtonsSfxIndex < 0 ||
+        this->sfxListActionButtonsSfxIndex >= static_cast<int>(this->importedSfx.size()))
+    {
+        this->statusMessage = "Selection VFX invalide.";
+        return true;
+    }
+
+    this->selectedSfxIndex = this->sfxListActionButtonsSfxIndex;
+    this->ensureSelectionVisible(
+        this->selectedSfxIndex,
+        &this->sfxListScrollOffset,
+        static_cast<int>(this->importedSfx.size()));
+
+    if (this->pointInRect(x, y, this->sfxListActionAutoImportRect))
+    {
+        bool pairFileFound = false;
+        if (this->tryAutoImportShipVfxConfigForSelectedPair(&pairFileFound))
+        {
+            this->statusMessage += " | Tu peux ensuite cliquer AJOUTER INSTANCE.";
+            return true;
+        }
+        if (!pairFileFound)
+        {
+            this->statusMessage = "Aucun JSON ship+vfx trouve pour ce couple.";
+            return true;
+        }
+        return true;
+    }
+
+    this->spawnSelectedSfxAtShipCenter();
     return true;
 }
 
@@ -17299,6 +17475,10 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
 
         if (this->editorMode == EditorMode::SHIP_VFX)
         {
+            if (this->handleSfxListActionButtonsClick(x, y, button))
+            {
+                return;
+            }
             if (this->handleInvalidAssetPanelClick(
                     x,
                     y,
@@ -17329,7 +17509,7 @@ void EditorMapVfxScene::mousepressed(float x, float y, RC2D_MouseButton button, 
             {
                 return;
             }
-            if (this->handleSfxListClick(x, y))
+            if (this->handleSfxListClick(x, y, button))
             {
                 return;
             }
