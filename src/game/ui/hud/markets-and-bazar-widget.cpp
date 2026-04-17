@@ -565,6 +565,18 @@ static SDL_FRect getCategoryRowRect(const MarketLayout& layout, int rowIndex)
     };
 }
 
+static SDL_FRect getHeaderDragRect(const MarketLayout& layout)
+{
+    // Zone de drag volontairement limitee entre le dernier onglet et la croix.
+    const float left = layout.blackTab.x + layout.blackTab.w + 4.0f;
+    const float right = layout.closeButton.x - 4.0f;
+    if (right <= left)
+    {
+        return layout.topBar;
+    }
+    return SDL_FRect{left, layout.topBar.y, right - left, layout.topBar.h};
+}
+
 MarketsAndBazarWidget::MarketsAndBazarWidget(void)
     : titleFont{},
       bodyFont{},
@@ -1049,6 +1061,7 @@ void MarketsAndBazarWidget::update(double dt)
         getMouseRenderPosition(&mx, &my);
         if (isPointInRect(mx, my, this->widgetRect))
         {
+            const SDL_FRect headerDragRect = getHeaderDragRect(layout);
             bool onInput = false;
             bool onSubmit = false;
             bool onCategoryFilter = false;
@@ -1107,7 +1120,7 @@ void MarketsAndBazarWidget::update(double dt)
             {
                 setCursorResizeVertical();
             }
-            else if (isPointInRect(mx, my, layout.topBar))
+            else if (isPointInRect(mx, my, headerDragRect))
             {
                 setCursorMove();
             }
@@ -1199,6 +1212,7 @@ bool MarketsAndBazarWidget::mousepressed(float x, float y, RC2D_MouseButton butt
     int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxRowsPerPage));
     int maxFirstRow = (std::max)(0, totalRows - visibleRows);
     firstRow = (std::max)(0, (std::min)(firstRow, maxFirstRow));
+    const SDL_FRect headerDragRect = getHeaderDragRect(layout);
 
     if (isPointInRect(x, y, layout.closeButton))
     {
@@ -1241,7 +1255,7 @@ bool MarketsAndBazarWidget::mousepressed(float x, float y, RC2D_MouseButton butt
         return true;
     }
 
-    if (isPointInRect(x, y, layout.topBar))
+    if (isPointInRect(x, y, headerDragRect))
     {
         this->widgetDragging = true;
         this->scrollBarDragging = false;
