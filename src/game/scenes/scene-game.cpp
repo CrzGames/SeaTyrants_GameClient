@@ -5,6 +5,8 @@
 #include "game/render/world-render-clip.h"
 #include "game/shaders/gameplay-shader-controller.h"
 
+#include <vector>
+
 GameScene::GameScene(void)
     : clickMarker{},
       scrollBarOverlay{},
@@ -52,6 +54,91 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     camera.update(map, map.rect);
 }
 
+void GameScene::populateMarketDemoData(void)
+{
+    using Category = MarcheWidget::MarketCategory;
+
+    const std::vector<MarcheWidget::BazardItemData> bazardRows = {
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Eliteball", "Degats: 50", Category::MUNITION_DE_CANNON, 12, "PerFeck", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Elite Class 1", "Sante: 75.000", Category::NAVIRES, 1, "", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "San Salvador", "Sante: 50.000", Category::NAVIRES, 1, "", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "15Kg Cannon", "Dommages canon: 24", Category::CANNONS, 9, "Canakkale_1915", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Advanced Sail", "Bonus vitesse: 6%", Category::VOILES, 7, "Canakkale_1915", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Healball", "Reparation: 25", Category::CONSOMMABLES, 2500, "BeNiZz", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Gold Harpoon", "Degats: 250", Category::MUNITION_DE_HARPON, 15, "PerFeck", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Ruthless Pirate", "Navire legendaire", Category::NAVIRES, 1, "", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "King's Legacy", "Dommages harpon: +8%", Category::BOOSTER, 3, "Santiago", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Abyss Cannon", "Precision: +5%", Category::CANNONS, 2, "Asterion", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Frostburn Sail", "Vitesse: +4%", Category::VOILES, 4, "Nox", "0"},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Guardian Hull", "Resistance: +7%", Category::BOOSTER, 5, "", "0"}
+    };
+
+    const auto buildPriceLines = [](
+        int goldAmount,
+        int rubiesAmount,
+        int crystalAmount) -> std::vector<MarcheWidget::MarketPriceData>
+    {
+        std::vector<MarcheWidget::MarketPriceData> lines;
+        if (goldAmount > 0)
+        {
+            lines.push_back(MarcheWidget::MarketPriceData{goldAmount, "gold"});
+        }
+        if (rubiesAmount > 0)
+        {
+            lines.push_back(MarcheWidget::MarketPriceData{rubiesAmount, "rubies"});
+        }
+        if (crystalAmount > 0)
+        {
+            lines.push_back(MarcheWidget::MarketPriceData{crystalAmount, "cristaux"});
+        }
+        return lines;
+    };
+
+    const std::vector<MarcheWidget::MarketItemData> noirRows = {
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Silver Harpoon", "Degats: 150", Category::MUNITION_DE_HARPON, 7155, "1", buildPriceLines(300, 125, 2)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Explosive Rocket", "Degats: 5.000", Category::MUNITION_DE_CANNON, 626, "1", buildPriceLines(50000, 10000, 4)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Deceleration Rocket", "Ralentissement: 50%", Category::ACTIVABLES, 592, "1", buildPriceLines(80000, 0, 6)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Co2 Cartridge", "+20% degats harpon", Category::BOOSTER, 78846, "1", buildPriceLines(7500, 1515, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Hollowball", "Degats: 8", Category::MUNITION_DE_CANNON, 588573, "1", buildPriceLines(1, 0, 1)},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Sailors Salvation", "Supprime effets negatifs", Category::CONSOMMABLES, 481, "1", buildPriceLines(65000, 13015, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Dragon Powder", "Dommages critiques +12%", Category::BOOSTER, 902, "1", buildPriceLines(9000, 3025, 8)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Titan Plate", "Coque renforcee", Category::BOOSTER, 1540, "1", buildPriceLines(14000, 2815, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Phoenix Ammo", "Degats feu: 17", Category::MUNITION_DE_CANNON, 3200, "1", buildPriceLines(5200, 0, 10)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Storm Rocket", "Impact etourdissement", Category::UTILISABLE_SUR_CIBLE, 410, "1", buildPriceLines(33000, 11025, 0)}
+    };
+
+    const std::vector<MarcheWidget::MarketItemData> basiqueRows = {
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Bois de coque", "Materiau de base de construction", Category::BOOSTER, 24000, "1", buildPriceLines(120, 35, 1)},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Toile de voile", "Renfort voilure", Category::VOILES, 18000, "1", buildPriceLines(145, 0, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Fer brut", "Ressource de forge", Category::BOOSTER, 12500, "1", buildPriceLines(260, 70, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Canon 12 livres", "Dommages canon: 12", Category::CANNONS, 3800, "1", buildPriceLines(2100, 0, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Boulet perce-coque", "Degats coque: +6%", Category::MUNITION_DE_CANNON, 5300, "1", buildPriceLines(780, 200, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Kit matelot", "Reduction cout equipage", Category::MATELOTS, 7200, "1", buildPriceLines(420, 0, 1)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Goudron naval", "Reparation progressive", Category::CONSOMMABLES, 4100, "1", buildPriceLines(930, 235, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Lentille de vigie", "Portee de vue +3%", Category::BOOSTER, 2100, "1", buildPriceLines(1350, 0, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Carte de route", "XP navigation +2%", Category::UTILISABLE_SUR_CIBLE, 6500, "1", buildPriceLines(350, 95, 0)},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Pioche d'abordage", "Force abordage +4%", Category::HARPONEUSE, 2700, "1", buildPriceLines(1600, 0, 0)}
+    };
+
+    const std::vector<MarcheWidget::MarketItemData> evenementRows = {
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Flamme lunaire", "Degats evenement: +10%", Category::BOOSTER, 850, "1", buildPriceLines(9900, 4990, 3)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Cle de faille", "Ouvre un coffre special", Category::UTILISABLE_SUR_CIBLE, 540, "1", buildPriceLines(18000, 9040, 4)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Banniere tempete", "Chance butin +6%", Category::ACTIVABLES, 720, "1", buildPriceLines(14500, 7290, 5)},
+        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Poudre astrale", "Critique +9% en event", Category::BOOSTER, 430, "1", buildPriceLines(22000, 11040, 6)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Plaque abyssale", "Reduction degats boss", Category::CONSOMMABLES, 390, "1", buildPriceLines(25000, 12540, 3)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Harpon spectral", "Degats monstres marins +12%", Category::HARPONEUSE, 610, "1", buildPriceLines(16750, 8415, 4)},
+        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Sceau royal", "Bonus reputation event", Category::CONSOMMABLES, 980, "1", buildPriceLines(8300, 4190, 5)},
+        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Totem du capitaine", "Recharge competence -5%", Category::ACTIVABLES, 340, "1", buildPriceLines(27500, 13790, 6)},
+        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Carte eclipse", "Acces zone cachee", Category::UTILISABLE_SUR_CIBLE, 250, "1", buildPriceLines(31000, 15540, 3)},
+        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Voile comete", "Vitesse +7% pendant event", Category::VOILES, 460, "1", buildPriceLines(19800, 9940, 4)}
+    };
+
+    this->hudOverlay.setBazardMarketRows(bazardRows);
+    this->hudOverlay.setNoirMarketRows(noirRows);
+    this->hudOverlay.setBasiqueMarketRows(basiqueRows);
+    this->hudOverlay.setEvenementMarketRows(evenementRows);
+}
+
 void GameScene::unload(void)
 {
     // Recupere les references aux systemes et objets necessaires.
@@ -80,6 +167,7 @@ void GameScene::load(void)
 
     // Charge les ressources HUD (interface utilisateur).
     this->hudOverlay.load();
+    this->populateMarketDemoData();
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.update();

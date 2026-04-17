@@ -9,6 +9,8 @@
 #include "game/ui/hud/center-ship-button-widget.h"
 #include "game/ui/hud/chat-widget.h"
 #include "game/ui/hud/espion-search-player-widget.h"
+#include "game/ui/hud/journal-bord-widget.h"
+#include "game/ui/hud/marche-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/sector-coordinate-overlay.h"
@@ -31,7 +33,9 @@ private:
         CHAT = 0,
         ESPION = 1,
         PARAMS_MINIMAP = 2,
-        ANNONCES = 3
+        ANNONCES = 3,
+        JOURNAL_BORD = 4,
+        MARCHE_OFFRE_NOIR = 5
     };
 
     RC2D_Image backgroundUiImage; /**< Fond UI gameplay (haut/bas). */
@@ -43,11 +47,15 @@ private:
     EspionSearchPlayerWidget espionSearchPlayerWidget; /**< Fenetre "Espion" de recherche joueur. */
     ParamsMinimapWidget paramsMinimapWidget; /**< Fenetre de parametres de la minimap. */
     AnnoncesWidget annoncesWidget; /**< Fenetre "Annonces". */
+    JournalBordWidget journalBordWidget; /**< Fenetre "Journal de bord". */
+    MarcheWidget marcheWidget; /**< Fenetre "Bazard / Marches noirs". */
     std::vector<WindowLayer> windowDrawOrder; /**< Ordre de rendu de bas vers haut. */
     bool prevChatVisible; /**< Etat visible precedent du chat. */
     bool prevEspionVisible; /**< Etat visible precedent de la fenetre espion. */
     bool prevParamsVisible; /**< Etat visible precedent de la fenetre minimap. */
     bool prevAnnoncesVisible; /**< Etat visible precedent de la fenetre annonces. */
+    bool prevJournalBordVisible; /**< Etat visible precedent de la fenetre journal de bord. */
+    bool prevMarcheVisible; /**< Etat visible precedent de la fenetre marche. */
 
     void bringWindowToFront(WindowLayer layer);
     void syncWindowOrderOnOpen(void);
@@ -118,4 +126,30 @@ public:
      * @brief Publie un resultat de recherche dans la fenetre "Espion".
      */
     void publishSearchResult(const std::string& resultText);
+
+    /**
+     * @brief Ajoute une entree dans la fenetre "Journal de bord".
+     */
+    void publishLogbookEntry(const std::string& dateTime, const std::string& message);
+
+    /**
+     * @brief Remplace les lignes de l'onglet Bazard.
+     */
+    void setBazardMarketRows(const std::vector<MarcheWidget::BazardItemData>& rows);
+
+    /**
+     * @brief Remplace les lignes de l'onglet Marche noir.
+     */
+    void setNoirMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows);
+
+    /**
+     * @brief Remplace les lignes de l'onglet Marche basique.
+     */
+    void setBasiqueMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows);
+
+    /**
+     * @brief Remplace les lignes de l'onglet Marche d'evenement.
+     */
+    void setEvenementMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows);
 };
+

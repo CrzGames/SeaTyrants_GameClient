@@ -12,10 +12,10 @@ BarreActionWidget::~BarreActionWidget(void)
 void BarreActionWidget::load(void)
 {
     this->actionBarUi.image = rc2d_graphics_loadImageFromStorage(
-        "assets/images/ui-scene-game/barre-action2.png",
+        "assets/images/ui-scene-game/barre-action.png",
         RC2D_STORAGE_TITLE);
     this->actionBarUi.imageData = rc2d_graphics_loadImageDataFromStorage(
-        "assets/images/ui-scene-game/barre-action2.png",
+        "assets/images/ui-scene-game/barre-action.png",
         RC2D_STORAGE_TITLE);
     this->actionBarUi.anchor = RC2D_UI_ANCHOR_BOTTOM_CENTER;
     this->actionBarUi.margin_mode = RC2D_UI_MARGIN_PERCENT;

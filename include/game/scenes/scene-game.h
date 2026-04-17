@@ -18,6 +18,7 @@
 class GameScene : public Scene {
 private:
     void initializePlayerSpawnAndCamera(void);
+    void populateMarketDemoData(void);
 
     TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
     ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */

@@ -54,11 +54,15 @@ IngameHudOverlay::IngameHudOverlay(void)
       espionSearchPlayerWidget{},
       paramsMinimapWidget{},
       annoncesWidget{},
+      journalBordWidget{},
+      marcheWidget{},
       windowDrawOrder{},
       prevChatVisible(false),
       prevEspionVisible(false),
       prevParamsVisible(false),
-      prevAnnoncesVisible(false)
+      prevAnnoncesVisible(false),
+      prevJournalBordVisible(false),
+      prevMarcheVisible(false)
 {
 }
 
@@ -85,6 +89,8 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     const bool espionVisible = this->espionSearchPlayerWidget.isVisible();
     const bool paramsVisible = this->paramsMinimapWidget.isVisible();
     const bool annoncesVisible = this->annoncesWidget.isVisible();
+    const bool journalBordVisible = this->journalBordWidget.isVisible();
+    const bool marcheOffreNoirVisible = this->marcheWidget.isVisible();
 
     if (chatVisible && !this->prevChatVisible)
     {
@@ -102,11 +108,21 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     {
         this->bringWindowToFront(WindowLayer::ANNONCES);
     }
+    if (journalBordVisible && !this->prevJournalBordVisible)
+    {
+        this->bringWindowToFront(WindowLayer::JOURNAL_BORD);
+    }
+    if (marcheOffreNoirVisible && !this->prevMarcheVisible)
+    {
+        this->bringWindowToFront(WindowLayer::MARCHE_OFFRE_NOIR);
+    }
 
     this->prevChatVisible = chatVisible;
     this->prevEspionVisible = espionVisible;
     this->prevParamsVisible = paramsVisible;
     this->prevAnnoncesVisible = annoncesVisible;
+    this->prevJournalBordVisible = journalBordVisible;
+    this->prevMarcheVisible = marcheOffreNoirVisible;
 }
 
 void IngameHudOverlay::load(void)
@@ -135,22 +151,30 @@ void IngameHudOverlay::load(void)
     this->espionSearchPlayerWidget.load();
     this->paramsMinimapWidget.load();
     this->annoncesWidget.load();
+    this->journalBordWidget.load();
+    this->marcheWidget.load();
 
     // Ordre par defaut (bas -> haut), puis etat visible initial.
     this->windowDrawOrder = {
         WindowLayer::CHAT,
         WindowLayer::ESPION,
         WindowLayer::PARAMS_MINIMAP,
-        WindowLayer::ANNONCES
+        WindowLayer::ANNONCES,
+        WindowLayer::JOURNAL_BORD,
+        WindowLayer::MARCHE_OFFRE_NOIR
     };
     this->prevChatVisible = this->chatWidget.isVisible();
     this->prevEspionVisible = this->espionSearchPlayerWidget.isVisible();
     this->prevParamsVisible = this->paramsMinimapWidget.isVisible();
     this->prevAnnoncesVisible = this->annoncesWidget.isVisible();
+    this->prevJournalBordVisible = this->journalBordWidget.isVisible();
+    this->prevMarcheVisible = this->marcheWidget.isVisible();
 }
 
 void IngameHudOverlay::unload(void)
 {
+    this->marcheWidget.unload();
+    this->journalBordWidget.unload();
     this->annoncesWidget.unload();
     this->paramsMinimapWidget.unload();
     this->espionSearchPlayerWidget.unload();
@@ -172,6 +196,8 @@ void IngameHudOverlay::update(double dt)
     this->espionSearchPlayerWidget.setCursorEnabled(false);
     this->paramsMinimapWidget.setCursorEnabled(false);
     this->annoncesWidget.setCursorEnabled(false);
+    this->journalBordWidget.setCursorEnabled(false);
+    this->marcheWidget.setCursorEnabled(false);
 
     // On detecte la fenetre top-most sous la souris et elle seule pilotera le curseur.
     float mouseX = 0.0f;
@@ -200,6 +226,14 @@ void IngameHudOverlay::update(double dt)
             case WindowLayer::ANNONCES:
                 hovered = this->annoncesWidget.isVisible() && this->annoncesWidget.containsPoint(mouseX, mouseY);
                 if (hovered) { this->annoncesWidget.setCursorEnabled(true); }
+                break;
+            case WindowLayer::JOURNAL_BORD:
+                hovered = this->journalBordWidget.isVisible() && this->journalBordWidget.containsPoint(mouseX, mouseY);
+                if (hovered) { this->journalBordWidget.setCursorEnabled(true); }
+                break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                hovered = this->marcheWidget.isVisible() && this->marcheWidget.containsPoint(mouseX, mouseY);
+                if (hovered) { this->marcheWidget.setCursorEnabled(true); }
                 break;
         }
 
@@ -232,6 +266,12 @@ void IngameHudOverlay::update(double dt)
                 break;
             case WindowLayer::ANNONCES:
                 this->annoncesWidget.update(dt);
+                break;
+            case WindowLayer::JOURNAL_BORD:
+                this->journalBordWidget.update(dt);
+                break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                this->marcheWidget.update(dt);
                 break;
         }
     }
@@ -281,6 +321,12 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
             case WindowLayer::ANNONCES:
                 this->annoncesWidget.draw();
                 break;
+            case WindowLayer::JOURNAL_BORD:
+                this->journalBordWidget.draw();
+                break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                this->marcheWidget.draw();
+                break;
         }
     }
 }
@@ -307,6 +353,12 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             case WindowLayer::ANNONCES:
                 consumed = this->annoncesWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
+            case WindowLayer::JOURNAL_BORD:
+                consumed = this->journalBordWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                consumed = this->marcheWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
         }
 
         if (!consumed)
@@ -323,15 +375,23 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         if (layer == WindowLayer::CHAT)
         {
             this->espionSearchPlayerWidget.clearFocus();
+            this->marcheWidget.clearFocus();
         }
         else if (layer == WindowLayer::ESPION)
         {
             this->chatWidget.clearFocus();
+            this->marcheWidget.clearFocus();
+        }
+        else if (layer == WindowLayer::MARCHE_OFFRE_NOIR)
+        {
+            this->chatWidget.clearFocus();
+            this->espionSearchPlayerWidget.clearFocus();
         }
         else
         {
             this->chatWidget.clearFocus();
             this->espionSearchPlayerWidget.clearFocus();
+            this->marcheWidget.clearFocus();
         }
         return true;
     }
@@ -340,6 +400,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
     {
         this->chatWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
+        this->marcheWidget.clearFocus();
     }
     return false;
 }
@@ -362,6 +423,18 @@ bool IngameHudOverlay::mousewheelmoved(
         {
             case WindowLayer::ANNONCES:
                 if (this->annoncesWidget.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::JOURNAL_BORD:
+                if (this->journalBordWidget.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                if (this->marcheWidget.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
                 {
                     return true;
                 }
@@ -393,6 +466,12 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
                     return true;
                 }
                 break;
+            case WindowLayer::MARCHE_OFFRE_NOIR:
+                if (this->marcheWidget.keypressed(key, scancode, keycode, mod, isrepeat))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::CHAT:
                 if (this->chatWidget.keypressed(key, scancode, keycode, mod, isrepeat))
                 {
@@ -415,3 +494,29 @@ void IngameHudOverlay::publishSearchResult(const std::string& resultText)
 {
     this->espionSearchPlayerWidget.publishSearchResult(resultText);
 }
+
+void IngameHudOverlay::publishLogbookEntry(const std::string& dateTime, const std::string& message)
+{
+    this->journalBordWidget.pushEntry(dateTime, message);
+}
+
+void IngameHudOverlay::setBazardMarketRows(const std::vector<MarcheWidget::BazardItemData>& rows)
+{
+    this->marcheWidget.setBazardRows(rows);
+}
+
+void IngameHudOverlay::setNoirMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows)
+{
+    this->marcheWidget.setMarcheNoirRows(rows);
+}
+
+void IngameHudOverlay::setBasiqueMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows)
+{
+    this->marcheWidget.setMarcheBasiqueRows(rows);
+}
+
+void IngameHudOverlay::setEvenementMarketRows(const std::vector<MarcheWidget::MarketItemData>& rows)
+{
+    this->marcheWidget.setMarcheEvenementRows(rows);
+}
+
