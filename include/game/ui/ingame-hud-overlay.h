@@ -17,6 +17,7 @@
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
+#include "game/ui/hud/zoom-widget.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 #include "game/ui/overlay/sector-coordinate-overlay.h"
 #include "game/ui/overlay/tile-click-marker-overlay.h"
@@ -164,6 +165,7 @@ private:
     MinimapWidget minimapWidget; /**< Widget minimap. */
     BarreActionWidget barreActionWidget; /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget; /**< Widget bouton centrer navire. */
+    ZoomWidget zoomWidget; /**< Widget de zoom (barre + slider). */
     ChatWidget chatWidget; /**< Fenetre chat interactive. */
     EspionSearchPlayerWidget espionSearchPlayerWidget; /**< Fenetre "Espion" de recherche joueur. */
     ParamsMinimapWidget paramsMinimapWidget; /**< Fenetre de parametres de la minimap. */

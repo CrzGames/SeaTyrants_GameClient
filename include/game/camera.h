@@ -24,6 +24,9 @@ private:
 public:
     static constexpr float CAMERA_SCROLL_SPEED_SECTORS = 8.0f;
     static constexpr float CAMERA_DIAGONAL_FACTOR = 0.70710678f;
+    static constexpr float CAMERA_ZOOM_MIN_FACTOR = 0.40f;  /**< Zoom minimal gameplay autorise. */
+    static constexpr float CAMERA_ZOOM_MAX_FACTOR = 1.00f;  /**< Zoom maximal gameplay autorise. */
+    static constexpr float CAMERA_ZOOM_STEP_FACTOR = 0.05f; /**< Pas de zoom gameplay (clavier/UI). */
 
     Camera();
     ~Camera();

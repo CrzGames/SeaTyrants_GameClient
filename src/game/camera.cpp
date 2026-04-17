@@ -11,9 +11,9 @@
 Camera::Camera()
     : cameraTileX(0.0f),      // Centre camera X en coordonnee tuile (sera recalcule par resetCamera).
       cameraTileY(0.0f),      // Centre camera Y en coordonnee tuile.
-      zoomFactor(1.0f),       // Zoom initial = 100 % (taille native des tuiles).
-      minZoomFactor(0.40f),   // Dezoom max autorise (40 %).
-      maxZoomFactor(1.00f)    // Zoom max autorise (100 %).
+      zoomFactor(Camera::CAMERA_ZOOM_MAX_FACTOR), // Zoom initial = 100 % (taille native des tuiles).
+      minZoomFactor(Camera::CAMERA_ZOOM_MIN_FACTOR), // Dezoom max autorise (40 %).
+      maxZoomFactor(Camera::CAMERA_ZOOM_MAX_FACTOR)  // Zoom max autorise (100 %).
 {
 }
 
@@ -60,7 +60,7 @@ void Camera::moveCameraTiles(float deltaTileX, float deltaTileY, const Map& map,
 
 void Camera::setZoomFactor(float value)
 {
-    // Clamp entre min (0.40) et max (1.00) pour eviter un zoom trop extreme.
+    // Clamp entre min et max pour eviter un zoom trop extreme.
     this->zoomFactor = std::clamp(value, this->minZoomFactor, this->maxZoomFactor);
 }
 

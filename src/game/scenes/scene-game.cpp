@@ -295,20 +295,8 @@ void GameScene::keypressed(
         return;
     }
     
-    // Seules les touches de zoom et recentrage sont traitees ici.
-    if (scancode == SDL_SCANCODE_KP_PLUS || scancode == SDL_SCANCODE_EQUALS)
-    {
-        camera.setZoomFactor(camera.getZoomFactor() + 0.05f);
-        cameraChanged = true;
-        RC2D_log(RC2D_LOG_DEBUG, "Camera zoom: %.2f", camera.getZoomFactor());
-    }
-    else if (scancode == SDL_SCANCODE_KP_MINUS || scancode == SDL_SCANCODE_MINUS)
-    {
-        camera.setZoomFactor(camera.getZoomFactor() - 0.05f);
-        cameraChanged = true;
-        RC2D_log(RC2D_LOG_DEBUG, "Camera zoom: %.2f", camera.getZoomFactor());
-    }
-    else if (scancode == SDL_SCANCODE_SPACE)
+    // Espace recentre la camera sur le joueur et reactive le suivi auto.
+    if (scancode == SDL_SCANCODE_SPACE)
     {
         GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
         this->shipAutoFollowEnabled = true;

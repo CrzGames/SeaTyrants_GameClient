@@ -50,6 +50,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       minimapWidget{},
       barreActionWidget{},
       centerShipButtonWidget{},
+      zoomWidget{},
       chatWidget{},
       espionSearchPlayerWidget{},
       paramsMinimapWidget{},
@@ -136,6 +137,7 @@ void IngameHudOverlay::load(void)
 
     // Bouton de recentrage du navire, garde sa logique/ressources dans son widget dedie.
     this->centerShipButtonWidget.load();
+    this->zoomWidget.load();
 
     // Overlay texte du secteur courant.
     this->sectorCoordinateOverlay.load();
@@ -177,6 +179,7 @@ void IngameHudOverlay::unload(void)
     this->centerShipButtonWidget.unload();
     this->barreActionWidget.unload();
     this->minimapWidget.unload();
+    this->zoomWidget.unload();
     this->tileClickMarkerOverlay.hide();
     this->scrollBarOverlay.unload();
     this->backgroundWidget.unload();
@@ -271,6 +274,7 @@ void IngameHudOverlay::update(double dt, Camera& camera, const Map& map)
         }
     }
     this->tileClickMarkerOverlay.update(dt);
+    this->zoomWidget.update(camera);
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
 }
 
@@ -285,6 +289,7 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
     this->minimapWidget.draw();
     this->barreActionWidget.draw();
     this->centerShipButtonWidget.draw();
+    this->zoomWidget.draw();
 
     // Draw des fenetres flottantes de bas vers haut.
     for (const WindowLayer layer : this->windowDrawOrder)
@@ -385,6 +390,14 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
         }
+        return true;
+    }
+
+    if (this->zoomWidget.mousepressed(x, y, button))
+    {
+        this->chatWidget.clearFocus();
+        this->espionSearchPlayerWidget.clearFocus();
+        this->marketsAndBazarWidget.clearFocus();
         return true;
     }
 
