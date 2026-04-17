@@ -13,6 +13,7 @@
 
 #include "game/scenes/scene.h"
 #include "game/ships/ship.h"
+#include "game/ui/hud/background-widget.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 
 /**
@@ -224,7 +225,7 @@ private:
         float spawnTimeSeconds = 0.0f;
     };
 
-    RC2D_Image backgroundUiImage;
+    BackgroundWidget backgroundWidget;
     RC2D_Font overlayFont;
     ScrollBarOverlay scrollBarOverlay;
 

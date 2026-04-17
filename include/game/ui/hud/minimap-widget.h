@@ -11,9 +11,6 @@
  * - dessiner la minimap.
  */
 class MinimapWidget {
-private:
-    RC2D_UIImage minimapUi; /**< Image UI de la minimap. */
-
 public:
     MinimapWidget(void);
     ~MinimapWidget(void);
@@ -32,4 +29,10 @@ public:
      * @brief Dessine le widget minimap.
      */
     void draw(void);
+    
+private:
+    /**
+     * @brief Ressource image de la minimap HUD.
+     */
+    RC2D_UIImage minimapUi; /**< Image UI de la minimap. */
 };

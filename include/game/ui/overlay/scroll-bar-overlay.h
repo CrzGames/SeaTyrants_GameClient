@@ -16,37 +16,6 @@ class Camera;
  * (numeros 00-59 en haut, lettres AA-CH a gauche).
  */
 class ScrollBarOverlay {
-private:
-    static const int NUM_ROWS = Map::NUM_SECTORS_X;  /**< Nombre de lignes numerotees (00-59). */
-    static const int NUM_COLS = Map::NUM_SECTORS_Y;  /**< Nombre de colonnes lettrees (AA-CH). */
-
-    float barThickness;   /**< Epaisseur des barres en pixels. */
-    float cornerSize;     /**< Taille des carres de coin en pixels. */
-
-    RC2D_Color barColor;    /**< Couleur semi-transparente des barres. */
-    RC2D_Color cornerColor; /**< Couleur des carres de coin. */
-    RC2D_Color textColor;   /**< Couleur du texte des coordonnees. */
-
-    RC2D_Font font; /**< Police pour les labels de coordonnees. */
-
-    int activeBar; /**< Zone actuellement maintenue au clic: 0 = aucune, 1..4 = barres, 5..8 = coins. */
-
-    /**
-     * @brief Genere le label lettre pour un index de colonne (0=AA, 25=AZ, 26=BA, 33=BH).
-     */
-    void getColumnLabel(int index, char* out, int outSize) const;
-
-    /**
-     * @brief Genere le label numero pour un index de ligne (0="00", 59="59").
-     */
-    void getRowLabel(int index, char* out, int outSize) const;
-
-    /**
-     * @brief Teste si un point (x,y) est dans une barre ou un coin.
-     * @return 0=aucune, 1=haut, 2=bas, 3=gauche, 4=droite, 5=HG, 6=HD, 7=BG, 8=BD.
-     */
-    int hitTestBar(float x, float y, const SDL_FRect& screenRect) const;
-
 public:
     ScrollBarOverlay(void);
     ~ScrollBarOverlay(void);
@@ -87,4 +56,35 @@ public:
      * @brief Donne les cordonnées par rapport à la Tile X/Y (ex: "00-AA") pour une position de tuile donnée (ex: tileX=0, tileY=0). 
      */
     std::string getMapCoordFromTile(int tileX, int tileY) const;
+    
+private:
+    static const int NUM_ROWS = Map::NUM_SECTORS_X;  /**< Nombre de lignes numerotees (00-59). */
+    static const int NUM_COLS = Map::NUM_SECTORS_Y;  /**< Nombre de colonnes lettrees (AA-CH). */
+
+    float barThickness;   /**< Epaisseur des barres en pixels. */
+    float cornerSize;     /**< Taille des carres de coin en pixels. */
+
+    RC2D_Color barColor;    /**< Couleur semi-transparente des barres. */
+    RC2D_Color cornerColor; /**< Couleur des carres de coin. */
+    RC2D_Color textColor;   /**< Couleur du texte des coordonnees. */
+
+    RC2D_Font font; /**< Police pour les labels de coordonnees. */
+
+    int activeBar; /**< Zone actuellement maintenue au clic: 0 = aucune, 1..4 = barres, 5..8 = coins. */
+
+    /**
+     * @brief Genere le label lettre pour un index de colonne (0=AA, 25=AZ, 26=BA, 33=BH).
+     */
+    void getColumnLabel(int index, char* out, int outSize) const;
+
+    /**
+     * @brief Genere le label numero pour un index de ligne (0="00", 59="59").
+     */
+    void getRowLabel(int index, char* out, int outSize) const;
+
+    /**
+     * @brief Teste si un point (x,y) est dans une barre ou un coin.
+     * @return 0=aucune, 1=haut, 2=bas, 3=gauche, 4=droite, 5=HG, 6=HD, 7=BG, 8=BD.
+     */
+    int hitTestBar(float x, float y, const SDL_FRect& screenRect) const;
 };

@@ -10,7 +10,8 @@
 
 #include "game/scenes/scene.h"
 #include "game/ships/ship.h"
-#include "game/ui/overlay/tile-click-marker.h"
+#include "game/ui/hud/background-widget.h"
+#include "game/ui/overlay/tile-click-marker-overlay.h"
 
 /**
  * @class EditorMapAnchorShipScene
@@ -36,7 +37,7 @@ private:
         bool loaded; /**< True si la texture est valide. */
     };
 
-    RC2D_Image backgroundUiImage; /**< Fond UI ingame (haut/bas). */
+    BackgroundWidget backgroundWidget; /**< Fond UI ingame (haut/bas). */
     RC2D_Font overlayFont; /**< Police overlay/outils. */
     std::array<ShipFrame, 8> shipFrames; /**< Sprites 1..8 du navire. */
     std::array<SDL_FPoint, 8> spriteAnchors; /**< Anchors normalises [0..1] par sprite. */
@@ -63,7 +64,7 @@ private:
     int movementPreviewVisualPass; /**< Pass visuelle check: 0=sprites 1..4, 1=sprites 5..8. */
     double movementPreviewPauseRemainingSec; /**< Pause restante apres chaque arrivee de clic simule. */
     Ship movementPreviewShip; /**< Ship de simulation pour reutiliser le vrai pathfinding A*. */
-    TileClickMarker clickMarker; /**< Marqueur visuel des clics simules pendant le check. */
+    TileClickMarkerOverlay clickMarker; /**< Marqueur visuel des clics simules pendant le check. */
 
     SDL_FRect buttonImportFolderRect; /**< Bouton import dossier navire. */
     SDL_FRect buttonPrevSpriteRect; /**< Bouton sprite precedent. */

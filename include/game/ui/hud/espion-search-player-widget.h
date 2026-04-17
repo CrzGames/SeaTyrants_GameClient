@@ -1,37 +1,10 @@
 #pragma once
 
 #include <RC2D/RC2D.h>
+
 #include <string>
 
-/**
- * @brief Fenetre "Espion" pour rechercher un joueur.
- *
- * Cette version reproduit la maquette fournie:
- * - barre haute style chat (bordures or/argent);
- * - titre "Espion";
- * - bouton retour a gauche et croix a droite;
- * - champ ID joueur;
- * - bloc prix + bouton "Trouver un joueur".
- */
 class EspionSearchPlayerWidget {
-private:
-    RC2D_Font titleFont; /**< Police du titre et des labels. */
-    RC2D_Font bodyFont; /**< Police secondaire pour les textes standards. */
-    SDL_FRect widgetRect; /**< Rectangle global de rendu/hit-test. */
-    bool visible; /**< True si la fenetre est visible. */
-    std::string playerIdInput; /**< Valeur affichee dans le champ ID joueur (reserve). */
-    std::size_t cursorIndex; /**< Position d'insertion du curseur dans l'input ID. */
-    bool inputFocused; /**< True si l'input ID a le focus clavier. */
-    bool cursorVisible; /**< True si le curseur doit etre affiche. */
-    double cursorBlinkElapsed; /**< Temps accumule pour le blink du curseur. */
-    bool widgetDragging; /**< True si l'utilisateur drag la fenetre via le header. */
-    float widgetDragOffsetX; /**< Offset X souris->coin haut gauche pendant le drag. */
-    float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche pendant le drag. */
-    float widgetOffsetX; /**< Decalage X applique a la position de base. */
-    float widgetOffsetY; /**< Decalage Y applique a la position de base. */
-    std::string searchResultText; /**< Valeur affichee a droite de "Resultat de la recherche :". */
-    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
-
 public:
     EspionSearchPlayerWidget(void);
     ~EspionSearchPlayerWidget(void);
@@ -69,12 +42,6 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
-     * @brief Publie un texte de resultat dans la case du bas.
-     * @param resultText Texte a afficher a droite du label.
-     */
-    void publishSearchResult(const std::string& resultText);
-
-    /**
      * @brief Retire le focus de l'input ID et masque son curseur.
      */
     void clearFocus(void);
@@ -93,5 +60,51 @@ public:
      * @brief Teste si un point est dans la fenetre espion courante.
      */
     bool containsPoint(float x, float y) const;
-};
 
+    /**
+     * @brief Publie un texte de resultat dans la case du bas.
+     * @param resultText Texte a afficher a droite du label.
+     */
+    void publishSearchResult(const std::string& resultText);
+
+private:
+    /**
+     * @brief Texte de resultat affiche dans la zone de sortie.
+     */
+    std::string searchResultText; /**< Valeur affichee a droite de "Resultat de la recherche :". */
+
+    /**
+     * @brief Ressources de rendu et rectangle principal.
+     */
+    RC2D_Font titleFont; /**< Police du titre et des labels. */
+    RC2D_Font bodyFont; /**< Police secondaire pour les textes standards. */
+    SDL_FRect widgetRect; /**< Rectangle global de rendu/hit-test. */
+
+    /**
+     * @brief Etat global de visibilite de la fenetre.
+     */
+    bool visible; /**< True si la fenetre est visible. */
+
+    /**
+     * @brief Etat de saisie du champ d'ID joueur.
+     */
+    std::string playerIdInput; /**< Valeur affichee dans le champ ID joueur (reserve). */
+    std::size_t cursorIndex; /**< Position d'insertion du curseur dans l'input ID. */
+    bool inputFocused; /**< True si l'input ID a le focus clavier. */
+    bool cursorVisible; /**< True si le curseur doit etre affiche. */
+    double cursorBlinkElapsed; /**< Temps accumule pour le blink du curseur. */
+
+    /**
+     * @brief Etat de deplacement de la fenetre.
+     */
+    bool widgetDragging; /**< True si l'utilisateur drag la fenetre via le header. */
+    float widgetDragOffsetX; /**< Offset X souris->coin haut gauche pendant le drag. */
+    float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche pendant le drag. */
+    float widgetOffsetX; /**< Decalage X applique a la position de base. */
+    float widgetOffsetY; /**< Decalage Y applique a la position de base. */
+
+    /**
+     * @brief Autorisation de pilotage du curseur souris.
+     */
+    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+};

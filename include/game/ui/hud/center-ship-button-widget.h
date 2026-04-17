@@ -2,18 +2,7 @@
 
 #include <RC2D/RC2D.h>
 
-/**
- * @brief Widget HUD dedie au bouton "centrer sur le navire".
- *
- * Responsabilites:
- * - charger/decharger l'image du bouton;
- * - configurer son ancrage/marges UI;
- * - dessiner le bouton.
- */
 class CenterShipButtonWidget {
-private:
-    RC2D_UIImage buttonUi; /**< Image UI du bouton de centrage navire. */
-
 public:
     CenterShipButtonWidget(void);
     ~CenterShipButtonWidget(void);
@@ -32,4 +21,10 @@ public:
      * @brief Dessine le bouton.
      */
     void draw(void);
+    
+private:
+    /**
+     * @brief Ressource image du bouton de centrage.
+     */
+    RC2D_UIImage buttonUi; /**< Image UI du bouton de centrage navire. */
 };

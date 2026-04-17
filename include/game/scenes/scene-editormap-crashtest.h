@@ -11,6 +11,7 @@
 
 #include "game/scenes/scene.h"
 #include "game/ships/ship.h"
+#include "game/ui/hud/background-widget.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 
 /**
@@ -37,7 +38,7 @@ private:
         double networkCommandCooldownSec = 0.0; /**< Delai avant prochain paquet de deplacement reseau. */
     };
 
-    RC2D_Image backgroundUiImage; /**< Fond UI scene de jeu. */
+    BackgroundWidget backgroundWidget; /**< Fond UI scene de jeu. */
     RC2D_Font overlayFont; /**< Police overlay/hud. */
     ScrollBarOverlay scrollBarOverlay; /**< Scrollbars monde (haut/bas/gauche/droite). */
 

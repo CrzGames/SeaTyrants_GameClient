@@ -1,4 +1,4 @@
-﻿#if GAME_ENV_DEV
+#if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-vfx.h"
 
@@ -497,7 +497,7 @@ constexpr int kVisibleListRows = 10;
 /** Espacement vertical entre les lignes du panneau Layers (aligne dessin, clic, drag). */
 constexpr float kLayerListPanelRowGap = 6.0f;
 /**
- * Sentinel dans la liste d'affichage Layers : une ligne Ãƒâ€šÃ‚Â« sous-instance Ãƒâ€šÃ‚Â» par rejet de trainee actif.
+ * Sentinel dans la liste d'affichage Layers : une ligne Ã‚Â« sous-instance Ã‚Â» par rejet de trainee actif.
  * code = kLayerPanelTrailPieceRowMarker - (int)layerPanelUiId (uiId > 0, raisonnable pour rester dans int32).
  */
 constexpr int kLayerPanelTrailPieceRowMarker = -3000000;
@@ -1534,7 +1534,7 @@ static void editorMapVfxDrawTrailPopupPreviewOceanBackground(const SDL_FRect& r,
 EditorMapVfxScene* EditorMapVfxScene::activeInstance = nullptr;
 
 EditorMapVfxScene::EditorMapVfxScene(void)
-    : backgroundUiImage{},
+    : backgroundWidget{},
       overlayFont{},
       scrollBarOverlay{},
       editorMode(EditorMode::SHIP_VFX),
@@ -2981,7 +2981,7 @@ bool EditorMapVfxScene::computeVfxTrailConePopupLayout(VfxTrailConePopupLayout* 
         kSideHandleHalf * 2.0f,
         kSideHandleHalf * 2.0f};
 
-    // Evite les poignées collées l'une sur l'autre quand le cone est court/serre.
+    // Evite les poign�es coll�es l'une sur l'autre quand le cone est court/serre.
     editorMapVfxClampRectInside(&out->centerHandleRect, out->previewRect, 2.0f);
     editorMapVfxClampRectInside(&out->tipHandleRect, out->previewRect, 2.0f);
     editorMapVfxClampRectInside(&out->sideHandleRect, out->previewRect, 2.0f);
@@ -6615,7 +6615,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
     if (this->overlayFont.sdl_font != nullptr)
     {
         const char* ovlLab = !this->shipVfxEditorTargetSectorsABEnabled
-            ? "—"
+            ? "�"
             : (this->shipVfxEditorTargetSectorsOverlayVisible ? "TRC" : "trc");
         RC2D_Text ovlText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), ovlLab);
         ovlText.color = kHudTextColor;
@@ -15173,8 +15173,8 @@ void EditorMapVfxScene::drawVfxRelativeTimingPopup(void) const
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 
     const char* title = (this->vfxRelativeTimingPopupStep == 0)
-        ? "RELATIF ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â choisir l'instance de reference"
-        : "RELATIF ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â delai apres l'instance choisie (ms)";
+        ? "RELATIF Ã¢â‚¬â€ choisir l'instance de reference"
+        : "RELATIF Ã¢â‚¬â€ delai apres l'instance choisie (ms)";
     RC2D_Text titleText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
     titleText.color = kHudTextColor;
     rc2d_graphics_setTextColor(&titleText);
@@ -15868,7 +15868,7 @@ void EditorMapVfxScene::drawVfxTrailPopup(void) const
 
     RC2D_Text titleText = rc2d_graphics_createText(
         const_cast<RC2D_Font*>(&this->overlayFont),
-        "Trainee ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â marche (trace) et arret (couronne)");
+        "Trainee Ã¢â‚¬â€ marche (trace) et arret (couronne)");
     titleText.color = kHudTextColor;
     rc2d_graphics_setTextColor(&titleText);
     rc2d_graphics_drawText(&titleText, lay.popup.x + 14.0f, lay.popup.y + 12.0f);
@@ -16365,7 +16365,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
         if (this->pointInRect(x, y, lay.dimFullMap))
         {
             this->closeVfxTrailPopup();
-            this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
+            this->statusMessage = "TraÃƒÂ®nÃƒÂ©e : annule.";
         }
         return true;
     }
@@ -16373,7 +16373,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupMouseClick(float x, float y, RC2D_Mou
     if (this->pointInRect(x, y, lay.cancelBtn))
     {
         this->closeVfxTrailPopup();
-        this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
+        this->statusMessage = "TraÃƒÂ®nÃƒÂ©e : annule.";
         return true;
     }
 
@@ -16726,7 +16726,7 @@ bool EditorMapVfxScene::handleVfxTrailPopupKey(
     if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
     {
         this->closeVfxTrailPopup();
-        this->statusMessage = "TraÃƒÆ’Ã‚Â®nÃƒÆ’Ã‚Â©e : annule.";
+        this->statusMessage = "TraÃƒÂ®nÃƒÂ©e : annule.";
         return true;
     }
 
@@ -17737,8 +17737,8 @@ bool EditorMapVfxScene::handleLayerListClick(float x, float y, RC2D_MouseButton 
         ShipVfxInstance& placeInstance = this->currentShipVfxLayers()[static_cast<size_t>(clickedInstanceIndex)];
         placeInstance.placementSnapClickToTile = !placeInstance.placementSnapClickToTile;
         this->statusMessage = placeInstance.placementSnapClickToTile
-            ? "Layer: TILE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
-            : "Layer: PIXEL ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pas de snap tuile au clic.";
+            ? "Layer: TILE Ã¢â‚¬â€ fantome sur la tuile sous le curseur, clic pour poser (y compris pres d'autres VFX)."
+            : "Layer: PIXEL Ã¢â‚¬â€ pas de snap tuile au clic.";
         return true;
     }
 
@@ -18604,7 +18604,7 @@ void EditorMapVfxScene::unload(void)
 
     this->scrollBarOverlay.unload();
     rc2d_graphics_closeFont(&this->overlayFont);
-    rc2d_graphics_freeImage(&this->backgroundUiImage);
+    this->backgroundWidget.unload();
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapVfxScene: unloaded");
 }
@@ -18615,9 +18615,7 @@ void EditorMapVfxScene::load(void)
     this->resetEditorState();
     this->ensureUserStorageFolders();
 
-    this->backgroundUiImage = rc2d_graphics_loadImageFromStorage(
-        "assets/images/ui-scene-game/background.png",
-        RC2D_STORAGE_TITLE);
+    this->backgroundWidget.load();
 
     this->overlayFont = rc2d_graphics_openFontFromStorage(
         "assets/fonts/TradeWinds-Regular.ttf",
@@ -18832,20 +18830,7 @@ void EditorMapVfxScene::draw(void)
 {
     Map& map = GetCurrentMap();
 
-    if (this->backgroundUiImage.sdl_texture != nullptr)
-    {
-        rc2d_graphics_drawImage(
-            &this->backgroundUiImage,
-            0.0f,
-            0.0f,
-            0.0,
-            1.0f,
-            1.0f,
-            0.0f,
-            0.0f,
-            false,
-            false);
-    }
+    this->backgroundWidget.draw();
 
     SDL_Renderer* renderer = WorldRenderClip::begin(map.rect);
     if (GetOceanShader().isReady())

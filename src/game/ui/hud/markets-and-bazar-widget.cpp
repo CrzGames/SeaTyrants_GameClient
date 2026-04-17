@@ -1,4 +1,4 @@
-#include "game/ui/hud/marche-widget.h"
+#include "game/ui/hud/markets-and-bazar-widget.h"
 
 #include "core/context.h"
 
@@ -8,6 +8,12 @@
 #include <sstream>
 #include <utility>
 #include <vector>
+
+using MarketCategory = MarketsAndBazarWidget::MarketCategory;
+using MarketCurrency = MarketsAndBazarWidget::MarketCurrency;
+using MarketPriceData = MarketsAndBazarWidget::MarketPriceData;
+using BazarRow = MarketsAndBazarWidget::BazarRow;
+using MarketRow = MarketsAndBazarWidget::MarketRow;
 
 static constexpr float kRefW = 1040.0f;
 static constexpr float kRefH = 670.0f;
@@ -40,8 +46,8 @@ struct MarketLayout {
     SDL_FRect inner;
     SDL_FRect topBar;
     SDL_FRect closeButton;
-    SDL_FRect bazardTab;
-    SDL_FRect noirTab;
+    SDL_FRect bazarTab;
+    SDL_FRect blackTab;
     SDL_FRect basicTab;
     SDL_FRect eventTab;
     SDL_FRect categoryHeader;
@@ -367,65 +373,98 @@ static std::string keepDigitsOrFallback(const std::string& rawValue, const std::
     return filtered.substr(nonZero);
 }
 
-static constexpr std::array<MarcheWidget::MarketCategory, 11> kCategoryOrder = {
-    MarcheWidget::MarketCategory::ACTIVABLES,
-    MarcheWidget::MarketCategory::BOOSTER,
-    MarcheWidget::MarketCategory::CANNONS,
-    MarcheWidget::MarketCategory::CONSOMMABLES,
-    MarcheWidget::MarketCategory::HARPONEUSE,
-    MarcheWidget::MarketCategory::MATELOTS,
-    MarcheWidget::MarketCategory::MUNITION_DE_CANNON,
-    MarcheWidget::MarketCategory::MUNITION_DE_HARPON,
-    MarcheWidget::MarketCategory::NAVIRES,
-    MarcheWidget::MarketCategory::UTILISABLE_SUR_CIBLE,
-    MarcheWidget::MarketCategory::VOILES
+static constexpr std::array<MarketCategory, 11> kCategoryOrder = {
+    MarketCategory::ACTIVABLES,
+    MarketCategory::BOOSTER,
+    MarketCategory::CANNONS,
+    MarketCategory::CONSOMMABLES,
+    MarketCategory::HARPONEUSE,
+    MarketCategory::MATELOTS,
+    MarketCategory::MUNITION_DE_CANNON,
+    MarketCategory::MUNITION_DE_HARPON,
+    MarketCategory::NAVIRES,
+    MarketCategory::UTILISABLE_SUR_CIBLE,
+    MarketCategory::VOILES
 };
 
-static std::size_t categoryToIndex(MarcheWidget::MarketCategory category)
+static std::size_t categoryToIndex(MarketCategory category)
 {
     const int raw = static_cast<int>(category);
-    if (raw < 0 || raw >= static_cast<int>(MarcheWidget::MarketCategory::COUNT))
+    if (raw < 0 || raw >= static_cast<int>(MarketCategory::COUNT))
     {
         return 0U;
     }
     return static_cast<std::size_t>(raw);
 }
 
-static MarcheWidget::MarketCategory sanitizeCategory(MarcheWidget::MarketCategory category)
+static MarketCategory sanitizeCategory(MarketCategory category)
 {
     const int raw = static_cast<int>(category);
-    if (raw < 0 || raw >= static_cast<int>(MarcheWidget::MarketCategory::COUNT))
+    if (raw < 0 || raw >= static_cast<int>(MarketCategory::COUNT))
     {
-        return MarcheWidget::MarketCategory::ACTIVABLES;
+        return MarketCategory::ACTIVABLES;
     }
     return category;
 }
 
-static const char* categoryLabel(MarcheWidget::MarketCategory category)
+static MarketCurrency sanitizeCurrency(MarketCurrency currency)
+{
+    switch (currency)
+    {
+        case MarketCurrency::GOLD:
+        case MarketCurrency::CRISTAUX:
+        case MarketCurrency::RUBIES:
+        case MarketCurrency::FACTIONS:
+            return currency;
+        default:
+            break;
+    }
+    return MarketCurrency::GOLD;
+}
+
+static const char* marketCurrencyLabel(MarketCurrency currency)
+{
+    switch (sanitizeCurrency(currency))
+    {
+        case MarketCurrency::GOLD:
+            return "gold";
+        case MarketCurrency::CRISTAUX:
+            return "cristaux";
+        case MarketCurrency::RUBIES:
+            return "rubies";
+        case MarketCurrency::FACTIONS:
+            return "factions";
+        default:
+            break;
+    }
+    return "gold";
+}
+
+static const char* categoryLabel(MarketCategory category)
 {
     switch (category)
     {
-        case MarcheWidget::MarketCategory::ACTIVABLES:
+        case MarketCategory::ACTIVABLES:
             return "Activables";
-        case MarcheWidget::MarketCategory::BOOSTER:
+        case MarketCategory::BOOSTER:
             return "Booster";
-        case MarcheWidget::MarketCategory::CANNONS:
+        case MarketCategory::CANNONS:
             return "Cannons";
-        case MarcheWidget::MarketCategory::CONSOMMABLES:
+        case MarketCategory::CONSOMMABLES:
             return "Consommables";
-        case MarcheWidget::MarketCategory::HARPONEUSE:
+        case MarketCategory::HARPONEUSE:
             return "Harponeuse";
-        case MarcheWidget::MarketCategory::MATELOTS:
+        case MarketCategory::MATELOTS:
             return "Matelots";
-        case MarcheWidget::MarketCategory::MUNITION_DE_CANNON:
+        case MarketCategory::MUNITION_DE_CANNON:
             return "Munition de cannon";
-        case MarcheWidget::MarketCategory::MUNITION_DE_HARPON:
+        case MarketCategory::MUNITION_DE_HARPON:
             return "Munition de harpon";
-        case MarcheWidget::MarketCategory::NAVIRES:
+        case MarketCategory::NAVIRES:
             return "Navires";
-        case MarcheWidget::MarketCategory::UTILISABLE_SUR_CIBLE:
+        case MarketCategory::UTILISABLE_SUR_CIBLE:
             return "Utilisable sur cible";
-        case MarcheWidget::MarketCategory::VOILES:
+        case MarketCategory::VOILES:
             return "Voiles";
         default:
             break;
@@ -433,7 +472,7 @@ static const char* categoryLabel(MarcheWidget::MarketCategory category)
     return "Categorie";
 }
 
-static MarketLayout buildLayout(const SDL_FRect& outer, bool bazardTab)
+static MarketLayout buildLayout(const SDL_FRect& outer, bool bazarTab)
 {
     MarketLayout layout{};
     layout.outer = outer;
@@ -450,8 +489,8 @@ static MarketLayout buildLayout(const SDL_FRect& outer, bool bazardTab)
     const float tabH = layout.topBar.h - 6.0f;
     layout.basicTab = SDL_FRect{outer.x + 10.0f, tabY, 140.0f, tabH};
     layout.eventTab = SDL_FRect{layout.basicTab.x + layout.basicTab.w + 2.0f, tabY, 170.0f, tabH};
-    layout.bazardTab = SDL_FRect{layout.eventTab.x + layout.eventTab.w + 2.0f, tabY, 128.0f, tabH};
-    layout.noirTab = SDL_FRect{layout.bazardTab.x + layout.bazardTab.w + 2.0f, tabY, 128.0f, tabH};
+    layout.bazarTab = SDL_FRect{layout.eventTab.x + layout.eventTab.w + 2.0f, tabY, 128.0f, tabH};
+    layout.blackTab = SDL_FRect{layout.bazarTab.x + layout.bazarTab.w + 2.0f, tabY, 128.0f, tabH};
 
     const float sectionY = layout.topBar.y + layout.topBar.h + 8.0f;
     const float sectionH = 30.0f;
@@ -495,7 +534,7 @@ static MarketLayout buildLayout(const SDL_FRect& outer, bool bazardTab)
     };
 
     layout.col1X = layout.body.x;
-    if (bazardTab)
+    if (bazarTab)
     {
         layout.col1W = std::floor(layout.contentWidth * 0.44f);
         layout.col2W = std::floor(layout.contentWidth * 0.14f);
@@ -526,20 +565,24 @@ static SDL_FRect getCategoryRowRect(const MarketLayout& layout, int rowIndex)
     };
 }
 
-MarcheWidget::MarcheWidget(void)
+MarketsAndBazarWidget::MarketsAndBazarWidget(void)
     : titleFont{},
       bodyFont{},
       smallFont{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       visible(true),
       cursorEnabled(true),
-      activeTab(ActiveTab::BASIQUE),
-      bazardRows{},
-      noirRows{},
-      basicRows{},
-      eventRows{},
-      bazardFirstRow(0),
-      noirFirstRow(0),
+      activeTab(ActiveTab::BASIC_MARKET),
+      bazarRows{},
+      blackMarketRows{},
+      basicMarketRows{},
+      eventMarketRows{},
+      bazarRowIcons{},
+      blackMarketRowIcons{},
+      basicMarketRowIcons{},
+      eventMarketRowIcons{},
+      bazarFirstRow(0),
+      blackFirstRow(0),
       basicFirstRow(0),
       eventFirstRow(0),
       categoryFilterEnabled{},
@@ -551,7 +594,7 @@ MarcheWidget::MarcheWidget(void)
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
       inputFocused(false),
-      focusedTab(ActiveTab::BASIQUE),
+      focusedTab(ActiveTab::BASIC_MARKET),
       focusedRow(-1),
       cursorIndex(0),
       cursorVisible(false),
@@ -560,23 +603,16 @@ MarcheWidget::MarcheWidget(void)
 {
 }
 
-MarcheWidget::~MarcheWidget(void)
+MarketsAndBazarWidget::~MarketsAndBazarWidget(void)
 {
 }
 
-bool MarcheWidget::isBazardActive(void) const
+bool MarketsAndBazarWidget::isBazarActive(void) const
 {
     return this->activeTab == ActiveTab::BAZARD;
 }
 
-bool MarcheWidget::isNoirFamilyActive(void) const
-{
-    return this->activeTab == ActiveTab::NOIR ||
-           this->activeTab == ActiveTab::BASIQUE ||
-           this->activeTab == ActiveTab::EVENEMENT;
-}
-
-bool MarcheWidget::hasAnyCategoryFilterEnabled(void) const
+bool MarketsAndBazarWidget::hasAnyCategoryFilterEnabled(void) const
 {
     for (const bool enabled : this->categoryFilterEnabled)
     {
@@ -588,12 +624,12 @@ bool MarcheWidget::hasAnyCategoryFilterEnabled(void) const
     return false;
 }
 
-bool MarcheWidget::isCategoryEnabled(MarketCategory category) const
+bool MarketsAndBazarWidget::isCategoryEnabled(MarketCategory category) const
 {
     return this->categoryFilterEnabled[categoryToIndex(sanitizeCategory(category))];
 }
 
-bool MarcheWidget::passesCategoryFilter(MarketCategory category) const
+bool MarketsAndBazarWidget::passesCategoryFilter(MarketCategory category) const
 {
     if (!this->hasAnyCategoryFilterEnabled())
     {
@@ -602,20 +638,20 @@ bool MarcheWidget::passesCategoryFilter(MarketCategory category) const
     return this->isCategoryEnabled(category);
 }
 
-void MarcheWidget::resetCategoryFilters(void)
+void MarketsAndBazarWidget::resetCategoryFilters(void)
 {
     this->categoryFilterEnabled.fill(false);
 }
 
-std::vector<int> MarcheWidget::buildFilteredRowIndices(ActiveTab tab) const
+std::vector<int> MarketsAndBazarWidget::buildFilteredRowIndices(ActiveTab tab) const
 {
     std::vector<int> indices;
     if (tab == ActiveTab::BAZARD)
     {
-        indices.reserve(this->bazardRows.size());
-        for (std::size_t i = 0; i < this->bazardRows.size(); ++i)
+        indices.reserve(this->bazarRows.size());
+        for (std::size_t i = 0; i < this->bazarRows.size(); ++i)
         {
-            const BazardRow& row = this->bazardRows[i];
+            const BazarRow& row = this->bazarRows[i];
             if (this->passesCategoryFilter(row.category))
             {
                 indices.push_back(static_cast<int>(i));
@@ -624,7 +660,7 @@ std::vector<int> MarcheWidget::buildFilteredRowIndices(ActiveTab tab) const
         return indices;
     }
 
-    const std::vector<NoirRow>* rows = this->getNoirRowsForTab(tab);
+    const std::vector<MarketRow>* rows = this->getMarketRowsForTab(tab);
     if (rows == nullptr)
     {
         return indices;
@@ -633,7 +669,7 @@ std::vector<int> MarcheWidget::buildFilteredRowIndices(ActiveTab tab) const
     indices.reserve(rows->size());
     for (std::size_t i = 0; i < rows->size(); ++i)
     {
-        const NoirRow& row = (*rows)[i];
+        const MarketRow& row = (*rows)[i];
         if (this->passesCategoryFilter(row.category))
         {
             indices.push_back(static_cast<int>(i));
@@ -642,25 +678,25 @@ std::vector<int> MarcheWidget::buildFilteredRowIndices(ActiveTab tab) const
     return indices;
 }
 
-void MarcheWidget::clearNoirRows(std::vector<NoirRow>& rows)
+void MarketsAndBazarWidget::clearIcons(std::vector<RC2D_Image>& icons)
 {
-    for (NoirRow& row : rows)
+    for (RC2D_Image& icon : icons)
     {
-        rc2d_graphics_freeImage(&row.icon);
+        rc2d_graphics_freeImage(&icon);
     }
-    rows.clear();
+    icons.clear();
 }
 
-std::vector<MarcheWidget::NoirRow>* MarcheWidget::getNoirRowsForTab(ActiveTab tab)
+std::vector<MarketsAndBazarWidget::MarketRow>* MarketsAndBazarWidget::getMarketRowsForTab(ActiveTab tab)
 {
     switch (tab)
     {
-        case ActiveTab::NOIR:
-            return &this->noirRows;
-        case ActiveTab::BASIQUE:
-            return &this->basicRows;
-        case ActiveTab::EVENEMENT:
-            return &this->eventRows;
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackMarketRows;
+        case ActiveTab::BASIC_MARKET:
+            return &this->basicMarketRows;
+        case ActiveTab::EVENT_MARKET:
+            return &this->eventMarketRows;
         case ActiveTab::BAZARD:
         default:
             break;
@@ -668,16 +704,16 @@ std::vector<MarcheWidget::NoirRow>* MarcheWidget::getNoirRowsForTab(ActiveTab ta
     return nullptr;
 }
 
-const std::vector<MarcheWidget::NoirRow>* MarcheWidget::getNoirRowsForTab(ActiveTab tab) const
+const std::vector<MarketsAndBazarWidget::MarketRow>* MarketsAndBazarWidget::getMarketRowsForTab(ActiveTab tab) const
 {
     switch (tab)
     {
-        case ActiveTab::NOIR:
-            return &this->noirRows;
-        case ActiveTab::BASIQUE:
-            return &this->basicRows;
-        case ActiveTab::EVENEMENT:
-            return &this->eventRows;
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackMarketRows;
+        case ActiveTab::BASIC_MARKET:
+            return &this->basicMarketRows;
+        case ActiveTab::EVENT_MARKET:
+            return &this->eventMarketRows;
         case ActiveTab::BAZARD:
         default:
             break;
@@ -685,17 +721,51 @@ const std::vector<MarcheWidget::NoirRow>* MarcheWidget::getNoirRowsForTab(Active
     return nullptr;
 }
 
-int* MarcheWidget::getFirstRowForTab(ActiveTab tab)
+std::vector<RC2D_Image>* MarketsAndBazarWidget::getMarketIconsForTab(ActiveTab tab)
+{
+    switch (tab)
+    {
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackMarketRowIcons;
+        case ActiveTab::BASIC_MARKET:
+            return &this->basicMarketRowIcons;
+        case ActiveTab::EVENT_MARKET:
+            return &this->eventMarketRowIcons;
+        case ActiveTab::BAZARD:
+        default:
+            break;
+    }
+    return nullptr;
+}
+
+const std::vector<RC2D_Image>* MarketsAndBazarWidget::getMarketIconsForTab(ActiveTab tab) const
+{
+    switch (tab)
+    {
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackMarketRowIcons;
+        case ActiveTab::BASIC_MARKET:
+            return &this->basicMarketRowIcons;
+        case ActiveTab::EVENT_MARKET:
+            return &this->eventMarketRowIcons;
+        case ActiveTab::BAZARD:
+        default:
+            break;
+    }
+    return nullptr;
+}
+
+int* MarketsAndBazarWidget::getFirstRowForTab(ActiveTab tab)
 {
     switch (tab)
     {
         case ActiveTab::BAZARD:
-            return &this->bazardFirstRow;
-        case ActiveTab::NOIR:
-            return &this->noirFirstRow;
-        case ActiveTab::BASIQUE:
+            return &this->bazarFirstRow;
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackFirstRow;
+        case ActiveTab::BASIC_MARKET:
             return &this->basicFirstRow;
-        case ActiveTab::EVENEMENT:
+        case ActiveTab::EVENT_MARKET:
             return &this->eventFirstRow;
         default:
             break;
@@ -703,17 +773,17 @@ int* MarcheWidget::getFirstRowForTab(ActiveTab tab)
     return nullptr;
 }
 
-const int* MarcheWidget::getFirstRowForTab(ActiveTab tab) const
+const int* MarketsAndBazarWidget::getFirstRowForTab(ActiveTab tab) const
 {
     switch (tab)
     {
         case ActiveTab::BAZARD:
-            return &this->bazardFirstRow;
-        case ActiveTab::NOIR:
-            return &this->noirFirstRow;
-        case ActiveTab::BASIQUE:
+            return &this->bazarFirstRow;
+        case ActiveTab::BLACK_MARKET:
+            return &this->blackFirstRow;
+        case ActiveTab::BASIC_MARKET:
             return &this->basicFirstRow;
-        case ActiveTab::EVENEMENT:
+        case ActiveTab::EVENT_MARKET:
             return &this->eventFirstRow;
         default:
             break;
@@ -721,39 +791,44 @@ const int* MarcheWidget::getFirstRowForTab(ActiveTab tab) const
     return nullptr;
 }
 
-void MarcheWidget::clearRows(void)
+void MarketsAndBazarWidget::clearRows(void)
 {
-    for (BazardRow& row : this->bazardRows)
-    {
-        rc2d_graphics_freeImage(&row.icon);
-    }
-    this->bazardRows.clear();
-    this->clearNoirRows(this->noirRows);
-    this->clearNoirRows(this->basicRows);
-    this->clearNoirRows(this->eventRows);
+    this->bazarRows.clear();
+    this->blackMarketRows.clear();
+    this->basicMarketRows.clear();
+    this->eventMarketRows.clear();
+
+    this->clearIcons(this->bazarRowIcons);
+    this->clearIcons(this->blackMarketRowIcons);
+    this->clearIcons(this->basicMarketRowIcons);
+    this->clearIcons(this->eventMarketRowIcons);
 }
 
-void MarcheWidget::setNoirFamilyRows(ActiveTab tab, const std::vector<MarketItemData>& rows)
+void MarketsAndBazarWidget::setMarketFamilyRows(ActiveTab tab, const std::vector<MarketRow>& rows)
 {
-    std::vector<NoirRow>* targetRows = this->getNoirRowsForTab(tab);
+    std::vector<MarketRow>* targetRows = this->getMarketRowsForTab(tab);
+    std::vector<RC2D_Image>* targetIcons = this->getMarketIconsForTab(tab);
     int* firstRow = this->getFirstRowForTab(tab);
-    if (targetRows == nullptr || firstRow == nullptr)
+    if (targetRows == nullptr || targetIcons == nullptr || firstRow == nullptr)
     {
         return;
     }
 
-    this->clearNoirRows(*targetRows);
-    targetRows->reserve(rows.size());
+    targetRows->clear();
+    this->clearIcons(*targetIcons);
 
-    for (const MarketItemData& row : rows)
+    targetRows->reserve(rows.size());
+    targetIcons->reserve(rows.size());
+
+    for (const MarketRow& row : rows)
     {
-        NoirRow internalRow{};
-        internalRow.icon = loadImageFromTitleOrEmpty(row.imagePath);
-        internalRow.name = row.itemName;
-        internalRow.description = row.itemDescription;
+        MarketRow internalRow{};
+        internalRow.imagePath = row.imagePath;
+        internalRow.itemName = row.itemName;
+        internalRow.itemDescription = row.itemDescription;
         internalRow.category = sanitizeCategory(row.category);
         internalRow.quantity = (std::max)(0, row.quantity);
-        internalRow.buyQuantity = keepDigitsOrFallback(row.yourOffer, "1");
+        internalRow.yourOffer = keepDigitsOrFallback(row.yourOffer, "1");
 
         for (const MarketPriceData& priceLine : row.prices)
         {
@@ -764,10 +839,12 @@ void MarcheWidget::setNoirFamilyRows(ActiveTab tab, const std::vector<MarketItem
 
             MarketPriceData cleanPrice{};
             cleanPrice.amount = priceLine.amount;
-            cleanPrice.currency = priceLine.currency.empty() ? "or" : priceLine.currency;
+            cleanPrice.currency = sanitizeCurrency(priceLine.currency);
             internalRow.prices.push_back(std::move(cleanPrice));
         }
+
         targetRows->push_back(std::move(internalRow));
+        targetIcons->push_back(loadImageFromTitleOrEmpty(row.imagePath));
     }
 
     *firstRow = 0;
@@ -777,51 +854,52 @@ void MarcheWidget::setNoirFamilyRows(ActiveTab tab, const std::vector<MarketItem
     }
 }
 
-void MarcheWidget::setBazardRows(const std::vector<BazardItemData>& rows)
+void MarketsAndBazarWidget::setBazarRows(const std::vector<BazarRow>& rows)
 {
-    for (BazardRow& row : this->bazardRows)
-    {
-        rc2d_graphics_freeImage(&row.icon);
-    }
-    this->bazardRows.clear();
-    this->bazardRows.reserve(rows.size());
+    this->bazarRows.clear();
+    this->clearIcons(this->bazarRowIcons);
 
-    for (const BazardItemData& row : rows)
+    this->bazarRows.reserve(rows.size());
+    this->bazarRowIcons.reserve(rows.size());
+
+    for (const BazarRow& row : rows)
     {
-        BazardRow internalRow{};
-        internalRow.icon = loadImageFromTitleOrEmpty(row.imagePath);
-        internalRow.name = row.itemName;
-        internalRow.description = row.itemDescription;
+        BazarRow internalRow{};
+        internalRow.imagePath = row.imagePath;
+        internalRow.itemName = row.itemName;
+        internalRow.itemDescription = row.itemDescription;
         internalRow.category = sanitizeCategory(row.category);
         internalRow.quantity = (std::max)(0, row.quantity);
         internalRow.highestBidder = row.highestBidder;
         internalRow.yourOffer = keepDigitsOrFallback(row.yourOffer, "0");
-        this->bazardRows.push_back(std::move(internalRow));
+
+        this->bazarRows.push_back(std::move(internalRow));
+        this->bazarRowIcons.push_back(loadImageFromTitleOrEmpty(row.imagePath));
     }
 
-    this->bazardFirstRow = 0;
+    this->bazarFirstRow = 0;
     if (this->focusedTab == ActiveTab::BAZARD)
     {
         this->clearInputFocusInternal();
     }
 }
 
-void MarcheWidget::setMarcheNoirRows(const std::vector<MarketItemData>& rows)
+void MarketsAndBazarWidget::setBlackMarketRows(const std::vector<MarketRow>& rows)
 {
-    this->setNoirFamilyRows(ActiveTab::NOIR, rows);
+    this->setMarketFamilyRows(ActiveTab::BLACK_MARKET, rows);
 }
 
-void MarcheWidget::setMarcheBasiqueRows(const std::vector<MarketItemData>& rows)
+void MarketsAndBazarWidget::setBasicMarketRows(const std::vector<MarketRow>& rows)
 {
-    this->setNoirFamilyRows(ActiveTab::BASIQUE, rows);
+    this->setMarketFamilyRows(ActiveTab::BASIC_MARKET, rows);
 }
 
-void MarcheWidget::setMarcheEvenementRows(const std::vector<MarketItemData>& rows)
+void MarketsAndBazarWidget::setEventMarketRows(const std::vector<MarketRow>& rows)
 {
-    this->setNoirFamilyRows(ActiveTab::EVENEMENT, rows);
+    this->setMarketFamilyRows(ActiveTab::EVENT_MARKET, rows);
 }
 
-void MarcheWidget::clearInputFocusInternal(void)
+void MarketsAndBazarWidget::clearInputFocusInternal(void)
 {
     this->inputFocused = false;
     this->focusedRow = -1;
@@ -830,7 +908,7 @@ void MarcheWidget::clearInputFocusInternal(void)
     this->cursorBlinkElapsed = 0.0;
 }
 
-void MarcheWidget::submitFocusedInput(void)
+void MarketsAndBazarWidget::submitFocusedInput(void)
 {
     if (!this->inputFocused || this->focusedRow < 0)
     {
@@ -840,49 +918,49 @@ void MarcheWidget::submitFocusedInput(void)
     if (this->focusedTab == ActiveTab::BAZARD)
     {
         const int row = this->focusedRow;
-        if (row < 0 || row >= static_cast<int>(this->bazardRows.size()))
+        if (row < 0 || row >= static_cast<int>(this->bazarRows.size()))
         {
             return;
         }
 
-        const int value = parsePositiveInt(this->bazardRows[static_cast<std::size_t>(row)].yourOffer);
+        const int value = parsePositiveInt(this->bazarRows[static_cast<std::size_t>(row)].yourOffer);
         if (value <= 0)
         {
             return;
         }
 
-        this->bazardRows[static_cast<std::size_t>(row)].highestBidder = "Vous";
+        this->bazarRows[static_cast<std::size_t>(row)].highestBidder = "Vous";
     }
     else
     {
-        std::vector<NoirRow>* noirRowsForTab = this->getNoirRowsForTab(this->focusedTab);
-        if (noirRowsForTab == nullptr)
+        std::vector<MarketRow>* marketRowsForTab = this->getMarketRowsForTab(this->focusedTab);
+        if (marketRowsForTab == nullptr)
         {
             return;
         }
 
         const int row = this->focusedRow;
-        if (row < 0 || row >= static_cast<int>(noirRowsForTab->size()))
+        if (row < 0 || row >= static_cast<int>(marketRowsForTab->size()))
         {
             return;
         }
 
-        NoirRow& noirRow = (*noirRowsForTab)[static_cast<std::size_t>(row)];
-        int amount = parsePositiveInt(noirRow.buyQuantity);
+        MarketRow& marketRow = (*marketRowsForTab)[static_cast<std::size_t>(row)];
+        int amount = parsePositiveInt(marketRow.yourOffer);
         if (amount <= 0)
         {
             return;
         }
 
-        amount = (std::min)(amount, noirRow.quantity);
-        noirRow.quantity -= amount;
-        noirRow.quantity = (std::max)(0, noirRow.quantity);
-        noirRow.buyQuantity = "1";
-        this->cursorIndex = noirRow.buyQuantity.size();
+        amount = (std::min)(amount, marketRow.quantity);
+        marketRow.quantity -= amount;
+        marketRow.quantity = (std::max)(0, marketRow.quantity);
+        marketRow.yourOffer = "1";
+        this->cursorIndex = marketRow.yourOffer.size();
     }
 }
 
-void MarcheWidget::load(void)
+void MarketsAndBazarWidget::load(void)
 {
     this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
@@ -893,9 +971,9 @@ void MarcheWidget::load(void)
     this->widgetOffsetY = 0.0f;
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, baseRect.w, baseRect.h};
     this->visible = true;
-    this->activeTab = ActiveTab::BASIQUE;
-    this->bazardFirstRow = 0;
-    this->noirFirstRow = 0;
+    this->activeTab = ActiveTab::BASIC_MARKET;
+    this->bazarFirstRow = 0;
+    this->blackFirstRow = 0;
     this->basicFirstRow = 0;
     this->eventFirstRow = 0;
     this->scrollBarDragging = false;
@@ -910,7 +988,7 @@ void MarcheWidget::load(void)
     this->clearRows();
 }
 
-void MarcheWidget::unload(void)
+void MarketsAndBazarWidget::unload(void)
 {
     this->clearRows();
     rc2d_graphics_closeFont(&this->smallFont);
@@ -918,7 +996,7 @@ void MarcheWidget::unload(void)
     rc2d_graphics_closeFont(&this->titleFont);
 }
 
-void MarcheWidget::update(double dt)
+void MarketsAndBazarWidget::update(double dt)
 {
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     this->widgetRect = SDL_FRect{
@@ -929,8 +1007,8 @@ void MarcheWidget::update(double dt)
     };
 
     const ActiveTab currentTab = this->activeTab;
-    const bool bazardTab = currentTab == ActiveTab::BAZARD;
-    const MarketLayout layout = buildLayout(this->widgetRect, bazardTab);
+    const bool bazarTab = currentTab == ActiveTab::BAZARD;
+    const MarketLayout layout = buildLayout(this->widgetRect, bazarTab);
     int firstRowFallback = 0;
     int* firstRowPtr = this->getFirstRowForTab(currentTab);
     int& firstRow = firstRowPtr != nullptr ? *firstRowPtr : firstRowFallback;
@@ -1011,8 +1089,8 @@ void MarcheWidget::update(double dt)
             onResetFilters = isPointInRect(mx, my, layout.categoryResetButton);
 
             if (isPointInRect(mx, my, layout.closeButton) ||
-                isPointInRect(mx, my, layout.bazardTab) ||
-                isPointInRect(mx, my, layout.noirTab) ||
+                isPointInRect(mx, my, layout.bazarTab) ||
+                isPointInRect(mx, my, layout.blackTab) ||
                 isPointInRect(mx, my, layout.basicTab) ||
                 isPointInRect(mx, my, layout.eventTab) ||
                 onCategoryFilter ||
@@ -1087,7 +1165,7 @@ void MarcheWidget::update(double dt)
     this->widgetRect.y = baseRect.y + this->widgetOffsetY;
 }
 
-bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
+bool MarketsAndBazarWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     (void)clicks;
     (void)mouseID;
@@ -1110,8 +1188,8 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
     }
 
     const ActiveTab currentTab = this->activeTab;
-    const bool bazardTab = currentTab == ActiveTab::BAZARD;
-    MarketLayout layout = buildLayout(this->widgetRect, bazardTab);
+    const bool bazarTab = currentTab == ActiveTab::BAZARD;
+    MarketLayout layout = buildLayout(this->widgetRect, bazarTab);
     int firstRowFallback = 0;
     int* firstRowPtr = this->getFirstRowForTab(currentTab);
     int& firstRow = firstRowPtr != nullptr ? *firstRowPtr : firstRowFallback;
@@ -1131,7 +1209,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
         return true;
     }
 
-    if (isPointInRect(x, y, layout.bazardTab))
+    if (isPointInRect(x, y, layout.bazarTab))
     {
         this->activeTab = ActiveTab::BAZARD;
         this->scrollBarDragging = false;
@@ -1139,9 +1217,9 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
         return true;
     }
 
-    if (isPointInRect(x, y, layout.noirTab))
+    if (isPointInRect(x, y, layout.blackTab))
     {
-        this->activeTab = ActiveTab::NOIR;
+        this->activeTab = ActiveTab::BLACK_MARKET;
         this->scrollBarDragging = false;
         this->clearInputFocusInternal();
         return true;
@@ -1149,7 +1227,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
 
     if (isPointInRect(x, y, layout.basicTab))
     {
-        this->activeTab = ActiveTab::BASIQUE;
+        this->activeTab = ActiveTab::BASIC_MARKET;
         this->scrollBarDragging = false;
         this->clearInputFocusInternal();
         return true;
@@ -1157,7 +1235,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
 
     if (isPointInRect(x, y, layout.eventTab))
     {
-        this->activeTab = ActiveTab::EVENEMENT;
+        this->activeTab = ActiveTab::EVENT_MARKET;
         this->scrollBarDragging = false;
         this->clearInputFocusInternal();
         return true;
@@ -1190,8 +1268,8 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
             const MarketCategory category = kCategoryOrder[static_cast<std::size_t>(i)];
             const std::size_t categoryIndex = categoryToIndex(category);
             this->categoryFilterEnabled[categoryIndex] = !this->categoryFilterEnabled[categoryIndex];
-            this->bazardFirstRow = 0;
-            this->noirFirstRow = 0;
+            this->bazarFirstRow = 0;
+            this->blackFirstRow = 0;
             this->basicFirstRow = 0;
             this->eventFirstRow = 0;
             this->scrollBarDragging = false;
@@ -1203,8 +1281,8 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
     if (isPointInRect(x, y, layout.categoryResetButton))
     {
         this->resetCategoryFilters();
-        this->bazardFirstRow = 0;
-        this->noirFirstRow = 0;
+        this->bazarFirstRow = 0;
+        this->blackFirstRow = 0;
         this->basicFirstRow = 0;
         this->eventFirstRow = 0;
         this->scrollBarDragging = false;
@@ -1212,7 +1290,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
         return true;
     }
 
-    layout = buildLayout(this->widgetRect, this->isBazardActive());
+    layout = buildLayout(this->widgetRect, this->isBazarActive());
     filteredRowIndices = this->buildFilteredRowIndices(this->activeTab);
     totalRows = static_cast<int>(filteredRowIndices.size());
     visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor(layout.body.h / kRowHeight)));
@@ -1261,7 +1339,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
         const float rowY = layout.body.y + (static_cast<float>(visualRow) * kRowHeight);
         SDL_FRect inputRect{};
         SDL_FRect submitRect{};
-        if (this->isBazardActive())
+        if (this->isBazarActive())
         {
             inputRect = SDL_FRect{layout.col4X + 8.0f, rowY + 12.0f, layout.col4W - 16.0f, 29.0f};
             submitRect = SDL_FRect{layout.col4X + 8.0f, rowY + 46.0f, layout.col4W - 16.0f, 30.0f};
@@ -1281,16 +1359,16 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
             this->cursorBlinkElapsed = 0.0;
 
             std::string* inputValue = nullptr;
-            if (this->isBazardActive())
+            if (this->isBazarActive())
             {
-                inputValue = &this->bazardRows[static_cast<std::size_t>(row)].yourOffer;
+                inputValue = &this->bazarRows[static_cast<std::size_t>(row)].yourOffer;
             }
             else
             {
-                std::vector<NoirRow>* activeNoirRows = this->getNoirRowsForTab(this->activeTab);
-                if (activeNoirRows != nullptr)
+                std::vector<MarketRow>* activeMarketRows = this->getMarketRowsForTab(this->activeTab);
+                if (activeMarketRows != nullptr)
                 {
-                    inputValue = &(*activeNoirRows)[static_cast<std::size_t>(row)].buyQuantity;
+                    inputValue = &(*activeMarketRows)[static_cast<std::size_t>(row)].yourOffer;
                 }
             }
 
@@ -1333,7 +1411,7 @@ bool MarcheWidget::mousepressed(float x, float y, RC2D_MouseButton button, int c
     return true;
 }
 
-bool MarcheWidget::mousewheelmoved(
+bool MarketsAndBazarWidget::mousewheelmoved(
     RC2D_MouseWheelDirection direction,
     float wheel_x,
     float wheel_y,
@@ -1365,8 +1443,8 @@ bool MarcheWidget::mousewheelmoved(
     }
 
     const ActiveTab currentTab = this->activeTab;
-    const bool bazardTab = currentTab == ActiveTab::BAZARD;
-    const MarketLayout layout = buildLayout(this->widgetRect, bazardTab);
+    const bool bazarTab = currentTab == ActiveTab::BAZARD;
+    const MarketLayout layout = buildLayout(this->widgetRect, bazarTab);
     int firstRowFallback = 0;
     int* firstRowPtr = this->getFirstRowForTab(currentTab);
     int& firstRow = firstRowPtr != nullptr ? *firstRowPtr : firstRowFallback;
@@ -1402,7 +1480,7 @@ bool MarcheWidget::mousewheelmoved(
     return true;
 }
 
-bool MarcheWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat)
+bool MarketsAndBazarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat)
 {
     (void)mod;
     (void)isrepeat;
@@ -1415,20 +1493,20 @@ bool MarcheWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycod
     std::string* input = nullptr;
     if (this->focusedTab == ActiveTab::BAZARD)
     {
-        if (this->focusedRow >= static_cast<int>(this->bazardRows.size()))
+        if (this->focusedRow >= static_cast<int>(this->bazarRows.size()))
         {
             return false;
         }
-        input = &this->bazardRows[static_cast<std::size_t>(this->focusedRow)].yourOffer;
+        input = &this->bazarRows[static_cast<std::size_t>(this->focusedRow)].yourOffer;
     }
     else
     {
-        std::vector<NoirRow>* focusedNoirRows = this->getNoirRowsForTab(this->focusedTab);
-        if (focusedNoirRows == nullptr || this->focusedRow >= static_cast<int>(focusedNoirRows->size()))
+        std::vector<MarketRow>* focusedMarketRows = this->getMarketRowsForTab(this->focusedTab);
+        if (focusedMarketRows == nullptr || this->focusedRow >= static_cast<int>(focusedMarketRows->size()))
         {
             return false;
         }
-        input = &(*focusedNoirRows)[static_cast<std::size_t>(this->focusedRow)].buyQuantity;
+        input = &(*focusedMarketRows)[static_cast<std::size_t>(this->focusedRow)].yourOffer;
     }
 
     if (input == nullptr)
@@ -1525,7 +1603,7 @@ bool MarcheWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycod
     return false;
 }
 
-bool MarcheWidget::containsPoint(float x, float y) const
+bool MarketsAndBazarWidget::containsPoint(float x, float y) const
 {
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     const SDL_FRect currentRect = SDL_FRect{
@@ -1537,14 +1615,14 @@ bool MarcheWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
-void MarcheWidget::clearFocus(void)
+void MarketsAndBazarWidget::clearFocus(void)
 {
     this->clearInputFocusInternal();
 }
 
-void MarcheWidget::draw(void) const
+void MarketsAndBazarWidget::draw(void) const
 {
-    MarcheWidget* self = const_cast<MarcheWidget*>(this);
+    MarketsAndBazarWidget* self = const_cast<MarketsAndBazarWidget*>(this);
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     self->widgetRect = SDL_FRect{
@@ -1560,12 +1638,13 @@ void MarcheWidget::draw(void) const
     }
 
     const ActiveTab currentTab = self->activeTab;
-    const bool bazardTab = currentTab == ActiveTab::BAZARD;
-    const MarketLayout layout = buildLayout(self->widgetRect, bazardTab);
+    const bool bazarTab = currentTab == ActiveTab::BAZARD;
+    const MarketLayout layout = buildLayout(self->widgetRect, bazarTab);
     int firstRowFallback = 0;
     int* firstRowPtr = self->getFirstRowForTab(currentTab);
     int& firstRow = firstRowPtr != nullptr ? *firstRowPtr : firstRowFallback;
-    std::vector<NoirRow>* activeNoirRows = bazardTab ? nullptr : self->getNoirRowsForTab(currentTab);
+    std::vector<MarketRow>* activeMarketRows = bazarTab ? nullptr : self->getMarketRowsForTab(currentTab);
+    std::vector<RC2D_Image>* activeMarketIcons = bazarTab ? nullptr : self->getMarketIconsForTab(currentTab);
     const std::vector<int> filteredRowIndices = self->buildFilteredRowIndices(currentTab);
     const int totalRows = static_cast<int>(filteredRowIndices.size());
     const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor(layout.body.h / kRowHeight)));
@@ -1588,29 +1667,29 @@ void MarcheWidget::draw(void) const
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &layout.topBar);
 
-    rc2d_graphics_setColor(self->activeTab == ActiveTab::BASIQUE ? kTabActive : kTabInactive);
+    rc2d_graphics_setColor(self->activeTab == ActiveTab::BASIC_MARKET ? kTabActive : kTabInactive);
     rc2d_graphics_rectangle("fill", &layout.basicTab);
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &layout.basicTab);
-    drawCentered(&self->smallFont, "Marche basique", layout.basicTab, self->activeTab == ActiveTab::BASIQUE ? kTextGold : kTextMuted);
+    drawCentered(&self->smallFont, "Marche basique", layout.basicTab, self->activeTab == ActiveTab::BASIC_MARKET ? kTextGold : kTextMuted);
 
-    rc2d_graphics_setColor(self->activeTab == ActiveTab::EVENEMENT ? kTabActive : kTabInactive);
+    rc2d_graphics_setColor(self->activeTab == ActiveTab::EVENT_MARKET ? kTabActive : kTabInactive);
     rc2d_graphics_rectangle("fill", &layout.eventTab);
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &layout.eventTab);
-    drawCentered(&self->smallFont, "Marche d'event", layout.eventTab, self->activeTab == ActiveTab::EVENEMENT ? kTextGold : kTextMuted);
+    drawCentered(&self->smallFont, "Marche d'event", layout.eventTab, self->activeTab == ActiveTab::EVENT_MARKET ? kTextGold : kTextMuted);
 
-    rc2d_graphics_setColor(bazardTab ? kTabActive : kTabInactive);
-    rc2d_graphics_rectangle("fill", &layout.bazardTab);
+    rc2d_graphics_setColor(bazarTab ? kTabActive : kTabInactive);
+    rc2d_graphics_rectangle("fill", &layout.bazarTab);
     rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &layout.bazardTab);
-    drawCentered(&self->bodyFont, "Bazar", layout.bazardTab, bazardTab ? kTextGold : kTextMuted);
+    rc2d_graphics_rectangle("line", &layout.bazarTab);
+    drawCentered(&self->bodyFont, "Bazar", layout.bazarTab, bazarTab ? kTextGold : kTextMuted);
 
-    rc2d_graphics_setColor(self->activeTab == ActiveTab::NOIR ? kTabActive : kTabInactive);
-    rc2d_graphics_rectangle("fill", &layout.noirTab);
+    rc2d_graphics_setColor(self->activeTab == ActiveTab::BLACK_MARKET ? kTabActive : kTabInactive);
+    rc2d_graphics_rectangle("fill", &layout.blackTab);
     rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &layout.noirTab);
-    drawCentered(&self->bodyFont, "Marche noir", layout.noirTab, self->activeTab == ActiveTab::NOIR ? kTextGold : kTextMuted);
+    rc2d_graphics_rectangle("line", &layout.blackTab);
+    drawCentered(&self->bodyFont, "Marche noir", layout.blackTab, self->activeTab == ActiveTab::BLACK_MARKET ? kTextGold : kTextMuted);
 
     rc2d_graphics_setColor(kHeaderFill);
     rc2d_graphics_rectangle("fill", &layout.closeButton);
@@ -1688,7 +1767,7 @@ void MarcheWidget::draw(void) const
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &layout.tableHeader);
 
-    if (bazardTab)
+    if (bazarTab)
     {
         const SDL_FRect h1 = SDL_FRect{layout.col1X, layout.tableHeader.y, layout.col1W, layout.tableHeader.h};
         const SDL_FRect h2 = SDL_FRect{layout.col2X, layout.tableHeader.y, layout.col2W, layout.tableHeader.h};
@@ -1768,19 +1847,22 @@ void MarcheWidget::draw(void) const
         const float nameY = rowRect.y + 14.0f;
         const float descY = rowRect.y + 45.0f;
 
-        if (bazardTab)
+        if (bazarTab)
         {
-            const BazardRow& bazard = self->bazardRows[static_cast<std::size_t>(sourceRow)];
-            drawImageFit(const_cast<RC2D_Image*>(&bazard.icon), iconRect);
-            drawTextAt(&self->bodyFont, bazard.name, textX, nameY, kTextGold);
-            drawTextAt(&self->smallFont, bazard.description, textX, descY, kTextMuted);
+            const BazarRow& bazar = self->bazarRows[static_cast<std::size_t>(sourceRow)];
+            if (sourceRow >= 0 && sourceRow < static_cast<int>(self->bazarRowIcons.size()))
+            {
+                drawImageFit(&self->bazarRowIcons[static_cast<std::size_t>(sourceRow)], iconRect);
+            }
+            drawTextAt(&self->bodyFont, bazar.itemName, textX, nameY, kTextGold);
+            drawTextAt(&self->smallFont, bazar.itemDescription, textX, descY, kTextMuted);
 
             const SDL_FRect quantityRect = SDL_FRect{layout.col2X + 8.0f, rowRect.y + 8.0f, layout.col2W - 16.0f, rowRect.h - 16.0f};
-            const std::string quantityText = formatWithDots(bazard.quantity);
+            const std::string quantityText = formatWithDots(bazar.quantity);
             drawCentered(&self->bodyFont, quantityText.c_str(), quantityRect, kTextBody);
 
             SDL_FRect bidderRect = SDL_FRect{layout.col3X + 8.0f, rowRect.y + 8.0f, layout.col3W - 16.0f, rowRect.h - 16.0f};
-            const std::string bidder = bazard.highestBidder.empty() ? "-" : bazard.highestBidder;
+            const std::string bidder = bazar.highestBidder.empty() ? "-" : bazar.highestBidder;
             drawCentered(&self->bodyFont, bidder.c_str(), bidderRect, kTextBody);
 
             SDL_FRect inputRect = SDL_FRect{layout.col4X + 8.0f, rowRect.y + 12.0f, layout.col4W - 16.0f, 29.0f};
@@ -1789,7 +1871,7 @@ void MarcheWidget::draw(void) const
             rc2d_graphics_rectangle("fill", &inputRect);
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &inputRect);
-            drawTextAt(&self->bodyFont, bazard.yourOffer, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);
+            drawTextAt(&self->bodyFont, bazar.yourOffer, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);
 
             const bool focused = self->inputFocused &&
                                  self->focusedTab == ActiveTab::BAZARD &&
@@ -1797,8 +1879,8 @@ void MarcheWidget::draw(void) const
                                  self->cursorVisible;
             if (focused)
             {
-                const std::size_t cursor = (std::min)(self->cursorIndex, bazard.yourOffer.size());
-                const std::string prefix = bazard.yourOffer.substr(0, cursor);
+                const std::size_t cursor = (std::min)(self->cursorIndex, bazar.yourOffer.size());
+                const std::string prefix = bazar.yourOffer.substr(0, cursor);
                 const float cx = inputRect.x + 8.0f + measureTextWidth(&self->bodyFont, prefix);
                 rc2d_graphics_setColor(kTextGold);
                 rc2d_graphics_line(cx, inputRect.y + 5.0f, cx, inputRect.y + inputRect.h - 5.0f);
@@ -1812,14 +1894,18 @@ void MarcheWidget::draw(void) const
         }
         else
         {
-            if (activeNoirRows == nullptr || sourceRow >= static_cast<int>(activeNoirRows->size()))
+            if (activeMarketRows == nullptr || sourceRow >= static_cast<int>(activeMarketRows->size()))
             {
                 continue;
             }
-            const NoirRow& black = (*activeNoirRows)[static_cast<std::size_t>(sourceRow)];
-            drawImageFit(const_cast<RC2D_Image*>(&black.icon), iconRect);
-            drawTextAt(&self->bodyFont, black.name, textX, nameY, kTextGold);
-            drawTextAt(&self->smallFont, black.description, textX, descY, kTextMuted);
+
+            const MarketRow& black = (*activeMarketRows)[static_cast<std::size_t>(sourceRow)];
+            if (activeMarketIcons != nullptr && sourceRow >= 0 && sourceRow < static_cast<int>(activeMarketIcons->size()))
+            {
+                drawImageFit(&(*activeMarketIcons)[static_cast<std::size_t>(sourceRow)], iconRect);
+            }
+            drawTextAt(&self->bodyFont, black.itemName, textX, nameY, kTextGold);
+            drawTextAt(&self->smallFont, black.itemDescription, textX, descY, kTextMuted);
 
             const SDL_FRect quantityRect = SDL_FRect{layout.col2X + 8.0f, rowRect.y + 8.0f, layout.col2W - 16.0f, rowRect.h - 16.0f};
             const SDL_FRect priceRect = SDL_FRect{layout.col3X + 8.0f, rowRect.y + 8.0f, layout.col3W - 16.0f, rowRect.h - 16.0f};
@@ -1843,11 +1929,8 @@ void MarcheWidget::draw(void) const
                 {
                     const MarketPriceData& priceLine = black.prices[static_cast<std::size_t>(i)];
                     std::string priceText = formatWithDots((std::max)(0, priceLine.amount));
-                    if (!priceLine.currency.empty())
-                    {
-                        priceText.push_back(' ');
-                        priceText += priceLine.currency;
-                    }
+                    priceText.push_back(' ');
+                    priceText += marketCurrencyLabel(priceLine.currency);
 
                     const SDL_FRect lineRect = SDL_FRect{
                         priceRect.x,
@@ -1865,7 +1948,7 @@ void MarcheWidget::draw(void) const
             rc2d_graphics_rectangle("fill", &inputRect);
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &inputRect);
-            drawTextAt(&self->bodyFont, black.buyQuantity, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);
+            drawTextAt(&self->bodyFont, black.yourOffer, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);
 
             const bool focused = self->inputFocused &&
                                  self->focusedTab == self->activeTab &&
@@ -1873,8 +1956,8 @@ void MarcheWidget::draw(void) const
                                  self->cursorVisible;
             if (focused)
             {
-                const std::size_t cursor = (std::min)(self->cursorIndex, black.buyQuantity.size());
-                const std::string prefix = black.buyQuantity.substr(0, cursor);
+                const std::size_t cursor = (std::min)(self->cursorIndex, black.yourOffer.size());
+                const std::string prefix = black.yourOffer.substr(0, cursor);
                 const float cx = inputRect.x + 8.0f + measureTextWidth(&self->bodyFont, prefix);
                 rc2d_graphics_setColor(kTextGold);
                 rc2d_graphics_line(cx, inputRect.y + 5.0f, cx, inputRect.y + inputRect.h - 5.0f);
@@ -1920,7 +2003,7 @@ void MarcheWidget::draw(void) const
         rc2d_graphics_rectangle("fill", &thumb);
     }
 
-    if (bazardTab)
+    if (bazarTab)
     {
         rc2d_graphics_setColor(kHeaderFill);
         rc2d_graphics_rectangle("fill", &layout.timerBox);
@@ -1931,5 +2014,11 @@ void MarcheWidget::draw(void) const
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
+
+
+
+
+
+
 
 

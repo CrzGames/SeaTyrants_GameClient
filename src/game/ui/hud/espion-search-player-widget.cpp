@@ -715,3 +715,5 @@ bool EspionSearchPlayerWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
+
+

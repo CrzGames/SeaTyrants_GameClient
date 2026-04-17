@@ -92,7 +92,7 @@ static std::string shortenMiddle(const std::string& text, size_t maxLen)
 EditorMapAnchorShipScene* EditorMapAnchorShipScene::activeInstance = nullptr;
 
 EditorMapAnchorShipScene::EditorMapAnchorShipScene(void)
-    : backgroundUiImage{},
+    : backgroundWidget{},
       overlayFont{},
       shipFrames{},
       spriteAnchors{},
@@ -1623,7 +1623,7 @@ void EditorMapAnchorShipScene::unload(void)
     this->movementPreviewShip.unloadSprites();
     this->unloadShipFrames();
     rc2d_graphics_closeFont(&this->overlayFont);
-    rc2d_graphics_freeImage(&this->backgroundUiImage);
+    this->backgroundWidget.unload();
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapAnchorShipScene: unloaded");
 }
@@ -1635,9 +1635,7 @@ void EditorMapAnchorShipScene::load(void)
     this->resetEditorState();
     this->ensureUserStorageFolders();
 
-    this->backgroundUiImage = rc2d_graphics_loadImageFromStorage(
-        "assets/images/ui-scene-game/background.png",
-        RC2D_STORAGE_TITLE);
+    this->backgroundWidget.load();
 
     this->overlayFont = rc2d_graphics_openFontFromStorage(
         "assets/fonts/TradeWinds-Regular.ttf",
@@ -1695,20 +1693,7 @@ void EditorMapAnchorShipScene::draw(void)
 {
     Map& map = GetCurrentMap();
 
-    if (this->backgroundUiImage.sdl_texture != nullptr)
-    {
-        rc2d_graphics_drawImage(
-            &this->backgroundUiImage,
-            0.0f,
-            0.0f,
-            0.0,
-            1.0f,
-            1.0f,
-            0.0f,
-            0.0f,
-            false,
-            false);
-    }
+    this->backgroundWidget.draw();
 
     SDL_Renderer* renderer = WorldRenderClip::begin(map.rect);
     if (GetOceanShader().isReady())

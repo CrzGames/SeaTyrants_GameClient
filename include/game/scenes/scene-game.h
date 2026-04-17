@@ -7,9 +7,7 @@
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
-#include "game/ui/hud/ingame-hud-overlay.h"
-#include "game/ui/overlay/scroll-bar-overlay.h"
-#include "game/ui/overlay/tile-click-marker.h"
+#include "game/ui/ingame-hud-overlay.h"
 #include "game/vfx/vfx.h"
 
 /**
@@ -20,8 +18,6 @@ private:
     void initializePlayerSpawnAndCamera(void);
     void populateMarketDemoData(void);
 
-    TileClickMarker clickMarker;       /**< Marqueur visuel de clic sur tuile. */
-    ScrollBarOverlay scrollBarOverlay; /**< Barres de scroll avec coordonnees. */
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
     IngameHudOverlay hudOverlay;       /**< UI gameplay (fond + minimap + bouton centre). */
     std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */

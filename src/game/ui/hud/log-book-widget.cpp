@@ -1,4 +1,4 @@
-#include "game/ui/hud/journal-bord-widget.h"
+#include "game/ui/hud/log-book-widget.h"
 
 #include "core/context.h"
 
@@ -266,32 +266,33 @@ static std::vector<std::string> buildWrappedMessageLines(RC2D_Font* font, const 
     return wrapped;
 }
 
+template <typename EntryContainerT>
 static std::vector<JournalVisualRow> buildVisualRows(
     RC2D_Font* font,
-    const std::vector<JournalBordWidget::LogEntry>& entries,
+    const EntryContainerT& logRows,
     float messageWrapWidth)
 {
     std::vector<JournalVisualRow> rows;
-    for (std::size_t i = 0; i < entries.size(); ++i)
+    for (std::size_t i = 0; i < logRows.size(); ++i)
     {
-        const std::vector<std::string> wrapped = buildWrappedMessageLines(font, entries[i].message, messageWrapWidth);
+        const std::vector<std::string> wrapped = buildWrappedMessageLines(font, logRows[i].message, messageWrapWidth);
         if (wrapped.empty())
         {
-            rows.push_back(JournalVisualRow{entries[i].dateTime, std::string{}, false});
+            rows.push_back(JournalVisualRow{logRows[i].dateTime, std::string{}, false});
         }
         else
         {
             for (std::size_t lineIndex = 0; lineIndex < wrapped.size(); ++lineIndex)
             {
                 rows.push_back(JournalVisualRow{
-                    (lineIndex == 0) ? entries[i].dateTime : std::string{},
+                    (lineIndex == 0) ? logRows[i].dateTime : std::string{},
                     wrapped[lineIndex],
                     false
                 });
             }
         }
 
-        if (i + 1 < entries.size())
+        if (i + 1 < logRows.size())
         {
             rows.push_back(JournalVisualRow{std::string{}, std::string{}, true});
         }
@@ -304,13 +305,12 @@ static std::vector<JournalVisualRow> buildVisualRows(
     return rows;
 }
 
-JournalBordWidget::JournalBordWidget(void)
+LogBookWidget::LogBookWidget(void)
     : titleFont{},
       bodyFont{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       visible(true),
-      cursorEnabled(true),
-      entries{},
+      rows{},
       scrollFirstRow(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
@@ -318,37 +318,16 @@ JournalBordWidget::JournalBordWidget(void)
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
-      widgetOffsetY(0.0f)
+      widgetOffsetY(0.0f),
+      cursorEnabled(true)
 {
 }
 
-JournalBordWidget::~JournalBordWidget(void)
+LogBookWidget::~LogBookWidget(void)
 {
 }
 
-void JournalBordWidget::pushDemoEntries(void)
-{
-    this->pushEntry("15.04 20:12", "Vous avez coule un Viking Boat et recu : 14x Experience Points, 3351x Gold.");
-    this->pushEntry("15.04 20:12", "Vous avez obtenu un Viking Paddle en eliminant un Viking Boat.");
-    this->pushEntry("15.04 20:11", "Vous avez ramasse des dechets et recu 3x Protective Shield.");
-    this->pushEntry("15.04 20:11", "Vous avez coule un Viking Boat et recu : 14x Experience Points, 3282x Gold.");
-    this->pushEntry("15.04 20:11", "Vous avez coule un Viking Boat et recu : 12x Experience Points, 3722x Gold.");
-    this->pushEntry("15.04 20:11", "Vous avez obtenu un Viking Paddle en eliminant un Viking Boat.");
-    this->pushEntry("15.04 20:11", "Vous avez coule un Antique Sailor et recu : 19x Experience Points, 6513x Gold.");
-    this->pushEntry("15.04 20:10", "> Vous avez rejoint le serveur.");
-    this->pushEntry("15.04 20:10", "Vous avez collecte 2x Crystal Prism dans les eaux du nord.");
-    this->pushEntry("15.04 20:09", "Vous avez vendu 18x Cargaison speciale au marche.");
-    this->pushEntry("15.04 20:09", "Vous avez recu 1x Carte mysterieuse en recompense.");
-    this->pushEntry("15.04 20:09", "Vous avez coule un Raider et recu : 10x Experience Points, 2410x Gold.");
-    this->pushEntry("15.04 20:08", "Vous avez reussi la quete quotidienne 'Marin d'elite'.");
-    this->pushEntry("15.04 20:08", "Vous avez obtenu 4x Munition explosive depuis le coffre.");
-    this->pushEntry("15.04 20:07", "Vous avez echappe a une embuscade en zone frontiere.");
-    this->pushEntry("15.04 20:07", "Vous avez repare votre navire avec 3x Plaque renforcee.");
-    this->pushEntry("15.04 20:06", "Vous avez elimine un Corsair Scout et recu 8x Experience Points.");
-    this->pushEntry("15.04 20:06", "Vous avez decouvert une route commerciale vers l'ouest.");
-}
-
-void JournalBordWidget::load(void)
+void LogBookWidget::load(void)
 {
     this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 24.0f);
     this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
@@ -358,7 +337,7 @@ void JournalBordWidget::load(void)
     this->widgetOffsetY = 0.0f;
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, baseRect.w, baseRect.h};
     this->visible = true;
-    this->entries.clear();
+    this->rows.clear();
     this->scrollFirstRow = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
@@ -366,36 +345,35 @@ void JournalBordWidget::load(void)
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
 
-    this->pushDemoEntries();
 }
 
-void JournalBordWidget::unload(void)
+void LogBookWidget::unload(void)
 {
     rc2d_graphics_closeFont(&this->bodyFont);
     rc2d_graphics_closeFont(&this->titleFont);
 }
 
-void JournalBordWidget::pushEntry(const std::string& dateTime, const std::string& message)
+void LogBookWidget::publishLogBookRow(const LogBookWidget::LogBookRow& row)
 {
-    if (message.empty())
+    if (row.message.empty())
     {
         return;
     }
 
-    this->entries.push_back(LogEntry{
-        dateTime.empty() ? std::string("??.?? ??:??") : dateTime,
-        message
+    this->rows.push_back(LogBookWidget::LogBookRow{
+        row.dateTime.empty() ? std::string("??.?? ??:??") : row.dateTime,
+        row.message
     });
 
-    static constexpr std::size_t kMaxEntries = 300;
-    if (this->entries.size() > kMaxEntries)
+    static constexpr std::size_t kMaxRows = 300;
+    if (this->rows.size() > kMaxRows)
     {
-        const std::size_t overflow = this->entries.size() - kMaxEntries;
-        this->entries.erase(this->entries.begin(), this->entries.begin() + overflow);
+        const std::size_t overflow = this->rows.size() - kMaxRows;
+        this->rows.erase(this->rows.begin(), this->rows.begin() + overflow);
     }
 }
 
-void JournalBordWidget::update(double dt)
+void LogBookWidget::update(double dt)
 {
     (void)dt;
 
@@ -425,7 +403,7 @@ void JournalBordWidget::update(double dt)
     const float messageX = body.x + 8.0f + dateColW + 10.0f;
     const float showScrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
     const float wrapW = body.w - (messageX - body.x) - 10.0f - showScrollReserve;
-    const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->entries, wrapW);
+    const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->rows, wrapW);
     const float lineHeight = measureLineHeight(&this->bodyFont) + 2.0f;
     const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor((body.h - 12.0f) / lineHeight)));
     const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxMessagesPerPage));
@@ -517,7 +495,7 @@ void JournalBordWidget::update(double dt)
     this->widgetRect.y = baseRect.y + this->widgetOffsetY;
 }
 
-bool JournalBordWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
+bool LogBookWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     (void)clicks;
     (void)mouseID;
@@ -575,7 +553,7 @@ bool JournalBordWidget::mousepressed(float x, float y, RC2D_MouseButton button, 
         const float messageX = body.x + 8.0f + dateColW + 10.0f;
         const float showScrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
         const float wrapW = body.w - (messageX - body.x) - 10.0f - showScrollReserve;
-        const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->entries, wrapW);
+        const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->rows, wrapW);
         const float lineHeight = measureLineHeight(&this->bodyFont) + 2.0f;
         const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor((body.h - 12.0f) / lineHeight)));
         const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxMessagesPerPage));
@@ -623,7 +601,7 @@ bool JournalBordWidget::mousepressed(float x, float y, RC2D_MouseButton button, 
     return true;
 }
 
-bool JournalBordWidget::mousewheelmoved(
+bool LogBookWidget::mousewheelmoved(
     RC2D_MouseWheelDirection direction,
     float wheel_x,
     float wheel_y,
@@ -663,7 +641,7 @@ bool JournalBordWidget::mousewheelmoved(
     const float messageX = body.x + 8.0f + dateColW + 10.0f;
     const float showScrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
     const float wrapW = body.w - (messageX - body.x) - 10.0f - showScrollReserve;
-    const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->entries, wrapW);
+    const std::vector<JournalVisualRow> rows = buildVisualRows(&this->bodyFont, this->rows, wrapW);
     const float lineHeight = measureLineHeight(&this->bodyFont) + 2.0f;
     const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor((body.h - 12.0f) / lineHeight)));
     const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxMessagesPerPage));
@@ -694,7 +672,7 @@ bool JournalBordWidget::mousewheelmoved(
     return true;
 }
 
-bool JournalBordWidget::containsPoint(float x, float y) const
+bool LogBookWidget::containsPoint(float x, float y) const
 {
     const SDL_FRect baseRect = getJournalRectFromGameScreen();
     const SDL_FRect currentRect = SDL_FRect{
@@ -706,9 +684,9 @@ bool JournalBordWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
-void JournalBordWidget::draw(void) const
+void LogBookWidget::draw(void) const
 {
-    JournalBordWidget* self = const_cast<JournalBordWidget*>(this);
+    LogBookWidget* self = const_cast<LogBookWidget*>(this);
 
     const SDL_FRect baseRect = getJournalRectFromGameScreen();
     self->widgetRect = SDL_FRect{
@@ -741,7 +719,7 @@ void JournalBordWidget::draw(void) const
     const float showScrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
     const float messageWrapWidth = body.w - (messageX - body.x) - 10.0f - showScrollReserve;
 
-    std::vector<JournalVisualRow> rows = buildVisualRows(&self->bodyFont, self->entries, messageWrapWidth);
+    std::vector<JournalVisualRow> rows = buildVisualRows(&self->bodyFont, self->rows, messageWrapWidth);
     const float lineHeight = measureLineHeight(&self->bodyFont) + 2.0f;
     const float textTop = body.y + 6.0f;
     const float textHeight = body.h - 12.0f;
@@ -859,3 +837,4 @@ void JournalBordWidget::draw(void) const
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
+

@@ -6,24 +6,6 @@
  * @brief Fenetre "Parametres de MiniMap" avec options cochables.
  */
 class ParamsMinimapWidget {
-private:
-    RC2D_Font titleFont; /**< Police du titre. */
-    RC2D_Font bodyFont; /**< Police des libelles des options. */
-    SDL_FRect widgetRect; /**< Rectangle principal du widget. */
-    bool visible; /**< True si la fenetre est visible. */
-
-    bool showPlayers; /**< Etat de la case "Afficher les joueurs". */
-    bool showMonsters; /**< Etat de la case "Afficher les monstres". */
-    bool showShips; /**< Etat de la case "Afficher les navires". */
-    bool showTreasures; /**< Etat de la case "Afficher les tresors". */
-
-    bool widgetDragging; /**< True pendant un drag via le header. */
-    float widgetDragOffsetX; /**< Offset X souris->coin haut gauche en drag. */
-    float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche en drag. */
-    float widgetOffsetX; /**< Decalage horizontal depuis la position de base. */
-    float widgetOffsetY; /**< Decalage vertical depuis la position de base. */
-    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
-
 public:
     ParamsMinimapWidget(void);
     ~ParamsMinimapWidget(void);
@@ -87,5 +69,41 @@ public:
      * @brief Teste si un point est dans la fenetre parametres courante.
      */
     bool containsPoint(float x, float y) const;
+    
+private:
+    /**
+     * @brief Ressources de rendu et rectangle principal.
+     */
+    RC2D_Font titleFont; /**< Police du titre. */
+    RC2D_Font bodyFont; /**< Police des libelles des options. */
+    SDL_FRect widgetRect; /**< Rectangle principal du widget. */
+
+    /**
+     * @brief Etat global de visibilite de la fenetre.
+     */
+    bool visible; /**< True si la fenetre est visible. */
+
+    /**
+     * @brief Etats des options de filtrage minimap.
+     */
+    bool showPlayers; /**< Etat de la case "Afficher les joueurs". */
+    bool showMonsters; /**< Etat de la case "Afficher les monstres". */
+    bool showShips; /**< Etat de la case "Afficher les navires". */
+    bool showTreasures; /**< Etat de la case "Afficher les tresors". */
+
+    /**
+     * @brief Etat de deplacement de la fenetre.
+     */
+    bool widgetDragging; /**< True pendant un drag via le header. */
+    float widgetDragOffsetX; /**< Offset X souris->coin haut gauche en drag. */
+    float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche en drag. */
+    float widgetOffsetX; /**< Decalage horizontal depuis la position de base. */
+    float widgetOffsetY; /**< Decalage vertical depuis la position de base. */
+
+    /**
+     * @brief Autorisation de pilotage du curseur souris.
+     */
+    bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
 };
+
 

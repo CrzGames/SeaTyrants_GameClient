@@ -7,30 +7,17 @@
 /**
  * @brief Marqueur visuel de clic sur tuile (losange pulse).
  */
-class TileClickMarker {
-private:
-    bool visible;    /**< True si le marqueur est actif. */
-    SDL_Point tile;  /**< Tuile du dernier clic gauche. */
-
-    double elapsedSeconds;  /**< Temps ecoule depuis l'affichage. */
-    double durationSeconds; /**< Duree totale d'affichage. */
-
-    float pulseAmplitude; /**< Amplitude de la pulsation. */
-    float pulseSpeed;     /**< Vitesse de pulsation. */
-
-    RC2D_Color fillColor; /**< Couleur de remplissage. */
-    RC2D_Color lineColor; /**< Couleur du contour. */
-
+class TileClickMarkerOverlay {
 public:
     /**
      * @brief Constructeur du marqueur.
      */
-    TileClickMarker(void);
+    TileClickMarkerOverlay(void);
 
     /**
      * @brief Destructeur du marqueur.
      */
-    ~TileClickMarker(void);
+    ~TileClickMarkerOverlay(void);
 
     /**
      * @brief Affiche le marqueur sur une tuile.
@@ -69,4 +56,17 @@ public:
      * @return True si le marqueur est affiche.
      */
     bool isVisible(void) const;
+    
+private:
+    bool visible;    /**< True si le marqueur est actif. */
+    SDL_Point tile;  /**< Tuile du dernier clic gauche. */
+
+    double elapsedSeconds;  /**< Temps ecoule depuis l'affichage. */
+    double durationSeconds; /**< Duree totale d'affichage. */
+
+    float pulseAmplitude; /**< Amplitude de la pulsation. */
+    float pulseSpeed;     /**< Vitesse de pulsation. */
+
+    RC2D_Color fillColor; /**< Couleur de remplissage. */
+    RC2D_Color lineColor; /**< Couleur du contour. */
 };

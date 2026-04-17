@@ -1,8 +1,8 @@
-#include "game/ui/overlay/tile-click-marker.h"
+#include "game/ui/overlay/tile-click-marker-overlay.h"
 
 #include <cmath>
 
-TileClickMarker::TileClickMarker(void)
+TileClickMarkerOverlay::TileClickMarkerOverlay(void)
     : visible(false),
       tile{0, 0},
       elapsedSeconds(0.0),
@@ -14,11 +14,11 @@ TileClickMarker::TileClickMarker(void)
 {
 }
 
-TileClickMarker::~TileClickMarker(void)
+TileClickMarkerOverlay::~TileClickMarkerOverlay(void)
 {
 }
 
-void TileClickMarker::show(int tileX, int tileY)
+void TileClickMarkerOverlay::show(int tileX, int tileY)
 {
     // Memorise la tuile cible et redemarre l'animation.
     this->tile.x = tileX;
@@ -27,14 +27,14 @@ void TileClickMarker::show(int tileX, int tileY)
     this->visible = true;
 }
 
-void TileClickMarker::hide(void)
+void TileClickMarkerOverlay::hide(void)
 {
     // Cache immediatement le marqueur et remet son timer a zero.
     this->visible = false;
     this->elapsedSeconds = 0.0;
 }
 
-void TileClickMarker::update(double dt)
+void TileClickMarkerOverlay::update(double dt)
 {
     // Si le marqueur est inactif, aucun calcul n'est necessaire.
     if (!this->visible)
@@ -52,7 +52,7 @@ void TileClickMarker::update(double dt)
     }
 }
 
-void TileClickMarker::draw(const Map& map) const
+void TileClickMarkerOverlay::draw(const Map& map) const
 {
     // On dessine uniquement pendant la fenetre de visibilite.
     if (!this->visible)
@@ -98,23 +98,21 @@ void TileClickMarker::draw(const Map& map) const
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
-void TileClickMarker::setDurationSeconds(double value)
+void TileClickMarkerOverlay::setDurationSeconds(double value)
 {
-    // value > 0  : auto-expiration active.
-    // value <= 0 : mode persistant (pas d'auto-expiration).
-    if (value <= 0.0)
-    {
-        this->durationSeconds = 0.0;
-        return;
-    }
+    // value <= 0 : persistant jusqu'a hide()/show().
+    this->durationSeconds = value;
 
-    if (value > 0.0)
+    // Si la nouvelle duree est positive et deja depassee, on masque tout de suite.
+    if (this->durationSeconds > 0.0 &&
+        this->visible &&
+        this->elapsedSeconds >= this->durationSeconds)
     {
-        this->durationSeconds = value;
+        this->visible = false;
     }
 }
 
-bool TileClickMarker::isVisible(void) const
+bool TileClickMarkerOverlay::isVisible(void) const
 {
     return this->visible;
 }

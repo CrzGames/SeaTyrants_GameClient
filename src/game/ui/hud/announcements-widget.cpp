@@ -1,4 +1,4 @@
-#include "game/ui/hud/annonces-widget.h"
+#include "game/ui/hud/announcements-widget.h"
 
 #include "core/context.h"
 
@@ -25,7 +25,7 @@ static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 16.0f;
 static constexpr const char* kAnnouncementPrefix = "Annonce serveur";
 
-static SDL_FRect getAnnoncesRectFromGameScreen(void)
+static SDL_FRect getAnnouncementsRectFromGameScreen(void)
 {
     const SDL_FRect screenRect = GetGameScreen().rect;
     return SDL_FRect{
@@ -239,12 +239,12 @@ static std::vector<std::string> buildWrappedMessageLines(RC2D_Font* font, const 
     return wrappedMessage;
 }
 
-static std::vector<AnnonceWrappedRow> buildWrappedRows(RC2D_Font* font, const std::vector<std::string>& messages, float maxWidth)
+static std::vector<AnnonceWrappedRow> buildWrappedRows(RC2D_Font* font, const std::vector<std::string>& announcementRows, float maxWidth)
 {
     std::vector<AnnonceWrappedRow> rows;
-    for (std::size_t i = 0; i < messages.size(); ++i)
+    for (std::size_t i = 0; i < announcementRows.size(); ++i)
     {
-        const std::string formattedMessage = buildFormattedAnnouncement(messages[i]);
+        const std::string formattedMessage = buildFormattedAnnouncement(announcementRows[i]);
         const std::vector<std::string> wrappedMessage = buildWrappedMessageLines(font, formattedMessage, maxWidth);
         for (std::size_t lineIndex = 0; lineIndex < wrappedMessage.size(); ++lineIndex)
         {
@@ -255,7 +255,7 @@ static std::vector<AnnonceWrappedRow> buildWrappedRows(RC2D_Font* font, const st
             });
         }
 
-        if (i + 1 < messages.size())
+        if (i + 1 < announcementRows.size())
         {
             // Espace equivalent au-dessus et en-dessous de la barre de separation.
             rows.push_back(AnnonceWrappedRow{std::string{}, false, false});
@@ -321,12 +321,12 @@ static void setCursorResizeVertical(void)
     applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
 }
 
-AnnoncesWidget::AnnoncesWidget(void)
-    : titleFont{},
+AnnouncementsWidget::AnnouncementsWidget(void)
+    : announcementRows{},
+      titleFont{},
       bodyFont{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       visible(true),
-      announcements{},
       scrollFirstLine(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
@@ -347,18 +347,18 @@ AnnoncesWidget::AnnoncesWidget(void)
 {
 }
 
-AnnoncesWidget::~AnnoncesWidget(void)
+AnnouncementsWidget::~AnnouncementsWidget(void)
 {
 }
 
-void AnnoncesWidget::load(void)
+void AnnouncementsWidget::load(void)
 {
     // Charge la police du titre (meme style visuel que les autres fenetres HUD).
     this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Charge la police du corps de texte (annonces).
     this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     // Recupere la position de base de la fenetre dans l'ecran de jeu.
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     // Reinitialise les offsets de deplacement utilisateur.
     this->widgetOffsetX = 0.0f;
     this->widgetOffsetY = 0.0f;
@@ -382,10 +382,10 @@ void AnnoncesWidget::load(void)
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
     // Nettoie l'historique d'annonces.
-    this->announcements.clear();
+    this->announcementRows.clear();
 }
 
-void AnnoncesWidget::unload(void)
+void AnnouncementsWidget::unload(void)
 {
     // Libere la police du contenu.
     rc2d_graphics_closeFont(&this->bodyFont);
@@ -393,13 +393,13 @@ void AnnoncesWidget::unload(void)
     rc2d_graphics_closeFont(&this->titleFont);
 }
 
-void AnnoncesWidget::update(double dt)
+void AnnouncementsWidget::update(double dt)
 {
     // Aucun calcul temporel actuellement, mais on garde le parametre pour l'API commune.
     (void)dt;
 
     // Recalcule la rect finale a partir de la base + offsets.
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     this->widgetRect = SDL_FRect{baseRect.x + this->widgetOffsetX, baseRect.y + this->widgetOffsetY, this->widgetWidth, this->widgetHeight};
 
     // Curseur contextuel selon les zones interactives de la fenetre.
@@ -435,7 +435,7 @@ void AnnoncesWidget::update(double dt)
 
             const float lineHeight = measureLineHeight(&this->bodyFont);
             const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
-            const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+            const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcementRows, body.w - 10.0f);
             const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedRows.size()) - visibleLines);
             const SDL_FRect scrollTrack = SDL_FRect{
                 body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
@@ -516,7 +516,7 @@ void AnnoncesWidget::update(double dt)
 
         const float lineHeight = measureLineHeight(&this->bodyFont);
         const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
-        const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+        const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcementRows, body.w - 10.0f);
         const int totalLines = static_cast<int>(wrappedRows.size());
         const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
         if (maxFirstLine <= 0)
@@ -559,18 +559,25 @@ void AnnoncesWidget::update(double dt)
     this->widgetRect.y = baseRect.y + this->widgetOffsetY;
 }
 
-void AnnoncesWidget::pushAnnouncement(const std::string& message)
+void AnnouncementsWidget::publishAnnouncementRow(const std::string& rowText)
 {
     // Ignore les textes vides pour ne pas polluer l'affichage.
-    if (message.empty())
+    if (rowText.empty())
     {
         return;
     }
     // Ajoute l'annonce brute; le wrapping est calcule au rendu.
-    this->announcements.push_back(message);
+    this->announcementRows.push_back(rowText);
+
+    // Conserve uniquement les annonces les plus recentes.
+    if (this->announcementRows.size() > maxStoredAnnouncementRows)
+    {
+        const std::size_t overflowCount = this->announcementRows.size() - maxStoredAnnouncementRows;
+        this->announcementRows.erase(this->announcementRows.begin(), this->announcementRows.begin() + overflowCount);
+    }
 }
 
-bool AnnoncesWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
+bool AnnouncementsWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     // Parametres non utilises, imposes par l'interface d'evenements.
     (void)clicks;
@@ -583,7 +590,7 @@ bool AnnoncesWidget::mousepressed(float x, float y, RC2D_MouseButton button, int
     }
 
     // Synchronise la rect avant tous les hit-tests.
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     this->widgetRect = SDL_FRect{
         baseRect.x + this->widgetOffsetX,
         baseRect.y + this->widgetOffsetY,
@@ -636,7 +643,7 @@ bool AnnoncesWidget::mousepressed(float x, float y, RC2D_MouseButton button, int
     // Clic sur scrollbar/piste: active le drag comme dans le chat.
     const float lineHeight = measureLineHeight(&this->bodyFont);
     const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
-    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, body.w - 10.0f);
+    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcementRows, body.w - 10.0f);
     const int totalLines = static_cast<int>(wrappedRows.size());
     const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
     if (maxFirstLine > 0)
@@ -713,7 +720,7 @@ bool AnnoncesWidget::mousepressed(float x, float y, RC2D_MouseButton button, int
     return true;
 }
 
-bool AnnoncesWidget::mousewheelmoved(
+bool AnnouncementsWidget::mousewheelmoved(
     RC2D_MouseWheelDirection direction,
     float wheel_x,
     float wheel_y,
@@ -735,7 +742,7 @@ bool AnnoncesWidget::mousewheelmoved(
     }
 
     // Recalcule la rect courante avant hit-test.
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     this->widgetRect = SDL_FRect{
         baseRect.x + this->widgetOffsetX,
         baseRect.y + this->widgetOffsetY,
@@ -760,7 +767,7 @@ bool AnnoncesWidget::mousewheelmoved(
     // Largeur utile de wrapping.
     const float wrapWidth = body.w - 10.0f;
     // Construit les lignes wrappees a partir des annonces brutes.
-    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcements, wrapWidth);
+    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcementRows, wrapWidth);
     const int totalLines = static_cast<int>(wrappedRows.size());
     // Nombre max de lignes qu'on peut decaler vers le bas.
     const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
@@ -784,9 +791,9 @@ bool AnnoncesWidget::mousewheelmoved(
     return true;
 }
 
-bool AnnoncesWidget::containsPoint(float x, float y) const
+bool AnnouncementsWidget::containsPoint(float x, float y) const
 {
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     const SDL_FRect currentRect = SDL_FRect{
         baseRect.x + this->widgetOffsetX,
         baseRect.y + this->widgetOffsetY,
@@ -796,12 +803,12 @@ bool AnnoncesWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
-void AnnoncesWidget::draw(void) const
+void AnnouncementsWidget::draw(void) const
 {
     // draw est const; on cast pour mettre a jour widgetRect cachee.
-    AnnoncesWidget* self = const_cast<AnnoncesWidget*>(this);
+    AnnouncementsWidget* self = const_cast<AnnouncementsWidget*>(this);
     // Recalcule la rect finale (base + offsets).
-    const SDL_FRect baseRect = getAnnoncesRectFromGameScreen();
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     self->widgetRect = SDL_FRect{
         baseRect.x + self->widgetOffsetX,
         baseRect.y + self->widgetOffsetY,
@@ -841,7 +848,7 @@ void AnnoncesWidget::draw(void) const
     // Calcule le wrapping et les bornes de scroll pour le rendu texte.
     const float lineHeight = measureLineHeight(&self->bodyFont);
     const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
-    std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&self->bodyFont, self->announcements, body.w - 10.0f);
+    std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&self->bodyFont, self->announcementRows, body.w - 10.0f);
     const int totalLines = static_cast<int>(wrappedRows.size());
     const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
     self->scrollFirstLine = (std::max)(0, (std::min)(self->scrollFirstLine, maxFirstLine));
@@ -984,4 +991,5 @@ void AnnoncesWidget::draw(void) const
     // Restaure le mode de blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
+
 

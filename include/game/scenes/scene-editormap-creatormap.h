@@ -11,7 +11,8 @@
 
 #include "game/scenes/scene.h"
 #include "game/ships/ship.h"
-#include "game/ui/overlay/tile-click-marker.h"
+#include "game/ui/hud/background-widget.h"
+#include "game/ui/overlay/tile-click-marker-overlay.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 
 /**
@@ -124,7 +125,7 @@ private:
         std::vector<TileBlockChange> tileBlockBatch; /**< Liste des changements collision d'une brosse. */
     };
 
-    RC2D_Image backgroundUiImage; /**< Fond UI (haut/bas) de la scene. */
+    BackgroundWidget backgroundWidget; /**< Fond UI (haut/bas) de la scene. */
     RC2D_Font overlayFont; /**< Police des overlays et boutons. */
     ScrollBarOverlay scrollBarOverlay; /**< Overlay scrollbar reutilise en mode editeur. */
 
@@ -177,7 +178,7 @@ private:
     float assetListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour un drag precis. */
     bool shipListScrollDragActive; /**< true si le drag de la scrollbar navires est actif. */
     float shipListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour drag liste navires. */
-    TileClickMarker clickMarker; /**< Marqueur visuel de clic en mode controle navire. */
+    TileClickMarkerOverlay clickMarker; /**< Marqueur visuel de clic en mode controle navire. */
     Ship testShip; /**< Navire de test pour validation collisions + A*. */
     Ship testShipPreview; /**< Navire de preview sous la souris en mode spawn. */
     bool testShipLoaded; /**< true si le dossier navire a ete importe et charge. */

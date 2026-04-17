@@ -92,7 +92,7 @@ static void setCursorResizeVertical(void)
 struct ChatWrappedLine
 {
     std::string text;        /**< Texte affiche sur cette ligne. */
-    int messageIndex;        /**< Index du message source dans ChatWidget::messages. */
+    int messageIndex;        /**< Index du message source dans ChatWidget::chatMessages. */
     std::size_t startIndex;  /**< Debut (inclus) dans la chaine source. */
     std::size_t endIndex;    /**< Fin (exclue) dans la chaine source. */
 };
@@ -250,13 +250,13 @@ static void drawLeftCenteredY(RC2D_Font* font, const char* text, const SDL_FRect
 }
 
 /**
- * @brief Construit les lignes visuelles wrappees de tous les messages.
+ * @brief Construit les lignes visuelles wrappees de tous les messages du chat.
  *
  * Le wrapping est volontairement caractere-par-caractere pour occuper
  * exactement toute la largeur utile jusqu'a la scrollbar.
  */
 static std::vector<ChatWrappedLine> buildWrappedLines(
-    const std::vector<std::string>& messages,
+    const std::vector<std::string>& chatMessages,
     RC2D_Font* font,
     float maxWidth)
 {
@@ -267,9 +267,9 @@ static std::vector<ChatWrappedLine> buildWrappedLines(
         return lines;
     }
 
-    for (std::size_t messageIndex = 0; messageIndex < messages.size(); ++messageIndex)
+    for (std::size_t messageIndex = 0; messageIndex < chatMessages.size(); ++messageIndex)
     {
-        const std::string& message = messages[messageIndex];
+        const std::string& message = chatMessages[messageIndex];
 
         // Message vide => reserve une ligne vide.
         if (message.empty())
@@ -448,7 +448,8 @@ static bool keyToPrintableChar(
 }
 
 ChatWidget::ChatWidget(void)
-    : titleFont{},
+    : chatMessages{},
+      titleFont{},
       bodyFont{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       inputBuffer{},
@@ -456,7 +457,6 @@ ChatWidget::ChatWidget(void)
       inputFocused(false),
       cursorVisible(true),
       cursorBlinkElapsed(0.0),
-      messages{},
       scrollFirstLine(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
@@ -523,11 +523,11 @@ void ChatWidget::load(void)
     this->resizeStartMouseY = 0.0f;
     this->resizeStartWidth = this->widgetWidth;
     this->resizeStartHeight = this->widgetHeight;
-    this->messages.clear();
+    this->chatMessages.clear();
     this->scrollFirstLine = 0;
 
     // 3) Messages systeme initiaux propres au widget.
-    this->publishMessage(ChatMessageAuthor::SYSTEM, "Bienvenue dans le chat du serveur ! Sois respectueux et amuse-toi ! On surveille...");
+    this->publishChatMessage(ChatWidget::ChatMessageAuthor::SYSTEM, "Bienvenue dans le chat du serveur ! Sois respectueux et amuse-toi ! On surveille...");
 }
 
 void ChatWidget::unload(void)
@@ -537,29 +537,7 @@ void ChatWidget::unload(void)
     rc2d_graphics_closeFont(&this->titleFont);
 }
 
-void ChatWidget::pushMessage(const std::string& message)
-{
-    // Ignore les messages vides.
-    if (message.empty())
-    {
-        return;
-    }
-
-    // Ajoute le message en fin d'historique.
-    this->messages.push_back(message);
-
-    // Respecte la limite max d'historique.
-    if (this->messages.size() > kMaxStoredMessages)
-    {
-        const std::size_t overflowCount = this->messages.size() - kMaxStoredMessages;
-        this->messages.erase(this->messages.begin(), this->messages.begin() + overflowCount);
-    }
-
-    // Force un scroll tout en bas (valeur volontairement haute, clamp plus tard).
-    this->scrollFirstLine = 1000000;
-}
-
-void ChatWidget::publishMessage(ChatMessageAuthor author, const std::string& message, const std::string& playerName)
+void ChatWidget::publishChatMessage(ChatWidget::ChatMessageAuthor author, const std::string& message, const std::string& playerName)
 {
     if (message.empty())
     {
@@ -569,21 +547,38 @@ void ChatWidget::publishMessage(ChatMessageAuthor author, const std::string& mes
     std::string finalMessage;
     switch (author)
     {
-        case ChatMessageAuthor::SYSTEM:
+        case ChatWidget::ChatMessageAuthor::SYSTEM:
             finalMessage = "System: " + message;
             break;
-        case ChatMessageAuthor::PLAYER:
+        case ChatWidget::ChatMessageAuthor::PLAYER:
             finalMessage = (playerName.empty() ? "Joueur" : playerName) + ": " + message;
             break;
-        case ChatMessageAuthor::SELF:
+        case ChatWidget::ChatMessageAuthor::SELF:
             finalMessage = "Moi: " + message;
             break;
         default:
             finalMessage = message;
             break;
     }
+    
+    // Ignore les messages vides.
+    if (finalMessage.empty())
+    {
+        return;
+    }
 
-    this->pushMessage(finalMessage);
+    // Ajoute le message en fin d'historique.
+    this->chatMessages.push_back(finalMessage);
+
+    // Respecte la limite max d'historique.
+    if (this->chatMessages.size() > maxStoredChatMessages)
+    {
+        const std::size_t overflowCount = this->chatMessages.size() - maxStoredChatMessages;
+        this->chatMessages.erase(this->chatMessages.begin(), this->chatMessages.begin() + overflowCount);
+    }
+
+    // Force un scroll tout en bas (valeur volontairement haute, clamp plus tard).
+    this->scrollFirstLine = 1000000;
 }
 
 void ChatWidget::update(double dt)
@@ -642,7 +637,7 @@ void ChatWidget::update(double dt)
             msgArea.h - RH(6.0f * 2.0f)
         };
         const float lineHeight = measureTextHeight(&this->bodyFont) + RH(2.0f);
-        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->chatMessages, &this->bodyFont, msgTextClip.w);
         const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
         const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedLines.size()) - visibleLines);
 
@@ -799,7 +794,7 @@ void ChatWidget::update(double dt)
 
     // Mesure line-height et nombre de lignes reelles (apres wrapping).
     const float lineHeight = measureTextHeight(&this->bodyFont) + RH(2.0f);
-    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->chatMessages, &this->bodyFont, msgTextClip.w);
     const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
     const int totalLines = static_cast<int>(wrappedLines.size());
     const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
@@ -905,7 +900,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
             msgArea.h - RH(6.0f * 2.0f)
         };
         const float lineHeight = measureTextHeight(&this->bodyFont) + RH(2.0f);
-        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->chatMessages, &this->bodyFont, msgTextClip.w);
         const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
         const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedLines.size()) - visibleLines);
 
@@ -1035,7 +1030,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
             msgArea.w - RW(6.0f * 2.0f) - RW(kScrollBarWidth + (kScrollBarPadding * 2.0f)),
             msgArea.h - RH(6.0f * 2.0f)
         };
-        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+        const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->chatMessages, &this->bodyFont, msgTextClip.w);
         const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
         const int totalLines = static_cast<int>(wrappedLines.size());
         const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
@@ -1124,7 +1119,7 @@ bool ChatWidget::mousewheelmoved(
         msgArea.h - RH(6.0f * 2.0f)
     };
     const float lineHeight = measureTextHeight(&this->bodyFont) + RH(2.0f);
-    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->messages, &this->bodyFont, msgTextClip.w);
+    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(this->chatMessages, &this->bodyFont, msgTextClip.w);
     const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
     const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedLines.size()) - visibleLines);
 
@@ -1223,7 +1218,7 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             // Validation: pousse le message puis reset input.
             if (!this->inputBuffer.empty())
             {
-                this->publishMessage(ChatMessageAuthor::SELF, this->inputBuffer);
+                this->publishChatMessage(ChatWidget::ChatMessageAuthor::SELF, this->inputBuffer);
                 this->inputBuffer.clear();
                 this->cursorIndex = 0;
             }
@@ -1356,7 +1351,7 @@ void ChatWidget::draw(void) const
     };
 
     const float lineHeight = measureTextHeight(&self->bodyFont) + RH(2.0f);
-    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(self->messages, &self->bodyFont, msgTextClip.w);
+    const std::vector<ChatWrappedLine> wrappedLines = buildWrappedLines(self->chatMessages, &self->bodyFont, msgTextClip.w);
     const int visibleLines = (std::max)(1, static_cast<int>(msgTextClip.h / lineHeight));
     const int totalLines = static_cast<int>(wrappedLines.size());
     const int maxFirstLine = (std::max)(0, totalLines - visibleLines);
@@ -1377,9 +1372,9 @@ void ChatWidget::draw(void) const
         // Coloration prefixe "avant ':'" en or.
         bool handledWithPrefixColor = false;
         if (line.messageIndex >= 0 &&
-            line.messageIndex < static_cast<int>(self->messages.size()))
+            line.messageIndex < static_cast<int>(self->chatMessages.size()))
         {
-            const std::string& srcMessage = self->messages[static_cast<std::size_t>(line.messageIndex)];
+            const std::string& srcMessage = self->chatMessages[static_cast<std::size_t>(line.messageIndex)];
             const std::size_t colonPos = srcMessage.find(':');
             if (colonPos != std::string::npos && line.startIndex < colonPos)
             {
@@ -1573,4 +1568,6 @@ bool ChatWidget::containsPoint(float x, float y) const
     };
     return isPointInRect(x, y, currentRect);
 }
+
+
 

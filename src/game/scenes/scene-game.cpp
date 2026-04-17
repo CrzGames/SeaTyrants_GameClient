@@ -8,9 +8,7 @@
 #include <vector>
 
 GameScene::GameScene(void)
-    : clickMarker{},
-      scrollBarOverlay{},
-      shipAutoFollowEnabled(true),
+    : shipAutoFollowEnabled(true),
       hudOverlay{},
       playerShipFolderPath("assets/images/ships/ship-elite27"),
       playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
@@ -56,9 +54,9 @@ void GameScene::initializePlayerSpawnAndCamera(void)
 
 void GameScene::populateMarketDemoData(void)
 {
-    using Category = MarcheWidget::MarketCategory;
+    using Category = MarketsAndBazarWidget::MarketCategory;
 
-    const std::vector<MarcheWidget::BazardItemData> bazardRows = {
+    const std::vector<MarketsAndBazarWidget::BazarRow> bazarRows = {
         {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Eliteball", "Degats: 50", Category::MUNITION_DE_CANNON, 12, "PerFeck", "0"},
         {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Elite Class 1", "Sante: 75.000", Category::NAVIRES, 1, "", "0"},
         {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "San Salvador", "Sante: 50.000", Category::NAVIRES, 1, "", "0"},
@@ -76,25 +74,25 @@ void GameScene::populateMarketDemoData(void)
     const auto buildPriceLines = [](
         int goldAmount,
         int rubiesAmount,
-        int crystalAmount) -> std::vector<MarcheWidget::MarketPriceData>
+        int crystalAmount) -> std::vector<MarketsAndBazarWidget::MarketPriceData>
     {
-        std::vector<MarcheWidget::MarketPriceData> lines;
+        std::vector<MarketsAndBazarWidget::MarketPriceData> lines;
         if (goldAmount > 0)
         {
-            lines.push_back(MarcheWidget::MarketPriceData{goldAmount, "gold"});
+            lines.push_back(MarketsAndBazarWidget::MarketPriceData{goldAmount, MarketsAndBazarWidget::MarketCurrency::GOLD});
         }
         if (rubiesAmount > 0)
         {
-            lines.push_back(MarcheWidget::MarketPriceData{rubiesAmount, "rubies"});
+            lines.push_back(MarketsAndBazarWidget::MarketPriceData{rubiesAmount, MarketsAndBazarWidget::MarketCurrency::RUBIES});
         }
         if (crystalAmount > 0)
         {
-            lines.push_back(MarcheWidget::MarketPriceData{crystalAmount, "cristaux"});
+            lines.push_back(MarketsAndBazarWidget::MarketPriceData{crystalAmount, MarketsAndBazarWidget::MarketCurrency::CRISTAUX});
         }
         return lines;
     };
 
-    const std::vector<MarcheWidget::MarketItemData> noirRows = {
+    const std::vector<MarketsAndBazarWidget::MarketRow> blackRows = {
         {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Silver Harpoon", "Degats: 150", Category::MUNITION_DE_HARPON, 7155, "1", buildPriceLines(300, 125, 2)},
         {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Explosive Rocket", "Degats: 5.000", Category::MUNITION_DE_CANNON, 626, "1", buildPriceLines(50000, 10000, 4)},
         {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Deceleration Rocket", "Ralentissement: 50%", Category::ACTIVABLES, 592, "1", buildPriceLines(80000, 0, 6)},
@@ -107,7 +105,7 @@ void GameScene::populateMarketDemoData(void)
         {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Storm Rocket", "Impact etourdissement", Category::UTILISABLE_SUR_CIBLE, 410, "1", buildPriceLines(33000, 11025, 0)}
     };
 
-    const std::vector<MarcheWidget::MarketItemData> basiqueRows = {
+    const std::vector<MarketsAndBazarWidget::MarketRow> basicRows = {
         {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Bois de coque", "Materiau de base de construction", Category::BOOSTER, 24000, "1", buildPriceLines(120, 35, 1)},
         {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Toile de voile", "Renfort voilure", Category::VOILES, 18000, "1", buildPriceLines(145, 0, 0)},
         {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Fer brut", "Ressource de forge", Category::BOOSTER, 12500, "1", buildPriceLines(260, 70, 0)},
@@ -120,7 +118,7 @@ void GameScene::populateMarketDemoData(void)
         {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Pioche d'abordage", "Force abordage +4%", Category::HARPONEUSE, 2700, "1", buildPriceLines(1600, 0, 0)}
     };
 
-    const std::vector<MarcheWidget::MarketItemData> evenementRows = {
+    const std::vector<MarketsAndBazarWidget::MarketRow> eventRows = {
         {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Flamme lunaire", "Degats evenement: +10%", Category::BOOSTER, 850, "1", buildPriceLines(9900, 4990, 3)},
         {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Cle de faille", "Ouvre un coffre special", Category::UTILISABLE_SUR_CIBLE, 540, "1", buildPriceLines(18000, 9040, 4)},
         {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Banniere tempete", "Chance butin +6%", Category::ACTIVABLES, 720, "1", buildPriceLines(14500, 7290, 5)},
@@ -133,10 +131,10 @@ void GameScene::populateMarketDemoData(void)
         {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Voile comete", "Vitesse +7% pendant event", Category::VOILES, 460, "1", buildPriceLines(19800, 9940, 4)}
     };
 
-    this->hudOverlay.setBazardMarketRows(bazardRows);
-    this->hudOverlay.setNoirMarketRows(noirRows);
-    this->hudOverlay.setBasiqueMarketRows(basiqueRows);
-    this->hudOverlay.setEvenementMarketRows(evenementRows);
+    this->hudOverlay.setBazarRows(bazarRows);
+    this->hudOverlay.setBlackMarketRows(blackRows);
+    this->hudOverlay.setBasicMarketRows(basicRows);
+    this->hudOverlay.setEventMarketRows(eventRows);
 }
 
 void GameScene::unload(void)
@@ -148,8 +146,6 @@ void GameScene::unload(void)
     GameplayShaderController::unloadAll();
     this->shipVfx.unload();
     player.unload();
-    this->clickMarker.hide();
-    this->scrollBarOverlay.unload();
     this->hudOverlay.unload();
 }
 
@@ -175,8 +171,6 @@ void GameScene::load(void)
     // Initialise le spawn joueur + camera de depart.
     this->initializePlayerSpawnAndCamera();
 
-    // Charge l'overlay des barres de scroll.
-    this->scrollBarOverlay.load();
 }
 
 void GameScene::update(double dt)
@@ -205,14 +199,8 @@ void GameScene::update(double dt)
     // Met a jour les shaders de visibilite (nuages + fog).
     GameplayShaderController::updateVisibility(dt, player);
 
-    // Met a jour le marqueur de clic.
-    this->clickMarker.update(dt);
-
-    // Met a jour les widgets HUD interactifs (chat, curseur, scrollbar chat...).
-    this->hudOverlay.update(dt);
-
-    // Met a jour les barres de scroll.
-    this->scrollBarOverlay.update(dt, camera, map, map.rect);
+    // Met a jour tout le HUD (widgets + overlays monde).
+    this->hudOverlay.update(dt, camera, map);
 
     // Deplacement camera continu aux fleches clavier.
     if (GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect))
@@ -242,7 +230,7 @@ void GameScene::draw(void)
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
 
     // Dessine le fond UI en premier (coordonnees logiques absolues).
-    this->hudOverlay.drawBackground();
+    this->hudOverlay.drawBackgroundWidget();
 
     // Clip strict du rendu gameplay dans la zone map.
     SDL_Renderer* renderer = WorldRenderClip::begin(map.rect);
@@ -260,7 +248,7 @@ void GameScene::draw(void)
     }
 
     // Dessine le marqueur de clic.
-    this->clickMarker.draw(map);
+    this->hudOverlay.drawTileClickMarkerOverlay(map);
 
     // Dessine les VFX derriere le ship.
     this->shipVfx.draw(map, player.getShip(), true);
@@ -278,7 +266,7 @@ void GameScene::draw(void)
     }
 
     // Dessine les barres de scroll par-dessus tout.
-    this->scrollBarOverlay.draw(map.rect, map);
+    this->hudOverlay.drawScrollBarOverlay(map);
 
     // Fin du clip monde: l'overlay/UI peut dessiner librement.
     WorldRenderClip::end(renderer);
@@ -347,7 +335,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     }
 
     // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
-    if (button == RC2D_MOUSE_BUTTON_LEFT && this->scrollBarOverlay.handleClick(x, y, map.rect))
+    if (this->hudOverlay.handleMapOverlayMousePressed(x, y, button, map))
     {
         this->shipAutoFollowEnabled = false;
         return;
@@ -379,7 +367,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         player.moveToTile(map, tile.x, tile.y);
 
         // Affiche le marqueur de clic sur la tuile cliquee.
-        this->clickMarker.show(tile.x, tile.y);
+        this->hudOverlay.notifyMapTileClicked(tile.x, tile.y);
     }
 }
 
@@ -399,5 +387,7 @@ void GameScene::mousewheelmoved(
         return;
     }
 }
+
+
 
 

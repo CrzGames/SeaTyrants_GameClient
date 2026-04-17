@@ -1,10 +1,8 @@
-#include "game/ui/hud/sector-coordinate-overlay.h"
+#include "game/ui/overlay/sector-coordinate-overlay.h"
 
 #include <cstdio>
 
 #include "core/context.h"
-#include "game/entities/player.h"
-#include "game/map/map.h"
 
 SectorCoordinateOverlay::SectorCoordinateOverlay(void)
     : font{},
