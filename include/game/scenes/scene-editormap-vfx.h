@@ -699,6 +699,12 @@ private:
     bool pendingLooseFolderDialogCanceled;
     std::string pendingLooseFolderAbsolute;
     mutable std::mutex pendingLooseFolderMutex;
+    bool looseImportBatchActive;
+    std::vector<std::string> looseImportBatchFolderPaths;
+    size_t looseImportBatchNextIndex;
+    int looseImportBatchAddedCount;
+    int looseImportBatchReloadedCount;
+    int looseImportBatchFailedCount;
 
     bool pendingExportFolderDialogCompleted;
     bool pendingExportFolderDialogCanceled;
@@ -1038,6 +1044,7 @@ private:
     void processPendingSfxFolderRequest(void);
     void processPendingShipVfxConfigRequest(void);
     void processPendingLooseFolderRequest(void);
+    void processLooseFolderImportBatch(void);
     void processPendingExportFolderRequest(void);
 
     bool importShipsFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);

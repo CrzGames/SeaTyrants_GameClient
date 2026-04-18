@@ -1599,6 +1599,12 @@ EditorMapVfxScene::EditorMapVfxScene(void)
       pendingLooseFolderDialogCanceled(false),
       pendingLooseFolderAbsolute{},
       pendingLooseFolderMutex{},
+      looseImportBatchActive(false),
+      looseImportBatchFolderPaths{},
+      looseImportBatchNextIndex(0U),
+      looseImportBatchAddedCount(0),
+      looseImportBatchReloadedCount(0),
+      looseImportBatchFailedCount(0),
       pendingExportFolderDialogCompleted(false),
       pendingExportFolderDialogCanceled(false),
       pendingExportFolderAbsolute{},
@@ -1955,6 +1961,12 @@ void EditorMapVfxScene::resetEditorState(void)
     this->unloadLooseReferencePreviewAssets();
     this->importedSfxCounter = 0U;
     this->importedLooseFolderCounter = 0U;
+    this->looseImportBatchActive = false;
+    this->looseImportBatchFolderPaths.clear();
+    this->looseImportBatchNextIndex = 0U;
+    this->looseImportBatchAddedCount = 0;
+    this->looseImportBatchReloadedCount = 0;
+    this->looseImportBatchFailedCount = 0;
     this->pendingShipVfxConfigDialogCompleted = false;
     this->pendingShipVfxConfigDialogCanceled = false;
     this->pendingShipVfxConfigAbsolutePath.clear();
@@ -2981,7 +2993,7 @@ bool EditorMapVfxScene::computeVfxTrailConePopupLayout(VfxTrailConePopupLayout* 
         kSideHandleHalf * 2.0f,
         kSideHandleHalf * 2.0f};
 
-    // Evite les poignées collées l'une sur l'autre quand le cone est court/serre.
+    // Evite les poignees collees l'une sur l'autre quand le cone est court/serre.
     editorMapVfxClampRectInside(&out->centerHandleRect, out->previewRect, 2.0f);
     editorMapVfxClampRectInside(&out->tipHandleRect, out->previewRect, 2.0f);
     editorMapVfxClampRectInside(&out->sideHandleRect, out->previewRect, 2.0f);
@@ -6615,7 +6627,7 @@ void EditorMapVfxScene::drawLayerListPanel(const std::vector<int>& orderedLayerI
     if (this->overlayFont.sdl_font != nullptr)
     {
         const char* ovlLab = !this->shipVfxEditorTargetSectorsABEnabled
-            ? "—"
+            ? "off"
             : (this->shipVfxEditorTargetSectorsOverlayVisible ? "TRC" : "trc");
         RC2D_Text ovlText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), ovlLab);
         ovlText.color = kHudTextColor;
@@ -8146,6 +8158,122 @@ void EditorMapVfxScene::processPendingLooseFolderRequest(void)
     this->importLooseFoldersFromRootFolderAbsolutePath(folder.c_str());
 }
 
+void EditorMapVfxScene::processLooseFolderImportBatch(void)
+{
+    if (!this->looseImportBatchActive)
+    {
+        return;
+    }
+
+    const size_t totalCount = this->looseImportBatchFolderPaths.size();
+    if (this->looseImportBatchNextIndex >= totalCount)
+    {
+        this->looseImportBatchActive = false;
+        this->looseImportBatchFolderPaths.clear();
+        this->looseImportBatchNextIndex = 0U;
+        this->looseImportBatchAddedCount = 0;
+        this->looseImportBatchReloadedCount = 0;
+        this->looseImportBatchFailedCount = 0;
+        return;
+    }
+
+    constexpr size_t kMaxLooseFoldersPerFrame = 1;
+    size_t processedThisFrame = 0;
+    while (processedThisFrame < kMaxLooseFoldersPerFrame &&
+           this->looseImportBatchNextIndex < totalCount)
+    {
+        const std::string& folderPath = this->looseImportBatchFolderPaths[this->looseImportBatchNextIndex];
+        const std::string targetPathKey = makePathKeyLower(folderPath);
+
+        bool alreadyImported = false;
+        for (const ImportedLooseFolder& importedFolder : this->importedLooseFolders)
+        {
+            if (makePathKeyLower(importedFolder.folderAbsolutePath) == targetPathKey)
+            {
+                alreadyImported = true;
+                break;
+            }
+        }
+
+        bool importOk = false;
+        if (alreadyImported)
+        {
+            importOk = this->reloadImportedLooseFolderFromAbsolutePath(folderPath.c_str());
+            if (importOk)
+            {
+                this->looseImportBatchReloadedCount += 1;
+            }
+        }
+        else
+        {
+            importOk = this->importLooseFolderFromAbsolutePath(folderPath.c_str());
+            if (importOk)
+            {
+                this->looseImportBatchAddedCount += 1;
+            }
+        }
+
+        if (!importOk)
+        {
+            this->looseImportBatchFailedCount += 1;
+        }
+
+        this->looseImportBatchNextIndex += 1;
+        processedThisFrame += 1;
+    }
+
+    const size_t processedCount = this->looseImportBatchNextIndex;
+    if (processedCount < totalCount)
+    {
+        this->statusMessage =
+            "Import sprites: " +
+            std::to_string(processedCount) + "/" +
+            std::to_string(totalCount) + "...";
+        return;
+    }
+
+    const int addedCount = this->looseImportBatchAddedCount;
+    const int reloadedCount = this->looseImportBatchReloadedCount;
+    const int failedCount = this->looseImportBatchFailedCount;
+    if (addedCount > 0 || reloadedCount > 0)
+    {
+        std::string msg;
+        if (addedCount > 0)
+        {
+            msg += std::to_string(addedCount) + " dossier(s) importe(s)";
+        }
+        if (reloadedCount > 0)
+        {
+            if (!msg.empty())
+            {
+                msg += ", ";
+            }
+            msg += std::to_string(reloadedCount) + " recharge(s) depuis le disque";
+        }
+        if (failedCount > 0)
+        {
+            msg += " (" + std::to_string(failedCount) + " en echec)";
+        }
+        msg += ".";
+        this->statusMessage = msg;
+    }
+    else if (failedCount > 0)
+    {
+        this->statusMessage = "Import sprites: " + std::to_string(failedCount) + " dossier(s) en echec.";
+    }
+    else
+    {
+        this->statusMessage = "Aucun dossier sprites PNG valide trouve.";
+    }
+
+    this->looseImportBatchActive = false;
+    this->looseImportBatchFolderPaths.clear();
+    this->looseImportBatchNextIndex = 0U;
+    this->looseImportBatchAddedCount = 0;
+    this->looseImportBatchReloadedCount = 0;
+    this->looseImportBatchFailedCount = 0;
+}
+
 void EditorMapVfxScene::processPendingExportFolderRequest(void)
 {
     bool hasResult = false;
@@ -9306,21 +9434,6 @@ bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char*
         return false;
     }
 
-    auto makePathKey = [](const std::string& path) {
-        std::string key = normalizePathSlashes(path);
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return key;
-    };
-
-    std::vector<std::string> knownPathKeys;
-    knownPathKeys.reserve(this->importedLooseFolders.size());
-    for (const ImportedLooseFolder& folder : this->importedLooseFolders)
-    {
-        knownPathKeys.push_back(makePathKey(folder.folderAbsolutePath));
-    }
-
     auto isValidLooseFolder = [](const std::filesystem::path& folderPath) -> bool {
         std::error_code localError;
         if (!std::filesystem::exists(folderPath, localError) || !std::filesystem::is_directory(folderPath, localError))
@@ -9366,65 +9479,61 @@ bool EditorMapVfxScene::importLooseFoldersFromRootFolderAbsolutePath(const char*
     }
 
     std::sort(discoveredFolders.begin(), discoveredFolders.end(), [](const auto& a, const auto& b) {
-        return normalizePathSlashes(a.string()) < normalizePathSlashes(b.string());
+        return makePathKeyLower(a.string()) < makePathKeyLower(b.string());
     });
 
-    int addedCount = 0;
-    int reloadedCount = 0;
-    int failedCount = 0;
+    if (discoveredFolders.empty())
+    {
+        this->statusMessage = "Aucun dossier sprites PNG valide trouve.";
+        return false;
+    }
+
+    if (!this->looseImportBatchActive)
+    {
+        this->looseImportBatchActive = true;
+        this->looseImportBatchFolderPaths.clear();
+        this->looseImportBatchNextIndex = 0U;
+        this->looseImportBatchAddedCount = 0;
+        this->looseImportBatchReloadedCount = 0;
+        this->looseImportBatchFailedCount = 0;
+    }
+
+    std::vector<std::string> queuedPathKeys;
+    queuedPathKeys.reserve(this->looseImportBatchFolderPaths.size() + discoveredFolders.size());
+    for (const std::string& queuedPath : this->looseImportBatchFolderPaths)
+    {
+        queuedPathKeys.push_back(makePathKeyLower(queuedPath));
+    }
+
+    int queuedCount = 0;
     for (const std::filesystem::path& folderPath : discoveredFolders)
     {
-        const std::string key = makePathKey(folderPath.string());
-        if (std::find(knownPathKeys.begin(), knownPathKeys.end(), key) != knownPathKeys.end())
+        std::error_code absError;
+        const std::filesystem::path absolutePath = std::filesystem::absolute(folderPath, absError);
+        const std::string absoluteNorm = normalizePathSlashes((absError ? folderPath : absolutePath).string());
+        const std::string absoluteKey = makePathKeyLower(absoluteNorm);
+        if (std::find(queuedPathKeys.begin(), queuedPathKeys.end(), absoluteKey) != queuedPathKeys.end())
         {
-            if (this->reloadImportedLooseFolderFromAbsolutePath(folderPath.string().c_str()))
-            {
-                reloadedCount += 1;
-            }
-            else
-            {
-                failedCount += 1;
-            }
             continue;
         }
 
-        if (this->importLooseFolderFromAbsolutePath(folderPath.string().c_str()))
-        {
-            knownPathKeys.push_back(key);
-            addedCount += 1;
-        }
-        else
-        {
-            failedCount += 1;
-        }
+        this->looseImportBatchFolderPaths.push_back(absoluteNorm);
+        queuedPathKeys.push_back(absoluteKey);
+        queuedCount += 1;
     }
 
-    if (addedCount > 0 || reloadedCount > 0)
+    if (queuedCount <= 0)
     {
-        std::string msg;
-        if (addedCount > 0)
-        {
-            msg += std::to_string(addedCount) + " dossier(s) importe(s)";
-        }
-        if (reloadedCount > 0)
-        {
-            if (!msg.empty())
-            {
-                msg += ", ";
-            }
-            msg += std::to_string(reloadedCount) + " recharge(s) depuis le disque";
-        }
-        if (failedCount > 0)
-        {
-            msg += " (" + std::to_string(failedCount) + " en echec)";
-        }
-        msg += ".";
-        this->statusMessage = msg;
+        this->statusMessage = "Import sprites: dossiers deja en file d'attente.";
         return true;
     }
 
-    this->statusMessage = "Aucun dossier sprites PNG valide trouve.";
-    return false;
+    const size_t remainingCount = this->looseImportBatchFolderPaths.size() - this->looseImportBatchNextIndex;
+    this->statusMessage =
+        "Import sprites: " +
+        std::to_string(queuedCount) + " dossier(s) ajoutes (" +
+        std::to_string(remainingCount) + " en attente).";
+    return true;
 }
 
 void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
@@ -18576,6 +18685,12 @@ void EditorMapVfxScene::unload(void)
         this->pendingLooseFolderDialogCanceled = false;
         this->pendingLooseFolderAbsolute.clear();
     }
+    this->looseImportBatchActive = false;
+    this->looseImportBatchFolderPaths.clear();
+    this->looseImportBatchNextIndex = 0U;
+    this->looseImportBatchAddedCount = 0;
+    this->looseImportBatchReloadedCount = 0;
+    this->looseImportBatchFailedCount = 0;
     {
         std::lock_guard<std::mutex> lock(this->pendingExportFolderMutex);
         this->pendingExportFolderDialogCompleted = false;
@@ -18648,6 +18763,7 @@ void EditorMapVfxScene::update(double dt)
     this->processPendingSfxFolderRequest();
     this->processPendingShipVfxConfigRequest();
     this->processPendingLooseFolderRequest();
+    this->processLooseFolderImportBatch();
     this->processPendingExportFolderRequest();
     this->applyPendingOceanColorStep();
 
@@ -19572,6 +19688,11 @@ void EditorMapVfxScene::mousewheelmoved(
             constexpr float kShipVfxWheelZoomStep = 0.05f;
             this->adjustShipVfxPreviewZoom(delta > 0 ? kShipVfxWheelZoomStep : -kShipVfxWheelZoomStep);
         }
+        return;
+    }
+
+    if (scrollListPanel(this->looseListRect, static_cast<int>(this->importedLooseFolders.size()), &this->looseListScrollOffset))
+    {
         return;
     }
 
