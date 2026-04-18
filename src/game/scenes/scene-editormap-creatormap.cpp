@@ -76,16 +76,21 @@ constexpr RC2D_Color kAssetRowSelectedFillColor = RC2D_Color{86, 130, 174, 220};
 constexpr RC2D_Color kAssetRowBorderColor = RC2D_Color{115, 128, 146, 210};
 constexpr float kAssetListScrollBarWidth = 10.0f;
 constexpr int kAssetListVisibleRows = 10;
-// Export minimap:
-// - taille derivee de la map secteurs (pas de taille fixe 1024x1024).
-// - 1 secteur = SECTOR_STEP pixels dans l'image exportee.
-// - ratio visuel commun minimap ecran + export PNG: 2/3 (soit 1/3 plus petit).
-constexpr int kMiniMapScaleNumerator = 2;
-constexpr int kMiniMapScaleDenominator = 3;
-constexpr int kExportMiniMapPixelsPerSectorRaw =
-    (Map::SECTOR_STEP * kMiniMapScaleNumerator) / kMiniMapScaleDenominator;
-constexpr int kExportMiniMapPixelsPerSector =
-    (kExportMiniMapPixelsPerSectorRaw > 0) ? kExportMiniMapPixelsPerSectorRaw : 1;
+// Minimap editeur: l'export PNG reprend la taille visible du rectangle ecran.
+constexpr float kMiniMapVisualScale = 2.0f / 3.0f;
+
+static float computeEditorMiniMapSize(const SDL_FRect& mapRect)
+{
+    return std::clamp(
+        mapRect.h * 0.22f * kMiniMapVisualScale,
+        120.0f * kMiniMapVisualScale,
+        190.0f * kMiniMapVisualScale);
+}
+
+static int miniMapRectDimensionToPixels(float dimension)
+{
+    return (std::max)(static_cast<int>(std::lround(dimension)), 1);
+}
 
 constexpr RC2D_FileDialogFilter kImportFilters[] = {
     {"Images", "png;jpg;jpeg;bmp;webp;tga"},
@@ -2093,12 +2098,9 @@ bool EditorMapCreateMapScene::exportMiniMapPngFromJsonPath(
         return false;
     }
 
-    const int miniMapWidthPx = (std::max)(
-        Map::NUM_SECTORS_X * kExportMiniMapPixelsPerSector,
-        1);
-    const int miniMapHeightPx = (std::max)(
-        Map::NUM_SECTORS_Y * kExportMiniMapPixelsPerSector,
-        1);
+    const float miniMapSize = computeEditorMiniMapSize(GetCurrentMap().rect);
+    const int miniMapWidthPx = miniMapRectDimensionToPixels(miniMapSize);
+    const int miniMapHeightPx = miniMapRectDimensionToPixels(miniMapSize);
 
     SDL_Surface* miniMapSurface = SDL_CreateSurface(
         miniMapWidthPx,
@@ -3654,13 +3656,7 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     this->shipListRect.x = (std::max)(this->shipListRect.x, map.rect.x + 12.0f);
 
     // Minimap maison en haut a droite dans la zone monde.
-    // Minimap 1/3 plus petite (largeur + hauteur), tout en gardant le meme
-    // comportement de clamp responsive.
-    constexpr float miniMapScale = 2.0f / 3.0f;
-    const float miniMapSize = std::clamp(
-        map.rect.h * 0.22f * miniMapScale,
-        120.0f * miniMapScale,
-        190.0f * miniMapScale);
+    const float miniMapSize = computeEditorMiniMapSize(map.rect);
     this->miniMapRect.w = miniMapSize;
     this->miniMapRect.h = miniMapSize;
     this->miniMapRect.x = map.rect.x + map.rect.w - this->miniMapRect.w - 40.0f;
@@ -4521,9 +4517,9 @@ void EditorMapCreateMapScene::drawMiniMap(void) const
     if (renderer != nullptr)
     {
         const int miniMapWidthPx =
-            (std::max)(static_cast<int>(std::lround(this->miniMapRect.w)), 1);
+            miniMapRectDimensionToPixels(this->miniMapRect.w);
         const int miniMapHeightPx =
-            (std::max)(static_cast<int>(std::lround(this->miniMapRect.h)), 1);
+            miniMapRectDimensionToPixels(this->miniMapRect.h);
 
         SDL_Surface* miniMapSurface = SDL_CreateSurface(
             miniMapWidthPx,
@@ -5639,5 +5635,3 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     }
 }
 #endif // GAME_ENV_DEV
-
-
