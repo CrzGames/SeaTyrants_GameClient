@@ -20,6 +20,7 @@
 #include "game/scenes/scene-editormap-anchorship.h"
 #include "game/scenes/scene-editormap-crashtest.h"
 #include "game/scenes/scene-editormap-creatormap.h"
+#include "game/scenes/scene-editormap-shipdownscale.h"
 #include "game/scenes/scene-editormap-vfx.h"
 #endif
 
@@ -63,13 +64,14 @@ void rc2d_load(void)
     //sceneManager.addScene("menu", new MenuScene());
 #if GAME_ENV_DEV
     sceneManager.addScene("editormap-creatormap", new EditorMapCreateMapScene());
+    sceneManager.addScene("editormap-shipdownscale", new EditorMapShipDownscaleScene());
     sceneManager.addScene("editormap-anchorship", new EditorMapAnchorShipScene());
     sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
     sceneManager.addScene("editormap-crashtest", new EditorMapCrashTestScene());
 #endif
     //sceneManager.addScene("splashscreen", new SplashScreenScene());
     sceneManager.addScene("game", new GameScene());
-    sceneManager.changeScene("game");
+    sceneManager.changeScene("editormap-shipdownscale");
 
     // Mettre en plein écran.
     //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
@@ -185,6 +187,12 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
     if (!isrepeat && scancode == SDL_SCANCODE_F9)
     {
         sceneManager.changeScene("editormap-creatormap");
+        return;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_F8)
+    {
+        sceneManager.changeScene("editormap-shipdownscale");
         return;
     }
 
