@@ -1,6 +1,7 @@
 #if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-anchorship.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <array>
@@ -187,7 +188,7 @@ void EditorMapAnchorShipScene::unloadShipFrames(void)
     {
         if (frame.image.sdl_texture != nullptr)
         {
-            rc2d_graphics_freeImage(&frame.image);
+            ReleaseStorageImage(&frame.image);
         }
         frame.widthPx = 0.0f;
         frame.heightPx = 0.0f;
@@ -396,7 +397,7 @@ bool EditorMapAnchorShipScene::loadShipFolderFromAbsolutePath(const char* folder
             return false;
         }
 
-        RC2D_Image image = rc2d_graphics_loadImageFromStorage(userStoragePath, RC2D_STORAGE_USER);
+        RC2D_Image image = LoadStorageImage(userStoragePath, RC2D_STORAGE_USER);
         if (image.sdl_texture == nullptr)
         {
             this->statusMessage = "Echec chargement sprite user: " + std::string(userStoragePath);
@@ -1622,7 +1623,7 @@ void EditorMapAnchorShipScene::unload(void)
     this->clickMarker.hide();
     this->movementPreviewShip.unloadSprites();
     this->unloadShipFrames();
-    rc2d_graphics_closeFont(&this->overlayFont);
+    ResetStorageFontRef(&this->overlayFont);
     this->backgroundWidget.unload();
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapAnchorShipScene: unloaded");
@@ -1637,7 +1638,7 @@ void EditorMapAnchorShipScene::load(void)
 
     this->backgroundWidget.load();
 
-    this->overlayFont = rc2d_graphics_openFontFromStorage(
+    this->overlayFont = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);

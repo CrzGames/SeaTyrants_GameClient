@@ -1,4 +1,5 @@
 #include "game/ui/hud/center-ship-button-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 CenterShipButtonWidget::CenterShipButtonWidget(void)
     : buttonUi{}
@@ -12,10 +13,10 @@ CenterShipButtonWidget::~CenterShipButtonWidget(void)
 void CenterShipButtonWidget::load(void)
 {
     // Bouton centre en bas de l'ecran, dans la zone UI.
-    this->buttonUi.image = rc2d_graphics_loadImageFromStorage(
+    this->buttonUi.image = LoadStorageImage(
         "assets/images/ui-scene-game/center-ship.png",
         RC2D_STORAGE_TITLE);
-    this->buttonUi.imageData = rc2d_graphics_loadImageDataFromStorage(
+    this->buttonUi.imageData = LoadStorageImageData(
         "assets/images/ui-scene-game/center-ship.png",
         RC2D_STORAGE_TITLE);
     this->buttonUi.anchor = RC2D_UI_ANCHOR_BOTTOM_CENTER;
@@ -28,8 +29,8 @@ void CenterShipButtonWidget::load(void)
 
 void CenterShipButtonWidget::unload(void)
 {
-    rc2d_graphics_freeImageData(&this->buttonUi.imageData);
-    rc2d_graphics_freeImage(&this->buttonUi.image);
+    ResetStorageImageDataRef(&this->buttonUi.imageData);
+    ResetStorageImageRef(&this->buttonUi.image);
 }
 
 void CenterShipButtonWidget::draw(void)

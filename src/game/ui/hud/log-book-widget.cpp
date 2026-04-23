@@ -1,4 +1,5 @@
 #include "game/ui/hud/log-book-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 
@@ -329,8 +330,8 @@ LogBookWidget::~LogBookWidget(void)
 
 void LogBookWidget::load(void)
 {
-    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 24.0f);
-    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 24.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
 
     const SDL_FRect baseRect = getJournalRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
@@ -349,8 +350,8 @@ void LogBookWidget::load(void)
 
 void LogBookWidget::unload(void)
 {
-    rc2d_graphics_closeFont(&this->bodyFont);
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->bodyFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void LogBookWidget::publishLogBookRow(const LogBookWidget::LogBookRow& row)

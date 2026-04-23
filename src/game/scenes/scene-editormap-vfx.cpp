@@ -1,6 +1,7 @@
 #if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-vfx.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <array>
@@ -2089,7 +2090,7 @@ void EditorMapVfxScene::unloadImportedSfx(void)
 {
     for (ImportedSfx& sfx : this->importedSfx)
     {
-        rc2d_graphics_freeImage(&sfx.image);
+        ReleaseStorageImage(&sfx.image);
         sfx.frames.clear();
     }
     this->importedSfx.clear();
@@ -2104,7 +2105,7 @@ void EditorMapVfxScene::unloadImportedLooseFolders(void)
     {
         for (ImportedLooseSprite& sprite : folder.sprites)
         {
-            rc2d_graphics_freeImage(&sprite.image);
+            ReleaseStorageImage(&sprite.image);
         }
         folder.sprites.clear();
     }
@@ -2115,27 +2116,20 @@ void EditorMapVfxScene::loadLooseReferencePreviewAssets(void)
 {
     this->unloadLooseReferencePreviewAssets();
 
-    this->looseReferenceGuildIslandImage = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceGuildIslandImage = LoadStorageImage(
         "assets/images/scene-editormap-vfx/iles-guild/guild_island.png",
         RC2D_STORAGE_TITLE);
-    if (this->looseReferenceGuildIslandImage.sdl_texture == nullptr)
-    {
-        // Compatibilite avec anciens assets.
-        this->looseReferenceGuildIslandImage = rc2d_graphics_loadImageFromStorage(
-            "assets/images/scene-editormap-vfx/iles-guild/test.png",
-            RC2D_STORAGE_TITLE);
-    }
 
-    this->looseReferenceTowerLevel1Image = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceTowerLevel1Image = LoadStorageImage(
         "assets/images/scene-editormap-vfx/towers/tower_lvl1.png",
         RC2D_STORAGE_TITLE);
-    this->looseReferenceTowerLevel2Image = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceTowerLevel2Image = LoadStorageImage(
         "assets/images/scene-editormap-vfx/towers/tower_lvl2.png",
         RC2D_STORAGE_TITLE);
-    this->looseReferenceTowerLevel3Image = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceTowerLevel3Image = LoadStorageImage(
         "assets/images/scene-editormap-vfx/towers/tower_lvl3.png",
         RC2D_STORAGE_TITLE);
-    this->looseReferenceTowerLevel4Image = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceTowerLevel4Image = LoadStorageImage(
         "assets/images/scene-editormap-vfx/towers/tower_lvl4.png",
         RC2D_STORAGE_TITLE);
 
@@ -2144,10 +2138,10 @@ void EditorMapVfxScene::loadLooseReferencePreviewAssets(void)
     const bool tower2Loaded = (this->looseReferenceTowerLevel2Image.sdl_texture != nullptr);
     const bool tower3Loaded = (this->looseReferenceTowerLevel3Image.sdl_texture != nullptr);
     const bool tower4Loaded = (this->looseReferenceTowerLevel4Image.sdl_texture != nullptr);
-    this->looseReferenceShipLeftImage = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceShipLeftImage = LoadStorageImage(
         "assets/images/scene-editormap-vfx/ships/test1/1.png",
         RC2D_STORAGE_TITLE);
-    this->looseReferenceShipRightImage = rc2d_graphics_loadImageFromStorage(
+    this->looseReferenceShipRightImage = LoadStorageImage(
         "assets/images/scene-editormap-vfx/ships/test2/1.png",
         RC2D_STORAGE_TITLE);
 
@@ -2170,13 +2164,13 @@ void EditorMapVfxScene::loadLooseReferencePreviewAssets(void)
 
 void EditorMapVfxScene::unloadLooseReferencePreviewAssets(void)
 {
-    rc2d_graphics_freeImage(&this->looseReferenceShipLeftImage);
-    rc2d_graphics_freeImage(&this->looseReferenceShipRightImage);
-    rc2d_graphics_freeImage(&this->looseReferenceGuildIslandImage);
-    rc2d_graphics_freeImage(&this->looseReferenceTowerLevel1Image);
-    rc2d_graphics_freeImage(&this->looseReferenceTowerLevel2Image);
-    rc2d_graphics_freeImage(&this->looseReferenceTowerLevel3Image);
-    rc2d_graphics_freeImage(&this->looseReferenceTowerLevel4Image);
+    ResetStorageImageRef(&this->looseReferenceShipLeftImage);
+    ResetStorageImageRef(&this->looseReferenceShipRightImage);
+    ResetStorageImageRef(&this->looseReferenceGuildIslandImage);
+    ResetStorageImageRef(&this->looseReferenceTowerLevel1Image);
+    ResetStorageImageRef(&this->looseReferenceTowerLevel2Image);
+    ResetStorageImageRef(&this->looseReferenceTowerLevel3Image);
+    ResetStorageImageRef(&this->looseReferenceTowerLevel4Image);
     this->looseReferencePreviewLoaded = false;
 }
 
@@ -8851,7 +8845,7 @@ bool EditorMapVfxScene::importSfxFromAbsolutePath(const char* absolutePath)
         return false;
     }
 
-    RC2D_Image image = rc2d_graphics_loadImageFromStorage(storageImagePath.c_str(), RC2D_STORAGE_USER);
+    RC2D_Image image = LoadStorageImage(storageImagePath.c_str(), RC2D_STORAGE_USER);
     if (image.sdl_texture == nullptr)
     {
         this->statusMessage = "Echec chargement image VFX.";
@@ -9086,7 +9080,7 @@ void EditorMapVfxScene::refreshLooseFolderUnionCrop(ImportedLooseFolder& folder)
     for (size_t o = 0; o < orderedSpriteIndices.size(); ++o)
     {
         const ImportedLooseSprite& sprite = folder.sprites[orderedSpriteIndices[o]];
-        RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
+        RC2D_ImageData src = LoadStorageImageData(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
         if (src.sdl_surface == nullptr)
         {
             destroySurfaceVector(sourceSurfaces);
@@ -9094,7 +9088,7 @@ void EditorMapVfxScene::refreshLooseFolderUnionCrop(ImportedLooseFolder& folder)
         }
         sourceSurfaces.push_back(src.sdl_surface);
         src.sdl_surface = nullptr;
-        rc2d_graphics_freeImageData(&src);
+        ReleaseStorageImageData(&src);
     }
 
     int cropX = 0;
@@ -9218,7 +9212,7 @@ bool EditorMapVfxScene::importLooseFolderFromAbsolutePath(const char* absolutePa
             continue;
         }
 
-        RC2D_Image image = rc2d_graphics_loadImageFromStorage(storagePath.c_str(), RC2D_STORAGE_USER);
+        RC2D_Image image = LoadStorageImage(storagePath.c_str(), RC2D_STORAGE_USER);
         if (image.sdl_texture == nullptr)
         {
             continue;
@@ -9340,7 +9334,7 @@ bool EditorMapVfxScene::reloadImportedLooseFolderFromAbsolutePath(const char* ab
     ImportedLooseFolder& folder = this->importedLooseFolders[static_cast<size_t>(foundIndex)];
     for (ImportedLooseSprite& sprite : folder.sprites)
     {
-        rc2d_graphics_freeImage(&sprite.image);
+        ReleaseStorageImage(&sprite.image);
     }
     folder.sprites.clear();
     folder.looseUnionCropReady = false;
@@ -9385,7 +9379,7 @@ bool EditorMapVfxScene::reloadImportedLooseFolderFromAbsolutePath(const char* ab
             continue;
         }
 
-        RC2D_Image image = rc2d_graphics_loadImageFromStorage(storagePath.c_str(), RC2D_STORAGE_USER);
+        RC2D_Image image = LoadStorageImage(storagePath.c_str(), RC2D_STORAGE_USER);
         if (image.sdl_texture == nullptr)
         {
             continue;
@@ -13179,7 +13173,7 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
     {
         const ImportedLooseSprite& sprite =
             folder.sprites[orderedSpriteIndices[orderedIndex]];
-        RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
+        RC2D_ImageData src = LoadStorageImageData(sprite.storagePath.c_str(), RC2D_STORAGE_USER);
         if (src.sdl_surface == nullptr)
         {
             destroySurfaceVector(sourceSurfaces);
@@ -13189,7 +13183,7 @@ bool EditorMapVfxScene::exportLooseFolderScaledToFolder(
         }
         sourceSurfaces.push_back(src.sdl_surface);
         src.sdl_surface = nullptr;
-        rc2d_graphics_freeImageData(&src);
+        ReleaseStorageImageData(&src);
     }
 
     int cropX = 0;
@@ -18718,7 +18712,7 @@ void EditorMapVfxScene::unload(void)
     this->invalidVfxFolders.clear();
 
     this->scrollBarOverlay.unload();
-    rc2d_graphics_closeFont(&this->overlayFont);
+    ResetStorageFontRef(&this->overlayFont);
     this->backgroundWidget.unload();
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapVfxScene: unloaded");
@@ -18732,7 +18726,7 @@ void EditorMapVfxScene::load(void)
 
     this->backgroundWidget.load();
 
-    this->overlayFont = rc2d_graphics_openFontFromStorage(
+    this->overlayFont = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);

@@ -1,4 +1,5 @@
 #include "game/ui/hud/top-bar-menu-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 
@@ -13,7 +14,7 @@ TopBarMenuWidget::~TopBarMenuWidget(void)
 
 void TopBarMenuWidget::load(void)
 {
-    this->topBarMenuUiImage = rc2d_graphics_loadImageFromStorage(
+    this->topBarMenuUiImage = LoadStorageImage(
         "assets/images/ui-scene-game/top-bar-menu.png",
         RC2D_STORAGE_TITLE);
     if (this->topBarMenuUiImage.sdl_texture == nullptr)
@@ -24,7 +25,7 @@ void TopBarMenuWidget::load(void)
 
 void TopBarMenuWidget::unload(void)
 {
-    rc2d_graphics_freeImage(&this->topBarMenuUiImage);
+    ResetStorageImageRef(&this->topBarMenuUiImage);
 }
 
 void TopBarMenuWidget::draw(void)

@@ -1,4 +1,5 @@
 #include "game/shaders/fog-of-war-shader.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 
@@ -64,10 +65,10 @@ void FogOfWarShader::unload(void)
     }
 
     // Libère la texture masque.
-    rc2d_graphics_freeImage(&this->fogMaskTexture);
+    ResetStorageImageRef(&this->fogMaskTexture);
 
     // Libère la texture noise.
-    rc2d_graphics_freeImage(&this->fogNoiseTexture);
+    ResetStorageImageRef(&this->fogNoiseTexture);
 }
 
 void FogOfWarShader::resetUniforms(void)
@@ -254,7 +255,7 @@ bool FogOfWarShader::load(void)
     this->resetUniforms();
 
     // Charge la texture masque du fog.
-    this->fogMaskTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
+    this->fogMaskTexture = LoadStorageImage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du masque.
     if (this->fogMaskTexture.sdl_texture == nullptr)
@@ -277,7 +278,7 @@ bool FogOfWarShader::load(void)
     }
 
     // Charge la texture noise secondaire.
-    this->fogNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
+    this->fogNoiseTexture = LoadStorageImage("assets/images/shaders/fogofwar/cloud-noise.png", RC2D_STORAGE_TITLE);
 
     // Vérifie la disponibilité du noise.
     if (this->fogNoiseTexture.sdl_texture == nullptr)

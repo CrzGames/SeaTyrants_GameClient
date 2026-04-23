@@ -1,6 +1,7 @@
 #if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-crashtest.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <array>
@@ -1163,7 +1164,7 @@ void EditorMapCrashTestScene::unload(void)
     this->scrollBarOverlay.unload();
     this->renderShipPrototype.unloadSprites();
     this->simPlayers.clear();
-    rc2d_graphics_closeFont(&this->overlayFont);
+    ResetStorageFontRef(&this->overlayFont);
     this->backgroundWidget.unload();
 }
 
@@ -1172,7 +1173,7 @@ void EditorMapCrashTestScene::load(void)
     this->resetSceneState();
 
     this->backgroundWidget.load();
-    this->overlayFont = rc2d_graphics_openFontFromStorage(
+    this->overlayFont = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);

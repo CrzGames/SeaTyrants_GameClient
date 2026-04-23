@@ -1,4 +1,5 @@
 #include "game/ui/overlay/scroll-bar-overlay.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <cstdio>
 #include <algorithm>
@@ -25,7 +26,7 @@ ScrollBarOverlay::~ScrollBarOverlay(void)
 
 void ScrollBarOverlay::load(void)
 {
-    this->font = rc2d_graphics_openFontFromStorage(
+    this->font = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);
@@ -33,7 +34,7 @@ void ScrollBarOverlay::load(void)
 
 void ScrollBarOverlay::unload(void)
 {
-    rc2d_graphics_closeFont(&this->font);
+    ResetStorageFontRef(&this->font);
 }
 
 void ScrollBarOverlay::getColumnLabel(int index, char* out, int outSize) const

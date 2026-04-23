@@ -1,4 +1,5 @@
 #include "game/ui/hud/params-minimap-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 
@@ -182,9 +183,9 @@ ParamsMinimapWidget::~ParamsMinimapWidget(void)
 void ParamsMinimapWidget::load(void)
 {
     // Police titre identique au style des autres fenetres HUD.
-    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Police des lignes de menu (plus petite que le titre).
-    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
 
     // Rectangle de base calcule depuis l'ecran.
     const SDL_FRect baseRect = getParamsMinimapRectFromGameScreen();
@@ -205,9 +206,9 @@ void ParamsMinimapWidget::load(void)
 void ParamsMinimapWidget::unload(void)
 {
     // Liberation police de texte secondaire.
-    rc2d_graphics_closeFont(&this->bodyFont);
+    ResetStorageFontRef(&this->bodyFont);
     // Liberation police de titre.
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void ParamsMinimapWidget::update(double dt)

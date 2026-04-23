@@ -1,4 +1,5 @@
 #include "game/shaders/vision-cloud-shader.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 
@@ -47,7 +48,7 @@ void VisionCloudShader::unload(void)
     }
 
     // Libere la texture de noise.
-    rc2d_graphics_freeImage(&this->cloudNoiseTexture);
+    ResetStorageImageRef(&this->cloudNoiseTexture);
 }
 
 void VisionCloudShader::resetUniforms(void)
@@ -122,7 +123,7 @@ bool VisionCloudShader::load(void)
     this->resetUniforms();
 
     // Charge la texture de nuages (noise).
-    this->cloudNoiseTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/visionclouds/cloud-group-noise.png", RC2D_STORAGE_TITLE);
+    this->cloudNoiseTexture = LoadStorageImage("assets/images/shaders/visionclouds/cloud-group-noise.png", RC2D_STORAGE_TITLE);
     if (this->cloudNoiseTexture.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "VisionCloudShader: texture absente (assets/images/shaders/visionclouds/cloud-group-noise.png)");

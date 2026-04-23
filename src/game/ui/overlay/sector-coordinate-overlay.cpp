@@ -1,4 +1,5 @@
 #include "game/ui/overlay/sector-coordinate-overlay.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <cstdio>
 
@@ -23,7 +24,7 @@ void SectorCoordinateOverlay::load(void)
     // conserver une identite visuelle uniforme dans toute la scene.
     // Taille 18: legible dans la barre haute sans trop occuper d'espace.
     // -------------------------------------------------------------------------
-    this->font = rc2d_graphics_openFontFromStorage(
+    this->font = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         18.0f);
@@ -37,7 +38,7 @@ void SectorCoordinateOverlay::unload(void)
     // Le close est centralise ici pour garder une responsabilite claire:
     // ce composant charge -> ce composant decharge.
     // -------------------------------------------------------------------------
-    rc2d_graphics_closeFont(&this->font);
+    ResetStorageFontRef(&this->font);
 }
 
 void SectorCoordinateOverlay::getRowLabel(int index, char* out, int outSize) const

@@ -1,4 +1,5 @@
 #include "game/vfx/vfx.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1860,7 +1861,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         return false;
     }
 
-    RC2D_Image loadedImage = rc2d_graphics_loadImageFromStorage(parsedSpritesheetImagePath.c_str(), RC2D_STORAGE_TITLE);
+    RC2D_Image loadedImage = LoadStorageImage(parsedSpritesheetImagePath.c_str(), RC2D_STORAGE_TITLE);
     if (loadedImage.sdl_texture == nullptr)
     {
         cJSON_Delete(root);
@@ -1920,7 +1921,7 @@ void VFX::unload(void)
     // 1) Liberer la texture si elle existe.
     if (this->spritesheetImage.sdl_texture != nullptr)
     {
-        rc2d_graphics_freeImage(&this->spritesheetImage);
+        ResetStorageImageRef(&this->spritesheetImage);
     }
 
     // 2) Reset data runtime.

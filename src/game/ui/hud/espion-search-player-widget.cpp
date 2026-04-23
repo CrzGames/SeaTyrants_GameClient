@@ -1,4 +1,5 @@
 #include "game/ui/hud/espion-search-player-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 #include <algorithm>
@@ -257,8 +258,8 @@ EspionSearchPlayerWidget::~EspionSearchPlayerWidget(void)
 void EspionSearchPlayerWidget::load(void)
 {
     // Meme rendu de titre que la fenetre Chat.
-    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
-    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     const SDL_FRect baseRect = getEspionRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
     this->widgetOffsetY = 0.0f;
@@ -282,8 +283,8 @@ void EspionSearchPlayerWidget::load(void)
 
 void EspionSearchPlayerWidget::unload(void)
 {
-    rc2d_graphics_closeFont(&this->bodyFont);
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->bodyFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void EspionSearchPlayerWidget::update(double dt)

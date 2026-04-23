@@ -6,6 +6,7 @@
 #include "core/threading/queues/simulation_to_network_outgoing.h"
 #include "core/threading/queues/simulation_to_websocket.h"
 #include "core/threading/queues/websocket_to_simulation.h"
+#include "game/assets/title-asset-cache.h"
 #include "game/camera.h"
 #include "game/game_screen.h"
 #include "game/map/map.h"
@@ -98,3 +99,9 @@ FogOfWarShader& GetFogOfWarShader();
  * @return Reference mutable vers l'instance globale.
  */
 VisionCloudShader& GetVisionCloudShader();
+
+/**
+ * @brief Acces global au cache central des assets TITLE.
+ * @return Reference mutable vers le store de cache.
+ */
+TitleAssetCache& GetTitleAssetCache();

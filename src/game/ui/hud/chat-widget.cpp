@@ -1,4 +1,5 @@
 #include "game/ui/hud/chat-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <cctype>
@@ -485,11 +486,11 @@ ChatWidget::~ChatWidget(void)
 void ChatWidget::load(void)
 {
     // 1) Chargement des polices.
-    this->titleFont = rc2d_graphics_openFontFromStorage(
+    this->titleFont = OpenStorageFont(
         "assets/fonts/SegoeUI-Semibold.ttf",
         RC2D_STORAGE_TITLE,
         20.0f);
-    this->bodyFont = rc2d_graphics_openFontFromStorage(
+    this->bodyFont = OpenStorageFont(
         "assets/fonts/SegoeUI-Semibold.ttf",
         RC2D_STORAGE_TITLE,
         14.0f);
@@ -533,8 +534,8 @@ void ChatWidget::load(void)
 void ChatWidget::unload(void)
 {
     // Libere les ressources TTF.
-    rc2d_graphics_closeFont(&this->bodyFont);
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->bodyFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void ChatWidget::publishChatMessage(ChatWidget::ChatMessageAuthor author, const std::string& message, const std::string& playerName)

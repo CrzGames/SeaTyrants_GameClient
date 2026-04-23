@@ -4,6 +4,7 @@
 #include "game/render/world-render-clip.h"
 #include "crypto/kx.h"
 #include "game/scenes/scene-game.h"
+#include "game/scenes/scene-loading.h"
 #include "game/scenes/scene-manager.h"
 #include "game/scenes/scene-menu.h"
 #include "game/scenes/scene-splashscreen.h"
@@ -29,6 +30,7 @@ SceneManager sceneManager;
 void rc2d_unload(void)
 {
     sceneManager.unload();
+    GetTitleAssetCache().clear();
     WorldRenderClip::destroy();
 }
 
@@ -60,8 +62,7 @@ void rc2d_load(void)
         return;
     }
 
-    // Crée les scènes du jeu et affiche la scène de splashscreen.
-    //sceneManager.addScene("menu", new MenuScene());
+    // Crée les scènes du jeu et affiche la scène de loading.
 #if GAME_ENV_DEV
     sceneManager.addScene("editormap-creatormap", new EditorMapCreateMapScene());
     sceneManager.addScene("editormap-shipdownscale", new EditorMapShipDownscaleScene());
@@ -69,9 +70,11 @@ void rc2d_load(void)
     sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
     sceneManager.addScene("editormap-crashtest", new EditorMapCrashTestScene());
 #endif
-    //sceneManager.addScene("splashscreen", new SplashScreenScene());
+    sceneManager.addScene("loading", new LoadingScene("splashscreen"));
+    sceneManager.addScene("splashscreen", new SplashScreenScene());
+    sceneManager.addScene("menu", new MenuScene());
     sceneManager.addScene("game", new GameScene());
-    sceneManager.changeScene("editormap-shipdownscale");
+    sceneManager.changeScene("loading");
 
     // Mettre en plein écran.
     //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
@@ -184,15 +187,21 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
 {
 #if GAME_ENV_DEV
     // Raccourcis globaux DEV pour naviguer entre gameplay et scenes editeur.
-    if (!isrepeat && scancode == SDL_SCANCODE_F9)
+    if (!isrepeat && scancode == SDL_SCANCODE_F1)
     {
-        sceneManager.changeScene("editormap-creatormap");
+        sceneManager.changeScene("game");
         return;
     }
 
     if (!isrepeat && scancode == SDL_SCANCODE_F8)
     {
         sceneManager.changeScene("editormap-shipdownscale");
+        return;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_F9)
+    {
+        sceneManager.changeScene("editormap-creatormap");
         return;
     }
 

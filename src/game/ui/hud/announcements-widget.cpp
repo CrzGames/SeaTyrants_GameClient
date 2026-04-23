@@ -1,4 +1,5 @@
 #include "game/ui/hud/announcements-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 
@@ -354,9 +355,9 @@ AnnouncementsWidget::~AnnouncementsWidget(void)
 void AnnouncementsWidget::load(void)
 {
     // Charge la police du titre (meme style visuel que les autres fenetres HUD).
-    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Charge la police du corps de texte (annonces).
-    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     // Recupere la position de base de la fenetre dans l'ecran de jeu.
     const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     // Reinitialise les offsets de deplacement utilisateur.
@@ -388,9 +389,9 @@ void AnnouncementsWidget::load(void)
 void AnnouncementsWidget::unload(void)
 {
     // Libere la police du contenu.
-    rc2d_graphics_closeFont(&this->bodyFont);
+    ResetStorageFontRef(&this->bodyFont);
     // Libere la police du titre.
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void AnnouncementsWidget::update(double dt)

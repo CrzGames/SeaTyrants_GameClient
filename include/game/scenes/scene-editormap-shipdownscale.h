@@ -4,7 +4,10 @@
 
 #include <RC2D/RC2D.h>
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -16,7 +19,7 @@
 #include "game/ui/overlay/scroll-bar-overlay.h"
 
 /**
- * @class EditorMapCreateMapScene
+ * @class EditorMapShipDownscaleScene
  * @brief Scene d'editeur de map orientee creation.
  *
  * Cette scene permet de:
@@ -27,7 +30,7 @@
  * - changer la couleur ocean,
  * - exporter une map JSON.
  */
-class EditorMapCreateMapScene : public Scene {
+class EditorMapShipDownscaleScene : public Scene {
 private:
     /**
      * @enum EditorMode
@@ -60,6 +63,7 @@ private:
         std::string sourcePath; /**< Chemin source absolu choisi a l'import. */
         std::string storagePath; /**< Chemin en storage user pour la session. */
         bool useUserStorage; /**< true si storagePath pointe vers RC2D_STORAGE_USER. */
+        bool loadFailed; /**< true si un chargement lazy a deja echoue. */
         RC2D_Image image; /**< Texture chargee par RC2D. */
         RC2D_ImageData imageData; /**< Surface source chargee (utile pour la minimap stylisee). */
         float widthPx; /**< Largeur native de l'image en pixels. */
@@ -75,6 +79,48 @@ private:
     struct ImportedShip {
         std::string displayName; /**< Nom affiche dans la liste navires. */
         std::string folderAbsolutePath; /**< Chemin absolu vers le dossier contenant 1.png..8.png. */
+        std::string relativeExportPath; /**< Chemin relatif conserve pour l'export global. */
+        std::string previewStorageFolderPath; /**< Dossier storage TITLE si ce navire vient des assets du jeu. */
+        bool previewUseTitleStorage; /**< true si les previews peuvent etre empruntees depuis le cache TITLE. */
+        int scalePercent; /**< Echelle propre au navire en % [5..100]. */
+        std::array<RC2D_Image, 8> previewImages; /**< Textures preview chargees (1.png..8.png). */
+        std::array<RC2D_ImageData, 8> previewImageData; /**< Surfaces preview chargees (1.png..8.png). */
+        std::array<bool, 8> previewSpriteLoaded; /**< true si le sprite correspondant est charge. */
+        float previewWidthPx; /**< Largeur native max preview en pixels (pour layout). */
+        float previewHeightPx; /**< Hauteur native max preview en pixels (pour layout). */
+        int previewSpriteIndex; /**< Index sprite actuellement charge [1..8]. */
+        float anchorTileX; /**< Position ancree X sur la map (layout auto). */
+        float anchorTileY; /**< Position ancree Y sur la map (layout auto). */
+        float layoutScreenX; /**< Position ecran X en mode OFF (grille spritesheet). */
+        float layoutScreenY; /**< Position ecran Y en mode OFF (grille spritesheet). */
+        float simulationVelocityTileX; /**< Vitesse simulation X en tuiles/s. */
+        float simulationVelocityTileY; /**< Vitesse simulation Y en tuiles/s. */
+        std::unique_ptr<Ship> simulationShip; /**< Runtime Ship utilise en mode simulation ON. */
+        int simulationNextDirectionIndex; /**< Direction reseau suivante [0..7] (style crashtest). */
+        double simulationPauseBeforeNextCommandSec; /**< Pause idle avant prochain move reseau. */
+        uint32_t simulationCommandRngState; /**< RNG local pour fallback cibles reseau. */
+        double simulationCommandCooldownSec; /**< Cooldown reseau avant prochain move. */
+    };
+    /**
+     * @struct PendingShipImport
+     * @brief Item de batch pour importer les dossiers navire progressivement.
+     */
+    struct PendingShipImport {
+        std::string displayName; /**< Nom a afficher dans la liste navires. */
+        std::string folderAbsolutePath; /**< Dossier absolu source du navire. */
+        std::string relativeExportPath; /**< Chemin relatif a reproduire a l'export. */
+        std::string previewStorageFolderPath; /**< Dossier storage TITLE si le dossier source est dans assets/images/. */
+        bool previewUseTitleStorage; /**< true si les previews doivent lire directement le cache TITLE. */
+    };
+    /**
+     * @struct SpawnedShipInstance
+     * @brief Instance de navire placee manuellement sur la map (simulation OFF).
+     */
+    struct SpawnedShipInstance {
+        int importedShipIndex; /**< Index du navire source dans importedShips. */
+        float tileX; /**< Position map en tuiles (X). */
+        float tileY; /**< Position map en tuiles (Y). */
+        int scalePercent; /**< Scale capturee a la pose [%]. */
     };
     /**
      * @struct PlacedAsset
@@ -142,14 +188,12 @@ private:
     bool showBlockedTiles; /**< Affichage visuel des tuiles bloquees ON/OFF. */
     bool showBottomRightLists; /**< Affichage des listes navires/assets. */
     bool collisionPaintBlocks; /**< true=mode peinture collision, false=mode suppression collision. */
-    std::string mapNameInput; /**< Nom map saisi dans l'input. */
-    bool mapNameInputFocused; /**< true si l'input nom map a le focus clavier. */
     int blockedBrushRadiusTiles; /**< Rayon de paint collision (0 = 1 tuile). */
     bool assetTransparencyEnabled; /**< true si l'opacite globale assets est active. */
     int assetOpacityPercent; /**< Opacite globale assets en pourcentage [10..100]. */
     int selectedBlockedColorIndex; /**< Index couleur des tuiles bloquees. */
     int selectedHotspotColorIndex; /**< Index couleur des hotspots tours. */
-    int shipScalePercent; /**< Echelle navire test en % [10..100]. */
+    int shipScalePercent; /**< Echelle navire selectionne en % [5..100]. */
 
     bool hoveredTileValid; /**< true si la souris survole une tuile map. */
     SDL_Point hoveredTile; /**< Tuile actuellement survolee. */
@@ -175,6 +219,30 @@ private:
     size_t importBatchNextIndex; /**< Index du prochain fichier a importer dans le batch. */
     int importBatchImportedCount; /**< Nombre de fichiers importes avec succes dans le batch courant. */
     int importBatchFailedCount; /**< Nombre de fichiers en echec dans le batch courant. */
+    bool shipImportBatchActive; /**< true si le batch de dossiers navires est actif. */
+    std::vector<PendingShipImport> shipImportBatchFolders; /**< Queue navires a importer progressivement. */
+    size_t shipImportBatchNextIndex; /**< Index du prochain dossier navire a importer. */
+    int shipImportBatchImportedCount; /**< Nombre de navires importes dans le batch. */
+    int shipImportBatchFailedCount; /**< Nombre de navires en echec dans le batch. */
+    std::vector<SpawnedShipInstance> spawnedShips; /**< Navires poses manuellement (mode simulation OFF). */
+    unsigned int importedShipPreviewCounter; /**< Compteur de previews navire en storage user. */
+    bool importedShipsLayoutDirty; /**< true si le layout auto des navires doit etre recalcule. */
+    bool shipsSimulationEnabled; /**< true si les navires se baladent en simulation. */
+    bool shipSpawnPlacementEnabled; /**< true si clic gauche map = spawn navire selectionne. */
+    bool shipsLowHpEnabled; /**< true si l'affichage navires utilise les sprites low HP. */
+    double shipsPreviewAnimationAccumulator; /**< Accumulateur animation preview navires. */
+    double shipsPreviewAnimationIntervalSeconds; /**< Periode animation preview navires. */
+    int shipsPreviewFrameOffset; /**< Frame partagee [0..7] appliquee a tous les navires. */
+    std::size_t shipsSimulationRetargetCursor; /**< Curseur round-robin retarget simulation. */
+    double shipsSimulationRetargetAccumulatorSec; /**< Tick fixe pour budget A* simulation. */
+    std::size_t deferredShipPreviewLoadCursor; /**< Curseur round-robin de chargement preview lazy. */
+    std::size_t deferredAssetLoadCursor; /**< Curseur round-robin de chargement assets lazy. */
+    bool initialShipsLoadingScreenActive; /**< true si l'ecran de chargement initial navires est actif. */
+    int initialShipsLoadingTotal; /**< Nombre total de navires a charger au boot scene. */
+    int initialShipsLoadingProcessed; /**< Nombre de navires deja traites pour la progression boot. */
+    int shipImportBatchFramesUntilNextShip; /**< Throttle boot: nombre de frames a attendre avant le prochain navire. */
+    bool shipScaleInputActive; /**< true si le champ % downscale est en edition clavier. */
+    std::string shipScaleInputBuffer; /**< Buffer texte du champ % downscale. */
     bool assetListScrollDragActive; /**< true si le drag de la scrollbar assets est actif. */
     float assetListScrollDragGrabOffsetY; /**< Offset vertical curseur->thumb pour un drag precis. */
     bool shipListScrollDragActive; /**< true si le drag de la scrollbar navires est actif. */
@@ -196,42 +264,26 @@ private:
     mutable std::mutex pendingMapImportMutex; /**< Mutex callback import map -> thread scene. */
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
-    SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
-    SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRES". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
     SDL_FRect buttonUndoRect; /**< Bouton "Annuler". */
     SDL_FRect buttonRedoRect; /**< Bouton "Refaire". */
-    SDL_FRect buttonToolBlockRect; /**< Bouton outil collision. */
-    SDL_FRect buttonToolUnblockRect; /**< Bouton outil suppression collision. */
     SDL_FRect buttonToolPlaceRect; /**< Bouton outil pose asset. */
     SDL_FRect buttonToolRemoveRect; /**< Bouton outil suppression asset. */
-    SDL_FRect buttonToolShipRect; /**< Bouton outil spawn navire. */
-    SDL_FRect buttonToolShipControlRect; /**< Bouton outil controle navire. */
-    SDL_FRect buttonToolHotspotRect; /**< Bouton outil hotspots tours. */
     SDL_FRect buttonAssetPrevRect; /**< Bouton asset precedent. */
     SDL_FRect buttonAssetNextRect; /**< Bouton asset suivant. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
     SDL_FRect buttonOceanNextRect; /**< Bouton ocean suivant. */
     SDL_FRect buttonGridRect; /**< Bouton toggle lignes grille. */
-    SDL_FRect buttonBlockedTilesRect; /**< Bouton toggle affichage des tiles bloquees. */
     SDL_FRect buttonCenterRect; /**< Bouton recentrage camera map. */
-    SDL_FRect buttonCenterShipRect; /**< Bouton recentrage/suivi navire test. */
     SDL_FRect buttonZoomOutRect; /**< Bouton zoom -. */
     SDL_FRect buttonZoomInRect; /**< Bouton zoom +. */
-    SDL_FRect buttonBlockedBrushMinusRect; /**< Bouton radius blocked -. */
-    SDL_FRect buttonBlockedBrushPlusRect; /**< Bouton radius blocked +. */
-    SDL_FRect buttonBlockedColorPrevRect; /**< Bouton couleur blocked -. */
-    SDL_FRect buttonBlockedColorNextRect; /**< Bouton couleur blocked +. */
-    SDL_FRect buttonHotspotColorPrevRect; /**< Bouton couleur hotspot -. */
-    SDL_FRect buttonHotspotColorNextRect; /**< Bouton couleur hotspot +. */
-    SDL_FRect buttonAssetOpacityToggleRect; /**< Bouton toggle opacite globale assets. */
-    SDL_FRect buttonAssetOpacityMinusRect; /**< Bouton opacite assets -. */
-    SDL_FRect buttonAssetOpacityPlusRect; /**< Bouton opacite assets +. */
     SDL_FRect buttonShipScaleMinusRect; /**< Bouton scale navire -. */
     SDL_FRect buttonShipScalePlusRect; /**< Bouton scale navire +. */
-    SDL_FRect buttonShipReexportRect; /**< Bouton reexport navire scale. */
+    SDL_FRect buttonShipSpawnRect; /**< Bouton ON/OFF spawn navire sur clic gauche map. */
+    SDL_FRect buttonSimulationRect; /**< Bouton ON/OFF simulation navires. */
+    SDL_FRect buttonShipsHpRect; /**< Bouton toggle FULL HP/BAS HP navires. */
     SDL_FRect buttonListsVisibilityRect; /**< Bouton ON/OFF affichage des 3 listes. */
-    SDL_FRect mapNameInputRect; /**< Champ de saisie nom map. */
+    SDL_FRect shipScaleInputRect; /**< Champ de saisie % downscale navire. */
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
     SDL_FRect shipListRect; /**< Panneau liste navires (meme format que assets). */
     SDL_FRect miniMapRect; /**< Minimap editeur (haut droite). */
@@ -239,12 +291,14 @@ private:
     float miniMapDragOffsetX; /**< Offset drag minimap en X. */
     float miniMapDragOffsetY; /**< Offset drag minimap en Y. */
 
-    static EditorMapCreateMapScene* activeInstance; /**< Instance active pour callbacks async de file dialog. */
+    static EditorMapShipDownscaleScene* activeInstance; /**< Instance active pour callbacks async de file dialog. */
 
     /** @brief Reinitialise l'etat runtime de l'editeur. */
     void resetEditorState(void);
     /** @brief Libere toutes les textures d'assets importes. */
     void unloadImportedAssets(void);
+    /** @brief Libere toutes les previews de navires importes. */
+    void unloadImportedShips(void);
     /** @brief Cree les dossiers user requis pour les imports. */
     void ensureUserStorageFolders(void);
     /** @brief Applique la couleur ocean selectionnee sur le shader ocean. */
@@ -333,6 +387,10 @@ private:
      *  @return true si import ok.
      */
     bool importAssetFromAbsolutePath(const char* absolutePath);
+    /** @brief Charge a la demande un asset importe (texture + surface + alpha mask). */
+    bool ensureImportedAssetLoaded(ImportedAsset* asset);
+    /** @brief Charge progressivement les assets importes manquants pour eviter les freeze UI. */
+    void processDeferredAssetLoads(void);
     /** @brief Traite les imports publies par le callback de file dialog. */
     void processPendingImportRequests(void);
     /** @brief Exporte la map JSON vers un chemin absolu.
@@ -364,6 +422,10 @@ private:
     void openImportShipFolderDialog(void);
     /** @brief Importe recursivement des dossiers navires depuis un dossier racine. */
     bool importShipsFromRootFolderAbsolutePath(const char* rootFolderAbsolutePath);
+    /** @brief Traite le batch d'import navires de facon progressive. */
+    void processShipImportBatch(void);
+    /** @brief Importe un navire depuis un item de batch. */
+    bool importSingleShipFromBatch(const PendingShipImport& pendingShip);
     /** @brief Ouvre le dialogue d'export map (selection dossier). */
     void openExportMapDialog(void);
     /** @brief Traite l'import map publie par callback async. */
@@ -386,10 +448,46 @@ private:
     void setShipScalePercent(int value);
     /** @brief Reexporte les 8 sprites navire avec scale. */
     bool reexportLoadedShipScaled(int scalePercent);
-    /** @brief Gère la saisie clavier nom map.
-     *  @return true si la touche est consommee.
-     */
-    bool handleMapNameInputKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    /** @brief Exporte tous les dossiers navires avec scale par navire. */
+    bool exportAllShipsScaledToFolder(const char* absoluteFolderPath);
+    /** @brief Copie tous les fichiers d'un dossier navire vers un dossier destination. */
+    bool copyShipFolderBaseFiles(const char* sourceFolderAbsolutePath, const char* destinationFolderAbsolutePath) const;
+    /** @brief Ecrit les sprites 1..8 downscalees d'un navire dans un dossier destination. */
+    bool exportScaledShipSpritesToFolder(const ImportedShip& ship, const char* destinationFolderAbsolutePath) const;
+    /** @brief Charge une preview navire depuis un chemin storage RC2D. */
+    bool loadShipPreviewImageFromStoragePath(
+        ImportedShip* ship,
+        int spriteIndex,
+        const char* storagePath,
+        RC2D_StorageKind storageKind);
+    /** @brief Charge la preview 1.png d'un navire depuis un chemin absolu. */
+    bool loadShipPreviewImageFromAbsolutePath(ImportedShip* ship, int spriteIndex, const char* spriteAbsolutePath);
+    /** @brief Charge a la demande un sprite preview pour un navire importe. */
+    bool ensureImportedShipPreviewSpriteLoaded(ImportedShip* ship, int spriteIndex);
+    /** @brief Charge progressivement les previews navires manquantes pour eviter les freeze UI. */
+    void processDeferredShipPreviewLoads(void);
+    /** @brief Recalcule les positions de tous les navires importes sur la map. */
+    void recomputeImportedShipLayout(void);
+    /** @brief Met a jour les positions des navires lorsque la simulation est active. */
+    void updateImportedShipsSimulation(double dt);
+    /** @brief Active/desactive la simulation de deplacement des navires. */
+    void setShipsSimulationEnabled(bool enabled);
+    /** @brief Active/desactive le mode BAS HP pour tous les navires. */
+    void setShipsLowHpEnabled(bool enabled);
+    /** @brief Recharge les previews navire selon le mode FULL HP/BAS HP courant. */
+    void applyShipsPreviewForCurrentHealthVisual(void);
+    /** @brief Renvoie l'index sprite courant [1..8] pour l'animation OFF en grille. */
+    int computeCurrentShipPreviewSpriteIndex(void) const;
+    /** @brief Met a jour toutes les previews navires pour la frame OFF en grille. */
+    void refreshImportedShipsPreviewForCurrentFrame(bool updateStatusMessageOnFailure);
+    /** @brief Place chaque navire a une position aleatoire et vitesse aleatoire. */
+    void randomizeImportedShipsSimulationState(void);
+    /** @brief Calcule la prochaine cible reseau d'un navire simule (style crashtest). */
+    bool computeNextSimulationTargetTileForImportedShip(ImportedShip* ship, SDL_Point* outTargetTile);
+    /** @brief Envoie un ordre de move reseau simule a un navire (style crashtest). */
+    bool issueNextSimulationMoveForImportedShip(ImportedShip* ship);
+    /** @brief Fait avancer l'animation sprite partagee des navires. */
+    void advanceImportedShipsSpriteAnimation(double dt);
     /** @brief Traite l'import dossier navire publie par callback async. */
     void processPendingShipFolderRequest(void);
     /** @brief Charge un navire test depuis un dossier absolu.
@@ -399,6 +497,23 @@ private:
     bool loadShipFolderFromAbsolutePath(const char* folderAbsolutePath);
     /** @brief Selectionne un navire importe et le charge en navire test. */
     bool selectImportedShipAtIndex(int shipIndex);
+    /** @brief Centre la camera sur un navire importe (simulation ON/OFF). */
+    void centerCameraOnImportedShipIndex(int shipIndex);
+    /** @brief Spawn une instance du navire selectionne sur une tuile map. */
+    void spawnSelectedImportedShipAtTile(int tileX, int tileY);
+    /** @brief Active l'edition clavier du champ % downscale. */
+    void beginShipScaleInputEdit(void);
+    /** @brief Valide l'edition du champ % downscale. */
+    void commitShipScaleInputEdit(void);
+    /** @brief Annule l'edition du champ % downscale. */
+    void cancelShipScaleInputEdit(void);
+    /** @brief Traite une touche quand le champ % downscale est actif. */
+    bool handleShipScaleInputKey(
+        const char* key,
+        SDL_Scancode scancode,
+        SDL_Keycode keycode,
+        SDL_Keymod mod,
+        bool isrepeat);
     /** @brief Place le navire test sur une tuile.
      *  @param tileX Tuile X.
      *  @param tileY Tuile Y.
@@ -421,6 +536,8 @@ private:
     void drawWorldGridAndBlockedTiles(void) const;
     /** @brief Dessine les assets poses et leur preview de pose. */
     void drawPlacedAssets(void) const;
+    /** @brief Dessine tous les navires importes (preview 1.png) sur la map. */
+    void drawImportedShips(void) const;
     /** @brief Dessine le HUD, les boutons et infos editeur. */
     void drawEditorHud(void) const;
     /** @brief Recalcule les rects des boutons/panneaux UI. */
@@ -494,10 +611,10 @@ private:
     static void onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
 
 public:
-    /** @brief Construit la scene editor map create map. */
-    EditorMapCreateMapScene(void);
+    /** @brief Construit la scene editor map ship downscale. */
+    EditorMapShipDownscaleScene(void);
     /** @brief Destructeur de la scene. */
-    ~EditorMapCreateMapScene(void) override;
+    ~EditorMapShipDownscaleScene(void) override;
 
     /** @brief Decharge les ressources de scene. */
     void unload(void) override;
@@ -539,3 +656,4 @@ public:
 };
 
 #endif // GAME_ENV_DEV
+

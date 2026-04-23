@@ -2,6 +2,7 @@
 #if GAME_ENV_DEV
 
 #include "game/scenes/scene-editormap-creatormap.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <array>
@@ -221,6 +222,70 @@ static std::string buildRuntimeAssetPathFromSource(const std::string& sourcePath
     // Fallback defensif si la source ne vient pas du dossier assets du projet.
     const std::string fileName = extractFileName(fallbackName.empty() ? sourcePath : fallbackName);
     return "assets/" + (fileName.empty() ? std::string("unknown.png") : fileName);
+}
+
+static bool tryBuildTitleStoragePathFromAbsolutePath(const std::string& absolutePath, std::string* outStoragePath)
+{
+    if (outStoragePath == nullptr)
+    {
+        return false;
+    }
+
+    outStoragePath->clear();
+    if (absolutePath.empty())
+    {
+        return false;
+    }
+
+    std::error_code rootError;
+    std::filesystem::path assetsImagesRoot = std::filesystem::absolute("assets/images", rootError);
+    if (rootError)
+    {
+        return false;
+    }
+
+    std::error_code absoluteError;
+    std::filesystem::path candidatePath = std::filesystem::absolute(absolutePath, absoluteError);
+    if (absoluteError)
+    {
+        candidatePath = std::filesystem::path(absolutePath);
+    }
+
+    const std::string normalizedRoot = normalizePathSlashes(assetsImagesRoot.string());
+    const std::string normalizedCandidate = normalizePathSlashes(candidatePath.string());
+    if (normalizedRoot.empty() || normalizedCandidate.empty())
+    {
+        return false;
+    }
+
+    std::string loweredRoot = normalizedRoot;
+    std::string loweredCandidate = normalizedCandidate;
+    std::transform(
+        loweredRoot.begin(),
+        loweredRoot.end(),
+        loweredRoot.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(
+        loweredCandidate.begin(),
+        loweredCandidate.end(),
+        loweredCandidate.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (loweredCandidate == loweredRoot)
+    {
+        *outStoragePath = "assets/images";
+        return true;
+    }
+
+    if (loweredCandidate.size() <= loweredRoot.size() ||
+        loweredCandidate.compare(0, loweredRoot.size(), loweredRoot) != 0 ||
+        normalizedCandidate[normalizedRoot.size()] != '/')
+    {
+        return false;
+    }
+
+    *outStoragePath = "assets/images" + normalizedCandidate.substr(normalizedRoot.size());
+    return true;
 }
 
 static std::string buildMiniMapPngPathFromJsonPath(const char* jsonAbsolutePath)
@@ -488,8 +553,16 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
 {
     for (ImportedAsset& asset : this->importedAssets)
     {
-        rc2d_graphics_freeImageData(&asset.imageData);
-        rc2d_graphics_freeImage(&asset.image);
+        if (asset.useUserStorage)
+        {
+            ReleaseStorageImageData(&asset.imageData);
+            ReleaseStorageImage(&asset.image);
+        }
+        else
+        {
+            ResetStorageImageDataRef(&asset.imageData);
+            ResetStorageImageRef(&asset.image);
+        }
     }
 
     this->importedAssets.clear();
@@ -1296,7 +1369,7 @@ bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePa
         return false;
     }
 
-    RC2D_Image image = rc2d_graphics_loadImageFromStorage(storagePath, RC2D_STORAGE_USER);
+    RC2D_Image image = LoadStorageImage(storagePath, RC2D_STORAGE_USER);
     if (image.sdl_texture == nullptr)
     {
         this->statusMessage = "Echec chargement texture importee.";
@@ -1314,7 +1387,7 @@ bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePa
     }
 
     RC2D_ImageData imageData =
-        rc2d_graphics_loadImageDataFromStorage(storagePath, RC2D_STORAGE_USER);
+        LoadStorageImageData(storagePath, RC2D_STORAGE_USER);
 
     int alphaMaskWidth = 0;
     int alphaMaskHeight = 0;
@@ -1353,6 +1426,7 @@ bool EditorMapCreateMapScene::importAssetFromAbsolutePath(const char* absolutePa
     importedAsset.displayName = fileName.empty() ? importedAsset.id : fileName;
     importedAsset.sourcePath = sourcePath;
     importedAsset.storagePath = storagePath;
+    importedAsset.useUserStorage = true;
     importedAsset.image = image;
     importedAsset.imageData = imageData;
     importedAsset.widthPx = widthPx;
@@ -1386,7 +1460,7 @@ int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string
         }
     }
 
-    RC2D_Image image = rc2d_graphics_loadImageFromStorage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
+    RC2D_Image image = LoadStorageImage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
     if (image.sdl_texture == nullptr)
     {
         return -1;
@@ -1401,7 +1475,7 @@ int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string
         heightPx = 0.0f;
     }
 
-    RC2D_ImageData imageData = rc2d_graphics_loadImageDataFromStorage(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
+    RC2D_ImageData imageData = LoadStorageImageData(normalizedPath.c_str(), RC2D_STORAGE_TITLE);
     int alphaMaskWidth = 0;
     int alphaMaskHeight = 0;
     std::vector<Uint8> alphaMask;
@@ -1436,6 +1510,7 @@ int EditorMapCreateMapScene::importAssetFromRuntimeStoragePath(const std::string
     importedAsset.displayName = extractFileName(normalizedPath);
     importedAsset.sourcePath = normalizedPath;
     importedAsset.storagePath = normalizedPath;
+    importedAsset.useUserStorage = false;
     importedAsset.image = image;
     importedAsset.imageData = imageData;
     importedAsset.widthPx = widthPx;
@@ -2773,6 +2848,18 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
         return false;
     }
 
+    std::error_code absError;
+    std::filesystem::path absoluteFolderPath = std::filesystem::absolute(folderPath, absError);
+    if (absError)
+    {
+        absoluteFolderPath = folderPath;
+    }
+    const std::string normalizedAbsoluteFolderPath = normalizePathSlashes(absoluteFolderPath.string());
+    std::string titleStorageFolderPath;
+    const bool useTitleStorage = tryBuildTitleStoragePathFromAbsolutePath(
+        normalizedAbsoluteFolderPath,
+        &titleStorageFolderPath);
+
     std::array<std::filesystem::path, kShipSpriteCount> sourcePngPaths{};
     for (int i = 0; i < kShipSpriteCount; ++i)
     {
@@ -2787,96 +2874,114 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
         sourcePngPaths[static_cast<size_t>(i)] = pngPath;
     }
 
-    this->ensureUserStorageFolders();
+    this->testShip.unloadSprites();
+    this->testShipPreview.unloadSprites();
 
-    for (int i = 0; i < kShipSpriteCount; ++i)
+    if (useTitleStorage)
     {
-        const std::filesystem::path& sourcePath = sourcePngPaths[static_cast<size_t>(i)];
-        std::ifstream input(sourcePath, std::ios::binary | std::ios::ate);
-        if (!input.is_open())
+        if (!this->testShip.loadSpritesFromFolder(titleStorageFolderPath.c_str(), RC2D_STORAGE_TITLE))
         {
-            this->statusMessage = "Lecture impossible: " + sourcePath.string();
+            this->statusMessage = "Echec chargement navire test depuis le cache TITLE.";
             return false;
         }
-
-        const std::streamsize fileSize = input.tellg();
-        if (fileSize <= 0)
+        if (!this->testShipPreview.loadSpritesFromFolder(titleStorageFolderPath.c_str(), RC2D_STORAGE_TITLE))
         {
-            this->statusMessage = "Fichier vide: " + sourcePath.string();
-            return false;
-        }
-
-        input.seekg(0, std::ios::beg);
-        std::vector<char> bytes(static_cast<size_t>(fileSize));
-        if (!input.read(bytes.data(), fileSize))
-        {
-            this->statusMessage = "Lecture bytes echouee: " + sourcePath.string();
-            return false;
-        }
-
-        char userStoragePath[128] = {};
-        SDL_snprintf(
-            userStoragePath,
-            sizeof(userStoragePath),
-            "editor-map-ship/current/%d.png",
-            i + 1);
-
-        if (!rc2d_storage_userWriteFile(userStoragePath, bytes.data(), static_cast<Uint64>(bytes.size())))
-        {
-            this->statusMessage = "Echec copie user storage: " + std::string(userStoragePath);
+            this->testShip.unloadSprites();
+            this->statusMessage = "Echec chargement preview navire test depuis le cache TITLE.";
             return false;
         }
     }
-
-    // Copie optionnelle du ship_anchor.json pour conserver un rendu navire
-    // coherent avec le gameplay. Si absent, on ecrit un JSON vide pour
-    // neutraliser un eventuel fichier stale d'un import precedent.
-    std::vector<char> anchorBytes;
-    const std::filesystem::path anchorSourcePath = folderPath / "ship_anchor.json";
-    if (std::filesystem::exists(anchorSourcePath, fsError) &&
-        std::filesystem::is_regular_file(anchorSourcePath, fsError))
+    else
     {
-        std::ifstream anchorInput(anchorSourcePath, std::ios::binary | std::ios::ate);
-        if (anchorInput.is_open())
+        this->ensureUserStorageFolders();
+
+        for (int i = 0; i < kShipSpriteCount; ++i)
         {
-            const std::streamsize anchorSize = anchorInput.tellg();
-            if (anchorSize > 0)
+            const std::filesystem::path& sourcePath = sourcePngPaths[static_cast<size_t>(i)];
+            std::ifstream input(sourcePath, std::ios::binary | std::ios::ate);
+            if (!input.is_open())
             {
-                anchorInput.seekg(0, std::ios::beg);
-                anchorBytes.resize(static_cast<size_t>(anchorSize));
-                if (!anchorInput.read(anchorBytes.data(), anchorSize))
+                this->statusMessage = "Lecture impossible: " + sourcePath.string();
+                return false;
+            }
+
+            const std::streamsize fileSize = input.tellg();
+            if (fileSize <= 0)
+            {
+                this->statusMessage = "Fichier vide: " + sourcePath.string();
+                return false;
+            }
+
+            input.seekg(0, std::ios::beg);
+            std::vector<char> bytes(static_cast<size_t>(fileSize));
+            if (!input.read(bytes.data(), fileSize))
+            {
+                this->statusMessage = "Lecture bytes echouee: " + sourcePath.string();
+                return false;
+            }
+
+            char userStoragePath[128] = {};
+            SDL_snprintf(
+                userStoragePath,
+                sizeof(userStoragePath),
+                "editor-map-ship/current/%d.png",
+                i + 1);
+
+            if (!rc2d_storage_userWriteFile(userStoragePath, bytes.data(), static_cast<Uint64>(bytes.size())))
+            {
+                this->statusMessage = "Echec copie user storage: " + std::string(userStoragePath);
+                return false;
+            }
+        }
+
+        // Copie optionnelle du ship_anchor.json pour conserver un rendu navire
+        // coherent avec le gameplay. Si absent, on ecrit un JSON vide pour
+        // neutraliser un eventuel fichier stale d'un import precedent.
+        std::vector<char> anchorBytes;
+        const std::filesystem::path anchorSourcePath = folderPath / "ship_anchor.json";
+        if (std::filesystem::exists(anchorSourcePath, fsError) &&
+            std::filesystem::is_regular_file(anchorSourcePath, fsError))
+        {
+            std::ifstream anchorInput(anchorSourcePath, std::ios::binary | std::ios::ate);
+            if (anchorInput.is_open())
+            {
+                const std::streamsize anchorSize = anchorInput.tellg();
+                if (anchorSize > 0)
                 {
-                    anchorBytes.clear();
+                    anchorInput.seekg(0, std::ios::beg);
+                    anchorBytes.resize(static_cast<size_t>(anchorSize));
+                    if (!anchorInput.read(anchorBytes.data(), anchorSize))
+                    {
+                        anchorBytes.clear();
+                    }
                 }
             }
         }
-    }
-    if (anchorBytes.empty())
-    {
-        constexpr const char* kEmptyAnchorJson = "{}";
-        anchorBytes.assign(kEmptyAnchorJson, kEmptyAnchorJson + 2);
-    }
-    if (!rc2d_storage_userWriteFile(
-            "editor-map-ship/current/ship_anchor.json",
-            anchorBytes.data(),
-            static_cast<Uint64>(anchorBytes.size())))
-    {
-        this->statusMessage = "Echec copie ship_anchor.json dans user storage.";
-        return false;
-    }
+        if (anchorBytes.empty())
+        {
+            constexpr const char* kEmptyAnchorJson = "{}";
+            anchorBytes.assign(kEmptyAnchorJson, kEmptyAnchorJson + 2);
+        }
+        if (!rc2d_storage_userWriteFile(
+                "editor-map-ship/current/ship_anchor.json",
+                anchorBytes.data(),
+                static_cast<Uint64>(anchorBytes.size())))
+        {
+            this->statusMessage = "Echec copie ship_anchor.json dans user storage.";
+            return false;
+        }
 
-    this->testShip.unloadSprites();
-    this->testShipPreview.unloadSprites();
-    if (!this->testShip.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
-    {
-        this->statusMessage = "Echec chargement navire test (sprites 1..8).";
-        return false;
-    }
-    if (!this->testShipPreview.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
-    {
-        this->testShip.unloadSprites();
-        this->statusMessage = "Echec chargement preview navire test.";
-        return false;
+        if (!this->testShip.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
+        {
+            this->statusMessage = "Echec chargement navire test (sprites 1..8).";
+            return false;
+        }
+        if (!this->testShipPreview.loadSpritesFromFolder("editor-map-ship/current", RC2D_STORAGE_USER))
+        {
+            this->testShip.unloadSprites();
+            this->statusMessage = "Echec chargement preview navire test.";
+            return false;
+        }
     }
 
     this->testShip.setSpeedTilesPerSecond(4.0f);
@@ -2889,7 +2994,7 @@ bool EditorMapCreateMapScene::loadShipFolderFromAbsolutePath(const char* folderA
     this->testShipLoaded = true;
     this->testShipSpawned = false;
     this->testShipCameraFollowEnabled = false;
-    this->loadedShipFolderAbsolute = normalizePathSlashes(folderPath.string());
+    this->loadedShipFolderAbsolute = normalizedAbsoluteFolderPath;
     this->editorTool = EditorTool::SPAWN_SHIP;
     this->statusMessage = "Navire test charge. Clique gauche sur la map pour le spawn.";
     return true;
@@ -2939,7 +3044,7 @@ bool EditorMapCreateMapScene::reexportLoadedShipScaled(int scalePercent)
     {
         char storagePath[96] = {};
         SDL_snprintf(storagePath, sizeof(storagePath), "editor-map-ship/current/%d.png", i);
-        RC2D_ImageData src = rc2d_graphics_loadImageDataFromStorage(storagePath, RC2D_STORAGE_USER);
+        RC2D_ImageData src = LoadStorageImageData(storagePath, RC2D_STORAGE_USER);
         if (src.sdl_surface == nullptr)
         {
             this->statusMessage = "Reexport navire: sprite source manquant.";
@@ -2953,7 +3058,7 @@ bool EditorMapCreateMapScene::reexportLoadedShipScaled(int scalePercent)
         SDL_Surface* dst = SDL_CreateSurface(dstW, dstH, SDL_PIXELFORMAT_RGBA32);
         if (dst == nullptr)
         {
-            rc2d_graphics_freeImageData(&src);
+            ReleaseStorageImageData(&src);
             this->statusMessage = "Reexport navire: creation surface KO.";
             return false;
         }
@@ -2976,7 +3081,7 @@ bool EditorMapCreateMapScene::reexportLoadedShipScaled(int scalePercent)
         std::filesystem::path dstPath = outputFolder / (std::to_string(i) + ".png");
         const bool saveOk = SDL_SavePNG(dst, dstPath.string().c_str());
         SDL_DestroySurface(dst);
-        rc2d_graphics_freeImageData(&src);
+        ReleaseStorageImageData(&src);
         if (!saveOk)
         {
             this->statusMessage = "Reexport navire: echec ecriture PNG.";
@@ -5207,7 +5312,7 @@ void EditorMapCreateMapScene::unload(void)
         this->pendingMapImportAbsolutePath.clear();
     }
     this->unloadImportedAssets();
-    rc2d_graphics_closeFont(&this->overlayFont);
+    ResetStorageFontRef(&this->overlayFont);
     this->backgroundWidget.unload();
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapCreateMapScene: unloaded");
@@ -5222,7 +5327,7 @@ void EditorMapCreateMapScene::load(void)
 
     this->backgroundWidget.load();
 
-    this->overlayFont = rc2d_graphics_openFontFromStorage(
+    this->overlayFont = OpenStorageFont(
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);
@@ -5246,7 +5351,28 @@ void EditorMapCreateMapScene::load(void)
 
     this->applySelectedOceanColor();
     this->setShipScalePercent(this->shipScalePercent);
-    this->statusMessage = "Editor map charge.";
+    int autoImportedShipCount = 0;
+    {
+        std::error_code fsError;
+        const std::filesystem::path defaultShipsRoot("assets/images/ships");
+        if (std::filesystem::exists(defaultShipsRoot, fsError) &&
+            std::filesystem::is_directory(defaultShipsRoot, fsError))
+        {
+            const std::size_t previousShipCount = this->importedShips.size();
+            this->importShipsFromRootFolderAbsolutePath(defaultShipsRoot.string().c_str());
+            autoImportedShipCount = static_cast<int>(this->importedShips.size() - previousShipCount);
+            this->editorTool = EditorTool::BLOCK_TILES;
+        }
+    }
+    if (autoImportedShipCount > 0)
+    {
+        this->statusMessage =
+            "Editor map charge. " + std::to_string(autoImportedShipCount) + " navire(s) detecte(s) dans assets/images/ships.";
+    }
+    else
+    {
+        this->statusMessage = "Editor map charge.";
+    }
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapCreateMapScene: loaded");
 }
@@ -5633,5 +5759,67 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         this->toggleTowerHotspotAtTile(tile.x, tile.y);
         return;
     }
+}
+
+void EditorMapCreateMapScene::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    (void)integer_x;
+    (void)mouseID;
+
+    int delta = static_cast<int>(integer_y);
+    if (delta == 0)
+    {
+        if (direction == RC2D_SCROLL_UP)
+        {
+            delta = 1;
+        }
+        else if (direction == RC2D_SCROLL_DOWN)
+        {
+            delta = -1;
+        }
+    }
+    if (delta == 0)
+    {
+        return;
+    }
+
+    float renderX = x;
+    float renderY = y;
+    if (std::isfinite(mouse_x) && std::isfinite(mouse_y))
+    {
+        this->convertWindowToRender(mouse_x, mouse_y, &renderX, &renderY);
+    }
+    else
+    {
+        (void)this->getMouseRenderPosition(&renderX, &renderY);
+    }
+    const int step = (std::max)(1, std::abs(delta));
+
+    if (this->showBottomRightLists && this->pointInRect(renderX, renderY, this->shipListRect))
+    {
+        this->shipListScrollOffset += (delta > 0) ? -step : step;
+        this->clampShipListScrollOffset();
+        return;
+    }
+    if (this->showBottomRightLists && this->pointInRect(renderX, renderY, this->assetListRect))
+    {
+        this->assetListScrollOffset += (delta > 0) ? -step : step;
+        this->clampAssetListScrollOffset();
+        return;
+    }
+
+    Map& map = GetCurrentMap();
+    Camera& camera = GetCamera();
+    camera.setZoomFactor(camera.getZoomFactor() + ((delta > 0) ? 0.05f : -0.05f));
+    camera.update(map, map.rect);
+    this->testShipCameraFollowEnabled = false;
 }
 #endif // GAME_ENV_DEV

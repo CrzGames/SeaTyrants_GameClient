@@ -1,4 +1,5 @@
 #include "game/ui/hud/barre-action-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 BarreActionWidget::BarreActionWidget(void)
     : actionBarUi{}
@@ -11,10 +12,10 @@ BarreActionWidget::~BarreActionWidget(void)
 
 void BarreActionWidget::load(void)
 {
-    this->actionBarUi.image = rc2d_graphics_loadImageFromStorage(
+    this->actionBarUi.image = LoadStorageImage(
         "assets/images/ui-scene-game/barre-action.png",
         RC2D_STORAGE_TITLE);
-    this->actionBarUi.imageData = rc2d_graphics_loadImageDataFromStorage(
+    this->actionBarUi.imageData = LoadStorageImageData(
         "assets/images/ui-scene-game/barre-action.png",
         RC2D_STORAGE_TITLE);
     this->actionBarUi.anchor = RC2D_UI_ANCHOR_BOTTOM_CENTER;
@@ -27,8 +28,8 @@ void BarreActionWidget::load(void)
 
 void BarreActionWidget::unload(void)
 {
-    rc2d_graphics_freeImageData(&this->actionBarUi.imageData);
-    rc2d_graphics_freeImage(&this->actionBarUi.image);
+    ResetStorageImageDataRef(&this->actionBarUi.imageData);
+    ResetStorageImageRef(&this->actionBarUi.image);
 }
 
 void BarreActionWidget::draw(void)

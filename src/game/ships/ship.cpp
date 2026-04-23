@@ -1,4 +1,5 @@
 #include "game/ships/ship.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <atomic>
@@ -729,6 +730,7 @@ Ship::Ship(void)
     : sprites{},
       spriteDrawAnchors{},
       spritesLoaded(false),
+      spritesStorageKind(RC2D_STORAGE_TITLE),
       runtimeShipId(g_nextRuntimeShipId.fetch_add(1u)),
       config{3.0f},
       healthVisual(HealthVisual::FULL),
@@ -774,6 +776,7 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
 
     // Nettoyage prealable si on recharge un atlas.
     unloadSprites();
+    this->spritesStorageKind = storageKind;
 
     // Chargement des 8 sprites (1.png .. 8.png).
     // 4 directions x 2 etats de vie (FULL + LOW).
@@ -782,7 +785,7 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
         char path[512] = {0};
         std::snprintf(path, sizeof(path), "%s/%d.png", folderPath, static_cast<int>(i) + 1);
 
-        this->sprites[i] = rc2d_graphics_loadImageFromStorage(path, storageKind);
+        this->sprites[i] = LoadStorageImage(path, storageKind);
 
         if (this->sprites[i].sdl_texture == nullptr)
         {
@@ -806,11 +809,19 @@ void Ship::unloadSprites(void)
     {
         if (this->sprites[i].sdl_texture != nullptr)
         {
-            rc2d_graphics_freeImage(&this->sprites[i]);
+            if (this->spritesStorageKind == RC2D_STORAGE_TITLE)
+            {
+                ResetStorageImageRef(&this->sprites[i]);
+            }
+            else
+            {
+                ReleaseStorageImage(&this->sprites[i]);
+            }
         }
     }
 
     this->spritesLoaded = false;
+    this->spritesStorageKind = RC2D_STORAGE_TITLE;
 }
 
 bool Ship::loadAnchorsFromJson(const char* folderPath, RC2D_StorageKind storageKind)

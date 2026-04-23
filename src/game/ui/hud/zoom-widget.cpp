@@ -1,4 +1,5 @@
 #include "game/ui/hud/zoom-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -38,39 +39,18 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outY = renderY;
 }
 
-static bool loadUiImageWithFallback(
+static bool loadUiImage(
     RC2D_UIImage* uiImage,
-    const char* primaryPath,
-    const char* fallbackPath)
+    const char* path)
 {
     if (uiImage == nullptr)
     {
         return false;
     }
 
-    auto loadFromPath = [uiImage](const char* path) -> bool
-    {
-        uiImage->image = rc2d_graphics_loadImageFromStorage(path, RC2D_STORAGE_TITLE);
-        uiImage->imageData = rc2d_graphics_loadImageDataFromStorage(path, RC2D_STORAGE_TITLE);
-        return (uiImage->image.sdl_texture != nullptr && uiImage->imageData.sdl_surface != nullptr);
-    };
-
-    if (loadFromPath(primaryPath))
-    {
-        return true;
-    }
-
-    rc2d_graphics_freeImageData(&uiImage->imageData);
-    rc2d_graphics_freeImage(&uiImage->image);
-
-    if (fallbackPath != nullptr && loadFromPath(fallbackPath))
-    {
-        return true;
-    }
-
-    rc2d_graphics_freeImageData(&uiImage->imageData);
-    rc2d_graphics_freeImage(&uiImage->image);
-    return false;
+    uiImage->image = LoadStorageImage(path, RC2D_STORAGE_TITLE);
+    uiImage->imageData = LoadStorageImageData(path, RC2D_STORAGE_TITLE);
+    return (uiImage->image.sdl_texture != nullptr && uiImage->imageData.sdl_surface != nullptr);
 }
 
 ZoomWidget::ZoomWidget(void)
@@ -93,19 +73,16 @@ ZoomWidget::~ZoomWidget(void)
 
 void ZoomWidget::load(void)
 {
-    // Barre: compat avec l'ancien nom "zoom-barre.png".
-    if (!loadUiImageWithFallback(
+    if (!loadUiImage(
             &this->zoomBarUi,
-            "assets/images/ui-scene-game/zoom-bar.png",
-            "assets/images/ui-scene-game/zoom-barre.png"))
+            "assets/images/ui-scene-game/zoom-bar.png"))
     {
-        RC2D_log(RC2D_LOG_WARN, "ZoomWidget: echec chargement zoom-bar(.png)/zoom-barre.png");
+        RC2D_log(RC2D_LOG_WARN, "ZoomWidget: echec chargement zoom-bar.png");
     }
 
-    if (!loadUiImageWithFallback(
+    if (!loadUiImage(
             &this->zoomSliderUi,
-            "assets/images/ui-scene-game/zoom-slider.png",
-            nullptr))
+            "assets/images/ui-scene-game/zoom-slider.png"))
     {
         RC2D_log(RC2D_LOG_WARN, "ZoomWidget: echec chargement zoom-slider.png");
     }
@@ -151,10 +128,10 @@ void ZoomWidget::load(void)
 
 void ZoomWidget::unload(void)
 {
-    rc2d_graphics_freeImageData(&this->zoomSliderUi.imageData);
-    rc2d_graphics_freeImage(&this->zoomSliderUi.image);
-    rc2d_graphics_freeImageData(&this->zoomBarUi.imageData);
-    rc2d_graphics_freeImage(&this->zoomBarUi.image);
+    ResetStorageImageDataRef(&this->zoomSliderUi.imageData);
+    ResetStorageImageRef(&this->zoomSliderUi.image);
+    ResetStorageImageDataRef(&this->zoomBarUi.imageData);
+    ResetStorageImageRef(&this->zoomBarUi.image);
 }
 
 int ZoomWidget::getZoomStepsCount(void)

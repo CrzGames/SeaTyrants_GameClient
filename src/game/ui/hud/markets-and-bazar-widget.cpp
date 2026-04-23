@@ -1,4 +1,5 @@
 #include "game/ui/hud/markets-and-bazar-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 
@@ -345,7 +346,7 @@ static RC2D_Image loadImageFromTitleOrEmpty(const std::string& imagePath)
     {
         return RC2D_Image{};
     }
-    return rc2d_graphics_loadImageFromStorage(imagePath.c_str(), RC2D_STORAGE_TITLE);
+    return LoadStorageImage(imagePath.c_str(), RC2D_STORAGE_TITLE);
 }
 
 static std::string keepDigitsOrFallback(const std::string& rawValue, const std::string& fallback)
@@ -694,7 +695,7 @@ void MarketsAndBazarWidget::clearIcons(std::vector<RC2D_Image>& icons)
 {
     for (RC2D_Image& icon : icons)
     {
-        rc2d_graphics_freeImage(&icon);
+        ResetStorageImageRef(&icon);
     }
     icons.clear();
 }
@@ -974,9 +975,9 @@ void MarketsAndBazarWidget::submitFocusedInput(void)
 
 void MarketsAndBazarWidget::load(void)
 {
-    this->titleFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
-    this->bodyFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
-    this->smallFont = rc2d_graphics_openFontFromStorage("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->smallFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
@@ -1003,9 +1004,9 @@ void MarketsAndBazarWidget::load(void)
 void MarketsAndBazarWidget::unload(void)
 {
     this->clearRows();
-    rc2d_graphics_closeFont(&this->smallFont);
-    rc2d_graphics_closeFont(&this->bodyFont);
-    rc2d_graphics_closeFont(&this->titleFont);
+    ResetStorageFontRef(&this->smallFont);
+    ResetStorageFontRef(&this->bodyFont);
+    ResetStorageFontRef(&this->titleFont);
 }
 
 void MarketsAndBazarWidget::update(double dt)

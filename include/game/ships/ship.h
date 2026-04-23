@@ -65,6 +65,7 @@ private:
     std::array<RC2D_Image, 8> sprites;           /**< Sprites 1..8 charges en memoire. */
     std::array<SDL_FPoint, 8> spriteDrawAnchors;  /**< Anchor normalise [0..1] par sprite (charge depuis JSON). */
     bool spritesLoaded;                            /**< True si les sprites sont charges. */
+    RC2D_StorageKind spritesStorageKind;           /**< Storage d'origine des sprites actuellement charges. */
     uint64_t runtimeShipId;                        /**< Identifiant runtime unique pour le sillage ocean. */
 
     Config config;             /**< Parametres de deplacement. */

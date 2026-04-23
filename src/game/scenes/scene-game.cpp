@@ -10,9 +10,9 @@
 GameScene::GameScene(void)
     : shipAutoFollowEnabled(true),
       hudOverlay{},
-      playerShipFolderPath("assets/images/ships/ship-elite27"),
-      playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
-      shipVfx{}
+      playerShipFolderPath("assets/images/ships/ship-elite27")
+      //playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
+      //shipVfx{}
 {
 }
 
@@ -33,7 +33,7 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     }
 
     // Load le VFX du navire du joueur.
-    if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
+    /*if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
     {
         RC2D_log(
             RC2D_LOG_ERROR,
@@ -41,7 +41,7 @@ void GameScene::initializePlayerSpawnAndCamera(void)
             this->playerShipFolderPath.c_str(),
             this->playerVfxFolderPath.c_str());
         return;
-    }
+    }*/
 
     // Spawn au secteur 30-AE (centre approximatif).
     player.spawnOnSector(map, 30, 30);
@@ -144,7 +144,7 @@ void GameScene::unload(void)
 
     // Libere les ressources du jeu.
     GameplayShaderController::unloadAll();
-    this->shipVfx.unload();
+    //this->shipVfx.unload();
     player.unload();
     this->hudOverlay.unload();
 }
@@ -194,7 +194,7 @@ void GameScene::update(double dt)
     oceanShader.endWakeFrame(map, map.rect);
 
     // Met a jour les VFX du navire du joueur.
-    this->shipVfx.update(dt, player.getShip(), nullptr);
+    //this->shipVfx.update(dt, player.getShip(), nullptr);
 
     // Met a jour les shaders de visibilite (nuages + fog).
     GameplayShaderController::updateVisibility(dt, player);
@@ -251,13 +251,13 @@ void GameScene::draw(void)
     this->hudOverlay.drawTileClickMarkerOverlay(map);
 
     // Dessine les VFX derriere le ship.
-    this->shipVfx.draw(map, player.getShip(), true);
+    //this->shipVfx.draw(map, player.getShip(), true);
 
     // Dessine le joueur.
     player.draw(map);
 
     // Dessine les VFX devant le ship.
-    this->shipVfx.draw(map, player.getShip(), false);
+    //this->shipVfx.draw(map, player.getShip(), false);
 
     // Dessine les nuages par-dessus le joueur pour un rendu "au-dessus".
     if (visionCloudShader.isReady())

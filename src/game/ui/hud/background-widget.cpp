@@ -1,4 +1,5 @@
 #include "game/ui/hud/background-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 BackgroundWidget::BackgroundWidget(void)
     : backgroundUiImage{}
@@ -11,7 +12,7 @@ BackgroundWidget::~BackgroundWidget(void)
 
 void BackgroundWidget::load(void)
 {
-    this->backgroundUiImage = rc2d_graphics_loadImageFromStorage(
+    this->backgroundUiImage = LoadStorageImage(
         "assets/images/ui-scene-game/background.png",
         RC2D_STORAGE_TITLE);
     if (this->backgroundUiImage.sdl_texture == nullptr)
@@ -22,7 +23,7 @@ void BackgroundWidget::load(void)
 
 void BackgroundWidget::unload(void)
 {
-    rc2d_graphics_freeImage(&this->backgroundUiImage);
+    ResetStorageImageRef(&this->backgroundUiImage);
 }
 
 void BackgroundWidget::draw(void)

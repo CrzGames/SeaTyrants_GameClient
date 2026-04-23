@@ -1,4 +1,5 @@
 #include "game/ui/hud/minimap-widget.h"
+#include "game/assets/title-asset-cache.h"
 
 MinimapWidget::MinimapWidget(void)
     : minimapUi{}
@@ -12,10 +13,10 @@ MinimapWidget::~MinimapWidget(void)
 void MinimapWidget::load(void)
 {
     // Minimap ancree en haut a droite, avec des marges relatives a l'ecran.
-    this->minimapUi.image = rc2d_graphics_loadImageFromStorage(
+    this->minimapUi.image = LoadStorageImage(
         "assets/images/ui-scene-game/minimap.png",
         RC2D_STORAGE_TITLE);
-    this->minimapUi.imageData = rc2d_graphics_loadImageDataFromStorage(
+    this->minimapUi.imageData = LoadStorageImageData(
         "assets/images/ui-scene-game/minimap.png",
         RC2D_STORAGE_TITLE);
     this->minimapUi.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
@@ -28,8 +29,8 @@ void MinimapWidget::load(void)
 
 void MinimapWidget::unload(void)
 {
-    rc2d_graphics_freeImageData(&this->minimapUi.imageData);
-    rc2d_graphics_freeImage(&this->minimapUi.image);
+    ResetStorageImageDataRef(&this->minimapUi.imageData);
+    ResetStorageImageRef(&this->minimapUi.image);
 }
 
 void MinimapWidget::draw(void)

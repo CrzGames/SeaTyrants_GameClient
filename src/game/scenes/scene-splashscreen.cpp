@@ -1,4 +1,5 @@
 #include "game/scenes/scene-splashscreen.h"
+#include "game/assets/title-asset-cache.h"
 
 #include "core/context.h"
 #include "game/scenes/scene-manager.h"
@@ -99,11 +100,18 @@ void SplashScreenScene::finishAndGoToMenu(void)
 
 void SplashScreenScene::unload(void)
 {
+    // Restaure le curseur pour la scene suivante.
+    rc2d_mouse_setVisible(true);
+
     // Close first splash video if open.
     rc2d_video_close(&this->splashStudioVideo);
 
     // Close second splash video if open.
     rc2d_video_close(&this->splashGameVideo);
+
+    // Retire le warmup logique des videos splash du cache TITLE.
+    GetTitleAssetCache().evictVideo("assets/videos/splashscreen-studio-1080p.mp4", RC2D_STORAGE_TITLE);
+    GetTitleAssetCache().evictVideo("assets/videos/splashscreen-seatyrants-1080p.mp4", RC2D_STORAGE_TITLE);
 
     // Reset state machine for next entry.
     this->splashState = SPLASH_STUDIO;
@@ -114,6 +122,9 @@ void SplashScreenScene::unload(void)
 
 void SplashScreenScene::load(void)
 {
+    // Cache le curseur pendant toute la sequence splash.
+    rc2d_mouse_setVisible(false);
+
     // Ensure first video starts clean.
     rc2d_video_close(&this->splashStudioVideo);
 
@@ -138,7 +149,7 @@ void SplashScreenScene::update(double dt)
             if (this->splashStudioVideo.format_ctx == nullptr)
             {
                 // Try to open studio video.
-                if (rc2d_video_openFromStorage(
+                if (OpenStorageVideo(
                         &this->splashStudioVideo,
                         "assets/videos/splashscreen-studio-1080p.mp4",
                         RC2D_STORAGE_TITLE) != 0)
@@ -170,7 +181,7 @@ void SplashScreenScene::update(double dt)
             if (this->splashGameVideo.format_ctx == nullptr)
             {
                 // Try to open game splash.
-                if (rc2d_video_openFromStorage(
+                if (OpenStorageVideo(
                         &this->splashGameVideo,
                         "assets/videos/splashscreen-seatyrants-1080p.mp4",
                         RC2D_STORAGE_TITLE) != 0)

@@ -14,6 +14,7 @@ static Map g_currentMap;
 static OceanShader g_oceanShader;
 static FogOfWarShader g_fogOfWarShader;
 static VisionCloudShader g_visionCloudShader;
+static TitleAssetCache g_titleAssetCache;
 
 GameState& GetGameState()
 {
@@ -83,4 +84,9 @@ FogOfWarShader& GetFogOfWarShader()
 VisionCloudShader& GetVisionCloudShader()
 {
     return g_visionCloudShader;
+}
+
+TitleAssetCache& GetTitleAssetCache()
+{
+    return g_titleAssetCache;
 }

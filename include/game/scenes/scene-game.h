@@ -21,8 +21,8 @@ private:
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
     IngameHudOverlay hudOverlay;       /**< UI gameplay (fond + minimap + bouton centre). */
     std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */
-    std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
-    VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
+    //std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
+    //VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
 
 public:
     /**

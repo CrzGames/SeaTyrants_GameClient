@@ -1,4 +1,5 @@
 #include "game/shaders/ocean-shader.h"
+#include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -143,15 +144,15 @@ void OceanShader::unload(void)
     }
 
     // Libere la texture base.
-    rc2d_graphics_freeImage(&this->oceanTexture);
+    ResetStorageImageRef(&this->oceanTexture);
     // Libere la texture detail.
-    rc2d_graphics_freeImage(&this->oceanTextureDetail);
+    ResetStorageImageRef(&this->oceanTextureDetail);
     // Libere la texture caustiques.
-    rc2d_graphics_freeImage(&this->causticTexture);
+    ResetStorageImageRef(&this->causticTexture);
     // Libere la texture ecume.
-    rc2d_graphics_freeImage(&this->foamStreaksTexture);
+    ResetStorageImageRef(&this->foamStreaksTexture);
     // Libere la texture macro.
-    rc2d_graphics_freeImage(&this->macroWaterTexture);
+    ResetStorageImageRef(&this->macroWaterTexture);
 
     // Reinitialise aussi le systeme de sillage.
     this->resetWakeSystem();
@@ -492,7 +493,7 @@ bool OceanShader::load(WaterColor color)
         this->foamStreaksTexture.sdl_texture != nullptr &&
         this->macroWaterTexture.sdl_texture != nullptr)
     {
-        RC2D_Image newBaseTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
+        RC2D_Image newBaseTexture = LoadStorageImage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
         if (newBaseTexture.sdl_texture == nullptr)
         {
             RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger la texture base %s", loadedBaseTexturePath);
@@ -503,11 +504,11 @@ bool OceanShader::load(WaterColor color)
             RC2D_log(RC2D_LOG_WARN, "OceanShader: echec SDL_SetTextureScaleMode base(hot-swap): %s", SDL_GetError());
         }
 
-        RC2D_Image newDetailTexture = rc2d_graphics_loadImageFromStorage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
+        RC2D_Image newDetailTexture = LoadStorageImage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
         if (newDetailTexture.sdl_texture == nullptr)
         {
             RC2D_log(RC2D_LOG_ERROR, "OceanShader: impossible de charger la texture detail %s", loadedDetailTexturePath);
-            rc2d_graphics_freeImage(&newBaseTexture);
+            ResetStorageImageRef(&newBaseTexture);
             return false;
         }
         if (!SDL_SetTextureScaleMode(newDetailTexture.sdl_texture, SDL_SCALEMODE_LINEAR))
@@ -524,8 +525,8 @@ bool OceanShader::load(WaterColor color)
             !this->resolveGpuTexture(this->foamStreaksTexture, "foam texture(hot-swap)", &foamGpuTexture) ||
             !this->resolveGpuTexture(this->macroWaterTexture, "macro texture(hot-swap)", &macroGpuTexture))
         {
-            rc2d_graphics_freeImage(&newBaseTexture);
-            rc2d_graphics_freeImage(&newDetailTexture);
+            ResetStorageImageRef(&newBaseTexture);
+            ResetStorageImageRef(&newDetailTexture);
             return false;
         }
 
@@ -542,13 +543,13 @@ bool OceanShader::load(WaterColor color)
         if (!SDL_SetGPURenderStateSamplerBindings(this->oceanRenderState, 4, samplerBindings))
         {
             RC2D_log(RC2D_LOG_ERROR, "OceanShader: SDL_SetGPURenderStateSamplerBindings failed: %s", SDL_GetError());
-            rc2d_graphics_freeImage(&newBaseTexture);
-            rc2d_graphics_freeImage(&newDetailTexture);
+            ResetStorageImageRef(&newBaseTexture);
+            ResetStorageImageRef(&newDetailTexture);
             return false;
         }
 
-        rc2d_graphics_freeImage(&this->oceanTexture);
-        rc2d_graphics_freeImage(&this->oceanTextureDetail);
+        ResetStorageImageRef(&this->oceanTexture);
+        ResetStorageImageRef(&this->oceanTextureDetail);
         this->oceanTexture = newBaseTexture;
         this->oceanTextureDetail = newDetailTexture;
         this->oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
@@ -565,7 +566,7 @@ bool OceanShader::load(WaterColor color)
     this->resetWakeSystem();
 
     // Charge la texture base demandee.
-    this->oceanTexture = rc2d_graphics_loadImageFromStorage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
+    this->oceanTexture = LoadStorageImage(loadedBaseTexturePath, RC2D_STORAGE_TITLE);
     // Stoppe le chargement si la texture base reste absente.
     if (this->oceanTexture.sdl_texture == nullptr)
     {
@@ -580,7 +581,7 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture detail demandee.
-    this->oceanTextureDetail = rc2d_graphics_loadImageFromStorage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
+    this->oceanTextureDetail = LoadStorageImage(loadedDetailTexturePath, RC2D_STORAGE_TITLE);
     // Stoppe le chargement si la texture detail reste absente.
     if (this->oceanTextureDetail.sdl_texture == nullptr)
     {
@@ -599,7 +600,7 @@ bool OceanShader::load(WaterColor color)
     this->oceanUniforms.params2[0] = (color == WaterColor::BLUE) ? 0.0f : 1.0f;
 
     // Charge la texture caustiques.
-    this->causticTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-caustic2.png", RC2D_STORAGE_TITLE);
+    this->causticTexture = LoadStorageImage("assets/images/shaders/ocean/tile-caustic2.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite des caustiques.
     if (this->causticTexture.sdl_texture == nullptr)
     {
@@ -614,7 +615,7 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture d'ecume.
-    this->foamStreaksTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
+    this->foamStreaksTexture = LoadStorageImage("assets/images/shaders/ocean/tile-foam-streaks.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite de l'ecume.
     if (this->foamStreaksTexture.sdl_texture == nullptr)
     {
@@ -629,7 +630,7 @@ bool OceanShader::load(WaterColor color)
     }
 
     // Charge la texture macro.
-    this->macroWaterTexture = rc2d_graphics_loadImageFromStorage("assets/images/shaders/ocean/water-macro.png", RC2D_STORAGE_TITLE);
+    this->macroWaterTexture = LoadStorageImage("assets/images/shaders/ocean/water-macro.png", RC2D_STORAGE_TITLE);
     // Verifie la disponibilite de la macro texture.
     if (this->macroWaterTexture.sdl_texture == nullptr)
     {
