@@ -8,7 +8,7 @@
  * @brief Scene responsible for the startup splash flow.
  *
  * This scene plays the studio splash first, then the game splash,
- * and finally switches to the menu scene.
+ * and finally switches to the loading scene.
  */
 class SplashScreenScene : public Scene {
 private:
@@ -35,9 +35,9 @@ private:
     static double clamp01(double value);
 
     /**
-     * @brief End splash sequence and switch to menu scene.
+     * @brief End splash sequence and switch to loading scene.
      */
-    void finishAndGoToMenu(void);
+    void finishAndGoToLoading(void);
 
     /**
      * @brief Draw a black fullscreen overlay with alpha.

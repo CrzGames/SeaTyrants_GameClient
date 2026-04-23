@@ -74,7 +74,7 @@ void SplashScreenScene::drawFullscreenBlackWithAlpha(double alpha01)
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
-void SplashScreenScene::finishAndGoToMenu(void)
+void SplashScreenScene::finishAndGoToLoading(void)
 {
     // Avoid processing completion twice.
     if (this->splashState == SPLASH_DONE)
@@ -91,10 +91,10 @@ void SplashScreenScene::finishAndGoToMenu(void)
     // Mark sequence as done.
     this->splashState = SPLASH_DONE;
 
-    // Switch to menu scene if manager is valid.
+    // Switch to loading scene if manager is valid.
     if (sceneManager != nullptr)
     {
-        sceneManager->changeScene("menu");
+        sceneManager->changeScene("loading");
     }
 }
 
@@ -188,7 +188,7 @@ void SplashScreenScene::update(double dt)
                 {
                     // Fail safe: continue to menu.
                     RC2D_log(RC2D_LOG_WARN, "Failed to open game splash video, skipping.");
-                    this->finishAndGoToMenu();
+                    this->finishAndGoToLoading();
                     return;
                 }
             }
@@ -197,7 +197,7 @@ void SplashScreenScene::update(double dt)
             if (rc2d_video_update(&this->splashGameVideo, dt) <= 0)
             {
                 // End splash sequence when second video finishes.
-                this->finishAndGoToMenu();
+                this->finishAndGoToLoading();
             }
 
             // End second state block.

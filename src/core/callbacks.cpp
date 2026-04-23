@@ -62,7 +62,16 @@ void rc2d_load(void)
         return;
     }
 
-    // Crée les scènes du jeu et affiche la scène de loading.
+    // Scene de départ visible au boot.
+    // - "splashscreen"  => splashscreen puis loading puis menu
+    // - autre valeur    => loading puis cette scene
+    const std::string startupSceneName = "splashscreen";
+    const std::string loadingNextSceneName =
+        (startupSceneName == "splashscreen" || startupSceneName == "loading")
+            ? std::string("menu")
+            : startupSceneName;
+
+    // Crée les scènes du jeu.
 #if GAME_ENV_DEV
     sceneManager.addScene("editormap-creatormap", new EditorMapCreateMapScene());
     sceneManager.addScene("editormap-shipdownscale", new EditorMapShipDownscaleScene());
@@ -70,11 +79,20 @@ void rc2d_load(void)
     sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
     sceneManager.addScene("editormap-crashtest", new EditorMapCrashTestScene());
 #endif
-    sceneManager.addScene("loading", new LoadingScene("splashscreen"));
     sceneManager.addScene("splashscreen", new SplashScreenScene());
+    sceneManager.addScene("loading", new LoadingScene(loadingNextSceneName));
     sceneManager.addScene("menu", new MenuScene());
     sceneManager.addScene("game", new GameScene());
-    sceneManager.changeScene("loading");
+
+    // Affiche la scène de boot initiale.
+    if (startupSceneName == "splashscreen")
+    {
+        sceneManager.changeScene("splashscreen");
+    }
+    else
+    {
+        sceneManager.changeScene("loading");
+    }
 
     // Mettre en plein écran.
     //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);

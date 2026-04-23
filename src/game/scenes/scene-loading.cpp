@@ -133,6 +133,41 @@ static void loadingScene_drawBackgroundCover(const RC2D_Image* backgroundImage, 
         false);
 }
 
+double LoadingScene::clamp01(double value)
+{
+    if (value < 0.0)
+    {
+        return 0.0;
+    }
+
+    if (value > 1.0)
+    {
+        return 1.0;
+    }
+
+    return value;
+}
+
+void LoadingScene::drawFullscreenBlackWithAlpha(double alpha01)
+{
+    const double alphaClamped = clamp01(alpha01);
+    if (alphaClamped <= 0.0)
+    {
+        return;
+    }
+
+    SDL_FRect rect = GetGameScreen().rect;
+    if (rect.w <= 0.0f || rect.h <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor({0, 0, 0, static_cast<Uint8>(alphaClamped * 255.0)});
+    rc2d_graphics_rectangle("fill", &rect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
 std::string LoadingScene::getDefaultNextSceneName()
 {
 #if GAME_ENV_DEV
@@ -148,7 +183,9 @@ LoadingScene::LoadingScene()
       headingFont{},
       bodyFont{},
       transitionStarted(false),
-      transitionDelayRemaining(0.18)
+      transitionFadeOutStarted(false),
+      transitionDelayRemaining(0.18),
+      loadingFadeAlpha(1.0f)
 {
 }
 
@@ -163,7 +200,9 @@ LoadingScene::LoadingScene(const std::string& nextSceneNameValue)
       headingFont{},
       bodyFont{},
       transitionStarted(false),
-      transitionDelayRemaining(0.18)
+      transitionFadeOutStarted(false),
+      transitionDelayRemaining(0.18),
+      loadingFadeAlpha(1.0f)
 {
 }
 
@@ -174,7 +213,9 @@ LoadingScene::~LoadingScene()
 void LoadingScene::load(void)
 {
     this->transitionStarted = false;
+    this->transitionFadeOutStarted = false;
     this->transitionDelayRemaining = 0.18;
+    this->loadingFadeAlpha = 1.0f;
     rc2d_mouse_setVisible(false);
 
     this->backgroundImage = LoadStorageImage(
@@ -189,7 +230,9 @@ void LoadingScene::load(void)
 void LoadingScene::unload(void)
 {
     this->transitionStarted = false;
+    this->transitionFadeOutStarted = false;
     this->transitionDelayRemaining = 0.18;
+    this->loadingFadeAlpha = 1.0f;
     ResetStorageImageRef(&this->backgroundImage);
     GetTitleAssetCache().evictImage("assets/images/ui-scene-loading/background.png", RC2D_STORAGE_TITLE);
     ResetStorageFontRef(&this->headingFont);
@@ -199,6 +242,16 @@ void LoadingScene::unload(void)
 void LoadingScene::update(double dt)
 {
     const double safeDt = (std::max)(dt, 0.0);
+    const float fadeStep = static_cast<float>(kLoadingFadeSpeed * safeDt);
+
+    if (!this->transitionFadeOutStarted && this->loadingFadeAlpha > 0.0f)
+    {
+        this->loadingFadeAlpha -= fadeStep;
+        if (this->loadingFadeAlpha < 0.0f)
+        {
+            this->loadingFadeAlpha = 0.0f;
+        }
+    }
 
     TitleAssetCache& assetCache = GetTitleAssetCache();
     if (!assetCache.isPreloadFinished())
@@ -213,7 +266,18 @@ void LoadingScene::update(double dt)
         return;
     }
 
-    if (!this->transitionStarted && this->sceneManager != nullptr)
+    this->transitionFadeOutStarted = true;
+
+    if (this->loadingFadeAlpha < 1.0f)
+    {
+        this->loadingFadeAlpha += fadeStep;
+        if (this->loadingFadeAlpha > 1.0f)
+        {
+            this->loadingFadeAlpha = 1.0f;
+        }
+    }
+
+    if (!this->transitionStarted && this->sceneManager != nullptr && this->loadingFadeAlpha >= 1.0f)
     {
         this->transitionStarted = true;
         rc2d_mouse_setVisible(true);
@@ -374,6 +438,11 @@ void LoadingScene::draw(void)
     }
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    if (this->loadingFadeAlpha > 0.0f)
+    {
+        this->drawFullscreenBlackWithAlpha(this->loadingFadeAlpha);
+    }
 }
 
 void LoadingScene::keypressed(

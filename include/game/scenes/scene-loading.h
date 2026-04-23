@@ -29,11 +29,17 @@ public:
 
 private:
     static std::string getDefaultNextSceneName();
+    static double clamp01(double value);
+    void drawFullscreenBlackWithAlpha(double alpha01);
+
+    static constexpr float kLoadingFadeSpeed = 0.5f;
 
     std::string nextSceneName;
     RC2D_Image backgroundImage;
     RC2D_Font headingFont;
     RC2D_Font bodyFont;
     bool transitionStarted;
+    bool transitionFadeOutStarted;
     double transitionDelayRemaining;
+    float loadingFadeAlpha;
 };
