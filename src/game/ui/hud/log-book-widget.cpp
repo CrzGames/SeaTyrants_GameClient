@@ -82,50 +82,6 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outY = renderY;
 }
 
-static void applyCursorIfChanged(SDL_SystemCursor id)
-{
-    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
-    static SDL_Cursor* cached[4] = {nullptr, nullptr, nullptr, nullptr};
-    const int index =
-        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
-        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
-        (id == SDL_SYSTEM_CURSOR_MOVE) ? 2 : 3;
-
-    if (id == lastId)
-    {
-        return;
-    }
-    if (cached[index] == nullptr)
-    {
-        cached[index] = SDL_CreateSystemCursor(id);
-    }
-    if (cached[index] != nullptr)
-    {
-        SDL_SetCursor(cached[index]);
-        lastId = id;
-    }
-}
-
-static void setCursorArrow(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
-}
-
-static void setCursorHand(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
-}
-
-static void setCursorMove(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
-}
-
-static void setCursorResizeVertical(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
-}
-
 static float measureTextWidth(RC2D_Font* font, const std::string& text)
 {
     if (font == nullptr || font->sdl_font == nullptr || text.empty())
@@ -320,7 +276,8 @@ LogBookWidget::LogBookWidget(void)
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
-      cursorEnabled(true)
+      cursorEnabled(true),
+      controlIcons{}
 {
 }
 
@@ -332,12 +289,13 @@ void LogBookWidget::load(void)
 {
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 24.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->controlIcons.load();
 
     const SDL_FRect baseRect = getJournalRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
     this->widgetOffsetY = 0.0f;
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, baseRect.w, baseRect.h};
-    this->visible = true;
+    this->visible = false;
     this->rows.clear();
     this->scrollFirstRow = 0;
     this->scrollBarDragging = false;
@@ -350,6 +308,7 @@ void LogBookWidget::load(void)
 
 void LogBookWidget::unload(void)
 {
+    this->controlIcons.unload();
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
 }
@@ -410,40 +369,6 @@ void LogBookWidget::update(double dt)
     const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxMessagesPerPage));
     const int maxFirstRow = (std::max)(0, static_cast<int>(rows.size()) - visibleRows);
     this->scrollFirstRow = (std::max)(0, (std::min)(this->scrollFirstRow, maxFirstRow));
-
-    if (this->visible && this->cursorEnabled)
-    {
-        float mx = 0.0f;
-        float my = 0.0f;
-        getMouseRenderPosition(&mx, &my);
-        if (isPointInRect(mx, my, this->widgetRect))
-        {
-            const SDL_FRect scrollTrack = SDL_FRect{
-                body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
-                body.y + kScrollBarPadding,
-                kScrollBarWidth,
-                body.h - (kScrollBarPadding * 2.0f)
-            };
-            if (isPointInRect(mx, my, closeButtonRect) ||
-                isPointInRect(mx, my, prevButtonRect) ||
-                isPointInRect(mx, my, nextButtonRect))
-            {
-                setCursorHand();
-            }
-            else if (maxFirstRow > 0 && isPointInRect(mx, my, scrollTrack))
-            {
-                setCursorResizeVertical();
-            }
-            else if (isPointInRect(mx, my, header))
-            {
-                setCursorMove();
-            }
-            else
-            {
-                setCursorArrow();
-            }
-        }
-    }
 
     if (!this->widgetDragging && !this->scrollBarDragging)
     {
@@ -685,6 +610,73 @@ bool LogBookWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
+HudCursorType LogBookWidget::getDesiredCursor(float x, float y) const
+{
+    if (!this->visible)
+    {
+        return HudCursorType::NONE;
+    }
+
+    if (this->scrollBarDragging)
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (this->widgetDragging)
+    {
+        return HudCursorType::MOVE;
+    }
+    if (!this->containsPoint(x, y))
+    {
+        return HudCursorType::NONE;
+    }
+
+    const SDL_FRect outer = this->widgetRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 32.0f};
+    const SDL_FRect navBar = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, 28.0f};
+    const SDL_FRect body = SDL_FRect{outer.x + 8.0f, navBar.y + navBar.h + 6.0f, outer.w - 16.0f, outer.h - (navBar.y + navBar.h + 14.0f - outer.y)};
+    const SDL_FRect prevButtonRect = SDL_FRect{navBar.x + 8.0f, navBar.y + 4.0f, 24.0f, navBar.h - 8.0f};
+    const SDL_FRect nextButtonRect = SDL_FRect{navBar.x + navBar.w - 32.0f, navBar.y + 4.0f, 24.0f, navBar.h - 8.0f};
+    const SDL_FRect closeButtonRect = SDL_FRect{
+        outer.x + outer.w - 28.0f,
+        header.y + ((header.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+
+    const float dateColW = 96.0f;
+    const float messageX = body.x + 8.0f + dateColW + 10.0f;
+    const float showScrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
+    const float wrapW = body.w - (messageX - body.x) - 10.0f - showScrollReserve;
+    const std::vector<JournalVisualRow> rows = buildVisualRows(const_cast<RC2D_Font*>(&this->bodyFont), this->rows, wrapW);
+    const float lineHeight = measureLineHeight(const_cast<RC2D_Font*>(&this->bodyFont)) + 2.0f;
+    const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor((body.h - 12.0f) / lineHeight)));
+    const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxMessagesPerPage));
+    const int maxFirstRow = (std::max)(0, static_cast<int>(rows.size()) - visibleRows);
+    const SDL_FRect scrollTrack = SDL_FRect{
+        body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+        body.y + kScrollBarPadding,
+        kScrollBarWidth,
+        body.h - (kScrollBarPadding * 2.0f)
+    };
+
+    if (isPointInRect(x, y, closeButtonRect) ||
+        isPointInRect(x, y, prevButtonRect) ||
+        isPointInRect(x, y, nextButtonRect))
+    {
+        return HudCursorType::POINTER;
+    }
+    if (maxFirstRow > 0 && isPointInRect(x, y, scrollTrack))
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (isPointInRect(x, y, header))
+    {
+        return HudCursorType::MOVE;
+    }
+    return HudCursorType::DEFAULT;
+}
+
 void LogBookWidget::draw(void) const
 {
     LogBookWidget* self = const_cast<LogBookWidget*>(this);
@@ -821,21 +813,22 @@ void LogBookWidget::draw(void) const
         rc2d_graphics_rectangle("fill", &scrollThumb);
     }
 
-    rc2d_graphics_setColor(kHeaderFill);
-    rc2d_graphics_rectangle("fill", &closeButtonRect);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &closeButtonRect);
-    rc2d_graphics_line(
-        closeButtonRect.x + 5.0f,
-        closeButtonRect.y + 5.0f,
-        closeButtonRect.x + closeButtonRect.w - 5.0f,
-        closeButtonRect.y + closeButtonRect.h - 5.0f);
-    rc2d_graphics_line(
-        closeButtonRect.x + closeButtonRect.w - 5.0f,
-        closeButtonRect.y + 5.0f,
-        closeButtonRect.x + 5.0f,
-        closeButtonRect.y + closeButtonRect.h - 5.0f);
+    self->controlIcons.drawCloseButton(closeButtonRect, kHeaderFill, kGold);
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void LogBookWidget::show(void)
+{
+    this->visible = true;
+    this->widgetDragging = false;
+    this->scrollBarDragging = false;
+}
+
+void LogBookWidget::hide(void)
+{
+    this->visible = false;
+    this->widgetDragging = false;
+    this->scrollBarDragging = false;
 }
 

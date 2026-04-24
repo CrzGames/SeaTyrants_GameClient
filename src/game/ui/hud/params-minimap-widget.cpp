@@ -120,44 +120,6 @@ static void drawCheckBox(const SDL_FRect& boxRect, bool checked)
     rc2d_graphics_line(boxRect.x + 8.0f, boxRect.y + boxRect.h - 5.0f, boxRect.x + boxRect.w - 4.0f, boxRect.y + 4.0f);
 }
 
-static void applyCursorIfChanged(SDL_SystemCursor id)
-{
-    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
-    static SDL_Cursor* cached[3] = {nullptr, nullptr, nullptr};
-    const int index =
-        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
-        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 : 2;
-
-    if (id == lastId)
-    {
-        return;
-    }
-    if (cached[index] == nullptr)
-    {
-        cached[index] = SDL_CreateSystemCursor(id);
-    }
-    if (cached[index] != nullptr)
-    {
-        SDL_SetCursor(cached[index]);
-        lastId = id;
-    }
-}
-
-static void setCursorArrow(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
-}
-
-static void setCursorHand(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
-}
-
-static void setCursorMove(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
-}
-
 ParamsMinimapWidget::ParamsMinimapWidget(void)
     : titleFont{},
       bodyFont{},
@@ -172,7 +134,8 @@ ParamsMinimapWidget::ParamsMinimapWidget(void)
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
-      cursorEnabled(true)
+      cursorEnabled(true),
+      controlIcons{}
 {
 }
 
@@ -186,6 +149,7 @@ void ParamsMinimapWidget::load(void)
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Police des lignes de menu (plus petite que le titre).
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->controlIcons.load();
 
     // Rectangle de base calcule depuis l'ecran.
     const SDL_FRect baseRect = getParamsMinimapRectFromGameScreen();
@@ -194,8 +158,8 @@ void ParamsMinimapWidget::load(void)
     this->widgetOffsetY = 0.0f;
     // Placement initial de la fenetre.
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, baseRect.w, baseRect.h};
-    // Fenetre visible au chargement.
-    this->visible = true;
+    // Fenetre masquee au chargement: ouverture via l'icone top bar.
+    this->visible = false;
     // Aucun drag actif au chargement.
     this->widgetDragging = false;
     // Offsets de drag remis a zero.
@@ -205,6 +169,7 @@ void ParamsMinimapWidget::load(void)
 
 void ParamsMinimapWidget::unload(void)
 {
+    this->controlIcons.unload();
     // Liberation police de texte secondaire.
     ResetStorageFontRef(&this->bodyFont);
     // Liberation police de titre.
@@ -224,50 +189,6 @@ void ParamsMinimapWidget::update(double dt)
         baseRect.w,
         baseRect.h
     };
-
-    // Curseur contextuel (checkbox/boutons/drag header).
-    if (this->visible && this->cursorEnabled)
-    {
-        float mx = 0.0f;
-        float my = 0.0f;
-        getMouseRenderPosition(&mx, &my);
-        if (isPointInRect(mx, my, this->widgetRect))
-        {
-            const SDL_FRect outer = this->widgetRect;
-            const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
-            const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
-            const SDL_FRect closeButton = SDL_FRect{
-                outer.x + outer.w - 28.0f,
-                header.y + ((header.h - 20.0f) * 0.5f),
-                20.0f,
-                20.0f
-            };
-
-            const float rowStartY = outer.y + 56.0f;
-            const float rowStep = 41.0f;
-            const SDL_FRect checkPlayers = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 0.0f), 24.0f, 24.0f};
-            const SDL_FRect checkMonsters = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 1.0f), 24.0f, 24.0f};
-            const SDL_FRect checkShips = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 2.0f), 24.0f, 24.0f};
-            const SDL_FRect checkTreasures = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 3.0f), 24.0f, 24.0f};
-
-            if (isPointInRect(mx, my, closeButton) ||
-                isPointInRect(mx, my, checkPlayers) ||
-                isPointInRect(mx, my, checkMonsters) ||
-                isPointInRect(mx, my, checkShips) ||
-                isPointInRect(mx, my, checkTreasures))
-            {
-                setCursorHand();
-            }
-            else if (isPointInRect(mx, my, header))
-            {
-                setCursorMove();
-            }
-            else
-            {
-                setCursorArrow();
-            }
-        }
-    }
 
     // Si pas en mode drag, aucune mise a jour supplementaire.
     if (!this->widgetDragging)
@@ -449,13 +370,8 @@ void ParamsMinimapWidget::draw(void) const
     // Titre de la fenetre.
     drawLeftCenteredY(&self->titleFont, "Parametres de MiniMap", header, header.x + 8.0f, kTextGold);
 
-    // Bouton fermer + croix.
-    rc2d_graphics_setColor(kHeaderFill);
-    rc2d_graphics_rectangle("fill", &closeButtonCentered);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &closeButtonCentered);
-    rc2d_graphics_line(closeButtonCentered.x + 5.0f, closeButtonCentered.y + 5.0f, closeButtonCentered.x + 15.0f, closeButtonCentered.y + 15.0f);
-    rc2d_graphics_line(closeButtonCentered.x + 15.0f, closeButtonCentered.y + 5.0f, closeButtonCentered.x + 5.0f, closeButtonCentered.y + 15.0f);
+    // Bouton fermer.
+    self->controlIcons.drawCloseButton(closeButtonCentered, kHeaderFill, kGold);
 
     // Libelles des options.
     drawLeftCenteredY(&self->bodyFont, "Afficher les joueurs", rowPlayers, rowPlayers.x, kTextWhite);
@@ -483,5 +399,66 @@ bool ParamsMinimapWidget::containsPoint(float x, float y) const
         baseRect.h
     };
     return isPointInRect(x, y, currentRect);
+}
+
+HudCursorType ParamsMinimapWidget::getDesiredCursor(float x, float y) const
+{
+    if (!this->visible)
+    {
+        return HudCursorType::NONE;
+    }
+
+    if (this->widgetDragging)
+    {
+        return HudCursorType::MOVE;
+    }
+    if (!this->containsPoint(x, y))
+    {
+        return HudCursorType::NONE;
+    }
+
+    const SDL_FRect baseRect = getParamsMinimapRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        baseRect.w,
+        baseRect.h
+    };
+    const SDL_FRect outer = currentRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+    const SDL_FRect closeButton = SDL_FRect{
+        outer.x + outer.w - 28.0f,
+        header.y + ((header.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+
+    const float rowStartY = outer.y + 56.0f;
+    const float rowStep = 41.0f;
+    const SDL_FRect checkPlayers = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 0.0f), 24.0f, 24.0f};
+    const SDL_FRect checkMonsters = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 1.0f), 24.0f, 24.0f};
+    const SDL_FRect checkShips = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 2.0f), 24.0f, 24.0f};
+    const SDL_FRect checkTreasures = SDL_FRect{outer.x + outer.w - 48.0f, rowStartY + (rowStep * 3.0f), 24.0f, 24.0f};
+
+    if (isPointInRect(x, y, closeButton) ||
+        isPointInRect(x, y, checkPlayers) ||
+        isPointInRect(x, y, checkMonsters) ||
+        isPointInRect(x, y, checkShips) ||
+        isPointInRect(x, y, checkTreasures))
+    {
+        return HudCursorType::POINTER;
+    }
+    if (isPointInRect(x, y, header))
+    {
+        return HudCursorType::MOVE;
+    }
+    return HudCursorType::DEFAULT;
+}
+
+void ParamsMinimapWidget::show(void)
+{
+    this->visible = true;
+    this->widgetDragging = false;
 }
 

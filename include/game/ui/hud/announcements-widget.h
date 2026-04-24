@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 class AnnouncementsWidget {
 public:
     AnnouncementsWidget(void);
@@ -98,6 +101,14 @@ public:
     bool containsPoint(float x, float y) const;
 
     /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
+
+    /**
      * @brief Publie une annonce dans la liste interne.
      * @param rowText Texte de la ligne d'annonce.
      *
@@ -106,6 +117,16 @@ public:
      * Si la limite est depassee, les annonces les plus anciennes sont supprimees.
      */
     void publishAnnouncementRow(const std::string& rowText);
+
+    /**
+     * @brief Rouvre la fenetre d'annonces.
+     */
+    void show(void);
+
+    /**
+     * @brief Ferme la fenetre d'annonces.
+     */
+    void hide(void);
 
 private:
     /**
@@ -158,5 +179,5 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+    WindowControlIcons controlIcons; /**< Helper des icones croix/cadenas. */
 };
-

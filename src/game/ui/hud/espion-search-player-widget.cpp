@@ -187,50 +187,6 @@ static char extractDigitFromKeyLabel(const char* key)
     return '\0';
 }
 
-static void applyCursorIfChanged(SDL_SystemCursor id)
-{
-    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
-    static SDL_Cursor* cached[4] = {nullptr, nullptr, nullptr, nullptr};
-    const int index =
-        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
-        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
-        (id == SDL_SYSTEM_CURSOR_TEXT) ? 2 : 3;
-
-    if (id == lastId)
-    {
-        return;
-    }
-    if (cached[index] == nullptr)
-    {
-        cached[index] = SDL_CreateSystemCursor(id);
-    }
-    if (cached[index] != nullptr)
-    {
-        SDL_SetCursor(cached[index]);
-        lastId = id;
-    }
-}
-
-static void setCursorArrow(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
-}
-
-static void setCursorHand(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
-}
-
-static void setCursorIBeam(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_TEXT);
-}
-
-static void setCursorMove(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
-}
-
 EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
     : titleFont{},
       bodyFont{},
@@ -247,7 +203,8 @@ EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
       searchResultText{},
-      cursorEnabled(true)
+      cursorEnabled(true),
+      controlIcons{}
 {
 }
 
@@ -260,6 +217,7 @@ void EspionSearchPlayerWidget::load(void)
     // Meme rendu de titre que la fenetre Chat.
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->controlIcons.load();
     const SDL_FRect baseRect = getEspionRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
     this->widgetOffsetY = 0.0f;
@@ -269,7 +227,7 @@ void EspionSearchPlayerWidget::load(void)
         baseRect.w,
         baseRect.h
     };
-    this->visible = true;
+    this->visible = false;
     this->playerIdInput.clear();
     this->cursorIndex = 0;
     this->inputFocused = false;
@@ -283,6 +241,7 @@ void EspionSearchPlayerWidget::load(void)
 
 void EspionSearchPlayerWidget::unload(void)
 {
+    this->controlIcons.unload();
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
 }
@@ -297,32 +256,6 @@ void EspionSearchPlayerWidget::update(double dt)
         baseRect.w,
         baseRect.h
     };
-
-    // Curseur contextuel selon la zone survolee.
-    if (this->visible && this->cursorEnabled)
-    {
-        float mx = 0.0f;
-        float my = 0.0f;
-        getMouseRenderPosition(&mx, &my);
-        if (isPointInRect(mx, my, this->widgetRect))
-        {
-            const SDL_FRect headerRect = SDL_FRect{this->widgetRect.x + 5.0f, this->widgetRect.y + 5.0f, this->widgetRect.w - 10.0f, 30.0f};
-            const SDL_FRect topRowBox = SDL_FRect{this->widgetRect.x + 10.0f, this->widgetRect.y + 40.0f, this->widgetRect.w - 20.0f, 34.0f};
-            const SDL_FRect topRowInput = SDL_FRect{topRowBox.x + 132.0f, topRowBox.y + 4.0f, topRowBox.w - 138.0f, topRowBox.h - 8.0f};
-            const SDL_FRect closeButtonRect = SDL_FRect{
-                this->widgetRect.x + this->widgetRect.w - 28.0f,
-                headerRect.y + ((headerRect.h - 20.0f) * 0.5f),
-                20.0f,
-                20.0f
-            };
-            const SDL_FRect actionButton = SDL_FRect{this->widgetRect.x + 172.0f, this->widgetRect.y + 81.0f, this->widgetRect.w - 182.0f, 44.0f};
-
-            if (isPointInRect(mx, my, topRowInput)) { setCursorIBeam(); }
-            else if (isPointInRect(mx, my, actionButton) || isPointInRect(mx, my, closeButtonRect)) { setCursorHand(); }
-            else if (isPointInRect(mx, my, headerRect)) { setCursorMove(); }
-            else { setCursorArrow(); }
-        }
-    }
 
     if (this->widgetDragging)
     {
@@ -621,13 +554,8 @@ void EspionSearchPlayerWidget::draw(void) const
     rc2d_graphics_drawText(&titleText, titleX, titleY);
     rc2d_graphics_destroyText(&titleText);
 
-    // Bouton fermer (croix).
-    rc2d_graphics_setColor(kHeaderFill);
-    rc2d_graphics_rectangle("fill", &closeButtonCentered);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &closeButtonCentered);
-    rc2d_graphics_line(closeButtonCentered.x + 5.0f, closeButtonCentered.y + 5.0f, closeButtonCentered.x + 15.0f, closeButtonCentered.y + 15.0f);
-    rc2d_graphics_line(closeButtonCentered.x + 15.0f, closeButtonCentered.y + 5.0f, closeButtonCentered.x + 5.0f, closeButtonCentered.y + 15.0f);
+    // Bouton fermer.
+    self->controlIcons.drawCloseButton(closeButtonCentered, kHeaderFill, kGold);
 
     // Ligne "ID du joueur".
     rc2d_graphics_setColor(kPanelFill);
@@ -714,6 +642,62 @@ bool EspionSearchPlayerWidget::containsPoint(float x, float y) const
         baseRect.h
     };
     return isPointInRect(x, y, currentRect);
+}
+
+HudCursorType EspionSearchPlayerWidget::getDesiredCursor(float x, float y) const
+{
+    if (!this->visible)
+    {
+        return HudCursorType::NONE;
+    }
+
+    if (this->widgetDragging)
+    {
+        return HudCursorType::MOVE;
+    }
+    if (!this->containsPoint(x, y))
+    {
+        return HudCursorType::NONE;
+    }
+
+    const SDL_FRect baseRect = getEspionRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        baseRect.w,
+        baseRect.h
+    };
+    const SDL_FRect headerRect = SDL_FRect{currentRect.x + 5.0f, currentRect.y + 5.0f, currentRect.w - 10.0f, 30.0f};
+    const SDL_FRect topRowBox = SDL_FRect{currentRect.x + 10.0f, currentRect.y + 40.0f, currentRect.w - 20.0f, 34.0f};
+    const SDL_FRect topRowInput = SDL_FRect{topRowBox.x + 132.0f, topRowBox.y + 4.0f, topRowBox.w - 138.0f, topRowBox.h - 8.0f};
+    const SDL_FRect closeButtonRect = SDL_FRect{
+        currentRect.x + currentRect.w - 28.0f,
+        headerRect.y + ((headerRect.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+    const SDL_FRect actionButton = SDL_FRect{currentRect.x + 172.0f, currentRect.y + 81.0f, currentRect.w - 182.0f, 44.0f};
+
+    if (isPointInRect(x, y, topRowInput))
+    {
+        return HudCursorType::TEXT;
+    }
+    if (isPointInRect(x, y, actionButton) || isPointInRect(x, y, closeButtonRect))
+    {
+        return HudCursorType::POINTER;
+    }
+    if (isPointInRect(x, y, headerRect))
+    {
+        return HudCursorType::MOVE;
+    }
+    return HudCursorType::DEFAULT;
+}
+
+void EspionSearchPlayerWidget::show(void)
+{
+    this->visible = true;
+    this->widgetDragging = false;
+    this->clearFocus();
 }
 
 

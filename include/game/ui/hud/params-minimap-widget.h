@@ -2,6 +2,9 @@
 
 #include <RC2D/RC2D.h>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 /**
  * @brief Fenetre "Parametres de MiniMap" avec options cochables.
  */
@@ -69,6 +72,19 @@ public:
      * @brief Teste si un point est dans la fenetre parametres courante.
      */
     bool containsPoint(float x, float y) const;
+
+    /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
+
+    /**
+     * @brief Rouvre la fenetre de parametres.
+     */
+    void show(void);
     
 private:
     /**
@@ -104,6 +120,7 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+    WindowControlIcons controlIcons; /**< Helper des icones de controle. */
 };
 
 

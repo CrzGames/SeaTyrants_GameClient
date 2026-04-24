@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 /**
  * @brief Fenetre unique pour les differents marches du jeu.
  *
@@ -160,6 +163,14 @@ public:
      */
     bool containsPoint(float x, float y) const;
 
+    /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
+
         /**
      * @brief Remplace toutes les lignes du Bazar.
      */
@@ -179,6 +190,11 @@ public:
      * @brief Remplace toutes les lignes du Marche d'event.
      */
     void setEventMarketRows(const std::vector<MarketRow>& rows);
+
+    /**
+     * @brief Rouvre la fenetre sur l'onglet "Marche basique".
+     */
+    void openBasicMarket(void);
     
 private:
     /**
@@ -224,6 +240,7 @@ private:
      */
     bool visible;       /**< Indique si le widget est actuellement visible. */
     bool cursorEnabled; /**< Autorise le widget a piloter l'icone du curseur. */
+    WindowControlIcons controlIcons; /**< Helper des icones de controle. */
 
     /**
      * @brief Etat coche/non coche des categories de filtre.

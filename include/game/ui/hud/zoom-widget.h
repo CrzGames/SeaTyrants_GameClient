@@ -75,6 +75,22 @@ public:
      */
     bool mousepressed(float x, float y, RC2D_MouseButton button);
 
+    /**
+     * @brief Indique si le slider de zoom est actuellement en cours de drag.
+     *
+     * @return true si le bouton de zoom est attrape par la souris, sinon false.
+     */
+    bool isDraggingSlider(void) const;
+
+    /**
+     * @brief Indique si un point de rendu survole la surface dessinee du slider.
+     *
+     * @param x Position X en coordonnees de rendu.
+     * @param y Position Y en coordonnees de rendu.
+     * @return true si le point est sur le slider visible, sinon false.
+     */
+    bool isSliderHovered(float x, float y) const;
+
 private:
     RC2D_UIImage zoomBarUi;     /**< Barre de zoom. */
     RC2D_UIImage zoomSliderUi;  /**< Slider de zoom. */

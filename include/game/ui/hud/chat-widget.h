@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 class ChatWidget {
 public:
     enum class ChatMessageAuthor {
@@ -87,6 +90,16 @@ public:
     void clearFocus(void);
 
     /**
+     * @brief Rouvre la fenetre de chat sans recharger ses ressources.
+     */
+    void show(void);
+
+    /**
+     * @brief Ferme la fenetre de chat sans decharger ses ressources.
+     */
+    void hide(void);
+
+    /**
      * @brief Indique si la fenetre chat est actuellement visible.
      * @return True si la fenetre chat est visible.
      */
@@ -105,6 +118,14 @@ public:
      * @return True si le point est a l'interieur de la fenetre.
      */
     bool containsPoint(float x, float y) const;
+
+    /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
 
     /**
      * @brief Publie un message chat formate selon son auteur.
@@ -173,7 +194,5 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< Autorise ce widget a piloter le curseur souris ce frame. */
+    WindowControlIcons controlIcons; /**< Helper des icones croix/cadenas. */
 };
-
-
-

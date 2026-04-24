@@ -4,6 +4,9 @@
 
 #include <string>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 class EspionSearchPlayerWidget {
 public:
     EspionSearchPlayerWidget(void);
@@ -62,10 +65,23 @@ public:
     bool containsPoint(float x, float y) const;
 
     /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
+
+    /**
      * @brief Publie un texte de resultat dans la case du bas.
      * @param resultText Texte a afficher a droite du label.
      */
     void publishSearchResult(const std::string& resultText);
+
+    /**
+     * @brief Rouvre la fenetre espion.
+     */
+    void show(void);
 
 private:
     /**
@@ -107,4 +123,5 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+    WindowControlIcons controlIcons; /**< Helper des icones de controle. */
 };

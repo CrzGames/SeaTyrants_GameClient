@@ -304,6 +304,16 @@ bool ZoomWidget::mousepressed(float x, float y, RC2D_MouseButton button)
     return true;
 }
 
+bool ZoomWidget::isDraggingSlider(void) const
+{
+    return this->sliderDragging;
+}
+
+bool ZoomWidget::isSliderHovered(float x, float y) const
+{
+    return ZoomWidget::pointInRect(x, y, this->zoomSliderUi.last_drawn_rect);
+}
+
 bool ZoomWidget::pointInRect(float x, float y, const SDL_FRect& rect)
 {
     if (rect.w <= 0.0f || rect.h <= 0.0f)

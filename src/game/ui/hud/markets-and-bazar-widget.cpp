@@ -122,56 +122,6 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outY = renderY;
 }
 
-static void applyCursorIfChanged(SDL_SystemCursor id)
-{
-    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
-    static SDL_Cursor* cached[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-    const int index =
-        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
-        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
-        (id == SDL_SYSTEM_CURSOR_TEXT) ? 2 :
-        (id == SDL_SYSTEM_CURSOR_MOVE) ? 3 : 4;
-
-    if (id == lastId)
-    {
-        return;
-    }
-    if (cached[index] == nullptr)
-    {
-        cached[index] = SDL_CreateSystemCursor(id);
-    }
-    if (cached[index] != nullptr)
-    {
-        SDL_SetCursor(cached[index]);
-        lastId = id;
-    }
-}
-
-static void setCursorArrow(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
-}
-
-static void setCursorHand(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
-}
-
-static void setCursorIBeam(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_TEXT);
-}
-
-static void setCursorMove(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
-}
-
-static void setCursorResizeVertical(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
-}
-
 static float measureTextWidth(RC2D_Font* font, const std::string& text)
 {
     if (font == nullptr || font->sdl_font == nullptr || text.empty())
@@ -585,6 +535,7 @@ MarketsAndBazarWidget::MarketsAndBazarWidget(void)
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       visible(true),
       cursorEnabled(true),
+      controlIcons{},
       activeTab(ActiveTab::BASIC_MARKET),
       bazarRows{},
       blackMarketRows{},
@@ -978,12 +929,13 @@ void MarketsAndBazarWidget::load(void)
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
     this->smallFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
+    this->controlIcons.load();
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
     this->widgetOffsetY = 0.0f;
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, baseRect.w, baseRect.h};
-    this->visible = true;
+    this->visible = false;
     this->activeTab = ActiveTab::BASIC_MARKET;
     this->bazarFirstRow = 0;
     this->blackFirstRow = 0;
@@ -1003,6 +955,7 @@ void MarketsAndBazarWidget::load(void)
 
 void MarketsAndBazarWidget::unload(void)
 {
+    this->controlIcons.unload();
     this->clearRows();
     ResetStorageFontRef(&this->smallFont);
     ResetStorageFontRef(&this->bodyFont);
@@ -1053,83 +1006,6 @@ void MarketsAndBazarWidget::update(double dt)
     {
         this->cursorBlinkElapsed = 0.0;
         this->cursorVisible = false;
-    }
-
-    if (this->visible && this->cursorEnabled)
-    {
-        float mx = 0.0f;
-        float my = 0.0f;
-        getMouseRenderPosition(&mx, &my);
-        if (isPointInRect(mx, my, this->widgetRect))
-        {
-            const SDL_FRect headerDragRect = getHeaderDragRect(layout);
-            bool onInput = false;
-            bool onSubmit = false;
-            bool onCategoryFilter = false;
-            bool onResetFilters = false;
-            if (isPointInRect(mx, my, layout.body))
-            {
-                const int visualRow = static_cast<int>(std::floor((my - layout.body.y) / kRowHeight));
-                const int displayIndex = firstRow + visualRow;
-                if (visualRow >= 0 && visualRow < visibleRows && displayIndex >= 0 && displayIndex < totalRows)
-                {
-                    const int row = filteredRowIndices[static_cast<std::size_t>(displayIndex)];
-                    const float rowY = layout.body.y + (static_cast<float>(visualRow) * kRowHeight);
-                    SDL_FRect inputRect{};
-                    SDL_FRect submitRect{};
-                    (void)row;
-                    inputRect = SDL_FRect{layout.col4X + 8.0f, rowY + 12.0f, layout.col4W - 16.0f, 29.0f};
-                    submitRect = SDL_FRect{layout.col4X + 8.0f, rowY + 46.0f, layout.col4W - 16.0f, 30.0f};
-                    onInput = isPointInRect(mx, my, inputRect);
-                    onSubmit = isPointInRect(mx, my, submitRect);
-                }
-            }
-            if (isPointInRect(mx, my, layout.categoryBody))
-            {
-                for (int i = 0; i < static_cast<int>(kCategoryOrder.size()); ++i)
-                {
-                    const SDL_FRect rowRect = getCategoryRowRect(layout, i);
-                    if (rowRect.y + rowRect.h > layout.categoryBody.y + layout.categoryBody.h)
-                    {
-                        break;
-                    }
-                    if (isPointInRect(mx, my, rowRect))
-                    {
-                        onCategoryFilter = true;
-                        break;
-                    }
-                }
-            }
-            onResetFilters = isPointInRect(mx, my, layout.categoryResetButton);
-
-            if (isPointInRect(mx, my, layout.closeButton) ||
-                isPointInRect(mx, my, layout.bazarTab) ||
-                isPointInRect(mx, my, layout.blackTab) ||
-                isPointInRect(mx, my, layout.basicTab) ||
-                isPointInRect(mx, my, layout.eventTab) ||
-                onCategoryFilter ||
-                onResetFilters ||
-                onSubmit)
-            {
-                setCursorHand();
-            }
-            else if (onInput)
-            {
-                setCursorIBeam();
-            }
-            else if (maxFirstRow > 0 && isPointInRect(mx, my, layout.scrollTrack))
-            {
-                setCursorResizeVertical();
-            }
-            else if (isPointInRect(mx, my, headerDragRect))
-            {
-                setCursorMove();
-            }
-            else
-            {
-                setCursorArrow();
-            }
-        }
     }
 
     if (!this->widgetDragging && !this->scrollBarDragging)
@@ -1630,9 +1506,120 @@ bool MarketsAndBazarWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
+HudCursorType MarketsAndBazarWidget::getDesiredCursor(float x, float y) const
+{
+    if (!this->visible)
+    {
+        return HudCursorType::NONE;
+    }
+
+    if (this->scrollBarDragging)
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (this->widgetDragging)
+    {
+        return HudCursorType::MOVE;
+    }
+    if (!this->containsPoint(x, y))
+    {
+        return HudCursorType::NONE;
+    }
+
+    const SDL_FRect baseRect = getWidgetRectFromGameScreen();
+    const SDL_FRect currentRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        baseRect.w,
+        baseRect.h
+    };
+    const ActiveTab currentTab = this->activeTab;
+    const bool bazarTab = currentTab == ActiveTab::BAZARD;
+    const MarketLayout layout = buildLayout(currentRect, bazarTab);
+    const SDL_FRect headerDragRect = getHeaderDragRect(layout);
+    const std::vector<int> filteredRowIndices = this->buildFilteredRowIndices(currentTab);
+    const int totalRows = static_cast<int>(filteredRowIndices.size());
+    const int visibleRowsByHeight = (std::max)(1, static_cast<int>(std::floor(layout.body.h / kRowHeight)));
+    const int visibleRows = (std::max)(1, (std::min)(visibleRowsByHeight, kMaxRowsPerPage));
+    const int* firstRowPtr = this->getFirstRowForTab(currentTab);
+    const int firstRow = firstRowPtr != nullptr ? *firstRowPtr : 0;
+    const int maxFirstRow = (std::max)(0, totalRows - visibleRows);
+
+    bool onInput = false;
+    bool onSubmit = false;
+    bool onCategoryFilter = false;
+    bool onResetFilters = false;
+
+    if (isPointInRect(x, y, layout.body))
+    {
+        const int visualRow = static_cast<int>(std::floor((y - layout.body.y) / kRowHeight));
+        const int displayIndex = firstRow + visualRow;
+        if (visualRow >= 0 && visualRow < visibleRows && displayIndex >= 0 && displayIndex < totalRows)
+        {
+            const float rowY = layout.body.y + (static_cast<float>(visualRow) * kRowHeight);
+            const SDL_FRect inputRect = SDL_FRect{layout.col4X + 8.0f, rowY + 12.0f, layout.col4W - 16.0f, 29.0f};
+            const SDL_FRect submitRect = SDL_FRect{layout.col4X + 8.0f, rowY + 46.0f, layout.col4W - 16.0f, 30.0f};
+            onInput = isPointInRect(x, y, inputRect);
+            onSubmit = isPointInRect(x, y, submitRect);
+        }
+    }
+
+    if (isPointInRect(x, y, layout.categoryBody))
+    {
+        for (int i = 0; i < static_cast<int>(kCategoryOrder.size()); ++i)
+        {
+            const SDL_FRect rowRect = getCategoryRowRect(layout, i);
+            if (rowRect.y + rowRect.h > layout.categoryBody.y + layout.categoryBody.h)
+            {
+                break;
+            }
+            if (isPointInRect(x, y, rowRect))
+            {
+                onCategoryFilter = true;
+                break;
+            }
+        }
+    }
+    onResetFilters = isPointInRect(x, y, layout.categoryResetButton);
+
+    if (isPointInRect(x, y, layout.closeButton) ||
+        isPointInRect(x, y, layout.bazarTab) ||
+        isPointInRect(x, y, layout.blackTab) ||
+        isPointInRect(x, y, layout.basicTab) ||
+        isPointInRect(x, y, layout.eventTab) ||
+        onCategoryFilter ||
+        onResetFilters ||
+        onSubmit)
+    {
+        return HudCursorType::POINTER;
+    }
+    if (onInput)
+    {
+        return HudCursorType::TEXT;
+    }
+    if (maxFirstRow > 0 && isPointInRect(x, y, layout.scrollTrack))
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (isPointInRect(x, y, headerDragRect))
+    {
+        return HudCursorType::MOVE;
+    }
+    return HudCursorType::DEFAULT;
+}
+
 void MarketsAndBazarWidget::clearFocus(void)
 {
     this->clearInputFocusInternal();
+}
+
+void MarketsAndBazarWidget::openBasicMarket(void)
+{
+    this->visible = true;
+    this->activeTab = ActiveTab::BASIC_MARKET;
+    this->widgetDragging = false;
+    this->scrollBarDragging = false;
+    this->clearFocus();
 }
 
 void MarketsAndBazarWidget::draw(void) const
@@ -1706,20 +1693,7 @@ void MarketsAndBazarWidget::draw(void) const
     rc2d_graphics_rectangle("line", &layout.blackTab);
     drawCentered(&self->bodyFont, "Marche noir", layout.blackTab, self->activeTab == ActiveTab::BLACK_MARKET ? kTextGold : kTextMuted);
 
-    rc2d_graphics_setColor(kHeaderFill);
-    rc2d_graphics_rectangle("fill", &layout.closeButton);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &layout.closeButton);
-    rc2d_graphics_line(
-        layout.closeButton.x + 5.0f,
-        layout.closeButton.y + 5.0f,
-        layout.closeButton.x + layout.closeButton.w - 5.0f,
-        layout.closeButton.y + layout.closeButton.h - 5.0f);
-    rc2d_graphics_line(
-        layout.closeButton.x + layout.closeButton.w - 5.0f,
-        layout.closeButton.y + 5.0f,
-        layout.closeButton.x + 5.0f,
-        layout.closeButton.y + layout.closeButton.h - 5.0f);
+    self->controlIcons.drawCloseButton(layout.closeButton, kHeaderFill, kGold);
 
     rc2d_graphics_setColor(kHeaderFill);
     rc2d_graphics_rectangle("fill", &layout.categoryHeader);

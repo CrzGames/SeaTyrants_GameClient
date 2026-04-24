@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "game/ui/hud/hud-cursor.h"
+#include "game/ui/hud/window-control-icons.h"
+
 class LogBookWidget {
 public:
     /**
@@ -74,10 +77,28 @@ public:
     bool containsPoint(float x, float y) const;
 
     /**
+     * @brief Retourne le curseur souhaite pour une position donnee.
+     * @param x Position X de rendu a evaluer.
+     * @param y Position Y de rendu a evaluer.
+     * @return Type de curseur demande par le widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
+
+    /**
      * @brief Publie une ligne dans le journal.
      * @param row Donnees de la ligne a ajouter.
      */
     void publishLogBookRow(const LogBookRow& row);
+
+    /**
+     * @brief Rouvre la fenetre du journal.
+     */
+    void show(void);
+
+    /**
+     * @brief Ferme la fenetre du journal.
+     */
+    void hide(void);
 
 private:
     /**
@@ -117,5 +138,5 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+    WindowControlIcons controlIcons; /**< Helper des icones de controle. */
 };
-

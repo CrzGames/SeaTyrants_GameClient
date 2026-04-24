@@ -272,56 +272,6 @@ static std::vector<AnnonceWrappedRow> buildWrappedRows(RC2D_Font* font, const st
     return rows;
 }
 
-static void applyCursorIfChanged(SDL_SystemCursor id)
-{
-    static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
-    static SDL_Cursor* cached[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-    const int index =
-        (id == SDL_SYSTEM_CURSOR_DEFAULT) ? 0 :
-        (id == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
-        (id == SDL_SYSTEM_CURSOR_MOVE) ? 2 :
-        (id == SDL_SYSTEM_CURSOR_NWSE_RESIZE) ? 3 : 4;
-
-    if (id == lastId)
-    {
-        return;
-    }
-    if (cached[index] == nullptr)
-    {
-        cached[index] = SDL_CreateSystemCursor(id);
-    }
-    if (cached[index] != nullptr)
-    {
-        SDL_SetCursor(cached[index]);
-        lastId = id;
-    }
-}
-
-static void setCursorArrow(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_DEFAULT);
-}
-
-static void setCursorHand(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_POINTER);
-}
-
-static void setCursorMove(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_MOVE);
-}
-
-static void setCursorResizeDiag(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
-}
-
-static void setCursorResizeVertical(void)
-{
-    applyCursorIfChanged(SDL_SYSTEM_CURSOR_NS_RESIZE);
-}
-
 AnnouncementsWidget::AnnouncementsWidget(void)
     : announcementRows{},
       titleFont{},
@@ -344,7 +294,8 @@ AnnouncementsWidget::AnnouncementsWidget(void)
       resizeStartMouseY(0.0f),
       resizeStartWidth(kRefW),
       resizeStartHeight(kRefH),
-      cursorEnabled(true)
+      cursorEnabled(true),
+      controlIcons{}
 {
 }
 
@@ -358,6 +309,7 @@ void AnnouncementsWidget::load(void)
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Charge la police du corps de texte (annonces).
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->controlIcons.load();
     // Recupere la position de base de la fenetre dans l'ecran de jeu.
     const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     // Reinitialise les offsets de deplacement utilisateur.
@@ -372,8 +324,8 @@ void AnnouncementsWidget::load(void)
     this->resizeStartHeight = kRefH;
     // Applique la rect de base.
     this->widgetRect = SDL_FRect{baseRect.x, baseRect.y, this->widgetWidth, this->widgetHeight};
-    // La fenetre est visible juste apres chargement.
-    this->visible = true;
+    // La fenetre s'ouvre via son icone top bar.
+    this->visible = false;
     // Aucun drag en cours au demarrage.
     this->widgetDragging = false;
     // Cadenas ouvert par defaut (drag autorise).
@@ -388,6 +340,7 @@ void AnnouncementsWidget::load(void)
 
 void AnnouncementsWidget::unload(void)
 {
+    this->controlIcons.unload();
     // Libere la police du contenu.
     ResetStorageFontRef(&this->bodyFont);
     // Libere la police du titre.
@@ -405,75 +358,6 @@ void AnnouncementsWidget::update(double dt)
 
     // Curseur contextuel selon les zones interactives de la fenetre.
     if (this->visible && this->cursorEnabled)
-    {
-        float mx = 0.0f;
-        float my = 0.0f;
-        getMouseRenderPosition(&mx, &my);
-        if (isPointInRect(mx, my, this->widgetRect))
-        {
-            const SDL_FRect outer = this->widgetRect;
-            const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
-            const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
-            const SDL_FRect closeButtonRect = SDL_FRect{
-                outer.x + outer.w - 28.0f,
-                header.y + ((header.h - 20.0f) * 0.5f),
-                20.0f,
-                20.0f
-            };
-            const SDL_FRect lockButtonRect = SDL_FRect{
-                closeButtonRect.x - 24.0f,
-                closeButtonRect.y,
-                closeButtonRect.w,
-                closeButtonRect.h
-            };
-            const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
-            const SDL_FRect resizeHandleRect = SDL_FRect{
-                outer.x + outer.w - 16.0f,
-                outer.y + outer.h - 16.0f,
-                14.0f,
-                14.0f
-            };
-
-            const float lineHeight = measureLineHeight(&this->bodyFont);
-            const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
-            const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(&this->bodyFont, this->announcementRows, body.w - 10.0f);
-            const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedRows.size()) - visibleLines);
-            const SDL_FRect scrollTrack = SDL_FRect{
-                body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
-                body.y + kScrollBarPadding,
-                kScrollBarWidth,
-                body.h - (kScrollBarPadding * 2.0f)
-            };
-
-            if (isPointInRect(mx, my, resizeHandleRect))
-            {
-                setCursorResizeDiag();
-            }
-            else if (isPointInRect(mx, my, closeButtonRect) || isPointInRect(mx, my, lockButtonRect))
-            {
-                setCursorHand();
-            }
-            else if (maxFirstLine > 0 && isPointInRect(mx, my, scrollTrack))
-            {
-                setCursorResizeVertical();
-            }
-            else if (mx >= lockButtonRect.x && mx <= (closeButtonRect.x + closeButtonRect.w) &&
-                     my >= header.y && my <= (header.y + header.h))
-            {
-                // Evite le curseur MOVE entre cadenas et croix.
-                setCursorArrow();
-            }
-            else if (isPointInRect(mx, my, header))
-            {
-                setCursorMove();
-            }
-            else
-            {
-                setCursorArrow();
-            }
-        }
-    }
-
     // Si aucun drag/resize/scrollbar actif, rien d'autre a faire.
     if (!this->widgetDragging && !this->widgetResizing && !this->scrollBarDragging)
     {
@@ -804,6 +688,88 @@ bool AnnouncementsWidget::containsPoint(float x, float y) const
     return isPointInRect(x, y, currentRect);
 }
 
+HudCursorType AnnouncementsWidget::getDesiredCursor(float x, float y) const
+{
+    if (!this->visible)
+    {
+        return HudCursorType::NONE;
+    }
+
+    if (this->widgetResizing)
+    {
+        return HudCursorType::RESIZE_DIAGONAL;
+    }
+    if (this->scrollBarDragging)
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (this->widgetDragging && !this->widgetDragLocked)
+    {
+        return HudCursorType::MOVE;
+    }
+    if (!this->containsPoint(x, y))
+    {
+        return HudCursorType::NONE;
+    }
+
+    const SDL_FRect outer = this->widgetRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect header = SDL_FRect{inner.x + 1.0f, inner.y + 1.0f, inner.w - 2.0f, 30.0f};
+    const SDL_FRect closeButtonRect = SDL_FRect{
+        outer.x + outer.w - 28.0f,
+        header.y + ((header.h - 20.0f) * 0.5f),
+        20.0f,
+        20.0f
+    };
+    const SDL_FRect lockButtonRect = SDL_FRect{
+        closeButtonRect.x - 24.0f,
+        closeButtonRect.y,
+        closeButtonRect.w,
+        closeButtonRect.h
+    };
+    const SDL_FRect body = SDL_FRect{outer.x + 8.0f, header.y + header.h + 4.0f, outer.w - 16.0f, outer.h - (header.h + 14.0f)};
+    const SDL_FRect resizeHandleRect = SDL_FRect{
+        outer.x + outer.w - 16.0f,
+        outer.y + outer.h - 16.0f,
+        14.0f,
+        14.0f
+    };
+
+    const float lineHeight = measureLineHeight(const_cast<RC2D_Font*>(&this->bodyFont));
+    const int visibleLines = (std::max)(1, static_cast<int>(std::floor((body.h - 8.0f) / (lineHeight + 1.0f))));
+    const std::vector<AnnonceWrappedRow> wrappedRows = buildWrappedRows(const_cast<RC2D_Font*>(&this->bodyFont), this->announcementRows, body.w - 10.0f);
+    const int maxFirstLine = (std::max)(0, static_cast<int>(wrappedRows.size()) - visibleLines);
+    const SDL_FRect scrollTrack = SDL_FRect{
+        body.x + body.w - (kScrollBarWidth + kScrollBarPadding),
+        body.y + kScrollBarPadding,
+        kScrollBarWidth,
+        body.h - (kScrollBarPadding * 2.0f)
+    };
+
+    if (isPointInRect(x, y, resizeHandleRect))
+    {
+        return HudCursorType::RESIZE_DIAGONAL;
+    }
+    if (isPointInRect(x, y, closeButtonRect) || isPointInRect(x, y, lockButtonRect))
+    {
+        return HudCursorType::POINTER;
+    }
+    if (maxFirstLine > 0 && isPointInRect(x, y, scrollTrack))
+    {
+        return HudCursorType::RESIZE_VERTICAL;
+    }
+    if (x >= lockButtonRect.x && x <= (closeButtonRect.x + closeButtonRect.w) &&
+        y >= header.y && y <= (header.y + header.h))
+    {
+        return HudCursorType::DEFAULT;
+    }
+    if (isPointInRect(x, y, header) && !this->widgetDragLocked)
+    {
+        return HudCursorType::MOVE;
+    }
+    return HudCursorType::DEFAULT;
+}
+
 void AnnouncementsWidget::draw(void) const
 {
     // draw est const; on cast pour mettre a jour widgetRect cachee.
@@ -931,36 +897,13 @@ void AnnouncementsWidget::draw(void) const
         }
     }
 
-    // Bouton cadenas (meme logique visuelle que chat).
-    rc2d_graphics_setColor(this->widgetDragLocked ? kPanelFill : kHeaderFill);
-    rc2d_graphics_rectangle("fill", &lockButtonRect);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &lockButtonRect);
-    const SDL_FRect lockBody = SDL_FRect{
-        lockButtonRect.x + 5.0f,
-        lockButtonRect.y + 10.0f,
-        lockButtonRect.w - 10.0f,
-        lockButtonRect.h - 16.0f
-    };
-    rc2d_graphics_rectangle("line", &lockBody);
-    rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y, lockBody.x + 2.0f, lockBody.y - 3.0f);
-    rc2d_graphics_line(lockBody.x + lockBody.w - 2.0f, lockBody.y, lockBody.x + lockBody.w - 2.0f, lockBody.y - 3.0f);
-    if (self->widgetDragLocked)
-    {
-        rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y - 3.0f, lockBody.x + lockBody.w - 2.0f, lockBody.y - 3.0f);
-    }
-    else
-    {
-        rc2d_graphics_line(lockBody.x + 2.0f, lockBody.y - 3.0f, lockBody.x + lockBody.w - 5.0f, lockBody.y - 3.0f);
-    }
-
-    // Bouton fermer (croix).
-    rc2d_graphics_setColor(kHeaderFill);
-    rc2d_graphics_rectangle("fill", &closeButtonRect);
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &closeButtonRect);
-    rc2d_graphics_line(closeButtonRect.x + 5.0f, closeButtonRect.y + 5.0f, closeButtonRect.x + closeButtonRect.w - 5.0f, closeButtonRect.y + closeButtonRect.h - 5.0f);
-    rc2d_graphics_line(closeButtonRect.x + closeButtonRect.w - 5.0f, closeButtonRect.y + 5.0f, closeButtonRect.x + 5.0f, closeButtonRect.y + closeButtonRect.h - 5.0f);
+    // Boutons de controle.
+    self->controlIcons.drawLockButton(
+        lockButtonRect,
+        self->widgetDragLocked,
+        self->widgetDragLocked ? kPanelFill : kHeaderFill,
+        kGold);
+    self->controlIcons.drawCloseButton(closeButtonRect, kHeaderFill, kGold);
 
     // Scrollbar visible uniquement si le contenu depasse.
     if (showScrollBar)
@@ -991,6 +934,22 @@ void AnnouncementsWidget::draw(void) const
 
     // Restaure le mode de blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void AnnouncementsWidget::show(void)
+{
+    this->visible = true;
+    this->widgetDragging = false;
+    this->widgetResizing = false;
+    this->scrollBarDragging = false;
+}
+
+void AnnouncementsWidget::hide(void)
+{
+    this->visible = false;
+    this->widgetDragging = false;
+    this->widgetResizing = false;
+    this->scrollBarDragging = false;
 }
 
 
