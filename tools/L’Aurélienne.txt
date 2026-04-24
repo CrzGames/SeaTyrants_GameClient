@@ -1,0 +1,167 @@
+Use the attached ship sprite sheet as the STRICT BASE MODEL.
+
+IMPORTANT RULE:
+Do not redesign the ship.
+Do not change the ship structure.
+Do not change the hull shape.
+Do not change the mast count.
+Do not change the sail count.
+Do not change the sprite proportions.
+Do not change the viewing angle.
+Do not change the silhouette.
+Do not invent a new ship.
+
+The original ship must remain visually the same base ship.
+Only add LIGHT FACTION DECORATION on top of the existing ship.
+
+Allowed modifications only:
+- repaint parts of the sails with faction colors
+- repaint parts of the hull with faction colors
+- add small decorative trim on the hull
+- add limited ornamental carvings
+- add small banners, seals, or painted markings matching the faction
+- slightly refine the stern and bow details without changing shape
+
+Forbidden modifications:
+- no redesign of hull
+- no new ship architecture
+- no bigger ship
+- no extra decks
+- no new cannons
+- no changing sail shape
+- no changing mast placement
+- no changing sprite layout
+- no changing perspective
+- no changing the number of visible ship parts
+- no changing the original sprite readability
+- no symbol on sails
+- no emblem on sails
+- no heraldry on sails
+- no crest on sails
+- no logo on sails
+- no insignia on sails
+
+Goal:
+keep the exact same ship sprite, but reskinned as an official faction variant.
+
+CONSISTENCY LOCK:
+All 8 directions must depict the exact same ship configuration.
+No variation between directions.
+No extra flags in some views.
+No missing flags in some views.
+No extra banners in some views.
+No missing banners in some views.
+No extra sail markings in some views.
+No missing sail markings in some views.
+No added ornaments in some views.
+No removed ornaments in some views.
+The same decorative elements must appear consistently on the same parts of the ship in every direction.
+The ship must read as one single identical asset rotated into 8 directions, not 8 slightly different versions.
+
+STRICT ASSET SHEET RULE:
+This is not a set of creative variations.
+This is one single ship asset shown in 8 directions.
+Every direction must preserve the exact same decorative loadout.
+No directional improvisation.
+No direction-specific additions.
+No direction-specific omissions.
+No variation in heraldry, flags, trims, banners, or markings.
+
+Style:
+2D hand-painted dark fantasy MMORPG sprite sheet, 8 directions, same framing, same scale, same presentation, clean readable game sprite, production-ready in-game asset.
+
+Background rules:
+- black background
+- no white background
+- no transparent background
+- no painted backdrop
+- no sea, no harbor, no environment
+- keep all internal ship shading
+- preserve sail folds, hull depth, material shadows, and painted self-shadowing
+- do not flatten the colors
+- the ship must remain cleanly isolated on a black background
+- do not generate any cast shadow
+- do not generate any contact shadow under the hull
+- no ground shadow
+- no ship shadow at all
+
+The result must look like:
+original ship base + faction decoration overlay only.
+
+Faction overlay:
+L’Aurélienne
+
+Visual aspect:
+luxurious
+
+Luxury rules:
+- the ship must look refined, wealthy, prestigious, and high-status
+- luxury must be expressed only through surface decoration, noble materials, elegant paint, gold trim, polished details, and tasteful ornament
+- the luxurious look must remain controlled, disciplined, and military
+- use royal blue sails, royal gold sail borders, and a white hull with refined gold and blue accents
+- sails must remain completely clean, with no emblem, no symbol, no crest, and no heraldic marking
+- decorative carvings may appear slightly more polished and noble than the base ship
+- banners and seals may look rich and ceremonial, but still battle-ready
+- the ship must feel like an elite imperial vessel with expensive finishing
+
+Do not change the ship structure for luxury.
+Do not add palaces, towers, balconies, extra decks, giant ornaments, or oversized decorations.
+Do not make the silhouette more complex.
+Luxury must remain a surface treatment only.
+
+Faction colors only:
+- royal blue
+- royal gold
+- white
+
+Official sail rule:
+- do not place any symbol on any sail
+- do not place any emblem on any sail
+- do not place any heraldry on any sail
+- do not place any crest on any sail
+- do not place any logo on any sail
+- do not place any insignia on any sail
+- all sails must remain clean and unmarked
+- the faction identity must come only from sail colors, sail borders, hull colors, trim, banners, and ornamentation
+- if the model attempts to add a symbol on a sail, remove it and keep the sail blank
+
+SAIL CONSISTENCY RULES:
+- all sails must stay blank in every direction
+- do not add a symbol on one sail in some views
+- do not remove a symbol in other views because there must never be a symbol at all
+- do not create decorative heraldic markings on some sails only
+- do not change sail marking count between directions
+- no blank-versus-marked inconsistency because every sail must be blank
+
+FLAG AND BANNER LOCK:
+- keep the exact same number of flags, banners, seals, and pennants in all 8 directions
+- do not add extra flags in certain views
+- do not remove flags in certain views
+- do not move flags to different masts between directions
+- keep flag placement consistent on the same mast positions across all directions
+- if a banner exists, it must exist consistently wherever the attachment point is visible
+- no random extra ceremonial cloth
+- no random missing cloth details
+- all banners and pennants must remain plain color only, with no heraldic symbol
+
+Decoration rules:
+- keep the original sails exactly the same shape, recolor them toward royal blue
+- add clean royal gold sail borders and edging
+- keep every sail completely blank, with no emblem and no marking
+- repaint the hull primarily white
+- keep the hull shape exactly the same while making the white hull finish clean, noble, and luxurious
+- add thin royal gold trim lines on the white hull
+- add small deep royal blue accent lines or panels on the hull in a restrained and elegant way
+- add minimal carved decoration at the bow and stern only, and nowhere else
+- use exactly 2 small noble banners total, kept identical in all directions where visible
+- use no extra ribbons
+- keep ornamentation controlled, refined, symmetrical, and minimal
+- the ship must feel disciplined, noble, majestic, radiant, and militarily organized
+
+Do not make the ship more luxurious in shape.
+Do not add palace-like architecture.
+Do not increase visual complexity too much.
+Only a refined imperial surface treatment.
+
+Negative prompt:
+redesign, new ship, different hull, different silhouette, different mast count, different sail count, larger ship, smaller ship, extra deck, extra cannons, different perspective, different angle, different sprite scale, different layout, new architecture, heavy modification, complete visual rewrite, overdesigned details, excessive ornament, clutter, messy composition, wrong perspective, changed sprite readability, changed sail shape, changed mast placement, changed hull structure, changed proportions, steampunk, sci-fi, modern ship, photorealistic, realistic rendering, 3d render, environment, sea, ocean, waves, harbor, dock, sky, background scenery, painted background, white background, black background, transparent background, alpha background, framed composition, crew, sailors, character, monster, creature, tentacles, text, logo text, letters, UI, border, smoke, fire, explosion, glow, magic aura, pirate symbols, skulls, religious cross, anchor cross, chaotic patchwork, torn sails, ragged hull, random heraldry, mixed faction elements, asymmetrical redesign, ivory sails as dominant color, white sail borders, dark hull as dominant color, black hull, brown hull as main color, sail emblem, sail symbol, sail crest, sail heraldry, sail insignia, sail logo, fleur-de-lys on sail, sun symbol on sail, marked sails, decorated sails with symbols, inconsistent details between directions, inconsistent sails, missing flag, extra flag, missing banner, extra banner, shifted ornament placement, different decorative layout per direction, asset inconsistency, model sheet inconsistency, directional variation, cast shadow, contact shadow, ship shadow, ground shadow, drop shadow, ambient shadow under the hull
