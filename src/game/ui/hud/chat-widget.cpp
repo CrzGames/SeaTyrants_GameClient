@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 
 #include "core/context.h"
@@ -20,6 +21,7 @@ static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
 static constexpr RC2D_Color kTabFill = RC2D_Color{84, 10, 9, 233};
 static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kInputFill = RC2D_Color{36, 36, 37, 235};
+static constexpr RC2D_Color kInputSelectionFill = RC2D_Color{67, 96, 144, 215};
 static constexpr RC2D_Color kMessageTextColor = RC2D_Color{210, 215, 225, 255};
 static constexpr RC2D_Color kPlaceholderTextColor = RC2D_Color{145, 152, 166, 235};
 static constexpr RC2D_Color kCursorColor = RC2D_Color{239, 226, 163, 255};
@@ -399,7 +401,9 @@ ChatWidget::ChatWidget(void)
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       inputBuffer{},
       cursorIndex(0),
+      selectionAnchorIndex(0),
       inputFocused(false),
+      inputSelectingWithMouse(false),
       cursorVisible(true),
       cursorBlinkElapsed(0.0),
       scrollFirstLine(0),
@@ -455,7 +459,9 @@ void ChatWidget::load(void)
     };
     this->inputBuffer.clear();
     this->cursorIndex = 0;
+    this->selectionAnchorIndex = 0;
     this->inputFocused = false;
+    this->inputSelectingWithMouse = false;
     this->cursorVisible = true;
     this->cursorBlinkElapsed = 0.0;
     this->scrollBarDragging = false;
@@ -596,11 +602,37 @@ void ChatWidget::update(double dt)
     // Si le widget est ferme, on coupe ici toute update interactive interne.
     if (!this->visible)
     {
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
         this->scrollBarDragging = false;
         this->widgetResizing = false;
         return;
+    }
+
+    // --- Selection de texte au drag dans la barre input ---
+    if (this->inputSelectingWithMouse)
+    {
+        if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+        {
+            this->inputSelectingWithMouse = false;
+        }
+        else if (this->inputFocused)
+        {
+            const float extraW = this->widgetRect.w - kRefW;
+            const float extraH = this->widgetRect.h - kRefH;
+            const auto RX = [&](float x) { return this->widgetRect.x + x; };
+            const auto RY = [&](float y) { return this->widgetRect.y + y; };
+            const auto RW = [&](float w) { return w; };
+            const auto RH = [&](float h) { return h; };
+            const SDL_FRect inputArea = SDL_FRect{RX(12.0f), RY(298.0f) + extraH, RW(478.0f) + extraW, RH(39.0f)};
+
+            float mouseX = 0.0f;
+            float mouseY = 0.0f;
+            getMouseRenderPosition(&mouseX, &mouseY);
+            (void)mouseY;
+            this->cursorIndex = this->getInputCursorIndexFromPosition(mouseX, inputArea);
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
     }
 
     // --- Blink curseur ---
@@ -682,7 +714,6 @@ void ChatWidget::update(double dt)
 
 bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
-    (void)clicks;
     (void)mouseID;
 
     // Synchronise le rect avant hit-tests (centre + offsets drag).
@@ -702,8 +733,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
     // Clic hors widget: retire focus input + stop drag.
     if (!isPointInRect(x, y, this->widgetRect))
     {
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
         this->scrollBarDragging = false;
         this->widgetResizing = false;
         return false;
@@ -795,8 +825,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
         this->resizeStartHeight = this->widgetHeight;
         this->widgetDragging = false;
         this->scrollBarDragging = false;
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
         return true;
     }
 
@@ -807,8 +836,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
         this->widgetDragging = false;
         this->widgetResizing = false;
         this->scrollBarDragging = false;
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
         return true;
     }
 
@@ -824,8 +852,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
         this->widgetResizing = false;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
         return true;
     }
 
@@ -836,50 +863,25 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
 
-        // Place le curseur au plus proche du clic.
-        const float inputTextX = inputArea.x + RW(8.0f);
-        const float inputMaxWidth = inputArea.w - RW(16.0f);
-
-        std::size_t renderStart = 0;
-        while (renderStart < this->cursorIndex &&
-               measureTextWidth(&this->bodyFont, this->inputBuffer.substr(renderStart, this->cursorIndex - renderStart)) > inputMaxWidth)
+        // Double-clic: selection complete du texte saisi.
+        if (clicks >= 2)
         {
-            ++renderStart;
+            this->selectionAnchorIndex = 0;
+            this->cursorIndex = this->inputBuffer.size();
+            this->inputSelectingWithMouse = false;
+            return true;
         }
 
-        std::size_t renderEnd = this->cursorIndex;
-        while (renderEnd < this->inputBuffer.size())
-        {
-            const std::string candidate = this->inputBuffer.substr(renderStart, (renderEnd - renderStart) + 1);
-            if (measureTextWidth(&this->bodyFont, candidate) > inputMaxWidth)
-            {
-                break;
-            }
-            ++renderEnd;
-        }
-
-        const std::string visibleText = this->inputBuffer.substr(renderStart, renderEnd - renderStart);
-        const float localX = (std::max)(0.0f, x - inputTextX);
-        std::size_t newCursor = renderStart;
-        float accumWidth = 0.0f;
-        for (std::size_t i = 0; i < visibleText.size(); ++i)
-        {
-            accumWidth = measureTextWidth(&this->bodyFont, visibleText.substr(0, i + 1));
-            if (localX <= accumWidth)
-            {
-                newCursor = renderStart + i + 1;
-                break;
-            }
-            newCursor = renderStart + i + 1;
-        }
-
-        this->cursorIndex = (std::min)(newCursor, this->inputBuffer.size());
+        // Clic simple: pose le curseur et prepare une selection eventuelle au drag.
+        const std::size_t clickedIndex = this->getInputCursorIndexFromPosition(x, inputArea);
+        this->cursorIndex = clickedIndex;
+        this->selectionAnchorIndex = clickedIndex;
+        this->inputSelectingWithMouse = true;
         return true;
     }
 
     // Clic ailleurs dans le widget => retire focus input.
-    this->inputFocused = false;
-    this->cursorVisible = false;
+    this->clearFocus();
 
     // --- Clic dans la zone messages / scrollbar ---
     if (isPointInRect(x, y, msgArea))
@@ -1032,44 +1034,72 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
     switch (scancode)
     {
         case SDL_SCANCODE_LEFT:
-            if (this->cursorIndex > 0) { --this->cursorIndex; }
+            if (this->hasInputSelection())
+            {
+                this->cursorIndex = this->getInputSelectionStart();
+            }
+            else if (this->cursorIndex > 0)
+            {
+                --this->cursorIndex;
+            }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_RIGHT:
-            if (this->cursorIndex < this->inputBuffer.size()) { ++this->cursorIndex; }
+            if (this->hasInputSelection())
+            {
+                this->cursorIndex = this->getInputSelectionEnd();
+            }
+            else if (this->cursorIndex < this->inputBuffer.size())
+            {
+                ++this->cursorIndex;
+            }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_HOME:
             this->cursorIndex = 0;
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_END:
             this->cursorIndex = this->inputBuffer.size();
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_BACKSPACE:
-            if (this->cursorIndex > 0 && !this->inputBuffer.empty())
+            if (this->hasInputSelection())
+            {
+                this->deleteSelectedInputText();
+            }
+            else if (this->cursorIndex > 0 && !this->inputBuffer.empty())
             {
                 this->inputBuffer.erase(this->cursorIndex - 1, 1);
                 --this->cursorIndex;
             }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_DELETE:
-            if (this->cursorIndex < this->inputBuffer.size())
+            if (this->hasInputSelection())
+            {
+                this->deleteSelectedInputText();
+            }
+            else if (this->cursorIndex < this->inputBuffer.size())
             {
                 this->inputBuffer.erase(this->cursorIndex, 1);
             }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
@@ -1082,14 +1112,14 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
                 this->publishChatMessage(ChatWidget::ChatMessageAuthor::SELF, this->inputBuffer);
                 this->inputBuffer.clear();
                 this->cursorIndex = 0;
+                this->clearInputSelection();
             }
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
 
         case SDL_SCANCODE_ESCAPE:
-            this->inputFocused = false;
-            this->cursorVisible = false;
+            this->clearFocus();
             return true;
 
         case SDL_SCANCODE_UP:
@@ -1109,8 +1139,13 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
     char newCharacter = '\0';
     if (keyToPrintableChar(key, scancode, keycode, mod, &newCharacter))
     {
+        if (this->hasInputSelection())
+        {
+            this->deleteSelectedInputText();
+        }
         this->inputBuffer.insert(this->cursorIndex, 1, newCharacter);
         ++this->cursorIndex;
+        this->clearInputSelection();
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
         return true;
@@ -1298,22 +1333,8 @@ void ChatWidget::draw(void) const
     // Fenetre texte horizontale: on garde le curseur visible meme en saisie longue.
     std::size_t cursor = (std::min)(self->cursorIndex, self->inputBuffer.size());
     std::size_t renderStart = 0;
-    while (renderStart < cursor &&
-           measureTextWidth(&self->bodyFont, self->inputBuffer.substr(renderStart, cursor - renderStart)) > inputMaxWidth)
-    {
-        ++renderStart;
-    }
-
     std::size_t renderEnd = cursor;
-    while (renderEnd < self->inputBuffer.size())
-    {
-        const std::string candidate = self->inputBuffer.substr(renderStart, (renderEnd - renderStart) + 1);
-        if (measureTextWidth(&self->bodyFont, candidate) > inputMaxWidth)
-        {
-            break;
-        }
-        ++renderEnd;
-    }
+    self->computeInputVisibleRange(inputMaxWidth, cursor, &renderStart, &renderEnd);
 
     const std::string visibleInput = self->inputBuffer.substr(renderStart, renderEnd - renderStart);
     const bool showPlaceholder = self->inputBuffer.empty() && !self->inputFocused;
@@ -1324,7 +1345,43 @@ void ChatWidget::draw(void) const
     }
     else
     {
+        if (self->hasInputSelection())
+        {
+            const std::size_t selectionStart = self->getInputSelectionStart();
+            const std::size_t selectionEnd = self->getInputSelectionEnd();
+            const std::size_t visibleSelectionStart = (std::max)(renderStart, selectionStart);
+            const std::size_t visibleSelectionEnd = (std::min)(renderEnd, selectionEnd);
+            if (visibleSelectionStart < visibleSelectionEnd)
+            {
+                const std::string prefixText = self->inputBuffer.substr(renderStart, visibleSelectionStart - renderStart);
+                const std::string selectedText = self->inputBuffer.substr(visibleSelectionStart, visibleSelectionEnd - visibleSelectionStart);
+                const float prefixWidth = measureTextWidth(&self->bodyFont, prefixText);
+                const float selectedWidth = measureTextWidth(&self->bodyFont, selectedText);
+                const SDL_FRect selectionRect = SDL_FRect{
+                    static_cast<float>(std::round(inputTextX + prefixWidth - RW(1.0f))),
+                    static_cast<float>(std::round(inputArea.y + RH(7.0f))),
+                    (std::max)(RW(2.0f), selectedWidth + RW(2.0f)),
+                    inputArea.h - RH(14.0f)
+                };
+                rc2d_graphics_setColor(kInputSelectionFill);
+                rc2d_graphics_rectangle("fill", &selectionRect);
+            }
+        }
         drawTextAt(&self->bodyFont, visibleInput, inputTextX, inputTextY, kMessageTextColor);
+        if (self->hasInputSelection())
+        {
+            const std::size_t selectionStart = self->getInputSelectionStart();
+            const std::size_t selectionEnd = self->getInputSelectionEnd();
+            const std::size_t visibleSelectionStart = (std::max)(renderStart, selectionStart);
+            const std::size_t visibleSelectionEnd = (std::min)(renderEnd, selectionEnd);
+            if (visibleSelectionStart < visibleSelectionEnd)
+            {
+                const std::string prefixText = self->inputBuffer.substr(renderStart, visibleSelectionStart - renderStart);
+                const std::string selectedText = self->inputBuffer.substr(visibleSelectionStart, visibleSelectionEnd - visibleSelectionStart);
+                const float prefixWidth = measureTextWidth(&self->bodyFont, prefixText);
+                drawTextAt(&self->bodyFont, selectedText, inputTextX + prefixWidth, inputTextY, kMessageTextColor);
+            }
+        }
     }
 
     // Curseur vertical clignotant.
@@ -1354,8 +1411,110 @@ void ChatWidget::draw(void) const
 void ChatWidget::clearFocus(void)
 {
     this->inputFocused = false;
+    this->inputSelectingWithMouse = false;
     this->cursorVisible = false;
     this->cursorBlinkElapsed = 0.0;
+    this->clearInputSelection();
+}
+
+void ChatWidget::computeInputVisibleRange(
+    float inputMaxWidth,
+    std::size_t focusIndex,
+    std::size_t* outStart,
+    std::size_t* outEnd) const
+{
+    if (outStart == nullptr || outEnd == nullptr)
+    {
+        return;
+    }
+
+    const std::size_t clampedFocusIndex = (std::min)(focusIndex, this->inputBuffer.size());
+    std::size_t renderStart = 0;
+    while (renderStart < clampedFocusIndex &&
+           measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, this->inputBuffer.substr(renderStart, clampedFocusIndex - renderStart)) > inputMaxWidth)
+    {
+        ++renderStart;
+    }
+
+    std::size_t renderEnd = clampedFocusIndex;
+    while (renderEnd < this->inputBuffer.size())
+    {
+        const std::string candidate = this->inputBuffer.substr(renderStart, (renderEnd - renderStart) + 1);
+        if (measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, candidate) > inputMaxWidth)
+        {
+            break;
+        }
+        ++renderEnd;
+    }
+
+    *outStart = renderStart;
+    *outEnd = renderEnd;
+}
+
+std::size_t ChatWidget::getInputCursorIndexFromPosition(float renderX, const SDL_FRect& inputArea) const
+{
+    const float inputTextX = inputArea.x + 8.0f;
+    const float inputMaxWidth = inputArea.w - 16.0f;
+    std::size_t renderStart = 0;
+    std::size_t renderEnd = 0;
+    this->computeInputVisibleRange(inputMaxWidth, this->cursorIndex, &renderStart, &renderEnd);
+
+    const std::string visibleText = this->inputBuffer.substr(renderStart, renderEnd - renderStart);
+    const float localX = clampf(renderX - inputTextX, 0.0f, inputMaxWidth);
+    std::size_t newCursor = renderStart;
+    float previousWidth = 0.0f;
+    for (std::size_t i = 0; i < visibleText.size(); ++i)
+    {
+        const float nextWidth = measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, visibleText.substr(0, i + 1));
+        const float midpoint = previousWidth + ((nextWidth - previousWidth) * 0.5f);
+        if (localX <= midpoint)
+        {
+            newCursor = renderStart + i;
+            return (std::min)(newCursor, this->inputBuffer.size());
+        }
+        previousWidth = nextWidth;
+        newCursor = renderStart + i + 1;
+    }
+
+    return (std::min)(newCursor, this->inputBuffer.size());
+}
+
+bool ChatWidget::hasInputSelection(void) const
+{
+    return this->getInputSelectionStart() != this->getInputSelectionEnd();
+}
+
+std::size_t ChatWidget::getInputSelectionStart(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->inputBuffer.size());
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->inputBuffer.size());
+    return (std::min)(clampedAnchor, clampedCursor);
+}
+
+std::size_t ChatWidget::getInputSelectionEnd(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->inputBuffer.size());
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->inputBuffer.size());
+    return (std::max)(clampedAnchor, clampedCursor);
+}
+
+void ChatWidget::clearInputSelection(void)
+{
+    this->selectionAnchorIndex = (std::min)(this->cursorIndex, this->inputBuffer.size());
+}
+
+void ChatWidget::deleteSelectedInputText(void)
+{
+    if (!this->hasInputSelection())
+    {
+        return;
+    }
+
+    const std::size_t selectionStart = this->getInputSelectionStart();
+    const std::size_t selectionEnd = this->getInputSelectionEnd();
+    this->inputBuffer.erase(selectionStart, selectionEnd - selectionStart);
+    this->cursorIndex = selectionStart;
+    this->clearInputSelection();
 }
 
 void ChatWidget::show(void)

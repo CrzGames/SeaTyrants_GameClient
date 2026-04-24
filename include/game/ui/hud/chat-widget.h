@@ -157,7 +157,9 @@ private:
      */
     std::string inputBuffer; /**< Buffer texte courant saisi dans la barre input. */
     std::size_t cursorIndex; /**< Position d'insertion du curseur dans `inputBuffer`. */
+    std::size_t selectionAnchorIndex; /**< Point d'ancrage de la selection active dans `inputBuffer`. */
     bool inputFocused; /**< True si la barre input a le focus clavier. */
+    bool inputSelectingWithMouse; /**< True si un glisser souris etend actuellement la selection dans la barre input. */
     bool cursorVisible; /**< True si le curseur de saisie doit etre visible. */
     double cursorBlinkElapsed; /**< Temps accumule pour l'animation de clignotement du curseur. */
 
@@ -195,4 +197,51 @@ private:
      */
     bool cursorEnabled; /**< Autorise ce widget a piloter le curseur souris ce frame. */
     WindowControlIcons controlIcons; /**< Helper des icones croix/cadenas. */
+
+    /**
+     * @brief Calcule la fenetre visible du texte de l'input autour d'un index donne.
+     * @param inputMaxWidth Largeur utile disponible pour afficher le texte.
+     * @param focusIndex Index qui doit rester visible dans la fenetre.
+     * @param outStart Debut inclus calcule de la fenetre visible.
+     * @param outEnd Fin exclue calculee de la fenetre visible.
+     */
+    void computeInputVisibleRange(float inputMaxWidth, std::size_t focusIndex, std::size_t* outStart, std::size_t* outEnd) const;
+
+    /**
+     * @brief Convertit une position X de rendu en index de curseur dans l'input du chat.
+     * @param renderX Position X de rendu a convertir.
+     * @param inputArea Rectangle courant de la barre input.
+     * @return Index d'insertion le plus proche dans `inputBuffer`.
+     */
+    std::size_t getInputCursorIndexFromPosition(float renderX, const SDL_FRect& inputArea) const;
+
+    /**
+     * @brief Indique si une plage de texte est selectionnee dans l'input du chat.
+     * @return True si au moins un caractere est selectionne.
+     */
+    bool hasInputSelection(void) const;
+
+    /**
+     * @brief Retourne le debut inclus de la selection courante dans l'input.
+     * @return Index de debut de selection, deja normalise.
+     */
+    std::size_t getInputSelectionStart(void) const;
+
+    /**
+     * @brief Retourne la fin exclue de la selection courante dans l'input.
+     * @return Index de fin de selection, deja normalise.
+     */
+    std::size_t getInputSelectionEnd(void) const;
+
+    /**
+     * @brief Replie la selection courante sur la position actuelle du curseur.
+     */
+    void clearInputSelection(void);
+
+    /**
+     * @brief Supprime le texte actuellement selectionne dans l'input du chat.
+     *
+     * Le curseur est replace au debut de la plage supprimee.
+     */
+    void deleteSelectedInputText(void);
 };

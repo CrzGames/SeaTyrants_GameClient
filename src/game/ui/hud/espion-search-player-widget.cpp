@@ -18,11 +18,11 @@ static constexpr RC2D_Color kFieldFill = RC2D_Color{12, 12, 14, 235};
 // Teinte or globale.
 static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kTextWhite = RC2D_Color{210, 215, 225, 255};
+static constexpr RC2D_Color kButtonHoverFill = RC2D_Color{27, 18, 8, 242};
+static constexpr RC2D_Color kInputSelectionFill = RC2D_Color{67, 96, 144, 215};
 // Teinte dediee au titre "Espion" pour forcer exactement la nuance voulue.
 static constexpr RC2D_Color kEspionTitleColor = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kTextMuted = RC2D_Color{124, 109, 84, 255};
-static constexpr RC2D_Color kTextButton = RC2D_Color{142, 132, 112, 255};
-static constexpr RC2D_Color kCyanGem = RC2D_Color{88, 198, 232, 255};
 static constexpr double kCursorBlinkPeriod = 0.55;
 static constexpr std::size_t kMaxPlayerIdDigits = 15;
 
@@ -144,6 +144,50 @@ static void drawLeftCenteredY(RC2D_Font* font, const char* text, const SDL_FRect
     rc2d_graphics_destroyText(&t);
 }
 
+static void drawImageFit(const RC2D_Image& image, const SDL_FRect& target, float padding)
+{
+    if (image.sdl_texture == nullptr)
+    {
+        return;
+    }
+
+    float texW = 0.0f;
+    float texH = 0.0f;
+    if (!SDL_GetTextureSize(image.sdl_texture, &texW, &texH) || texW <= 0.0f || texH <= 0.0f)
+    {
+        return;
+    }
+
+    const float clampedPadding = (std::max)(0.0f, padding);
+    const float maxWidth = (std::max)(1.0f, target.w - (clampedPadding * 2.0f));
+    const float maxHeight = (std::max)(1.0f, target.h - (clampedPadding * 2.0f));
+    const float scale = (std::min)(maxWidth / texW, maxHeight / texH);
+    const float drawW = texW * scale;
+    const float drawH = texH * scale;
+    const float drawX = std::round(target.x + ((target.w - drawW) * 0.5f));
+    const float drawY = std::round(target.y + ((target.h - drawH) * 0.5f));
+
+    RC2D_Image imageCopy = image;
+    const RC2D_Quad quad = rc2d_graphics_newQuad(&imageCopy, 0.0f, 0.0f, texW, texH);
+    if (quad.src.w <= 0.0f || quad.src.h <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_drawQuad(
+        &imageCopy,
+        &quad,
+        drawX,
+        drawY,
+        0.0,
+        scale,
+        scale,
+        -1.0f,
+        -1.0f,
+        false,
+        false);
+}
+
 static char extractDigitFromKeyLabel(const char* key)
 {
     // Cas invalide: aucune touche exploitable.
@@ -190,11 +234,14 @@ static char extractDigitFromKeyLabel(const char* key)
 EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
     : titleFont{},
       bodyFont{},
+      rubiesPriceIcon{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
       visible(true),
       playerIdInput{},
       cursorIndex(0),
+      selectionAnchorIndex(0),
       inputFocused(false),
+      inputSelectingWithMouse(false),
       cursorVisible(true),
       cursorBlinkElapsed(0.0),
       widgetDragging(false),
@@ -203,8 +250,10 @@ EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
       searchResultText{},
+      rubiesPrice(250),
       cursorEnabled(true),
-      controlIcons{}
+      controlIcons{},
+      onFindPlayerRequested{}
 {
 }
 
@@ -217,6 +266,7 @@ void EspionSearchPlayerWidget::load(void)
     // Meme rendu de titre que la fenetre Chat.
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->rubiesPriceIcon = LoadStorageImage("assets/images/ui-scene-game/money-rubies.png", RC2D_STORAGE_TITLE);
     this->controlIcons.load();
     const SDL_FRect baseRect = getEspionRectFromGameScreen();
     this->widgetOffsetX = 0.0f;
@@ -230,18 +280,22 @@ void EspionSearchPlayerWidget::load(void)
     this->visible = false;
     this->playerIdInput.clear();
     this->cursorIndex = 0;
+    this->selectionAnchorIndex = 0;
     this->inputFocused = false;
+    this->inputSelectingWithMouse = false;
     this->cursorVisible = true;
     this->cursorBlinkElapsed = 0.0;
     this->widgetDragging = false;
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
     this->searchResultText.clear();
+    this->rubiesPrice = 250;
 }
 
 void EspionSearchPlayerWidget::unload(void)
 {
     this->controlIcons.unload();
+    ResetStorageImageRef(&this->rubiesPriceIcon);
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
 }
@@ -277,6 +331,37 @@ void EspionSearchPlayerWidget::update(double dt)
         }
     }
 
+    const SDL_FRect topRowBox = SDL_FRect{
+        this->widgetRect.x + 10.0f,
+        this->widgetRect.y + 40.0f,
+        this->widgetRect.w - 20.0f,
+        34.0f
+    };
+    const SDL_FRect topRowInput = SDL_FRect{
+        topRowBox.x + 132.0f,
+        topRowBox.y + 4.0f,
+        topRowBox.w - 138.0f,
+        topRowBox.h - 8.0f
+    };
+
+    if (this->inputSelectingWithMouse)
+    {
+        if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+        {
+            this->inputSelectingWithMouse = false;
+        }
+        else if (this->inputFocused)
+        {
+            float mouseX = 0.0f;
+            float mouseY = 0.0f;
+            getMouseRenderPosition(&mouseX, &mouseY);
+            (void)mouseY;
+            this->cursorIndex = this->getPlayerIdCursorIndexFromPosition(mouseX, topRowInput);
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
+    }
+
     if (this->inputFocused)
     {
         // Clignotement du curseur tant que le champ est focus.
@@ -298,7 +383,6 @@ void EspionSearchPlayerWidget::update(double dt)
 bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     // Parametres non utilises (API commune).
-    (void)clicks;
     (void)mouseID;
 
     if (!this->visible || button != RC2D_MOUSE_BUTTON_LEFT)
@@ -328,6 +412,7 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
     };
     const SDL_FRect topRowBox = SDL_FRect{this->widgetRect.x + 10.0f, this->widgetRect.y + 40.0f, this->widgetRect.w - 20.0f, 34.0f};
     const SDL_FRect topRowInput = SDL_FRect{topRowBox.x + 132.0f, topRowBox.y + 4.0f, topRowBox.w - 138.0f, topRowBox.h - 8.0f};
+    const SDL_FRect actionButton = SDL_FRect{this->widgetRect.x + 172.0f, this->widgetRect.y + 81.0f, this->widgetRect.w - 182.0f, 44.0f};
     const SDL_FRect closeButtonRect = SDL_FRect{
         this->widgetRect.x + this->widgetRect.w - 28.0f,
         headerRect.y + ((headerRect.h - 20.0f) * 0.5f),
@@ -339,7 +424,7 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
         // Ferme le widget et annule les etats interactifs en cours.
         this->visible = false;
         this->widgetDragging = false;
-        this->inputFocused = false;
+        this->clearFocus();
         return true;
     }
 
@@ -350,22 +435,34 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
 
-        // Placement du curseur en fonction de la position X du clic.
-        const float inputTextX = topRowInput.x + 8.0f;
-        const float localX = (std::max)(0.0f, x - inputTextX);
-        std::size_t newCursor = 0;
-        for (std::size_t i = 0; i <= this->playerIdInput.size(); ++i)
+        // Double-clic: selection complete du contenu de l'input.
+        if (clicks >= 2)
         {
-            const float w = measureTextWidth(&this->bodyFont, this->playerIdInput.substr(0, i));
-            if (localX <= w)
-            {
-                newCursor = i;
-                break;
-            }
-            newCursor = i;
+            this->selectionAnchorIndex = 0;
+            this->cursorIndex = this->playerIdInput.size();
+            this->inputSelectingWithMouse = false;
+            this->widgetDragging = false;
+            return true;
         }
-        this->cursorIndex = (std::min)(newCursor, this->playerIdInput.size());
+
+        // Clic simple: placement du curseur a la position la plus proche.
+        const std::size_t clickedIndex = this->getPlayerIdCursorIndexFromPosition(x, topRowInput);
+        this->cursorIndex = clickedIndex;
+        this->selectionAnchorIndex = clickedIndex;
+        this->inputSelectingWithMouse = true;
         this->widgetDragging = false;
+        return true;
+    }
+
+    if (isPointInRect(x, y, actionButton))
+    {
+        // Un clic sur le bouton declenche l'action publique avec l'ID saisi.
+        this->widgetDragging = false;
+        this->clearFocus();
+        if (this->onFindPlayerRequested)
+        {
+            this->onFindPlayerRequested(this->playerIdInput);
+        }
         return true;
     }
 
@@ -375,14 +472,12 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
         this->widgetDragging = true;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
     }
     else
     {
         // Clic dans le widget mais hors header/input: perte de focus texte.
-        this->inputFocused = false;
-        this->cursorVisible = false;
+        this->clearFocus();
     }
     return true;
 }
@@ -419,14 +514,20 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
     }
     if (digit != '\0')
     {
+        if (this->hasPlayerIdSelection())
+        {
+            this->deleteSelectedPlayerIdText();
+        }
         // Limitation stricte de la longueur numerique.
         if (this->playerIdInput.size() >= kMaxPlayerIdDigits)
         {
             return true;
         }
         // Insertion du chiffre a la position du curseur.
+        this->cursorIndex = (std::min)(this->cursorIndex, this->playerIdInput.size());
         this->playerIdInput.insert(this->cursorIndex, 1, digit);
         ++this->cursorIndex;
+        this->clearPlayerIdSelection();
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
         return true;
@@ -436,48 +537,75 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
     {
         // Navigation classique dans le champ texte.
         case SDL_SCANCODE_LEFT:
-            if (this->cursorIndex > 0) { --this->cursorIndex; }
+            if (this->hasPlayerIdSelection())
+            {
+                this->cursorIndex = this->getPlayerIdSelectionStart();
+            }
+            else if (this->cursorIndex > 0)
+            {
+                --this->cursorIndex;
+            }
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_RIGHT:
-            if (this->cursorIndex < this->playerIdInput.size()) { ++this->cursorIndex; }
+            if (this->hasPlayerIdSelection())
+            {
+                this->cursorIndex = this->getPlayerIdSelectionEnd();
+            }
+            else if (this->cursorIndex < this->playerIdInput.size())
+            {
+                ++this->cursorIndex;
+            }
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_HOME:
             this->cursorIndex = 0;
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_END:
             this->cursorIndex = this->playerIdInput.size();
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_BACKSPACE:
-            // Suppression a gauche du curseur.
-            if (this->cursorIndex > 0 && !this->playerIdInput.empty())
+            // Supprime d'abord la selection si elle existe.
+            if (this->hasPlayerIdSelection())
+            {
+                this->deleteSelectedPlayerIdText();
+            }
+            else if (this->cursorIndex > 0 && !this->playerIdInput.empty())
             {
                 this->playerIdInput.erase(this->cursorIndex - 1, 1);
                 --this->cursorIndex;
             }
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_DELETE:
-            // Suppression a droite du curseur.
-            if (this->cursorIndex < this->playerIdInput.size())
+            // Supprime d'abord la selection si elle existe.
+            if (this->hasPlayerIdSelection())
+            {
+                this->deleteSelectedPlayerIdText();
+            }
+            else if (this->cursorIndex < this->playerIdInput.size())
             {
                 this->playerIdInput.erase(this->cursorIndex, 1);
             }
+            this->clearPlayerIdSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_ESCAPE:
             // Echap retire simplement le focus.
-            this->inputFocused = false;
-            this->cursorVisible = false;
+            this->clearFocus();
             return true;
         default:
             break;
@@ -489,6 +617,72 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
 void EspionSearchPlayerWidget::publishSearchResult(const std::string& resultText)
 {
     this->searchResultText = resultText;
+}
+
+void EspionSearchPlayerWidget::setRubiesPrice(int newRubiesPrice)
+{
+    this->rubiesPrice = (std::max)(0, newRubiesPrice);
+}
+
+void EspionSearchPlayerWidget::setOnFindPlayerRequested(const std::function<void(const std::string&)>& callback)
+{
+    this->onFindPlayerRequested = callback;
+}
+
+std::size_t EspionSearchPlayerWidget::getPlayerIdCursorIndexFromPosition(float renderX, const SDL_FRect& inputRect) const
+{
+    const float inputTextX = inputRect.x + 8.0f;
+    const float localX = (std::max)(0.0f, renderX - inputTextX);
+    std::size_t newCursor = 0;
+    for (std::size_t i = 0; i <= this->playerIdInput.size(); ++i)
+    {
+        const float width = measureTextWidth(const_cast<RC2D_Font*>(&this->bodyFont), this->playerIdInput.substr(0, i));
+        if (localX <= width)
+        {
+            newCursor = i;
+            break;
+        }
+        newCursor = i;
+    }
+    return (std::min)(newCursor, this->playerIdInput.size());
+}
+
+bool EspionSearchPlayerWidget::hasPlayerIdSelection(void) const
+{
+    return this->getPlayerIdSelectionStart() != this->getPlayerIdSelectionEnd();
+}
+
+std::size_t EspionSearchPlayerWidget::getPlayerIdSelectionStart(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->playerIdInput.size());
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->playerIdInput.size());
+    return (std::min)(clampedAnchor, clampedCursor);
+}
+
+std::size_t EspionSearchPlayerWidget::getPlayerIdSelectionEnd(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->playerIdInput.size());
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->playerIdInput.size());
+    return (std::max)(clampedAnchor, clampedCursor);
+}
+
+void EspionSearchPlayerWidget::clearPlayerIdSelection(void)
+{
+    this->selectionAnchorIndex = (std::min)(this->cursorIndex, this->playerIdInput.size());
+}
+
+void EspionSearchPlayerWidget::deleteSelectedPlayerIdText(void)
+{
+    if (!this->hasPlayerIdSelection())
+    {
+        return;
+    }
+
+    const std::size_t selectionStart = this->getPlayerIdSelectionStart();
+    const std::size_t selectionEnd = this->getPlayerIdSelectionEnd();
+    this->playerIdInput.erase(selectionStart, selectionEnd - selectionStart);
+    this->cursorIndex = selectionStart;
+    this->clearPlayerIdSelection();
 }
 
 void EspionSearchPlayerWidget::draw(void) const
@@ -525,6 +719,10 @@ void EspionSearchPlayerWidget::draw(void) const
     const SDL_FRect priceRowBox = SDL_FRect{outer.x + 10.0f, outer.y + 81.0f, 160.0f, 44.0f};
     const SDL_FRect actionButton = SDL_FRect{outer.x + 172.0f, outer.y + 81.0f, outer.w - 182.0f, 44.0f};
     const SDL_FRect resultBox = SDL_FRect{outer.x + 10.0f, outer.y + outer.h - 44.0f, outer.w - 20.0f, 34.0f};
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    getMouseRenderPosition(&mouseX, &mouseY);
+    const bool actionButtonHovered = isPointInRect(mouseX, mouseY, actionButton);
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
 
@@ -569,7 +767,33 @@ void EspionSearchPlayerWidget::draw(void) const
     rc2d_graphics_rectangle("fill", &topRowInput);
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &topRowInput);
+    if (self->hasPlayerIdSelection())
+    {
+        const std::size_t selectionStart = self->getPlayerIdSelectionStart();
+        const std::size_t selectionEnd = self->getPlayerIdSelectionEnd();
+        const std::string beforeSelection = self->playerIdInput.substr(0, selectionStart);
+        const std::string selectedText = self->playerIdInput.substr(selectionStart, selectionEnd - selectionStart);
+        const float selectionX = std::round(topRowInput.x + 8.0f + measureTextWidth(&self->bodyFont, beforeSelection));
+        const float selectionW = measureTextWidth(&self->bodyFont, selectedText);
+        const SDL_FRect selectionRect = SDL_FRect{
+            selectionX - 1.0f,
+            topRowInput.y + 5.0f,
+            (std::max)(2.0f, selectionW + 2.0f),
+            topRowInput.h - 10.0f
+        };
+        rc2d_graphics_setColor(kInputSelectionFill);
+        rc2d_graphics_rectangle("fill", &selectionRect);
+    }
     drawLeftCenteredY(&self->bodyFont, self->playerIdInput.c_str(), topRowInput, topRowInput.x + 8.0f, kTextGold);
+    if (self->hasPlayerIdSelection())
+    {
+        const std::size_t selectionStart = self->getPlayerIdSelectionStart();
+        const std::size_t selectionEnd = self->getPlayerIdSelectionEnd();
+        const std::string beforeSelection = self->playerIdInput.substr(0, selectionStart);
+        const std::string selectedText = self->playerIdInput.substr(selectionStart, selectionEnd - selectionStart);
+        const float selectionX = std::round(topRowInput.x + 8.0f + measureTextWidth(&self->bodyFont, beforeSelection));
+        drawLeftCenteredY(&self->bodyFont, selectedText.c_str(), topRowInput, selectionX, kTextWhite);
+    }
     if (self->inputFocused && self->cursorVisible)
     {
         const std::size_t cursor = (std::min)(self->cursorIndex, self->playerIdInput.size());
@@ -585,23 +809,48 @@ void EspionSearchPlayerWidget::draw(void) const
     rc2d_graphics_rectangle("fill", &priceRowBox);
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &priceRowBox);
-    drawLeftCenteredY(&self->bodyFont, "Prix :", priceRowBox, priceRowBox.x + 8.0f, kTextWhite);
 
-    // Icone "gemme" + valeur du prix.
-    rc2d_graphics_setColor(kCyanGem);
-    rc2d_graphics_line(priceRowBox.x + 62.0f, priceRowBox.y + 22.0f, priceRowBox.x + 67.0f, priceRowBox.y + 17.0f);
-    rc2d_graphics_line(priceRowBox.x + 67.0f, priceRowBox.y + 17.0f, priceRowBox.x + 72.0f, priceRowBox.y + 22.0f);
-    rc2d_graphics_line(priceRowBox.x + 72.0f, priceRowBox.y + 22.0f, priceRowBox.x + 67.0f, priceRowBox.y + 27.0f);
-    rc2d_graphics_line(priceRowBox.x + 67.0f, priceRowBox.y + 27.0f, priceRowBox.x + 62.0f, priceRowBox.y + 22.0f);
-    rc2d_graphics_setColor(kTextGold);
-    drawLeftCenteredY(&self->bodyFont, "250", priceRowBox, priceRowBox.x + 78.0f, kTextGold);
+    // Aligne le bloc "Prix : + icone + valeur" comme un groupe unique,
+    // centre horizontalement avec des espacements reguliers.
+    const std::string rubiesPriceText = std::to_string((std::max)(0, self->rubiesPrice));
+    const float priceLabelWidth = measureTextWidth(&self->bodyFont, "Prix :");
+    const float priceValueWidth = measureTextWidth(&self->bodyFont, rubiesPriceText);
+    const bool hasPriceIcon = self->rubiesPriceIcon.sdl_texture != nullptr;
+    const float priceGroupGap = 8.0f;
+    const float priceIconSize = hasPriceIcon ? 20.0f : 0.0f;
+    const float priceGroupWidth =
+        priceLabelWidth +
+        (hasPriceIcon ? priceGroupGap : 0.0f) +
+        priceIconSize +
+        priceGroupGap +
+        priceValueWidth;
+    const float priceGroupStartX = std::round(priceRowBox.x + ((priceRowBox.w - priceGroupWidth) * 0.5f));
+    const float priceIconX = priceGroupStartX + priceLabelWidth + (hasPriceIcon ? priceGroupGap : 0.0f);
+    const SDL_FRect priceIconRect = SDL_FRect{
+        std::round(priceIconX),
+        std::round(priceRowBox.y + ((priceRowBox.h - priceIconSize) * 0.5f)),
+        priceIconSize,
+        priceIconSize
+    };
+
+    drawLeftCenteredY(&self->bodyFont, "Prix :", priceRowBox, priceGroupStartX, kTextWhite);
+    if (hasPriceIcon)
+    {
+        drawImageFit(self->rubiesPriceIcon, priceIconRect, 0.0f);
+    }
+    drawLeftCenteredY(
+        &self->bodyFont,
+        rubiesPriceText.c_str(),
+        priceRowBox,
+        priceIconRect.x + priceIconRect.w + priceGroupGap,
+        kTextGold);
 
     // Bouton de recherche.
-    rc2d_graphics_setColor(kFieldFill);
+    rc2d_graphics_setColor(actionButtonHovered ? kButtonHoverFill : kFieldFill);
     rc2d_graphics_rectangle("fill", &actionButton);
-    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_setColor(actionButtonHovered ? kSilver : kGold);
     rc2d_graphics_rectangle("line", &actionButton);
-    drawCentered(&self->bodyFont, "Trouver un joueur", actionButton, kTextWhite);
+    drawCentered(&self->bodyFont, "Trouver un joueur", actionButton, actionButtonHovered ? kTextGold : kTextWhite);
 
     // Case resultat (colonne de droite, tout en bas).
     rc2d_graphics_setColor(kFieldFill);
@@ -628,8 +877,10 @@ void EspionSearchPlayerWidget::draw(void) const
 void EspionSearchPlayerWidget::clearFocus(void)
 {
     this->inputFocused = false;
+    this->inputSelectingWithMouse = false;
     this->cursorVisible = false;
     this->cursorBlinkElapsed = 0.0;
+    this->clearPlayerIdSelection();
 }
 
 bool EspionSearchPlayerWidget::containsPoint(float x, float y) const
