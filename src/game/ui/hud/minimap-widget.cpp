@@ -378,9 +378,6 @@ void MinimapWidget::update(Camera& camera, Map& map)
     getMouseRenderPosition(&mouseX, &mouseY);
     if (!this->containsContentPoint(mouseX, mouseY))
     {
-        this->minimapDragActive = false;
-        this->minimapDragOffsetX = 0.0f;
-        this->minimapDragOffsetY = 0.0f;
         return;
     }
 
