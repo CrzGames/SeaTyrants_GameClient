@@ -1,8 +1,6 @@
 #include "game/ui/hud/center-ship-button-widget.h"
 #include "game/assets/title-asset-cache.h"
 
-namespace center_ship_button_widget_internal {
-
 static bool pointInRect(float x, float y, const SDL_FRect& rect)
 {
     if (rect.w <= 0.0f || rect.h <= 0.0f)
@@ -76,10 +74,6 @@ static SDL_FRect getCurrentRect(const RC2D_UIImage& uiImage)
             return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 }
-
-} // namespace center_ship_button_widget_internal
-
-using namespace center_ship_button_widget_internal;
 
 CenterShipButtonWidget::CenterShipButtonWidget(void)
     : buttonUi{}

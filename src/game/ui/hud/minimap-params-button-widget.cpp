@@ -1,8 +1,6 @@
 #include "game/ui/hud/minimap-params-button-widget.h"
 #include "game/assets/title-asset-cache.h"
 
-namespace minimap_params_button_widget_internal {
-
 static bool pointInRect(float x, float y, const SDL_FRect& rect)
 {
     if (rect.w <= 0.0f || rect.h <= 0.0f)
@@ -40,10 +38,6 @@ static bool getImageSize(const RC2D_ImageData& imageData, const RC2D_Image& imag
     *outHeight = 0.0f;
     return false;
 }
-
-} // namespace minimap_params_button_widget_internal
-
-using namespace minimap_params_button_widget_internal;
 
 MinimapParamsButtonWidget::MinimapParamsButtonWidget(void)
     : iconImage{},

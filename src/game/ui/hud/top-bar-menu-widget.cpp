@@ -5,8 +5,6 @@
 
 #include <cmath>
 
-namespace top_bar_menu_widget_internal {
-
 static constexpr float kIconRowTopOffset = 4.0f;
 static constexpr float kTopBarOffsetY = 2.0f;
 static constexpr float kButtonGap = 14.0f;
@@ -85,10 +83,6 @@ static const char* getTooltipLabel(TopBarMenuWidget::Action action)
     }
     return "";
 }
-
-} // namespace top_bar_menu_widget_internal
-
-using namespace top_bar_menu_widget_internal;
 
 TopBarMenuWidget::TopBarMenuWidget(void)
     : topBarMenuUiImage{},

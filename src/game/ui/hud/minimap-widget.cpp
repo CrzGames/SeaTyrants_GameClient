@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <vector>
 
-namespace minimap_widget_internal {
-
 constexpr RC2D_Color kMiniMapWaterColor = RC2D_Color{28, 63, 103, 255};
 constexpr RC2D_Color kMiniMapBorderColor = RC2D_Color{135, 150, 168, 235};
 constexpr RC2D_Color kMiniMapViewFillColor = RC2D_Color{125, 198, 255, 55};
@@ -319,10 +317,6 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outX = renderX;
     *outY = renderY;
 }
-
-} // namespace minimap_widget_internal
-
-using namespace minimap_widget_internal;
 
 MinimapWidget::MinimapWidget(void)
     : minimapUi{},

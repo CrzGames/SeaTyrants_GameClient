@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/client-language-state.h"
 #include "core/threading/queues/http_to_simulation.h"
 #include "core/threading/queues/network_incoming_to_simulation.h"
 #include "core/threading/queues/simulation_to_http.h"
@@ -105,3 +106,9 @@ VisionCloudShader& GetVisionCloudShader();
  * @return Reference mutable vers le store de cache.
  */
 TitleAssetCache& GetTitleAssetCache();
+
+/**
+ * @brief Acces global a l'etat de langue client.
+ * @return Reference mutable vers l'etat de langue partage.
+ */
+ClientLanguageState& GetClientLanguageState();

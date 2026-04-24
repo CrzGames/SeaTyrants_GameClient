@@ -15,6 +15,7 @@ static OceanShader g_oceanShader;
 static FogOfWarShader g_fogOfWarShader;
 static VisionCloudShader g_visionCloudShader;
 static TitleAssetCache g_titleAssetCache;
+static ClientLanguageState g_clientLanguageState;
 
 GameState& GetGameState()
 {
@@ -89,4 +90,9 @@ VisionCloudShader& GetVisionCloudShader()
 TitleAssetCache& GetTitleAssetCache()
 {
     return g_titleAssetCache;
+}
+
+ClientLanguageState& GetClientLanguageState()
+{
+    return g_clientLanguageState;
 }

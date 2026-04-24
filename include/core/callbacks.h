@@ -24,3 +24,4 @@ void rc2d_mousewheelmoved(
     float mouse_y,
     SDL_MouseID mouseID);
 void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID);
+void rc2d_localechanged(RC2D_Locale* locales);

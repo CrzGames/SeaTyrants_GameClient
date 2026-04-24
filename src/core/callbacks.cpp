@@ -1,5 +1,6 @@
 ﻿#include "core/callbacks.h"
 
+#include "core/system-locale-language-resolver.h"
 #include "core/context.h"
 #include "game/render/world-render-clip.h"
 #include "crypto/kx.h"
@@ -16,6 +17,8 @@
 #include "services/http/entrypoint.h"
 #include "services/websocket/entrypoint.h"
 #include "simulation/entrypoint.h"
+
+#include <string>
 
 #if GAME_ENV_DEV
 #include "game/scenes/scene-editormap-anchorship.h"
@@ -36,6 +39,12 @@ void rc2d_unload(void)
 
 void rc2d_load(void)
 {
+    // Detecter la langue systeme des le boot pour la rendre disponible
+    // globalement avant la creation des scenes UI.
+    RC2D_Locale* preferredLocales = rc2d_local_getPreferredLocales();
+    SystemLocaleLanguageResolver::StorePreferredLocaleInContext(preferredLocales);
+    rc2d_local_freeLocales(preferredLocales);
+
     // Récupère l'état réseau global du client.
     NetworkState& networkState = GetNetworkState();
 
@@ -65,7 +74,7 @@ void rc2d_load(void)
     // Scene de départ visible au boot.
     // - "splashscreen"  => splashscreen puis loading puis menu
     // - autre valeur    => loading puis cette scene
-    const std::string startupSceneName = "game";
+    const std::string startupSceneName = "splashscreen";
     const std::string loadingNextSceneName =
         (startupSceneName == "splashscreen" || startupSceneName == "loading")
             ? std::string("menu")
@@ -243,6 +252,12 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
 #endif
 
     sceneManager.keypressed(key, scancode, keycode, mod, isrepeat, keyboardID);
+}
+
+void rc2d_localechanged(RC2D_Locale* locales)
+{
+    // Rejouer la meme logique qu'au boot pour suivre un changement de locale OS.
+    SystemLocaleLanguageResolver::StorePreferredLocaleInContext(locales);
 }
 
 void rc2d_mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
