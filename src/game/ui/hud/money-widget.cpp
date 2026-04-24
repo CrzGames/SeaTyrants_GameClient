@@ -572,8 +572,11 @@ void MoneyWidget::draw(void) const
         (renderedRowCount > 0)
             ? ((static_cast<float>(renderedRowCount) * kRowHeight) + (static_cast<float>(renderedRowCount - 1) * kRowGap))
             : 0.0f;
-    // Centre verticalement le bloc visible pour garder la meme marge en haut et en bas.
-    float rowY = bodyRect.y + ((bodyRect.h - renderedContentHeight) * 0.5f);
+    // Quand la liste deborde, on centre le bloc visible pour equilibrer la marge haute/basse.
+    // Si tout tient sans scrollbar, on garde un depart naturel en haut du contenu.
+    float rowY = showScrollBar
+                     ? (bodyRect.y + ((bodyRect.h - renderedContentHeight) * 0.5f))
+                     : (bodyRect.y + kBodyPadding);
     for (int rowIndex = firstRow; rowIndex < lastRow; ++rowIndex)
     {
         const CurrencyEntryRuntime& entry = self->currencyEntries[static_cast<std::size_t>(rowIndex)];
