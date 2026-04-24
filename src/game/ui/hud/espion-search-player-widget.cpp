@@ -245,6 +245,7 @@ EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
       cursorVisible(true),
       cursorBlinkElapsed(0.0),
       widgetDragging(false),
+      widgetDragLocked(false),
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
@@ -286,6 +287,7 @@ void EspionSearchPlayerWidget::load(void)
     this->cursorVisible = true;
     this->cursorBlinkElapsed = 0.0;
     this->widgetDragging = false;
+    this->widgetDragLocked = false;
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
     this->searchResultText.clear();
@@ -310,6 +312,11 @@ void EspionSearchPlayerWidget::update(double dt)
         baseRect.w,
         baseRect.h
     };
+
+    if (this->widgetDragLocked)
+    {
+        this->widgetDragging = false;
+    }
 
     if (this->widgetDragging)
     {
@@ -419,6 +426,20 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
         20.0f,
         20.0f
     };
+    const SDL_FRect lockButtonRect = SDL_FRect{
+        closeButtonRect.x - 24.0f,
+        closeButtonRect.y,
+        closeButtonRect.w,
+        closeButtonRect.h
+    };
+    if (isPointInRect(x, y, lockButtonRect))
+    {
+        this->widgetDragLocked = !this->widgetDragLocked;
+        this->widgetDragging = false;
+        this->clearFocus();
+        return true;
+    }
+
     if (isPointInRect(x, y, closeButtonRect))
     {
         // Ferme le widget et annule les etats interactifs en cours.
@@ -469,6 +490,11 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
     if (isPointInRect(x, y, headerRect))
     {
         // Drag possible uniquement via le bandeau du haut.
+        if (this->widgetDragLocked)
+        {
+            this->clearFocus();
+            return true;
+        }
         this->widgetDragging = true;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
@@ -713,6 +739,12 @@ void EspionSearchPlayerWidget::draw(void) const
         closeButton.w,
         closeButton.h
     };
+    const SDL_FRect lockButtonCentered = SDL_FRect{
+        closeButtonCentered.x - 24.0f,
+        closeButtonCentered.y,
+        closeButtonCentered.w,
+        closeButtonCentered.h
+    };
 
     const SDL_FRect topRowBox = SDL_FRect{outer.x + 10.0f, outer.y + 40.0f, outer.w - 20.0f, 34.0f};
     const SDL_FRect topRowInput = SDL_FRect{topRowBox.x + 132.0f, topRowBox.y + 4.0f, topRowBox.w - 138.0f, topRowBox.h - 8.0f};
@@ -753,6 +785,11 @@ void EspionSearchPlayerWidget::draw(void) const
     rc2d_graphics_destroyText(&titleText);
 
     // Bouton fermer.
+    self->controlIcons.drawLockButton(
+        lockButtonCentered,
+        self->widgetDragLocked,
+        self->widgetDragLocked ? kPanelFill : kHeaderFill,
+        kGold);
     self->controlIcons.drawCloseButton(closeButtonCentered, kHeaderFill, kGold);
 
     // Ligne "ID du joueur".
@@ -902,7 +939,7 @@ HudCursorType EspionSearchPlayerWidget::getDesiredCursor(float x, float y) const
         return HudCursorType::NONE;
     }
 
-    if (this->widgetDragging)
+    if (this->widgetDragging && !this->widgetDragLocked)
     {
         return HudCursorType::MOVE;
     }
@@ -927,17 +964,28 @@ HudCursorType EspionSearchPlayerWidget::getDesiredCursor(float x, float y) const
         20.0f,
         20.0f
     };
+    const SDL_FRect lockButtonRect = SDL_FRect{
+        closeButtonRect.x - 24.0f,
+        closeButtonRect.y,
+        closeButtonRect.w,
+        closeButtonRect.h
+    };
     const SDL_FRect actionButton = SDL_FRect{currentRect.x + 172.0f, currentRect.y + 81.0f, currentRect.w - 182.0f, 44.0f};
 
     if (isPointInRect(x, y, topRowInput))
     {
         return HudCursorType::TEXT;
     }
-    if (isPointInRect(x, y, actionButton) || isPointInRect(x, y, closeButtonRect))
+    if (isPointInRect(x, y, actionButton) || isPointInRect(x, y, closeButtonRect) || isPointInRect(x, y, lockButtonRect))
     {
         return HudCursorType::POINTER;
     }
-    if (isPointInRect(x, y, headerRect))
+    if (x >= lockButtonRect.x && x <= (closeButtonRect.x + closeButtonRect.w) &&
+        y >= headerRect.y && y <= (headerRect.y + headerRect.h))
+    {
+        return HudCursorType::DEFAULT;
+    }
+    if (isPointInRect(x, y, headerRect) && !this->widgetDragLocked)
     {
         return HudCursorType::MOVE;
     }

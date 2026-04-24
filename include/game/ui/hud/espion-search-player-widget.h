@@ -139,6 +139,7 @@ private:
      * @brief Etat de deplacement de la fenetre.
      */
     bool widgetDragging; /**< True si l'utilisateur drag la fenetre via le header. */
+    bool widgetDragLocked; /**< True si le cadenas bloque le deplacement de la fenetre. */
     float widgetDragOffsetX; /**< Offset X souris->coin haut gauche pendant le drag. */
     float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche pendant le drag. */
     float widgetOffsetX; /**< Decalage X applique a la position de base. */
