@@ -6,6 +6,7 @@
 #include "game/ui/hud/top-bar-announcement-button-widget.h"
 #include "game/ui/hud/top-bar-chat-button-widget.h"
 #include "game/ui/hud/top-bar-disconnect-button-widget.h"
+#include "game/ui/hud/top-bar-examen-pirate-button-widget.h"
 #include "game/ui/hud/top-bar-guild-button-widget.h"
 #include "game/ui/hud/top-bar-leaderboard-button-widget.h"
 #include "game/ui/hud/top-bar-logbook-button-widget.h"
@@ -60,6 +61,7 @@ private:
     float hoveredMouseX;          /**< Position X souris memorisee pour le tooltip. */
     float hoveredMouseY;          /**< Position Y souris memorisee pour le tooltip. */
 
+    TopBarExamenPirateButtonWidget examenPirateButton;   /**< Bouton examen pirate. */
     TopBarChatButtonWidget chatButton;                 /**< Bouton chat. */
     TopBarGuildButtonWidget guildButton;               /**< Bouton guilde. */
     TopBarQuestButtonWidget questButton;               /**< Bouton quetes. */

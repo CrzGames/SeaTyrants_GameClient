@@ -26,7 +26,8 @@ public:
         ANNOUNCEMENT = 7,
         LOGBOOK = 8,
         SETTINGS = 9,
-        DISCONNECT = 10
+        DISCONNECT = 10,
+        PIRATE_EXAM = 11
     };
 
     TopBarActionButtonWidget(Action action, const char* imagePath);

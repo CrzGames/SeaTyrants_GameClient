@@ -3,6 +3,7 @@
 
 #include "core/context.h"
 
+#include <algorithm>
 #include <cmath>
 
 static constexpr float kRefW = 277.0f;
@@ -100,7 +101,51 @@ static void drawLeftCenteredY(RC2D_Font* font, const char* text, const SDL_FRect
     rc2d_graphics_destroyText(&t);
 }
 
-static void drawCheckBox(const SDL_FRect& boxRect, bool checked)
+static void drawImageFit(const RC2D_Image& image, const SDL_FRect& target, float padding)
+{
+    if (image.sdl_texture == nullptr)
+    {
+        return;
+    }
+
+    float texW = 0.0f;
+    float texH = 0.0f;
+    if (!SDL_GetTextureSize(image.sdl_texture, &texW, &texH) || texW <= 0.0f || texH <= 0.0f)
+    {
+        return;
+    }
+
+    const float clampedPadding = (std::max)(0.0f, padding);
+    const float maxWidth = (std::max)(1.0f, target.w - (clampedPadding * 2.0f));
+    const float maxHeight = (std::max)(1.0f, target.h - (clampedPadding * 2.0f));
+    const float scale = (std::min)(maxWidth / texW, maxHeight / texH);
+    const float drawW = texW * scale;
+    const float drawH = texH * scale;
+    const float drawX = std::round(target.x + ((target.w - drawW) * 0.5f));
+    const float drawY = std::round(target.y + ((target.h - drawH) * 0.5f));
+
+    RC2D_Image imageCopy = image;
+    const RC2D_Quad quad = rc2d_graphics_newQuad(&imageCopy, 0.0f, 0.0f, texW, texH);
+    if (quad.src.w <= 0.0f || quad.src.h <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_drawQuad(
+        &imageCopy,
+        &quad,
+        drawX,
+        drawY,
+        0.0,
+        scale,
+        scale,
+        -1.0f,
+        -1.0f,
+        false,
+        false);
+}
+
+static void drawCheckBox(const SDL_FRect& boxRect, bool checked, const RC2D_Image& checkedIcon)
 {
     // Fond interne de la case.
     rc2d_graphics_setColor(kFieldFill);
@@ -114,10 +159,8 @@ static void drawCheckBox(const SDL_FRect& boxRect, bool checked)
         return;
     }
 
-    // Trace du "check" en deux segments.
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_line(boxRect.x + 4.0f, boxRect.y + (boxRect.h * 0.55f), boxRect.x + 8.0f, boxRect.y + boxRect.h - 5.0f);
-    rc2d_graphics_line(boxRect.x + 8.0f, boxRect.y + boxRect.h - 5.0f, boxRect.x + boxRect.w - 4.0f, boxRect.y + 4.0f);
+    // L'icone n'apparait que sur les cases cochees.
+    drawImageFit(checkedIcon, boxRect, 2.0f);
 }
 
 ParamsMinimapWidget::ParamsMinimapWidget(void)
@@ -135,6 +178,7 @@ ParamsMinimapWidget::ParamsMinimapWidget(void)
       widgetOffsetX(0.0f),
       widgetOffsetY(0.0f),
       cursorEnabled(true),
+      checkboxValidIcon{},
       controlIcons{}
 {
 }
@@ -149,6 +193,9 @@ void ParamsMinimapWidget::load(void)
     this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Police des lignes de menu (plus petite que le titre).
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->checkboxValidIcon = LoadStorageImage(
+        "assets/images/ui-scene-game/icon-checkboxvalid.png",
+        RC2D_STORAGE_TITLE);
     this->controlIcons.load();
 
     // Rectangle de base calcule depuis l'ecran.
@@ -170,6 +217,7 @@ void ParamsMinimapWidget::load(void)
 void ParamsMinimapWidget::unload(void)
 {
     this->controlIcons.unload();
+    ResetStorageImageRef(&this->checkboxValidIcon);
     // Liberation police de texte secondaire.
     ResetStorageFontRef(&this->bodyFont);
     // Liberation police de titre.
@@ -380,10 +428,10 @@ void ParamsMinimapWidget::draw(void) const
     drawLeftCenteredY(&self->bodyFont, "Afficher les tresors", rowTreasures, rowTreasures.x, kTextWhite);
 
     // Cases a cocher selon les etats booleens.
-    drawCheckBox(checkPlayers, self->showPlayers);
-    drawCheckBox(checkMonsters, self->showMonsters);
-    drawCheckBox(checkShips, self->showShips);
-    drawCheckBox(checkTreasures, self->showTreasures);
+    drawCheckBox(checkPlayers, self->showPlayers, self->checkboxValidIcon);
+    drawCheckBox(checkMonsters, self->showMonsters, self->checkboxValidIcon);
+    drawCheckBox(checkShips, self->showShips, self->checkboxValidIcon);
+    drawCheckBox(checkTreasures, self->showTreasures, self->checkboxValidIcon);
 
     // Restaure le mode de blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);

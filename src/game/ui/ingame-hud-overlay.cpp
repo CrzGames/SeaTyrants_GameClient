@@ -904,6 +904,9 @@ void IngameHudOverlay::handleTopBarAction(TopBarMenuWidget::Action action)
 {
     switch (action)
     {
+        case TopBarMenuWidget::Action::PIRATE_EXAM:
+            // Point d'entree reserve a la future GUI "Examen pirate".
+            break;
         case TopBarMenuWidget::Action::CHAT:
             if (this->chatWidget.isVisible())
             {
@@ -962,6 +965,7 @@ void IngameHudOverlay::handleTopBarAction(TopBarMenuWidget::Action action)
 
 void IngameHudOverlay::syncTopBarActionState(void)
 {
+    this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::PIRATE_EXAM, false);
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::CHAT, this->chatWidget.isVisible());
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::GUILD, false);
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::QUEST, false);

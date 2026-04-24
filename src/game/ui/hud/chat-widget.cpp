@@ -1344,19 +1344,8 @@ void ChatWidget::draw(void) const
         kGold);
     self->controlIcons.drawCloseButton(closeButtonRect, kHeaderFill, kGold);
 
-    // 9) Encoche/fleche bas-droite pour redimensionner le chat.
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &resizeHandleRect);
-    rc2d_graphics_line(
-        resizeHandleRect.x + RW(3.0f),
-        resizeHandleRect.y + resizeHandleRect.h - RH(3.0f),
-        resizeHandleRect.x + resizeHandleRect.w - RW(3.0f),
-        resizeHandleRect.y + RH(3.0f));
-    rc2d_graphics_line(
-        resizeHandleRect.x + RW(6.0f),
-        resizeHandleRect.y + resizeHandleRect.h - RH(3.0f),
-        resizeHandleRect.x + resizeHandleRect.w - RW(3.0f),
-        resizeHandleRect.y + RH(6.0f));
+    // 9) Poignee bas-droite: on reutilise l'icone commune de scale.
+    self->controlIcons.drawResizeHandle(resizeHandleRect, kPanelFill, kGold);
 
     // Restaure le mode blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);

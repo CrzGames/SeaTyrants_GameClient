@@ -67,6 +67,7 @@ static const char* getTooltipLabel(TopBarMenuWidget::Action action)
 {
     switch (action)
     {
+        case TopBarMenuWidget::Action::PIRATE_EXAM: return "Examen pirate";
         case TopBarMenuWidget::Action::CHAT: return "Tchat";
         case TopBarMenuWidget::Action::GUILD: return "Guilde";
         case TopBarMenuWidget::Action::QUEST: return "Quetes";
@@ -90,6 +91,7 @@ TopBarMenuWidget::TopBarMenuWidget(void)
       hoveredAction(Action::NONE),
       hoveredMouseX(0.0f),
       hoveredMouseY(0.0f),
+      examenPirateButton{},
       chatButton{},
       guildButton{},
       questButton{},
@@ -121,6 +123,7 @@ void TopBarMenuWidget::load(void)
         RC2D_log(RC2D_LOG_WARN, "TopBarMenuWidget: echec chargement top-bar-menu.png");
     }
 
+    this->examenPirateButton.load();
     this->chatButton.load();
     this->guildButton.load();
     this->questButton.load();
@@ -146,6 +149,7 @@ void TopBarMenuWidget::unload(void)
     this->questButton.unload();
     this->guildButton.unload();
     this->chatButton.unload();
+    this->examenPirateButton.unload();
     ResetStorageFontRef(&this->tooltipFont);
     ResetStorageImageRef(&this->topBarMenuUiImage);
 }
@@ -158,6 +162,11 @@ bool TopBarMenuWidget::update(float mouseX, float mouseY)
     this->hoveredMouseY = mouseY;
 
     bool hovered = false;
+    if (this->examenPirateButton.updateHover(mouseX, mouseY))
+    {
+        hovered = true;
+        this->hoveredAction = Action::PIRATE_EXAM;
+    }
     if (this->chatButton.updateHover(mouseX, mouseY))
     {
         hovered = true;
@@ -234,6 +243,7 @@ void TopBarMenuWidget::draw(void)
         false,
         false);
 
+    this->examenPirateButton.draw();
     this->chatButton.draw();
     this->guildButton.draw();
     this->questButton.draw();
@@ -252,6 +262,7 @@ TopBarMenuWidget::Action TopBarMenuWidget::mousepressed(float x, float y, RC2D_M
     this->updateButtonLayout();
 
     const Action actions[] = {
+        this->examenPirateButton.mousepressed(x, y, button),
         this->chatButton.mousepressed(x, y, button),
         this->guildButton.mousepressed(x, y, button),
         this->questButton.mousepressed(x, y, button),
@@ -278,6 +289,7 @@ void TopBarMenuWidget::setActionActive(Action action, bool active)
 {
     switch (action)
     {
+        case Action::PIRATE_EXAM: this->examenPirateButton.setActive(active); break;
         case Action::CHAT: this->chatButton.setActive(active); break;
         case Action::GUILD: this->guildButton.setActive(active); break;
         case Action::QUEST: this->questButton.setActive(active); break;
@@ -298,11 +310,13 @@ void TopBarMenuWidget::updateButtonLayout(void)
 {
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
     const float buttonWidth = 42.0f;
-    const float groupWidth = (buttonWidth * 5.0f) + (kButtonGap * 4.0f);
+    const float leftGroupWidth = (buttonWidth * 6.0f) + (kButtonGap * 5.0f);
     const float centerX = gameScreenRect.w * 0.5f;
-    float leftGroupX = centerX - (kCenterGap * 0.5f) - groupWidth;
+    float leftGroupX = centerX - (kCenterGap * 0.5f) - leftGroupWidth;
     float rightGroupX = centerX + (kCenterGap * 0.5f);
 
+    this->examenPirateButton.setLocalPosition(leftGroupX, kIconRowTopOffset);
+    leftGroupX += buttonWidth + kButtonGap;
     this->chatButton.setLocalPosition(leftGroupX, kIconRowTopOffset);
     leftGroupX += buttonWidth + kButtonGap;
     this->guildButton.setLocalPosition(leftGroupX, kIconRowTopOffset);

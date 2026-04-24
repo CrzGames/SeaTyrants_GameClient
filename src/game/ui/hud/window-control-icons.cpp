@@ -8,7 +8,8 @@
 WindowControlIcons::WindowControlIcons(void)
     : closeIcon{},
       lockIcon{},
-      unlockIcon{}
+      unlockIcon{},
+      scaleIcon{}
 {
 }
 
@@ -27,10 +28,14 @@ void WindowControlIcons::load(void)
     this->unlockIcon = LoadStorageImage(
         "assets/images/ui-scene-game/icon-unlock.png",
         RC2D_STORAGE_TITLE);
+    this->scaleIcon = LoadStorageImage(
+        "assets/images/ui-scene-game/icon-scale.png",
+        RC2D_STORAGE_TITLE);
 }
 
 void WindowControlIcons::unload(void)
 {
+    ResetStorageImageRef(&this->scaleIcon);
     ResetStorageImageRef(&this->unlockIcon);
     ResetStorageImageRef(&this->lockIcon);
     ResetStorageImageRef(&this->closeIcon);
@@ -52,6 +57,15 @@ void WindowControlIcons::drawLockButton(
     this->drawCenteredIcon(locked ? this->lockIcon : this->unlockIcon, buttonRect);
 }
 
+void WindowControlIcons::drawResizeHandle(
+    const SDL_FRect& buttonRect,
+    RC2D_Color fillColor,
+    RC2D_Color borderColor) const
+{
+    this->drawButtonFrame(buttonRect, fillColor, borderColor);
+    this->drawCenteredIcon(this->scaleIcon, buttonRect, 1.0f);
+}
+
 void WindowControlIcons::drawButtonFrame(
     const SDL_FRect& buttonRect,
     RC2D_Color fillColor,
@@ -63,7 +77,7 @@ void WindowControlIcons::drawButtonFrame(
     rc2d_graphics_rectangle("line", &buttonRect);
 }
 
-void WindowControlIcons::drawCenteredIcon(const RC2D_Image& icon, const SDL_FRect& buttonRect) const
+void WindowControlIcons::drawCenteredIcon(const RC2D_Image& icon, const SDL_FRect& buttonRect, float padding) const
 {
     if (icon.sdl_texture == nullptr)
     {
@@ -79,9 +93,9 @@ void WindowControlIcons::drawCenteredIcon(const RC2D_Image& icon, const SDL_FRec
         return;
     }
 
-    const float padding = 3.0f;
-    const float maxWidth = (std::max)(1.0f, buttonRect.w - (padding * 2.0f));
-    const float maxHeight = (std::max)(1.0f, buttonRect.h - (padding * 2.0f));
+    const float clampedPadding = (std::max)(0.0f, padding);
+    const float maxWidth = (std::max)(1.0f, buttonRect.w - (clampedPadding * 2.0f));
+    const float maxHeight = (std::max)(1.0f, buttonRect.h - (clampedPadding * 2.0f));
     const float scale = (std::min)(maxWidth / iconWidth, maxHeight / iconHeight);
     const float drawWidth = iconWidth * scale;
     const float drawHeight = iconHeight * scale;

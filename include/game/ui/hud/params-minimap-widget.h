@@ -125,6 +125,7 @@ private:
      * @brief Autorisation de pilotage du curseur souris.
      */
     bool cursorEnabled; /**< True si ce widget peut piloter le curseur ce frame. */
+    RC2D_Image checkboxValidIcon; /**< Icone affichee uniquement quand une case est cochee. */
     WindowControlIcons controlIcons; /**< Helper des icones de controle. */
 };
 

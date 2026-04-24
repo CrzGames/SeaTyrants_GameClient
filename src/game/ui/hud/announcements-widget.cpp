@@ -933,11 +933,8 @@ void AnnouncementsWidget::draw(void) const
         rc2d_graphics_rectangle("fill", &scrollThumb);
     }
 
-    // Poignee de resize (meme idee que le chat).
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_rectangle("line", &resizeHandleRect);
-    rc2d_graphics_line(resizeHandleRect.x + 2.0f, resizeHandleRect.y + resizeHandleRect.h - 2.0f, resizeHandleRect.x + resizeHandleRect.w - 2.0f, resizeHandleRect.y + 2.0f);
-    rc2d_graphics_line(resizeHandleRect.x + 5.0f, resizeHandleRect.y + resizeHandleRect.h - 2.0f, resizeHandleRect.x + resizeHandleRect.w - 2.0f, resizeHandleRect.y + 5.0f);
+    // Poignee de resize partagee avec le chat pour garder un style commun.
+    self->controlIcons.drawResizeHandle(resizeHandleRect, kPanelFill, kGold);
 
     // Restaure le mode de blend par defaut.
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
