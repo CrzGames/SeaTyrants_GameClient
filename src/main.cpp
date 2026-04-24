@@ -73,7 +73,7 @@ const RC2D_EngineConfig* rc2d_engine_setup(int argc, char* argv[])
 #else
     config->logicalPresentationMode = RC2D_LOGICAL_PRESENTATION_OVERSCAN;
 #endif
-    config->pixelartMode = false;
+    config->textureScaleMode = RC2D_TEXTURE_SCALE_LINEAR;
     config->appInfo->name = "SeaTyrants";
     config->appInfo->organization = "Crzgames";
     config->appInfo->version = "1.0.0";
