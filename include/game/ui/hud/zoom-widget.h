@@ -94,9 +94,14 @@ public:
 private:
     RC2D_UIImage zoomBarUi;     /**< Barre de zoom. */
     RC2D_UIImage zoomSliderUi;  /**< Slider de zoom. */
+    RC2D_Font tooltipFont;      /**< Police du tooltip de zoom. */
 
     bool sliderDragging;          /**< true tant que le drag gauche est actif. */
+    bool sliderHovered;           /**< true si la souris survole le slider. */
     float sliderDragGrabOffsetX;  /**< Offset curseur->slider pris au debut du drag. */
+    float hoveredMouseX;          /**< Position X souris memorisee pour le tooltip. */
+    float hoveredMouseY;          /**< Position Y souris memorisee pour le tooltip. */
+    float displayedZoomFactor;    /**< Derniere valeur de zoom a afficher dans le tooltip. */
 
     float sliderOffsetX;          /**< Offset horizontal du slider depuis le bord gauche de la barre. */
     float sliderTravelWidth;      /**< Course totale possible du slider. */
@@ -154,5 +159,10 @@ private:
      * @param camera Camera cible a mettre a jour.
      */
     void applySliderToCameraZoom(Camera& camera) const;
+
+    /**
+     * @brief Dessine le tooltip de survol du slider de zoom.
+     */
+    void drawHoveredTooltip(void) const;
 };
 

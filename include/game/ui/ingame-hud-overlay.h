@@ -17,6 +17,8 @@
 #include "game/ui/hud/espion-search-player-widget.h"
 #include "game/ui/hud/log-book-widget.h"
 #include "game/ui/hud/markets-and-bazar-widget.h"
+#include "game/ui/hud/minimap-espion-button-widget.h"
+#include "game/ui/hud/minimap-params-button-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/top-bar-menu-widget.h"
@@ -45,7 +47,7 @@ public:
     /**
      * @brief Met a jour l'ensemble du HUD et des overlays map.
      */
-    void update(double dt, Camera& camera, const Map& map);
+    void update(double dt, Camera& camera, Map& map);
 
     /**
      * @brief Dessine le widget de fond UI gameplay (en dessous du monde).
@@ -93,7 +95,7 @@ public:
      * @brief Wrapper de clic souris pour les overlays map.
      * @return True si le clic est consomme par un overlay map.
      */
-    bool handleMapOverlayMousePressed(float x, float y, RC2D_MouseButton button, const Map& map);
+    bool handleMapOverlayMousePressed(float x, float y, RC2D_MouseButton button, Camera& camera, Map& map);
 
     /**
      * @brief Notifie un clic tuile gameplay aux overlays map.
@@ -156,6 +158,15 @@ private:
     };
 
     /**
+     * @brief Tooltip actuellement survole pour les boutons ancrés a la minimap.
+     */
+    enum class MinimapTooltip : int {
+        NONE = 0,
+        ESPION = 1,
+        PARAMS_MINIMAP = 2
+    };
+
+    /**
      * @brief Overlay de l'UI gameplay.
      */
     SectorCoordinateOverlay sectorCoordinateOverlay; /**< Overlay texte du secteur courant. */
@@ -168,6 +179,8 @@ private:
     BackgroundWidget backgroundWidget;                      /**< Fond UI gameplay (haut/bas). */
     TopBarMenuWidget topBarMenuWidget;                     /**< Barre de menu haute en haut de l'ecran. */
     MinimapWidget minimapWidget;                           /**< Widget minimap. */
+    MinimapEspionButtonWidget minimapEspionButtonWidget;   /**< Bouton espion ancre sur la minimap. */
+    MinimapParamsButtonWidget minimapParamsButtonWidget;   /**< Bouton params minimap ancre sur la minimap. */
     BarreActionWidget barreActionWidget;                   /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget;         /**< Widget bouton centrer navire. */
     ZoomWidget zoomWidget;                                 /**< Widget de zoom (barre + slider). */
@@ -178,11 +191,15 @@ private:
     LogBookWidget logBookWidget;                           /**< Fenetre "Journal de bord". */
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
+    RC2D_Font tooltipFont;                                 /**< Police partagee des tooltips HUD locaux. */
 
     /**
      * @brief Pile de rendu des fenetres flottantes (bas -> haut).
      */
     std::vector<WindowLayer> windowDrawOrder; /**< Ordre de rendu de bas vers haut. */
+    MinimapTooltip hoveredMinimapTooltip;     /**< Tooltip minimap actuellement survole. */
+    float hoveredMinimapTooltipMouseX;        /**< Position X souris pour tooltip minimap. */
+    float hoveredMinimapTooltipMouseY;        /**< Position Y souris pour tooltip minimap. */
 
     /**
      * @brief Etats precedents de visibilite pour detecter les ouvertures.
@@ -210,6 +227,11 @@ private:
      * @brief Synchronise les etats actifs des icones top bar.
      */
     void syncTopBarActionState(void);
+
+    /**
+     * @brief Dessine le tooltip de survol des boutons minimap.
+     */
+    void drawHoveredMinimapTooltip(void) const;
 
     /**
      * @brief Synchronise l'ordre de fenetres quand une fenetre vient de s'ouvrir.

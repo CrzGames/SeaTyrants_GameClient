@@ -159,6 +159,7 @@ private:
      */
     bool widgetDragging; /**< True pendant le deplacement via le header. */
     bool widgetDragLocked; /**< True si le cadenas verrouille le drag. */
+    bool widgetPlacementCustomized; /**< True apres un drag/resize utilisateur. */
     float widgetDragOffsetX; /**< Offset X souris->widget pendant le drag. */
     float widgetDragOffsetY; /**< Offset Y souris->widget pendant le drag. */
     float widgetOffsetX; /**< Decalage horizontal depuis la position de base. */

@@ -1,12 +1,21 @@
 #include "game/ui/hud/zoom-widget.h"
 #include "game/assets/title-asset-cache.h"
 
+#include "core/context.h"
+
 #include <algorithm>
 #include <cmath>
 
 #include "game/camera.h"
 
 static constexpr float kZoomWidgetScreenMarginPx = 5.0f;
+static constexpr float kZoomTooltipOffsetX = 14.0f;
+static constexpr float kZoomTooltipOffsetY = 18.0f;
+static constexpr float kZoomTooltipPaddingX = 10.0f;
+static constexpr float kZoomTooltipPaddingY = 6.0f;
+static constexpr RC2D_Color kZoomTooltipFill = RC2D_Color{67, 8, 8, 236};
+static constexpr RC2D_Color kZoomTooltipBorder = RC2D_Color{184, 132, 30, 250};
+static constexpr RC2D_Color kZoomTooltipText = RC2D_Color{217, 200, 134, 255};
 
 static void getMouseRenderPosition(float* outX, float* outY)
 {
@@ -53,11 +62,62 @@ static bool loadUiImage(
     return (uiImage->image.sdl_texture != nullptr && uiImage->imageData.sdl_surface != nullptr);
 }
 
+static float measureTextWidth(RC2D_Font* font, const char* text)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return 0.0f;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    int width = 0;
+    int height = 0;
+    rc2d_graphics_getTextSize(&textObject, &width, &height);
+    rc2d_graphics_destroyText(&textObject);
+    (void)height;
+    return static_cast<float>(width);
+}
+
+static float measureTextHeight(RC2D_Font* font, const char* text)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return 0.0f;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    int width = 0;
+    int height = 0;
+    rc2d_graphics_getTextSize(&textObject, &width, &height);
+    rc2d_graphics_destroyText(&textObject);
+    (void)width;
+    return static_cast<float>(height);
+}
+
+static void drawTextAt(RC2D_Font* font, const char* text, float x, float y, RC2D_Color color)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    textObject.color = color;
+    rc2d_graphics_setTextColor(&textObject);
+    rc2d_graphics_drawText(&textObject, std::round(x), std::round(y));
+    rc2d_graphics_destroyText(&textObject);
+}
+
 ZoomWidget::ZoomWidget(void)
     : zoomBarUi{},
       zoomSliderUi{},
+      tooltipFont{},
       sliderDragging(false),
+      sliderHovered(false),
       sliderDragGrabOffsetX(0.0f),
+      hoveredMouseX(0.0f),
+      hoveredMouseY(0.0f),
+      displayedZoomFactor(Camera::CAMERA_ZOOM_MAX_FACTOR),
       sliderOffsetX(0.0f),
       sliderTravelWidth(0.0f),
       zoomBarWidthPx(0.0f),
@@ -100,6 +160,10 @@ void ZoomWidget::load(void)
     this->zoomSliderUi.margin_y = kZoomWidgetScreenMarginPx;
     this->zoomSliderUi.visible = true;
     this->zoomSliderUi.hittable = true;
+    this->tooltipFont = OpenStorageFont(
+        "assets/fonts/SegoeUI-Semibold.ttf",
+        RC2D_STORAGE_TITLE,
+        13.0f);
 
     this->zoomBarWidthPx =
         (this->zoomBarUi.imageData.sdl_surface != nullptr)
@@ -123,11 +187,16 @@ void ZoomWidget::load(void)
     this->sliderTravelWidth = (std::max)(this->zoomBarWidthPx - this->zoomSliderWidthPx, 0.0f);
     this->sliderOffsetX = this->sliderTravelWidth;
     this->sliderDragging = false;
+    this->sliderHovered = false;
     this->sliderDragGrabOffsetX = 0.0f;
+    this->hoveredMouseX = 0.0f;
+    this->hoveredMouseY = 0.0f;
+    this->displayedZoomFactor = Camera::CAMERA_ZOOM_MAX_FACTOR;
 }
 
 void ZoomWidget::unload(void)
 {
+    ResetStorageFontRef(&this->tooltipFont);
     ResetStorageImageDataRef(&this->zoomSliderUi.imageData);
     ResetStorageImageRef(&this->zoomSliderUi.image);
     ResetStorageImageDataRef(&this->zoomBarUi.imageData);
@@ -235,10 +304,18 @@ void ZoomWidget::applySliderToCameraZoom(Camera& camera) const
 
 void ZoomWidget::update(Camera& camera)
 {
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    getMouseRenderPosition(&mouseX, &mouseY);
+    this->hoveredMouseX = mouseX;
+    this->hoveredMouseY = mouseY;
+    this->sliderHovered = this->isSliderHovered(mouseX, mouseY);
+
     // Pas de drag actif: le slider suit les autres changements de zoom (clavier, code, etc.).
     if (!this->sliderDragging)
     {
         this->syncSliderFromCameraZoom(camera);
+        this->displayedZoomFactor = camera.getZoomFactor();
         return;
     }
 
@@ -247,12 +324,10 @@ void ZoomWidget::update(Camera& camera)
     {
         this->sliderDragging = false;
         this->syncSliderFromCameraZoom(camera);
+        this->sliderHovered = this->isSliderHovered(mouseX, mouseY);
+        this->displayedZoomFactor = camera.getZoomFactor();
         return;
     }
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    getMouseRenderPosition(&mouseX, &mouseY);
 
     this->refreshTravelWidthFromDrawnRects();
 
@@ -261,6 +336,8 @@ void ZoomWidget::update(Camera& camera)
         (mouseX - this->zoomBarUi.last_drawn_rect.x) - this->sliderDragGrabOffsetX;
     this->setSliderOffsetFromRawValue(rawOffset);
     this->applySliderToCameraZoom(camera);
+    this->sliderHovered = true;
+    this->displayedZoomFactor = camera.getZoomFactor();
 }
 
 void ZoomWidget::draw(void)
@@ -283,6 +360,7 @@ void ZoomWidget::draw(void)
     const float centeredYOffset = (this->zoomBarUi.last_drawn_rect.h - this->zoomSliderUi.last_drawn_rect.h) * 0.5f;
     this->zoomSliderUi.margin_y = this->zoomBarUi.margin_y + centeredYOffset;
     rc2d_ui_drawImage(&this->zoomSliderUi);
+    this->drawHoveredTooltip();
 }
 
 bool ZoomWidget::mousepressed(float x, float y, RC2D_MouseButton button)
@@ -326,5 +404,48 @@ bool ZoomWidget::pointInRect(float x, float y, const SDL_FRect& rect)
         x <= (rect.x + rect.w) &&
         y >= rect.y &&
         y <= (rect.y + rect.h));
+}
+
+void ZoomWidget::drawHoveredTooltip(void) const
+{
+    if ((!this->sliderHovered && !this->sliderDragging) || this->tooltipFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    char label[32] = {};
+    SDL_snprintf(
+        label,
+        sizeof(label),
+        "Zoom: %.0f%%",
+        std::round(this->displayedZoomFactor * 100.0f));
+
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
+    const float textWidth = measureTextWidth(const_cast<RC2D_Font*>(&this->tooltipFont), label);
+    const float textHeight = measureTextHeight(const_cast<RC2D_Font*>(&this->tooltipFont), label);
+    SDL_FRect tooltipRect = SDL_FRect{
+        this->hoveredMouseX + kZoomTooltipOffsetX,
+        this->hoveredMouseY + kZoomTooltipOffsetY,
+        textWidth + (kZoomTooltipPaddingX * 2.0f),
+        textHeight + (kZoomTooltipPaddingY * 2.0f)
+    };
+
+    const float maxX = (gameScreenRect.x + gameScreenRect.w) - tooltipRect.w;
+    const float maxY = (gameScreenRect.y + gameScreenRect.h) - tooltipRect.h;
+    tooltipRect.x = (std::max)(gameScreenRect.x, (std::min)(tooltipRect.x, maxX));
+    tooltipRect.y = (std::max)(gameScreenRect.y, (std::min)(tooltipRect.y, maxY));
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kZoomTooltipFill);
+    rc2d_graphics_rectangle("fill", &tooltipRect);
+    rc2d_graphics_setColor(kZoomTooltipBorder);
+    rc2d_graphics_rectangle("line", &tooltipRect);
+    drawTextAt(
+        const_cast<RC2D_Font*>(&this->tooltipFont),
+        label,
+        tooltipRect.x + kZoomTooltipPaddingX,
+        tooltipRect.y + kZoomTooltipPaddingY,
+        kZoomTooltipText);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 

@@ -85,6 +85,11 @@ public:
      * @brief Rouvre la fenetre de parametres.
      */
     void show(void);
+
+    /**
+     * @brief Ferme la fenetre de parametres.
+     */
+    void hide(void);
     
 private:
     /**

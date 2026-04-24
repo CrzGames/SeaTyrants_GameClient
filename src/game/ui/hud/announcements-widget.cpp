@@ -283,6 +283,7 @@ AnnouncementsWidget::AnnouncementsWidget(void)
       scrollDragOffsetY(0.0f),
       widgetDragging(false),
       widgetDragLocked(false),
+      widgetPlacementCustomized(false),
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
@@ -330,6 +331,7 @@ void AnnouncementsWidget::load(void)
     this->widgetDragging = false;
     // Cadenas ouvert par defaut (drag autorise).
     this->widgetDragLocked = false;
+    this->widgetPlacementCustomized = false;
     // Le scroll repart de la premiere ligne.
     this->scrollFirstLine = 0;
     this->scrollBarDragging = false;
@@ -356,8 +358,11 @@ void AnnouncementsWidget::update(double dt)
     const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
     this->widgetRect = SDL_FRect{baseRect.x + this->widgetOffsetX, baseRect.y + this->widgetOffsetY, this->widgetWidth, this->widgetHeight};
 
-    // Curseur contextuel selon les zones interactives de la fenetre.
-    if (this->visible && this->cursorEnabled)
+    if (!this->visible)
+    {
+        return;
+    }
+
     // Si aucun drag/resize/scrollbar actif, rien d'autre a faire.
     if (!this->widgetDragging && !this->widgetResizing && !this->scrollBarDragging)
     {
@@ -517,6 +522,7 @@ bool AnnouncementsWidget::mousepressed(float x, float y, RC2D_MouseButton button
     {
         this->widgetResizing = true;
         this->widgetDragging = false;
+        this->widgetPlacementCustomized = true;
         this->resizeStartMouseX = x;
         this->resizeStartMouseY = y;
         this->resizeStartWidth = this->widgetWidth;
@@ -596,6 +602,7 @@ bool AnnouncementsWidget::mousepressed(float x, float y, RC2D_MouseButton button
         this->widgetDragging = true;
         this->widgetResizing = false;
         this->scrollBarDragging = false;
+        this->widgetPlacementCustomized = true;
         // Memorise l'ancrage souris->widget pour un drag fluide.
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
@@ -938,6 +945,21 @@ void AnnouncementsWidget::draw(void) const
 
 void AnnouncementsWidget::show(void)
 {
+    const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
+    if (!this->widgetPlacementCustomized)
+    {
+        this->widgetOffsetX = 0.0f;
+        this->widgetOffsetY = 0.0f;
+        this->widgetWidth = kRefW;
+        this->widgetHeight = kRefH;
+    }
+
+    this->widgetRect = SDL_FRect{
+        baseRect.x + this->widgetOffsetX,
+        baseRect.y + this->widgetOffsetY,
+        this->widgetWidth,
+        this->widgetHeight
+    };
     this->visible = true;
     this->widgetDragging = false;
     this->widgetResizing = false;

@@ -83,6 +83,11 @@ public:
      */
     void show(void);
 
+    /**
+     * @brief Ferme la fenetre espion.
+     */
+    void hide(void);
+
 private:
     /**
      * @brief Texte de resultat affiche dans la zone de sortie.

@@ -700,5 +700,12 @@ void EspionSearchPlayerWidget::show(void)
     this->clearFocus();
 }
 
+void EspionSearchPlayerWidget::hide(void)
+{
+    this->visible = false;
+    this->widgetDragging = false;
+    this->clearFocus();
+}
+
 
 

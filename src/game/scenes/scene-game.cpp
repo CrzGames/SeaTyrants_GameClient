@@ -323,7 +323,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     }
 
     // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
-    if (this->hudOverlay.handleMapOverlayMousePressed(x, y, button, map))
+    if (this->hudOverlay.handleMapOverlayMousePressed(x, y, button, GetCamera(), map))
     {
         this->shipAutoFollowEnabled = false;
         return;
@@ -375,7 +375,6 @@ void GameScene::mousewheelmoved(
         return;
     }
 }
-
 
 
 

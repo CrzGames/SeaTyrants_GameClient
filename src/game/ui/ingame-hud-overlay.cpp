@@ -5,6 +5,14 @@
 #include <algorithm>
 #include <cmath>
 
+static constexpr float kHudTooltipOffsetX = 14.0f;
+static constexpr float kHudTooltipOffsetY = 18.0f;
+static constexpr float kHudTooltipPaddingX = 10.0f;
+static constexpr float kHudTooltipPaddingY = 6.0f;
+static constexpr RC2D_Color kHudTooltipFill = RC2D_Color{67, 8, 8, 236};
+static constexpr RC2D_Color kHudTooltipBorder = RC2D_Color{184, 132, 30, 250};
+static constexpr RC2D_Color kHudTooltipText = RC2D_Color{217, 200, 134, 255};
+
 static void applyCursorIfChanged(SDL_SystemCursor id)
 {
     static SDL_SystemCursor lastId = static_cast<SDL_SystemCursor>(-1);
@@ -127,6 +135,52 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outY = renderY;
 }
 
+static float measureTextWidth(RC2D_Font* font, const char* text)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return 0.0f;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    int width = 0;
+    int height = 0;
+    rc2d_graphics_getTextSize(&textObject, &width, &height);
+    rc2d_graphics_destroyText(&textObject);
+    (void)height;
+    return static_cast<float>(width);
+}
+
+static float measureTextHeight(RC2D_Font* font, const char* text)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return 0.0f;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    int width = 0;
+    int height = 0;
+    rc2d_graphics_getTextSize(&textObject, &width, &height);
+    rc2d_graphics_destroyText(&textObject);
+    (void)width;
+    return static_cast<float>(height);
+}
+
+static void drawTextAt(RC2D_Font* font, const char* text, float x, float y, RC2D_Color color)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text == nullptr || text[0] == '\0')
+    {
+        return;
+    }
+
+    RC2D_Text textObject = rc2d_graphics_createText(font, text);
+    textObject.color = color;
+    rc2d_graphics_setTextColor(&textObject);
+    rc2d_graphics_drawText(&textObject, std::round(x), std::round(y));
+    rc2d_graphics_destroyText(&textObject);
+}
+
 IngameHudOverlay::IngameHudOverlay(void)
     : backgroundWidget{},
       topBarMenuWidget{},
@@ -134,6 +188,8 @@ IngameHudOverlay::IngameHudOverlay(void)
       tileClickMarkerOverlay{},
       scrollBarOverlay{},
       minimapWidget{},
+      minimapEspionButtonWidget{},
+      minimapParamsButtonWidget{},
       barreActionWidget{},
       centerShipButtonWidget{},
       zoomWidget{},
@@ -144,7 +200,11 @@ IngameHudOverlay::IngameHudOverlay(void)
       logBookWidget{},
       marketsAndBazarWidget{},
       accountManagementWidget{},
+      tooltipFont{},
       windowDrawOrder{},
+      hoveredMinimapTooltip(MinimapTooltip::NONE),
+      hoveredMinimapTooltipMouseX(0.0f),
+      hoveredMinimapTooltipMouseY(0.0f),
       prevChatVisible(false),
       prevEspionVisible(false),
       prevParamsMiniMapVisible(false),
@@ -302,6 +362,8 @@ void IngameHudOverlay::load(void)
     this->scrollBarOverlay.load();
 
     this->minimapWidget.load();
+    this->minimapEspionButtonWidget.load();
+    this->minimapParamsButtonWidget.load();
     this->barreActionWidget.load();
     this->centerShipButtonWidget.load();
     this->zoomWidget.load();
@@ -314,9 +376,11 @@ void IngameHudOverlay::load(void)
     this->logBookWidget.load();
     this->marketsAndBazarWidget.load();
     this->accountManagementWidget.load();
+    this->tooltipFont = OpenStorageFont(
+        "assets/fonts/SegoeUI-Semibold.ttf",
+        RC2D_STORAGE_TITLE,
+        13.0f);
 
-    this->espionSearchPlayerWidget.show();
-    this->paramsMinimapWidget.show();
     this->marketsAndBazarWidget.openBasicMarket();
 
     this->windowDrawOrder = {
@@ -335,10 +399,14 @@ void IngameHudOverlay::load(void)
     this->prevLogBookVisible = this->logBookWidget.isVisible();
     this->prevMarketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     this->prevAccountManagementVisible = this->accountManagementWidget.isVisible();
+    this->hoveredMinimapTooltip = MinimapTooltip::NONE;
+    this->hoveredMinimapTooltipMouseX = 0.0f;
+    this->hoveredMinimapTooltipMouseY = 0.0f;
 }
 
 void IngameHudOverlay::unload(void)
 {
+    ResetStorageFontRef(&this->tooltipFont);
     this->accountManagementWidget.unload();
     this->marketsAndBazarWidget.unload();
     this->logBookWidget.unload();
@@ -349,6 +417,8 @@ void IngameHudOverlay::unload(void)
     this->sectorCoordinateOverlay.unload();
     this->centerShipButtonWidget.unload();
     this->barreActionWidget.unload();
+    this->minimapParamsButtonWidget.unload();
+    this->minimapEspionButtonWidget.unload();
     this->minimapWidget.unload();
     this->zoomWidget.unload();
     this->tileClickMarkerOverlay.hide();
@@ -357,7 +427,7 @@ void IngameHudOverlay::unload(void)
     this->backgroundWidget.unload();
 }
 
-void IngameHudOverlay::update(double dt, Camera& camera, const Map& map)
+void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
 {
     this->syncWindowOrderOnOpen();
     this->syncTopBarActionState();
@@ -365,6 +435,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, const Map& map)
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     getMouseRenderPosition(&mouseX, &mouseY);
+    this->hoveredMinimapTooltip = MinimapTooltip::NONE;
+    this->hoveredMinimapTooltipMouseX = mouseX;
+    this->hoveredMinimapTooltipMouseY = mouseY;
     const bool keepDefaultCursor = this->shouldKeepDefaultCursorAfterClose(mouseX, mouseY);
     const bool hoveredTopBar = this->topBarMenuWidget.update(mouseX, mouseY);
 
@@ -396,7 +469,25 @@ void IngameHudOverlay::update(double dt, Camera& camera, const Map& map)
         }
     }
     this->tileClickMarkerOverlay.update(dt);
+    this->minimapWidget.update(camera, map);
     this->zoomWidget.update(camera);
+    const bool minimapHovered = this->minimapWidget.containsContentPoint(mouseX, mouseY);
+    const bool minimapEspionHovered =
+        this->minimapEspionButtonWidget.containsPoint(mouseX, mouseY, this->minimapWidget);
+    const bool minimapParamsHovered =
+        this->minimapParamsButtonWidget.containsPoint(mouseX, mouseY, this->minimapWidget);
+    const HudCursorType minimapEspionCursor = this->minimapEspionButtonWidget.getDesiredCursor(mouseX, mouseY, this->minimapWidget);
+    const HudCursorType minimapParamsCursor = this->minimapParamsButtonWidget.getDesiredCursor(mouseX, mouseY, this->minimapWidget);
+    const HudCursorType centerShipCursor = this->centerShipButtonWidget.getDesiredCursor(mouseX, mouseY);
+
+    if (minimapEspionHovered)
+    {
+        this->hoveredMinimapTooltip = MinimapTooltip::ESPION;
+    }
+    else if (minimapParamsHovered)
+    {
+        this->hoveredMinimapTooltip = MinimapTooltip::PARAMS_MINIMAP;
+    }
 
     HudCursorType desiredCursor = HudCursorType::DEFAULT;
     if (!keepDefaultCursor)
@@ -424,6 +515,22 @@ void IngameHudOverlay::update(double dt, Camera& camera, const Map& map)
             {
                 desiredCursor = HudCursorType::RESIZE_HORIZONTAL;
             }
+            else if (minimapEspionCursor != HudCursorType::NONE)
+            {
+                desiredCursor = minimapEspionCursor;
+            }
+            else if (minimapParamsCursor != HudCursorType::NONE)
+            {
+                desiredCursor = minimapParamsCursor;
+            }
+            else if (minimapHovered)
+            {
+                desiredCursor = HudCursorType::POINTER;
+            }
+            else if (centerShipCursor != HudCursorType::NONE)
+            {
+                desiredCursor = centerShipCursor;
+            }
             else if (hoveredTopBar)
             {
                 desiredCursor = HudCursorType::POINTER;
@@ -448,7 +555,10 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
 {
     this->topBarMenuWidget.draw();
     this->sectorCoordinateOverlay.draw(map, player);
-    this->minimapWidget.draw();
+    this->minimapWidget.draw(map);
+    this->minimapParamsButtonWidget.draw(this->minimapWidget);
+    this->minimapEspionButtonWidget.draw(this->minimapWidget);
+    this->drawHoveredMinimapTooltip();
     this->barreActionWidget.draw();
     this->centerShipButtonWidget.draw();
     this->zoomWidget.draw();
@@ -480,6 +590,46 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
                 break;
         }
     }
+}
+
+void IngameHudOverlay::drawHoveredMinimapTooltip(void) const
+{
+    if (this->hoveredMinimapTooltip == MinimapTooltip::NONE || this->tooltipFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    const char* label =
+        (this->hoveredMinimapTooltip == MinimapTooltip::ESPION)
+            ? "Espion"
+            : "Params minimap";
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
+    const float textWidth = measureTextWidth(const_cast<RC2D_Font*>(&this->tooltipFont), label);
+    const float textHeight = measureTextHeight(const_cast<RC2D_Font*>(&this->tooltipFont), label);
+    SDL_FRect tooltipRect = SDL_FRect{
+        this->hoveredMinimapTooltipMouseX + kHudTooltipOffsetX,
+        this->hoveredMinimapTooltipMouseY + kHudTooltipOffsetY,
+        textWidth + (kHudTooltipPaddingX * 2.0f),
+        textHeight + (kHudTooltipPaddingY * 2.0f)
+    };
+
+    const float maxX = (gameScreenRect.x + gameScreenRect.w) - tooltipRect.w;
+    const float maxY = (gameScreenRect.y + gameScreenRect.h) - tooltipRect.h;
+    tooltipRect.x = (std::max)(gameScreenRect.x, (std::min)(tooltipRect.x, maxX));
+    tooltipRect.y = (std::max)(gameScreenRect.y, (std::min)(tooltipRect.y, maxY));
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kHudTooltipFill);
+    rc2d_graphics_rectangle("fill", &tooltipRect);
+    rc2d_graphics_setColor(kHudTooltipBorder);
+    rc2d_graphics_rectangle("line", &tooltipRect);
+    drawTextAt(
+        const_cast<RC2D_Font*>(&this->tooltipFont),
+        label,
+        tooltipRect.x + kHudTooltipPaddingX,
+        tooltipRect.y + kHudTooltipPaddingY,
+        kHudTooltipText);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
 void IngameHudOverlay::drawTileClickMarkerOverlay(const Map& map)
@@ -586,6 +736,42 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         return true;
     }
 
+    if (this->minimapEspionButtonWidget.mousepressed(x, y, button, this->minimapWidget))
+    {
+        if (this->espionSearchPlayerWidget.isVisible())
+        {
+            this->espionSearchPlayerWidget.hide();
+        }
+        else
+        {
+            this->espionSearchPlayerWidget.show();
+            this->bringWindowToFront(WindowLayer::ESPION);
+        }
+        this->chatWidget.clearFocus();
+        this->espionSearchPlayerWidget.clearFocus();
+        this->marketsAndBazarWidget.clearFocus();
+        this->accountManagementWidget.clearFocus();
+        return true;
+    }
+
+    if (this->minimapParamsButtonWidget.mousepressed(x, y, button, this->minimapWidget))
+    {
+        if (this->paramsMinimapWidget.isVisible())
+        {
+            this->paramsMinimapWidget.hide();
+        }
+        else
+        {
+            this->paramsMinimapWidget.show();
+            this->bringWindowToFront(WindowLayer::PARAMS_MINIMAP);
+        }
+        this->chatWidget.clearFocus();
+        this->espionSearchPlayerWidget.clearFocus();
+        this->marketsAndBazarWidget.clearFocus();
+        this->accountManagementWidget.clearFocus();
+        return true;
+    }
+
     if (this->zoomWidget.mousepressed(x, y, button))
     {
         this->chatWidget.clearFocus();
@@ -657,8 +843,13 @@ bool IngameHudOverlay::mousewheelmoved(
     return false;
 }
 
-bool IngameHudOverlay::handleMapOverlayMousePressed(float x, float y, RC2D_MouseButton button, const Map& map)
+bool IngameHudOverlay::handleMapOverlayMousePressed(float x, float y, RC2D_MouseButton button, Camera& camera, Map& map)
 {
+    if (this->minimapWidget.mousepressed(x, y, button, camera, map))
+    {
+        return true;
+    }
+
     if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
         return false;

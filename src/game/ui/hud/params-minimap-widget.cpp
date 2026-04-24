@@ -462,3 +462,9 @@ void ParamsMinimapWidget::show(void)
     this->widgetDragging = false;
 }
 
+void ParamsMinimapWidget::hide(void)
+{
+    this->visible = false;
+    this->widgetDragging = false;
+}
+

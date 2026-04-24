@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-namespace {
+namespace top_bar_action_button_widget_internal {
 
 static constexpr RC2D_Color kHoverFill = RC2D_Color{12, 20, 34, 210};
 static constexpr RC2D_Color kActiveFill = RC2D_Color{54, 28, 8, 240};
@@ -20,7 +20,9 @@ static bool isPointInRect(float x, float y, const SDL_FRect& rect)
     return (x >= rect.x && x <= (rect.x + rect.w) && y >= rect.y && y <= (rect.y + rect.h));
 }
 
-} // namespace
+} // namespace top_bar_action_button_widget_internal
+
+using namespace top_bar_action_button_widget_internal;
 
 TopBarActionButtonWidget::TopBarActionButtonWidget(Action action, const char* imagePath)
     : action(action),

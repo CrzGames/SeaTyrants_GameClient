@@ -2,6 +2,8 @@
 
 #include <RC2D/RC2D.h>
 
+#include "game/ui/hud/hud-cursor.h"
+
 class CenterShipButtonWidget {
 public:
     CenterShipButtonWidget(void);
@@ -21,6 +23,16 @@ public:
      * @brief Dessine le bouton.
      */
     void draw(void);
+
+    /**
+     * @brief Indique si un point ecran survole le bouton.
+     */
+    bool containsPoint(float x, float y) const;
+
+    /**
+     * @brief Retourne le curseur souhaite pour ce widget.
+     */
+    HudCursorType getDesiredCursor(float x, float y) const;
     
 private:
     /**
