@@ -511,7 +511,7 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
 
         if (desiredCursor == HudCursorType::NONE)
         {
-            if (this->zoomWidget.isDraggingSlider() || this->zoomWidget.isSliderHovered(mouseX, mouseY))
+            if (this->zoomWidget.isSliderHovered(mouseX, mouseY))
             {
                 desiredCursor = HudCursorType::RESIZE_HORIZONTAL;
             }

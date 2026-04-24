@@ -336,7 +336,6 @@ void ZoomWidget::update(Camera& camera)
         (mouseX - this->zoomBarUi.last_drawn_rect.x) - this->sliderDragGrabOffsetX;
     this->setSliderOffsetFromRawValue(rawOffset);
     this->applySliderToCameraZoom(camera);
-    this->sliderHovered = true;
     this->displayedZoomFactor = camera.getZoomFactor();
 }
 
@@ -408,7 +407,7 @@ bool ZoomWidget::pointInRect(float x, float y, const SDL_FRect& rect)
 
 void ZoomWidget::drawHoveredTooltip(void) const
 {
-    if ((!this->sliderHovered && !this->sliderDragging) || this->tooltipFont.sdl_font == nullptr)
+    if (!this->sliderHovered || this->tooltipFont.sdl_font == nullptr)
     {
         return;
     }
