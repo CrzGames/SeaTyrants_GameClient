@@ -854,9 +854,6 @@ void AnnouncementsWidget::draw(void) const
     rc2d_graphics_rectangle("line", &header);
     drawLeftCenteredY(&self->titleFont, "Annonces", header, header.x + 10.0f, kTextGold);
 
-    rc2d_graphics_setColor(kGold);
-    rc2d_graphics_line(header.x + 1.0f, header.y + header.h + 2.0f, header.x + header.w - 1.0f, header.y + header.h + 2.0f);
-
     // Zone de contenu vide (fond + contour).
     rc2d_graphics_setColor(kPanelFill);
     rc2d_graphics_rectangle("fill", &body);
