@@ -15,6 +15,7 @@ static constexpr float kHudWidgetScaleMin = 0.75f;
 static constexpr float kHudWidgetScaleMax = 1.0f;
 static constexpr float kMiniMapMarginRightPercent = 0.03f;
 static constexpr float kMiniMapMarginTopPercent = 0.05f;
+static constexpr float kMiniMapDefaultOffsetY = 10.0f;
 
 static float clampHudWidgetScale(float scale)
 {
@@ -77,7 +78,7 @@ static SDL_FRect getMiniMapRect(const RC2D_ImageData& imageData, const RC2D_Imag
     return scaleRectFromCenter(
         SDL_FRect{
             visibleRect.x + visibleRect.w - marginRight - width + offset.x,
-            visibleRect.y + marginTop + offset.y,
+            visibleRect.y + marginTop + kMiniMapDefaultOffsetY + offset.y,
             width,
             height},
         scale);

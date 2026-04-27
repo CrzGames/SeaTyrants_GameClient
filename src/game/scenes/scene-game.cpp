@@ -386,15 +386,25 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     // Recupere les references aux systemes et objets necessaires.
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
+    Camera& camera = GetCamera();
+    IngameHudOverlay& hudOverlay = GetIngameHudOverlay();
 
     // Priorite au chat HUD: clic consomme => pas de propagation gameplay.
-    if (GetIngameHudOverlay().mousepressed(x, y, button, clicks, mouseID))
+    if (hudOverlay.mousepressed(x, y, button, clicks, mouseID))
     {
         return;
     }
 
+    if (hudOverlay.centerShipButtonMousepressed(x, y, button))
+    {
+        GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
+        this->shipAutoFollowEnabled = true;
+        camera.update(map, map.rect);
+        return;
+    }
+
     // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
-    if (GetIngameHudOverlay().handleMapOverlayMousePressed(x, y, button, GetCamera(), map))
+    if (hudOverlay.handleMapOverlayMousePressed(x, y, button, camera, map))
     {
         this->shipAutoFollowEnabled = false;
         return;

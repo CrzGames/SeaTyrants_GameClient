@@ -24,7 +24,7 @@ static constexpr float kHudConfiguratorPanelWidth = 436.0f;
 static constexpr float kHudConfiguratorPanelHeight = 238.0f;
 static constexpr float kHudConfiguratorPanelMargin = 22.0f;
 static constexpr float kHudConfiguratorHighlightPadding = 14.0f;
-static constexpr float kHudConfiguratorButtonWidth = 124.0f;
+static constexpr float kHudConfiguratorButtonWidth = 196.0f;
 static constexpr float kHudConfiguratorButtonHeight = 26.0f;
 static constexpr float kHudConfiguratorDoneButtonWidth = 112.0f;
 static constexpr float kHudConfiguratorLabelPaddingX = 10.0f;
@@ -888,7 +888,7 @@ void IngameHudOverlay::drawHudConfiguratorOverlay(void) const
             hoveredReset ? kHudConfiguratorPanelBorder : kHudConfiguratorHighlightBorderMuted);
         drawCenteredText(
             const_cast<RC2D_Font*>(&this->tooltipFont),
-            "Par defaut",
+            "Réinitialiser par défaut",
             buttonRect,
             kHudConfiguratorText);
     }
@@ -901,7 +901,7 @@ void IngameHudOverlay::drawHudConfiguratorOverlay(void) const
         hoveredResetAll ? kHudConfiguratorPanelBorder : kHudConfiguratorHighlightBorderMuted);
     drawCenteredText(
         const_cast<RC2D_Font*>(&this->tooltipFont),
-        "Reinitialiser tout",
+        "Réinitialiser tout par défaut",
         layout.resetAllButtonRect,
         kHudConfiguratorText);
 
@@ -1932,6 +1932,14 @@ bool IngameHudOverlay::handleMapOverlayMousePressed(float x, float y, RC2D_Mouse
         return false;
     }
     return this->scrollBarOverlay.handleClick(x, y, map.rect);
+}
+
+bool IngameHudOverlay::centerShipButtonMousepressed(float x, float y, RC2D_MouseButton button) const
+{
+    return (
+        button == RC2D_MOUSE_BUTTON_LEFT &&
+        this->isHudWidgetVisible(GameSettingsWidget::HudScaleTarget::CENTER_SHIP) &&
+        this->centerShipButtonWidget.containsPoint(x, y));
 }
 
 void IngameHudOverlay::notifyMapTileClicked(int tileX, int tileY)

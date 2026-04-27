@@ -103,6 +103,11 @@ public:
     bool handleMapOverlayMousePressed(float x, float y, RC2D_MouseButton button, Camera& camera, Map& map);
 
     /**
+     * @brief Indique si le clic touche le bouton de recentrage navire.
+     */
+    bool centerShipButtonMousepressed(float x, float y, RC2D_MouseButton button) const;
+
+    /**
      * @brief Notifie un clic tuile gameplay aux overlays map.
      */
     void notifyMapTileClicked(int tileX, int tileY);
