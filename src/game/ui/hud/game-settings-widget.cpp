@@ -53,7 +53,7 @@ static constexpr float kGraphicsWheelStep = 52.0f;
 static constexpr float kGraphicsSectionGeneralHeight = 112.0f;
 static constexpr float kGraphicsSectionWindowHeight = 264.0f;
 static constexpr float kGraphicsSectionInterfaceHeight = 112.0f;
-static constexpr float kGraphicsSectionAnimationsHeight = 144.0f;
+static constexpr float kGraphicsSectionAnimationsHeight = 176.0f;
 static constexpr float kGraphicsSectionGameplayHeight = 112.0f;
 static constexpr float kGraphicsOptionRowHeight = 34.0f;
 static constexpr float kGraphicsCheckboxSize = 24.0f;
@@ -158,6 +158,8 @@ struct GameSettingsLayout {
     SDL_FRect graphicsFogOfWarCheckbox;
     SDL_FRect graphicsShipWakeTrailsRow;
     SDL_FRect graphicsShipWakeTrailsCheckbox;
+    SDL_FRect graphicsHideOtherPlayersVfxRow;
+    SDL_FRect graphicsHideOtherPlayersVfxCheckbox;
     SDL_FRect graphicsGameplayPanel;
     SDL_FRect graphicsSalvoRow;
     std::array<SDL_FRect, 3> graphicsSalvoOptions;
@@ -1288,7 +1290,7 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
         kGraphicsOptionRowHeight
     };
     layout.graphicsFogOfWarCheckbox = SDL_FRect{
-        layout.graphicsFogOfWarRow.x + 300.0f,
+        (layout.graphicsFogOfWarRow.x + layout.graphicsFogOfWarRow.w) - kGraphicsCheckboxSize,
         layout.graphicsFogOfWarRow.y + ((layout.graphicsFogOfWarRow.h - kGraphicsCheckboxSize) * 0.5f),
         kGraphicsCheckboxSize,
         kGraphicsCheckboxSize
@@ -1300,8 +1302,20 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
         kGraphicsOptionRowHeight
     };
     layout.graphicsShipWakeTrailsCheckbox = SDL_FRect{
-        layout.graphicsShipWakeTrailsRow.x + 300.0f,
+        (layout.graphicsShipWakeTrailsRow.x + layout.graphicsShipWakeTrailsRow.w) - kGraphicsCheckboxSize,
         layout.graphicsShipWakeTrailsRow.y + ((layout.graphicsShipWakeTrailsRow.h - kGraphicsCheckboxSize) * 0.5f),
+        kGraphicsCheckboxSize,
+        kGraphicsCheckboxSize
+    };
+    layout.graphicsHideOtherPlayersVfxRow = SDL_FRect{
+        layout.graphicsAnimationsPanel.x + 16.0f,
+        layout.graphicsShipWakeTrailsRow.y + layout.graphicsShipWakeTrailsRow.h + 4.0f,
+        layout.graphicsAnimationsPanel.w - 32.0f,
+        kGraphicsOptionRowHeight
+    };
+    layout.graphicsHideOtherPlayersVfxCheckbox = SDL_FRect{
+        (layout.graphicsHideOtherPlayersVfxRow.x + layout.graphicsHideOtherPlayersVfxRow.w) - kGraphicsCheckboxSize,
+        layout.graphicsHideOtherPlayersVfxRow.y + ((layout.graphicsHideOtherPlayersVfxRow.h - kGraphicsCheckboxSize) * 0.5f),
         kGraphicsCheckboxSize,
         kGraphicsCheckboxSize
     };
@@ -1390,6 +1404,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       graphicsWindowModeDropdownOpen(false),
       graphicsPresentationModeDropdownOpen(false),
       graphicsHideCoordinateBackground(false),
+      graphicsHideOtherPlayersVfx(false),
       graphicsScrollOffsetY(0.0f),
       graphicsScrollDragging(false),
       graphicsScrollDragOffsetY(0.0f),
@@ -1450,6 +1465,7 @@ void GameSettingsWidget::load(void)
     this->graphicsWindowModeDropdownOpen = false;
     this->graphicsPresentationModeDropdownOpen = false;
     this->graphicsHideCoordinateBackground = false;
+    this->graphicsHideOtherPlayersVfx = false;
     this->graphicsScrollOffsetY = 0.0f;
     this->graphicsScrollDragging = false;
     this->graphicsScrollDragOffsetY = 0.0f;
@@ -2059,6 +2075,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         const SDL_FRect graphicsHideCoordinateBackgroundRow = offsetRect(layout.graphicsHideCoordinateBackgroundRow, 0.0f, -scrollY);
         const SDL_FRect graphicsFogOfWarRow = offsetRect(layout.graphicsFogOfWarRow, 0.0f, -scrollY);
         const SDL_FRect graphicsShipWakeTrailsRow = offsetRect(layout.graphicsShipWakeTrailsRow, 0.0f, -scrollY);
+        const SDL_FRect graphicsHideOtherPlayersVfxRow = offsetRect(layout.graphicsHideOtherPlayersVfxRow, 0.0f, -scrollY);
 
         if (this->graphicsWindowModeDropdownOpen)
         {
@@ -2155,6 +2172,14 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         if (isPointInRect(x, y, graphicsShipWakeTrailsRow))
         {
             g_graphicsShipWakeTrailsEnabled = !g_graphicsShipWakeTrailsEnabled;
+            this->graphicsWindowModeDropdownOpen = false;
+            this->graphicsPresentationModeDropdownOpen = false;
+            return true;
+        }
+
+        if (isPointInRect(x, y, graphicsHideOtherPlayersVfxRow))
+        {
+            this->graphicsHideOtherPlayersVfx = !this->graphicsHideOtherPlayersVfx;
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
             return true;
@@ -3062,6 +3087,9 @@ void GameSettingsWidget::draw(void) const
         const SDL_FRect graphicsShipWakeTrailsRow = offsetRect(layout.graphicsShipWakeTrailsRow, 0.0f, -scrollY);
         const SDL_FRect graphicsShipWakeTrailsCheckbox =
             offsetRect(layout.graphicsShipWakeTrailsCheckbox, 0.0f, -scrollY);
+        const SDL_FRect graphicsHideOtherPlayersVfxRow = offsetRect(layout.graphicsHideOtherPlayersVfxRow, 0.0f, -scrollY);
+        const SDL_FRect graphicsHideOtherPlayersVfxCheckbox =
+            offsetRect(layout.graphicsHideOtherPlayersVfxCheckbox, 0.0f, -scrollY);
         const SDL_FRect graphicsGameplayPanel = offsetRect(layout.graphicsGameplayPanel, 0.0f, -scrollY);
         const SDL_FRect graphicsSalvoRow = offsetRect(layout.graphicsSalvoRow, 0.0f, -scrollY);
 
@@ -3238,6 +3266,17 @@ void GameSettingsWidget::draw(void) const
         drawCheckBox(
             graphicsShipWakeTrailsCheckbox,
             g_graphicsShipWakeTrailsEnabled,
+            self->checkboxValidIcon);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "Désactiver les VFX des autres joueurs (n'affiche plus les boulets, impacts, effets de speed, etc.)",
+            graphicsHideOtherPlayersVfxRow,
+            graphicsHideOtherPlayersVfxRow.x,
+            kTextBody);
+        drawCheckBox(
+            graphicsHideOtherPlayersVfxCheckbox,
+            self->graphicsHideOtherPlayersVfx,
             self->checkboxValidIcon);
 
         if (self->graphicsWindowModeDropdownOpen)
@@ -3609,6 +3648,7 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
         const SDL_FRect graphicsHideCoordinateBackgroundRow = offsetRect(layout.graphicsHideCoordinateBackgroundRow, 0.0f, -scrollY);
         const SDL_FRect graphicsFogOfWarRow = offsetRect(layout.graphicsFogOfWarRow, 0.0f, -scrollY);
         const SDL_FRect graphicsShipWakeTrailsRow = offsetRect(layout.graphicsShipWakeTrailsRow, 0.0f, -scrollY);
+        const SDL_FRect graphicsHideOtherPlayersVfxRow = offsetRect(layout.graphicsHideOtherPlayersVfxRow, 0.0f, -scrollY);
 
         if (this->graphicsWindowModeDropdownOpen)
         {
@@ -3644,6 +3684,7 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
             isPointInRect(x, y, graphicsHideCoordinateBackgroundRow) ||
             isPointInRect(x, y, graphicsFogOfWarRow) ||
             isPointInRect(x, y, graphicsShipWakeTrailsRow) ||
+            isPointInRect(x, y, graphicsHideOtherPlayersVfxRow) ||
             isPointInRect(x, y, graphicsWindowModeButton) ||
             isPointInRect(x, y, graphicsPresentationModeButton))
         {

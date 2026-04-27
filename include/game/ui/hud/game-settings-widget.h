@@ -400,6 +400,7 @@ private:
     bool graphicsWindowModeDropdownOpen;         /**< True si le selecteur de mode fenetre est ouvert. */
     bool graphicsPresentationModeDropdownOpen;   /**< True si le selecteur letterbox / overscan est ouvert. */
     bool graphicsHideCoordinateBackground;       /**< True si les barres de fond des coordonnees sont masquees. */
+    bool graphicsHideOtherPlayersVfx;            /**< True si les VFX des autres joueurs doivent etre masques. */
     float graphicsScrollOffsetY;                 /**< Offset vertical de l'onglet graphiques. */
     bool graphicsScrollDragging;                 /**< True pendant le drag de la scrollbar graphiques. */
     float graphicsScrollDragOffsetY;             /**< Offset souris -> thumb de la scrollbar graphiques. */
