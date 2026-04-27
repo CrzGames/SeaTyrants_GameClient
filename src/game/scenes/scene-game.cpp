@@ -234,9 +234,13 @@ void GameScene::update(double dt)
     Player& player = GetGameState().player;
     OceanShader& oceanShader = GetOceanShader();
     Camera& camera = GetCamera();
+    GameSettingsWidget& gameSettings = GetIngameHudOverlay().getGameSettingsWidget();
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.update();
+
+    // Applique les options graphiques qui pilotent les passes animees.
+    oceanShader.setWakeTrailsEnabled(gameSettings.getShipWakeTrailsEnabled());
 
     // Met a jour le shader ocean.
     oceanShader.update(dt);
@@ -251,7 +255,7 @@ void GameScene::update(double dt)
     //this->shipVfx.update(dt, player.getShip(), nullptr);
 
     // Met a jour les shaders de visibilite (nuages + fog).
-    GameplayShaderController::updateVisibility(dt, player);
+    GameplayShaderController::updateVisibility(dt, player, gameSettings.getFogOfWarEnabled());
 
     this->syncHudStatusWidgets(player);
 
@@ -293,6 +297,7 @@ void GameScene::draw(void)
     OceanShader& oceanShader = GetOceanShader();
     VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
+    GameSettingsWidget& gameSettings = GetIngameHudOverlay().getGameSettingsWidget();
 
     // Dessine le fond UI en premier (coordonnees logiques absolues).
     GetIngameHudOverlay().drawBackgroundWidget();
@@ -307,7 +312,7 @@ void GameScene::draw(void)
     }
 
     // Dessine le fog-of-war au-dessus de l'ocean.
-    if (fogOfWarShader.isReady())
+    if (gameSettings.getFogOfWarEnabled() && fogOfWarShader.isReady())
     {
         fogOfWarShader.draw(map.rect);
     }

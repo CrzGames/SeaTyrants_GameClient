@@ -306,6 +306,16 @@ public:
      */
     bool getHideCoordinateBackground(void) const;
 
+    /**
+     * @brief Retourne true si le brouillard de guerre doit etre anime et dessine.
+     */
+    bool getFogOfWarEnabled(void) const;
+
+    /**
+     * @brief Retourne true si les trainees des navires sur l'ocean doivent etre actives.
+     */
+    bool getShipWakeTrailsEnabled(void) const;
+
 private:
     /**
      * @brief Sous-onglets internes de la fenetre.
@@ -315,6 +325,15 @@ private:
         CONTROLS = 1,  /**< Sous-onglet controles. */
         GRAPHICS = 2,  /**< Sous-onglet graphiques. */
         SOUNDS = 3     /**< Sous-onglet sons. */
+    };
+
+    /**
+     * @brief Presets "Nombre de boulets par salve" affiches dans l'onglet Graphiques.
+     */
+    enum class SalvoBulletPreset : int {
+        LOW = 0,    /**< 1 boulet. */
+        NORMAL = 1, /**< 5 boulets. */
+        HIGH = 2    /**< 10 boulets. */
     };
 
     /**
@@ -381,6 +400,10 @@ private:
     bool graphicsWindowModeDropdownOpen;         /**< True si le selecteur de mode fenetre est ouvert. */
     bool graphicsPresentationModeDropdownOpen;   /**< True si le selecteur letterbox / overscan est ouvert. */
     bool graphicsHideCoordinateBackground;       /**< True si les barres de fond des coordonnees sont masquees. */
+    float graphicsScrollOffsetY;                 /**< Offset vertical de l'onglet graphiques. */
+    bool graphicsScrollDragging;                 /**< True pendant le drag de la scrollbar graphiques. */
+    float graphicsScrollDragOffsetY;             /**< Offset souris -> thumb de la scrollbar graphiques. */
+    SalvoBulletPreset graphicsSalvoBulletPreset; /**< Preset selectionne pour "Nombre de boulets par salve". */
 
     RedeemCodeCallback onRedeemCodeRequested;    /**< Callback appelee lors du clic sur "Activer". */
     VoidCallback onStartUiConfiguratorRequested; /**< Callback appelee lors du clic sur le configurateur UI. */
@@ -533,6 +556,16 @@ private:
      * @brief Met a jour le scroll de l'onglet controles depuis le drag souris.
      */
     void updateControlsScrollFromMouse(float mouseY);
+
+    /**
+     * @brief Garde le scroll de l'onglet graphiques dans ses bornes.
+     */
+    void clampGraphicsScroll(void);
+
+    /**
+     * @brief Met a jour le scroll de l'onglet graphiques depuis le drag souris.
+     */
+    void updateGraphicsScrollFromMouse(float mouseY);
 
     /**
      * @brief Met a jour le slider de vitesse camera depuis le drag souris.

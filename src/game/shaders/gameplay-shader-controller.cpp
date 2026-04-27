@@ -30,7 +30,7 @@ void GameplayShaderController::unloadAll(void)
     GetFogOfWarShader().unload();
 }
 
-void GameplayShaderController::updateVisibility(double dt, const Player& player)
+void GameplayShaderController::updateVisibility(double dt, const Player& player, bool fogOfWarEnabled)
 {
     OceanShader& oceanShader = GetOceanShader();
     VisionCloudShader& visionCloudShader = GetVisionCloudShader();
@@ -38,5 +38,8 @@ void GameplayShaderController::updateVisibility(double dt, const Player& player)
 
     // Parametres visuels gardes inline pour limiter le bruit dans la scene.
     visionCloudShader.update(dt, player.getTilePosition(), player.getViewRangeTiles(), 5.5f);
-    fogOfWarShader.update(dt, oceanShader.getColorMode(), player.getTilePosition(), player.getViewRangeTiles(), 4.5f);
+    if (fogOfWarEnabled)
+    {
+        fogOfWarShader.update(dt, oceanShader.getColorMode(), player.getTilePosition(), player.getViewRangeTiles(), 4.5f);
+    }
 }

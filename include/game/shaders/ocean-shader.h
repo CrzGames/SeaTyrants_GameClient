@@ -228,6 +228,17 @@ public:
     void resetWakeSystem(void);
 
     /**
+     * @brief Active ou desactive les sillages navires du shader ocean.
+     * @param enabled True pour autoriser les samples et le rendu de sillage.
+     */
+    void setWakeTrailsEnabled(bool enabled);
+
+    /**
+     * @brief Indique si les sillages navires sont actifs.
+     */
+    bool areWakeTrailsEnabled(void) const;
+
+    /**
      * @brief Debut de frame du sillage (vieillit + nettoie).
      * @param dt Delta time en secondes.
      */

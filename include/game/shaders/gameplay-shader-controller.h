@@ -25,6 +25,7 @@ public:
      * @brief Met a jour les shaders de visibilite (nuages + fog).
      * @param dt Delta time en secondes.
      * @param player Joueur de reference (position + portee de vue).
+     * @param fogOfWarEnabled True si le pass fog-of-war doit etre anime.
      */
-    static void updateVisibility(double dt, const Player& player);
+    static void updateVisibility(double dt, const Player& player, bool fogOfWarEnabled);
 };

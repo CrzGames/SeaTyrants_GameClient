@@ -15,6 +15,7 @@ constexpr float kWakeBaseLengthPx = 35.0f;
 // Garde une taille minimale pour eviter de perdre totalement le sillage a faible zoom.
 constexpr float kWakeMinWidthPx = 3.0f;
 constexpr float kWakeMinLengthPx = 9.0f;
+static bool g_oceanWakeTrailsEnabled = true;
 
 const char* OceanShader::colorToSuffix(WaterColor color)
 {
@@ -197,7 +198,7 @@ void OceanShader::resetUniforms(void)
     // Initialise le nombre de points de sillage.
     this->oceanUniforms.params3[0] = 0.0f;
     // Initialise la force globale du sillage.
-    this->oceanUniforms.params3[1] = kWakeBaseStrength;
+    this->oceanUniforms.params3[1] = g_oceanWakeTrailsEnabled ? kWakeBaseStrength : 0.0f;
     // Initialise la largeur du sillage en pixels ecran.
     this->oceanUniforms.params3[2] = kWakeBaseWidthPx;
     // Initialise la longueur du sillage en pixels ecran.
@@ -308,8 +309,37 @@ void OceanShader::resetWakeSystem(void)
     this->clearWakePoints();
 }
 
+void OceanShader::setWakeTrailsEnabled(bool enabled)
+{
+    if (g_oceanWakeTrailsEnabled == enabled)
+    {
+        return;
+    }
+
+    g_oceanWakeTrailsEnabled = enabled;
+    this->oceanUniforms.params3[1] = enabled ? kWakeBaseStrength : 0.0f;
+
+    if (!enabled)
+    {
+        this->resetWakeSystem();
+        return;
+    }
+
+    this->uploadUniforms();
+}
+
+bool OceanShader::areWakeTrailsEnabled(void) const
+{
+    return g_oceanWakeTrailsEnabled;
+}
+
 void OceanShader::beginWakeFrame(double dt)
 {
+    if (!g_oceanWakeTrailsEnabled)
+    {
+        return;
+    }
+
     // Debut de frame sillage:
     // 1) vieillir tous les stamps
     // 2) supprimer les stamps trop vieux
@@ -342,6 +372,11 @@ void OceanShader::submitWakeSample(
     const SDL_FPoint& tilePosition,
     bool moving)
 {
+    if (!g_oceanWakeTrailsEnabled)
+    {
+        return;
+    }
+
     // Cette fonction est appelee par chaque navire.
     // Elle decide si un nouveau "stamp" de sillage doit etre cree
     // selon la distance parcourue en espace monde (independant camera).
@@ -394,6 +429,11 @@ void OceanShader::submitWakeSample(
 
 void OceanShader::endWakeFrame(const Map& map, const SDL_FRect& visibleRect)
 {
+    if (!g_oceanWakeTrailsEnabled)
+    {
+        return;
+    }
+
     // Fin de frame sillage:
     // 1) retirer les trackers non vus
     // 2) projeter les stamps actifs en UV visibles
@@ -799,7 +839,7 @@ void OceanShader::update(double dt)
     // Le sillage suit aussi le zoom:
     // - a zoom 1.0: rendu identique a la reference
     // - a zoom faible: taille proportionnelle au navire (pas sur-intensifiee)
-    this->oceanUniforms.params3[1] = kWakeBaseStrength;
+    this->oceanUniforms.params3[1] = g_oceanWakeTrailsEnabled ? kWakeBaseStrength : 0.0f;
     this->oceanUniforms.params3[2] = (std::max)(kWakeBaseWidthPx * cameraZoom, kWakeMinWidthPx);
     this->oceanUniforms.params3[3] = (std::max)(kWakeBaseLengthPx * cameraZoom, kWakeMinLengthPx);
 
