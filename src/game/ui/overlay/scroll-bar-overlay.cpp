@@ -208,7 +208,7 @@ void ScrollBarOverlay::update(
     camera.update(const_cast<Map&>(map), screenRect);
 }
 
-void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
+void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map, bool drawBackground)
 {
     const float left   = screenRect.x;
     const float top    = screenRect.y;
@@ -238,65 +238,68 @@ void ScrollBarOverlay::draw(const SDL_FRect& screenRect, const Map& map)
     const RC2D_Color normalCornerColor = this->cornerColor;
     const RC2D_Color pressedCornerColor = withAlphaDelta(this->cornerColor, -80);
 
-    // -------------------------------------------------------------------------
-    // Barres de scroll
-    // -------------------------------------------------------------------------
-    rc2d_graphics_setColor((this->activeBar == 1) ? pressedBarColor : normalBarColor);
+    if (drawBackground)
+    {
+        // -------------------------------------------------------------------------
+        // Barres de scroll
+        // -------------------------------------------------------------------------
+        rc2d_graphics_setColor((this->activeBar == 1) ? pressedBarColor : normalBarColor);
 
-    SDL_FRect barTop = {
-        left + c,
-        top,
-        (right - left) - (2.0f * c),
-        t
-    };
-    rc2d_graphics_rectangle("fill", &barTop);
+        SDL_FRect barTop = {
+            left + c,
+            top,
+            (right - left) - (2.0f * c),
+            t
+        };
+        rc2d_graphics_rectangle("fill", &barTop);
 
-    rc2d_graphics_setColor((this->activeBar == 2) ? pressedBarColor : normalBarColor);
-    SDL_FRect barBottom = {
-        left + c,
-        bottom - t,
-        (right - left) - (2.0f * c),
-        t
-    };
-    rc2d_graphics_rectangle("fill", &barBottom);
+        rc2d_graphics_setColor((this->activeBar == 2) ? pressedBarColor : normalBarColor);
+        SDL_FRect barBottom = {
+            left + c,
+            bottom - t,
+            (right - left) - (2.0f * c),
+            t
+        };
+        rc2d_graphics_rectangle("fill", &barBottom);
 
-    rc2d_graphics_setColor((this->activeBar == 3) ? pressedBarColor : normalBarColor);
-    SDL_FRect barLeft = {
-        left,
-        top + c,
-        t,
-        (bottom - top) - (2.0f * c)
-    };
-    rc2d_graphics_rectangle("fill", &barLeft);
+        rc2d_graphics_setColor((this->activeBar == 3) ? pressedBarColor : normalBarColor);
+        SDL_FRect barLeft = {
+            left,
+            top + c,
+            t,
+            (bottom - top) - (2.0f * c)
+        };
+        rc2d_graphics_rectangle("fill", &barLeft);
 
-    rc2d_graphics_setColor((this->activeBar == 4) ? pressedBarColor : normalBarColor);
-    SDL_FRect barRight = {
-        right - t,
-        top + c,
-        t,
-        (bottom - top) - (2.0f * c)
-    };
-    rc2d_graphics_rectangle("fill", &barRight);
+        rc2d_graphics_setColor((this->activeBar == 4) ? pressedBarColor : normalBarColor);
+        SDL_FRect barRight = {
+            right - t,
+            top + c,
+            t,
+            (bottom - top) - (2.0f * c)
+        };
+        rc2d_graphics_rectangle("fill", &barRight);
 
-    // -------------------------------------------------------------------------
-    // Coins
-    // -------------------------------------------------------------------------
-    SDL_FRect cornerTL = {left, top, this->cornerSize, this->cornerSize};
-    SDL_FRect cornerTR = {right - this->cornerSize, top, this->cornerSize, this->cornerSize};
-    SDL_FRect cornerBL = {left, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
-    SDL_FRect cornerBR = {right - this->cornerSize, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
+        // -------------------------------------------------------------------------
+        // Coins
+        // -------------------------------------------------------------------------
+        SDL_FRect cornerTL = {left, top, this->cornerSize, this->cornerSize};
+        SDL_FRect cornerTR = {right - this->cornerSize, top, this->cornerSize, this->cornerSize};
+        SDL_FRect cornerBL = {left, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
+        SDL_FRect cornerBR = {right - this->cornerSize, bottom - this->cornerSize, this->cornerSize, this->cornerSize};
 
-    rc2d_graphics_setColor((this->activeBar == 5) ? pressedCornerColor : normalCornerColor);
-    rc2d_graphics_rectangle("fill", &cornerTL);
+        rc2d_graphics_setColor((this->activeBar == 5) ? pressedCornerColor : normalCornerColor);
+        rc2d_graphics_rectangle("fill", &cornerTL);
 
-    rc2d_graphics_setColor((this->activeBar == 6) ? pressedCornerColor : normalCornerColor);
-    rc2d_graphics_rectangle("fill", &cornerTR);
+        rc2d_graphics_setColor((this->activeBar == 6) ? pressedCornerColor : normalCornerColor);
+        rc2d_graphics_rectangle("fill", &cornerTR);
 
-    rc2d_graphics_setColor((this->activeBar == 7) ? pressedCornerColor : normalCornerColor);
-    rc2d_graphics_rectangle("fill", &cornerBL);
+        rc2d_graphics_setColor((this->activeBar == 7) ? pressedCornerColor : normalCornerColor);
+        rc2d_graphics_rectangle("fill", &cornerBL);
 
-    rc2d_graphics_setColor((this->activeBar == 8) ? pressedCornerColor : normalCornerColor);
-    rc2d_graphics_rectangle("fill", &cornerBR);
+        rc2d_graphics_setColor((this->activeBar == 8) ? pressedCornerColor : normalCornerColor);
+        rc2d_graphics_rectangle("fill", &cornerBR);
+    }
 
     // -------------------------------------------------------------------------
     // Coordonnees
@@ -388,6 +391,11 @@ bool ScrollBarOverlay::handleClick(float x, float y, const SDL_FRect& screenRect
 bool ScrollBarOverlay::isInteracting(void) const
 {
     return (this->activeBar != 0);
+}
+
+void ScrollBarOverlay::clearInteraction(void)
+{
+    this->activeBar = 0;
 }
 
 std::string ScrollBarOverlay::getMapCoordFromTile(int tileX, int tileY) const

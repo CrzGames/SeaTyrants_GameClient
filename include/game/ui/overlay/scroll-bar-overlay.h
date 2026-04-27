@@ -43,7 +43,7 @@ public:
     /**
      * @brief Dessine les barres, coins et coordonnees.
      */
-    void draw(const SDL_FRect& screenRect, const Map& map);
+    void draw(const SDL_FRect& screenRect, const Map& map, bool drawBackground = true);
 
     /**
      * @brief Teste si un clic tombe dans une barre (pour bloquer la propagation).
@@ -56,6 +56,11 @@ public:
      * (clic maintenu actif sur une barre/coin).
      */
     bool isInteracting(void) const;
+
+    /**
+     * @brief Annule l'interaction courante avec une barre de scroll.
+     */
+    void clearInteraction(void);
 
     /**
      * @brief Donne les cordonnées par rapport à la Tile X/Y (ex: "00-AA") pour une position de tuile donnée (ex: tileX=0, tileY=0). 

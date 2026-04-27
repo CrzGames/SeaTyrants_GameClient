@@ -10,6 +10,7 @@
 #include <cmath>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 static constexpr float kRefW = 860.0f;
 static constexpr float kRefH = 700.0f;
@@ -47,6 +48,13 @@ static constexpr float kControlsTrackHeight = 8.0f;
 static constexpr float kControlsThumbWidth = 14.0f;
 static constexpr float kControlsThumbHeight = 22.0f;
 static constexpr float kControlsWheelStep = 52.0f;
+static constexpr float kGraphicsSectionGeneralHeight = 112.0f;
+static constexpr float kGraphicsSectionWindowHeight = 236.0f;
+static constexpr float kGraphicsSectionInterfaceHeight = 112.0f;
+static constexpr float kGraphicsOptionRowHeight = 34.0f;
+static constexpr float kGraphicsCheckboxSize = 24.0f;
+static constexpr float kGraphicsSelectWidth = 340.0f;
+static constexpr float kGraphicsSelectHeight = 34.0f;
 static constexpr float kCameraScrollSpeedMinSectors = 2.0f;
 static constexpr float kCameraScrollSpeedMaxSectors = 16.0f;
 static constexpr float kCameraScrollSpeedDefaultSectors = 8.0f;
@@ -115,6 +123,23 @@ struct GameSettingsLayout {
     SDL_FRect controlsConflictPrompt;
     SDL_FRect controlsConflictConfirmButton;
     SDL_FRect controlsConflictCancelButton;
+
+    SDL_FRect graphicsPanel;
+    SDL_FRect graphicsGeneralPanel;
+    SDL_FRect graphicsVsyncRow;
+    SDL_FRect graphicsVsyncCheckbox;
+    SDL_FRect graphicsWindowPanel;
+    SDL_FRect graphicsWindowModeRow;
+    SDL_FRect graphicsWindowModeButton;
+    SDL_FRect graphicsWindowModeDropdown;
+    std::array<SDL_FRect, 2> graphicsWindowModeOptions;
+    SDL_FRect graphicsMonitorFpsRow;
+    SDL_FRect graphicsMonitorFpsBox;
+    SDL_FRect graphicsCursorLockRow;
+    SDL_FRect graphicsCursorLockCheckbox;
+    SDL_FRect graphicsInterfacePanel;
+    SDL_FRect graphicsHideCoordinateBackgroundRow;
+    SDL_FRect graphicsHideCoordinateBackgroundCheckbox;
 };
 
 struct GameSettingsLanguageCatalogEntry {
@@ -234,6 +259,71 @@ static const char* getControlActionDisplayName(GameSettingsWidget::ControlAction
     }
 
     return "cette action";
+}
+
+static const char* getGraphicsWindowModeLabel(GameSettingsWidget::GraphicsWindowMode mode)
+{
+    switch (mode)
+    {
+        case GameSettingsWidget::GraphicsWindowMode::FULLSCREEN:
+            return "FullScreen";
+        case GameSettingsWidget::GraphicsWindowMode::MAXIMIZED_WINDOW:
+        default:
+            return "Maximized Window";
+    }
+}
+
+static double getDisplayModeRefreshRate(const SDL_DisplayMode* mode)
+{
+    if (mode == nullptr)
+    {
+        return 0.0;
+    }
+    if (mode->refresh_rate_numerator > 0 && mode->refresh_rate_denominator > 0)
+    {
+        return static_cast<double>(mode->refresh_rate_numerator) /
+               static_cast<double>(mode->refresh_rate_denominator);
+    }
+    return (mode->refresh_rate > 0.0f) ? static_cast<double>(mode->refresh_rate) : 0.0;
+}
+
+static std::string formatRefreshRate(double refreshRate)
+{
+    if (refreshRate <= 0.0)
+    {
+        return "Indisponible";
+    }
+
+    char buffer[32] = {};
+    const double rounded = std::round(refreshRate);
+    if (std::fabs(refreshRate - rounded) < 0.05)
+    {
+        SDL_snprintf(buffer, sizeof(buffer), "%.0f FPS", rounded);
+    }
+    else
+    {
+        SDL_snprintf(buffer, sizeof(buffer), "%.1f FPS", refreshRate);
+    }
+    return std::string(buffer);
+}
+
+static std::string getCurrentMonitorRefreshRateLabel(void)
+{
+    SDL_Window* window = rc2d_window_getWindow();
+    if (window == nullptr)
+    {
+        return "Indisponible";
+    }
+
+    const SDL_DisplayID displayID = SDL_GetDisplayForWindow(window);
+    if (displayID == 0)
+    {
+        return "Indisponible";
+    }
+
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(displayID);
+    const double refreshRate = getDisplayModeRefreshRate(mode);
+    return formatRefreshRate(refreshRate);
 }
 
 static SDL_FRect getWidgetRectFromGameScreen(void)
@@ -700,6 +790,18 @@ static void drawImageFit(const RC2D_Image& image, const SDL_FRect& target, float
         false);
 }
 
+static void drawCheckBox(const SDL_FRect& boxRect, bool checked, const RC2D_Image& checkedIcon)
+{
+    rc2d_graphics_setColor(kFieldFill);
+    rc2d_graphics_rectangle("fill", &boxRect);
+    rc2d_graphics_setColor(kGold);
+    rc2d_graphics_rectangle("line", &boxRect);
+    if (checked)
+    {
+        drawImageFit(checkedIcon, boxRect, 2.0f);
+    }
+}
+
 static SDL_Rect toClipRect(const SDL_FRect& rect)
 {
     return SDL_Rect{
@@ -960,6 +1062,101 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
         layout.controlsPanel.h - kControlsFooterHeight - (kControlsViewportPadding * 2.0f)
     };
 
+    layout.graphicsPanel = layout.placeholderPanel;
+    layout.graphicsGeneralPanel = SDL_FRect{
+        layout.graphicsPanel.x,
+        layout.graphicsPanel.y,
+        layout.graphicsPanel.w,
+        kGraphicsSectionGeneralHeight
+    };
+    layout.graphicsVsyncRow = SDL_FRect{
+        layout.graphicsGeneralPanel.x + 16.0f,
+        layout.graphicsGeneralPanel.y + 52.0f,
+        layout.graphicsGeneralPanel.w - 32.0f,
+        42.0f
+    };
+    layout.graphicsVsyncCheckbox = SDL_FRect{
+        layout.graphicsVsyncRow.x + 300.0f,
+        layout.graphicsVsyncRow.y + ((layout.graphicsVsyncRow.h - kGraphicsCheckboxSize) * 0.5f),
+        kGraphicsCheckboxSize,
+        kGraphicsCheckboxSize
+    };
+    layout.graphicsWindowPanel = SDL_FRect{
+        layout.graphicsPanel.x,
+        layout.graphicsGeneralPanel.y + layout.graphicsGeneralPanel.h + kSectionGap,
+        layout.graphicsPanel.w,
+        kGraphicsSectionWindowHeight
+    };
+    layout.graphicsWindowModeRow = SDL_FRect{
+        layout.graphicsWindowPanel.x + 16.0f,
+        layout.graphicsWindowPanel.y + 60.0f,
+        layout.graphicsWindowPanel.w - 32.0f,
+        kGraphicsSelectHeight
+    };
+    layout.graphicsWindowModeButton = SDL_FRect{
+        layout.graphicsWindowModeRow.x + layout.graphicsWindowModeRow.w - kGraphicsSelectWidth,
+        layout.graphicsWindowModeRow.y,
+        kGraphicsSelectWidth,
+        kGraphicsSelectHeight
+    };
+    layout.graphicsWindowModeDropdown = SDL_FRect{
+        layout.graphicsWindowModeButton.x,
+        layout.graphicsWindowModeButton.y + layout.graphicsWindowModeButton.h + 4.0f,
+        layout.graphicsWindowModeButton.w,
+        8.0f + (2.0f * kGraphicsOptionRowHeight)
+    };
+    for (std::size_t index = 0; index < layout.graphicsWindowModeOptions.size(); ++index)
+    {
+        layout.graphicsWindowModeOptions[index] = SDL_FRect{
+            layout.graphicsWindowModeDropdown.x + 4.0f,
+            layout.graphicsWindowModeDropdown.y + 4.0f + (static_cast<float>(index) * kGraphicsOptionRowHeight),
+            layout.graphicsWindowModeDropdown.w - 8.0f,
+            kGraphicsOptionRowHeight
+        };
+    }
+    layout.graphicsMonitorFpsRow = SDL_FRect{
+        layout.graphicsWindowPanel.x + 16.0f,
+        layout.graphicsWindowModeRow.y + layout.graphicsWindowModeRow.h + 18.0f,
+        layout.graphicsWindowPanel.w - 32.0f,
+        kGraphicsSelectHeight
+    };
+    layout.graphicsMonitorFpsBox = SDL_FRect{
+        layout.graphicsMonitorFpsRow.x + layout.graphicsMonitorFpsRow.w - kGraphicsSelectWidth,
+        layout.graphicsMonitorFpsRow.y,
+        kGraphicsSelectWidth,
+        layout.graphicsMonitorFpsRow.h
+    };
+    layout.graphicsCursorLockRow = SDL_FRect{
+        layout.graphicsWindowPanel.x + 16.0f,
+        layout.graphicsMonitorFpsRow.y + layout.graphicsMonitorFpsRow.h + 12.0f,
+        layout.graphicsWindowPanel.w - 32.0f,
+        42.0f
+    };
+    layout.graphicsCursorLockCheckbox = SDL_FRect{
+        layout.graphicsCursorLockRow.x + 300.0f,
+        layout.graphicsCursorLockRow.y + ((layout.graphicsCursorLockRow.h - kGraphicsCheckboxSize) * 0.5f),
+        kGraphicsCheckboxSize,
+        kGraphicsCheckboxSize
+    };
+    layout.graphicsInterfacePanel = SDL_FRect{
+        layout.graphicsPanel.x,
+        layout.graphicsWindowPanel.y + layout.graphicsWindowPanel.h + kSectionGap,
+        layout.graphicsPanel.w,
+        kGraphicsSectionInterfaceHeight
+    };
+    layout.graphicsHideCoordinateBackgroundRow = SDL_FRect{
+        layout.graphicsInterfacePanel.x + 16.0f,
+        layout.graphicsInterfacePanel.y + 52.0f,
+        layout.graphicsInterfacePanel.w - 32.0f,
+        42.0f
+    };
+    layout.graphicsHideCoordinateBackgroundCheckbox = SDL_FRect{
+        layout.graphicsHideCoordinateBackgroundRow.x + 300.0f,
+        layout.graphicsHideCoordinateBackgroundRow.y + ((layout.graphicsHideCoordinateBackgroundRow.h - kGraphicsCheckboxSize) * 0.5f),
+        kGraphicsCheckboxSize,
+        kGraphicsCheckboxSize
+    };
+
     return layout;
 }
 
@@ -973,6 +1170,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       resourcesLoaded(false),
       controlIcons{},
       arrowDownIcon{},
+      checkboxValidIcon{},
       activeTab(SettingsTab::GENERAL),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
@@ -1011,6 +1209,8 @@ GameSettingsWidget::GameSettingsWidget(void)
       pendingConflictAction(ControlAction::CAMERA_MOVE_UP),
       conflictingControlAction(ControlAction::CAMERA_MOVE_UP),
       pendingConflictScancode(SDL_SCANCODE_UNKNOWN),
+      graphicsWindowModeDropdownOpen(false),
+      graphicsHideCoordinateBackground(false),
       onRedeemCodeRequested{},
       onStartUiConfiguratorRequested{},
       onLanguageChanged{},
@@ -1032,6 +1232,7 @@ void GameSettingsWidget::load(void)
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     this->smallFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 13.0f);
     this->arrowDownIcon = LoadStorageImage("assets/images/ui-scene-game/icon-arrowdown.png", RC2D_STORAGE_TITLE);
+    this->checkboxValidIcon = LoadStorageImage("assets/images/ui-scene-game/icon-checkboxvalid.png", RC2D_STORAGE_TITLE);
     this->controlIcons.load();
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
@@ -1063,6 +1264,8 @@ void GameSettingsWidget::load(void)
     this->pendingConflictAction = ControlAction::CAMERA_MOVE_UP;
     this->conflictingControlAction = ControlAction::CAMERA_MOVE_UP;
     this->pendingConflictScancode = SDL_SCANCODE_UNKNOWN;
+    this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsHideCoordinateBackground = false;
     this->cameraScrollSpeedSectors = snapCameraScrollSpeed(this->cameraScrollSpeedSectors);
     this->hudVisibilityValues.fill(true);
     this->resourcesLoaded = true;
@@ -1079,7 +1282,9 @@ void GameSettingsWidget::unload(void)
     this->cameraScrollSpeedDragging = false;
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
+    this->graphicsWindowModeDropdownOpen = false;
     this->controlIcons.unload();
+    ResetStorageImageRef(&this->checkboxValidIcon);
     ResetStorageImageRef(&this->arrowDownIcon);
     ResetStorageFontRef(&this->smallFont);
     ResetStorageFontRef(&this->bodyFont);
@@ -1613,6 +1818,74 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             return true;
         }
     }
+    else if (this->activeTab == SettingsTab::GRAPHICS)
+    {
+        this->redeemInputFocused = false;
+        this->redeemInputSelectingWithMouse = false;
+        this->clearRedeemSelection();
+        this->languageDropdownOpen = false;
+        this->languageScrollDragging = false;
+        this->hudScaleDragging = false;
+        this->controlsScrollDragging = false;
+        this->cameraScrollSpeedDragging = false;
+        this->controlCaptureActive = false;
+        this->controlConflictPending = false;
+
+        if (this->graphicsWindowModeDropdownOpen)
+        {
+            for (std::size_t index = 0; index < layout.graphicsWindowModeOptions.size(); ++index)
+            {
+                if (!isPointInRect(x, y, layout.graphicsWindowModeOptions[index]))
+                {
+                    continue;
+                }
+
+                this->applyGraphicsWindowMode(
+                    index == 0U
+                        ? GraphicsWindowMode::MAXIMIZED_WINDOW
+                        : GraphicsWindowMode::FULLSCREEN);
+                this->graphicsWindowModeDropdownOpen = false;
+                return true;
+            }
+
+            if (isPointInRect(x, y, layout.graphicsWindowModeDropdown))
+            {
+                return true;
+            }
+
+            if (!isPointInRect(x, y, layout.graphicsWindowModeButton))
+            {
+                this->graphicsWindowModeDropdownOpen = false;
+            }
+        }
+
+        if (isPointInRect(x, y, layout.graphicsVsyncRow))
+        {
+            rc2d_window_setVSync(!rc2d_window_getVSync());
+            this->graphicsWindowModeDropdownOpen = false;
+            return true;
+        }
+
+        if (isPointInRect(x, y, layout.graphicsCursorLockRow))
+        {
+            rc2d_window_setMouseGrabbed(!rc2d_window_isMouseGrabbed());
+            this->graphicsWindowModeDropdownOpen = false;
+            return true;
+        }
+
+        if (isPointInRect(x, y, layout.graphicsHideCoordinateBackgroundRow))
+        {
+            this->graphicsHideCoordinateBackground = !this->graphicsHideCoordinateBackground;
+            this->graphicsWindowModeDropdownOpen = false;
+            return true;
+        }
+
+        if (isPointInRect(x, y, layout.graphicsWindowModeButton))
+        {
+            this->graphicsWindowModeDropdownOpen = !this->graphicsWindowModeDropdownOpen;
+            return true;
+        }
+    }
 
     if (isPointInRect(x, y, layout.headerDragRect))
     {
@@ -1621,6 +1894,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->hudScaleDragging = false;
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
+        this->graphicsWindowModeDropdownOpen = false;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
         this->redeemInputFocused = false;
@@ -1888,11 +2162,6 @@ void GameSettingsWidget::draw(void) const
     rc2d_graphics_rectangle("fill", &layout.topBar);
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &layout.topBar);
-    rc2d_graphics_line(
-        layout.topBar.x + 1.0f,
-        layout.topBar.y + layout.topBar.h + 2.0f,
-        layout.topBar.x + layout.topBar.w - 1.0f,
-        layout.topBar.y + layout.topBar.h + 2.0f);
 
     const std::array<const char*, 4> tabLabels = {"General", "Controles", "Graphiques", "Sons"};
     for (int tabIndex = 0; tabIndex < static_cast<int>(layout.tabs.size()); ++tabIndex)
@@ -2436,6 +2705,159 @@ void GameSettingsWidget::draw(void) const
         rc2d_graphics_rectangle("line", &layout.controlsResetAllButton);
         drawCentered(&self->smallFont, "Réinitialiser tout", layout.controlsResetAllButton, kTextGold);
     }
+    else if (self->activeTab == SettingsTab::GRAPHICS)
+    {
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsPanel);
+
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsGeneralPanel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsGeneralPanel);
+        drawTextAt(
+            &self->titleFont,
+            "Général",
+            layout.graphicsGeneralPanel.x + 16.0f,
+            layout.graphicsGeneralPanel.y + 14.0f,
+            kTextGold);
+
+        drawTextAt(
+            &self->bodyFont,
+            "Synchronisation Verticale",
+            layout.graphicsVsyncRow.x,
+            layout.graphicsVsyncRow.y + 3.0f,
+            kTextBody);
+        drawTextAt(
+            &self->bodyFont,
+            "(VSync)",
+            layout.graphicsVsyncRow.x,
+            layout.graphicsVsyncRow.y + 22.0f,
+            kTextBody);
+        drawCheckBox(layout.graphicsVsyncCheckbox, rc2d_window_getVSync(), self->checkboxValidIcon);
+
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsWindowPanel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsWindowPanel);
+        drawTextAt(
+            &self->titleFont,
+            "Fenêtre",
+            layout.graphicsWindowPanel.x + 16.0f,
+            layout.graphicsWindowPanel.y + 14.0f,
+            kTextGold);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "Mode fenêtre",
+            layout.graphicsWindowModeRow,
+            layout.graphicsWindowModeRow.x,
+            kTextBody);
+
+        const bool windowModeHovered = isPointInRect(mouseX, mouseY, layout.graphicsWindowModeButton);
+        rc2d_graphics_setColor(windowModeHovered ? kButtonFillHover : kFieldFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsWindowModeButton);
+        rc2d_graphics_setColor(windowModeHovered ? kSliderThumbBorder : kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsWindowModeButton);
+        drawLeftCenteredY(
+            &self->bodyFont,
+            getGraphicsWindowModeLabel(self->getGraphicsWindowMode()),
+            layout.graphicsWindowModeButton,
+            layout.graphicsWindowModeButton.x + 10.0f,
+            kTextGold);
+
+        const SDL_FRect arrowRect = SDL_FRect{
+            layout.graphicsWindowModeButton.x + layout.graphicsWindowModeButton.w - 22.0f,
+            layout.graphicsWindowModeButton.y + ((layout.graphicsWindowModeButton.h - 14.0f) * 0.5f),
+            14.0f,
+            14.0f
+        };
+        drawImageFit(self->arrowDownIcon, arrowRect, 0.0f);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "FPS moniteur",
+            layout.graphicsMonitorFpsRow,
+            layout.graphicsMonitorFpsRow.x,
+            kTextBody);
+
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsMonitorFpsBox);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsMonitorFpsBox);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            getCurrentMonitorRefreshRateLabel(),
+            layout.graphicsMonitorFpsBox,
+            layout.graphicsMonitorFpsBox.x + 10.0f,
+            kTextGold);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "Verrouiller le curseur dans la fenêtre",
+            layout.graphicsCursorLockRow,
+            layout.graphicsCursorLockRow.x,
+            kTextBody);
+        drawCheckBox(
+            layout.graphicsCursorLockCheckbox,
+            rc2d_window_isMouseGrabbed(),
+            self->checkboxValidIcon);
+
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsInterfacePanel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsInterfacePanel);
+        drawTextAt(
+            &self->titleFont,
+            "Interface utilisateur",
+            layout.graphicsInterfacePanel.x + 16.0f,
+            layout.graphicsInterfacePanel.y + 14.0f,
+            kTextGold);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "Masquer l'arrière-plan des coordonnées",
+            layout.graphicsHideCoordinateBackgroundRow,
+            layout.graphicsHideCoordinateBackgroundRow.x,
+            kTextBody);
+        drawCheckBox(
+            layout.graphicsHideCoordinateBackgroundCheckbox,
+            self->graphicsHideCoordinateBackground,
+            self->checkboxValidIcon);
+
+        if (self->graphicsWindowModeDropdownOpen)
+        {
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &layout.graphicsWindowModeDropdown);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &layout.graphicsWindowModeDropdown);
+
+            const GraphicsWindowMode currentMode = self->getGraphicsWindowMode();
+            for (std::size_t index = 0; index < layout.graphicsWindowModeOptions.size(); ++index)
+            {
+                const GraphicsWindowMode mode =
+                    index == 0U
+                        ? GraphicsWindowMode::MAXIMIZED_WINDOW
+                        : GraphicsWindowMode::FULLSCREEN;
+                const bool selected = mode == currentMode;
+                const bool hovered = isPointInRect(mouseX, mouseY, layout.graphicsWindowModeOptions[index]);
+                if (selected || hovered)
+                {
+                    rc2d_graphics_setColor(selected ? kTabActive : kSelectionFill);
+                    rc2d_graphics_rectangle("fill", &layout.graphicsWindowModeOptions[index]);
+                }
+
+                rc2d_graphics_setColor(kRowLine);
+                rc2d_graphics_rectangle("line", &layout.graphicsWindowModeOptions[index]);
+                drawLeftCenteredY(
+                    &self->bodyFont,
+                    getGraphicsWindowModeLabel(mode),
+                    layout.graphicsWindowModeOptions[index],
+                    layout.graphicsWindowModeOptions[index].x + 10.0f,
+                    selected ? kTextGold : kTextBody);
+            }
+        }
+    }
     else
     {
         rc2d_graphics_setColor(kPanelFill);
@@ -2443,16 +2865,8 @@ void GameSettingsWidget::draw(void) const
         rc2d_graphics_setColor(kGold);
         rc2d_graphics_rectangle("line", &layout.placeholderPanel);
 
-        const char* title =
-            (self->activeTab == SettingsTab::CONTROLS) ? "Controles" :
-            (self->activeTab == SettingsTab::GRAPHICS) ? "Graphiques" :
-            "Sons";
-        const char* description =
-            (self->activeTab == SettingsTab::CONTROLS)
-                ? "Le contenu de l'onglet controles sera ajoute prochainement."
-                : (self->activeTab == SettingsTab::GRAPHICS)
-                    ? "Le contenu de l'onglet graphiques sera ajoute prochainement."
-                    : "Le contenu de l'onglet sons sera ajoute prochainement.";
+        const char* title = "Sons";
+        const char* description = "Le contenu de l'onglet sons sera ajoute prochainement.";
 
         drawTextAt(&self->titleFont, title, layout.placeholderPanel.x + 20.0f, layout.placeholderPanel.y + 22.0f, kTextGold);
         drawWrappedText(
@@ -2675,6 +3089,27 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
             }
         }
     }
+    else if (this->activeTab == SettingsTab::GRAPHICS)
+    {
+        if (this->graphicsWindowModeDropdownOpen)
+        {
+            for (const SDL_FRect& optionRect : layout.graphicsWindowModeOptions)
+            {
+                if (isPointInRect(x, y, optionRect))
+                {
+                    return HudCursorType::POINTER;
+                }
+            }
+        }
+
+        if (isPointInRect(x, y, layout.graphicsVsyncRow) ||
+            isPointInRect(x, y, layout.graphicsCursorLockRow) ||
+            isPointInRect(x, y, layout.graphicsHideCoordinateBackgroundRow) ||
+            isPointInRect(x, y, layout.graphicsWindowModeButton))
+        {
+            return HudCursorType::POINTER;
+        }
+    }
 
     if (isPointInRect(x, y, layout.headerDragRect))
     {
@@ -2697,6 +3132,7 @@ void GameSettingsWidget::clearFocus(void)
     this->cameraScrollSpeedDragging = false;
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
+    this->graphicsWindowModeDropdownOpen = false;
     this->hoveredLanguageIndex = -1;
 }
 
@@ -2711,6 +3147,7 @@ void GameSettingsWidget::show(void)
     this->cameraScrollSpeedDragging = false;
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
+    this->graphicsWindowModeDropdownOpen = false;
     this->syncSelectedLanguageFromContext();
     this->scrollLanguageToSelection();
     this->clampControlsScroll();
@@ -2725,6 +3162,7 @@ void GameSettingsWidget::hide(void)
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     this->controlCaptureActive = false;
+    this->graphicsWindowModeDropdownOpen = false;
     this->clearFocus();
 }
 
@@ -2820,6 +3258,11 @@ float GameSettingsWidget::getCameraScrollSpeedSectors(void) const
 void GameSettingsWidget::setCameraScrollSpeedSectors(float speedSectors)
 {
     this->cameraScrollSpeedSectors = snapCameraScrollSpeed(speedSectors);
+}
+
+bool GameSettingsWidget::getHideCoordinateBackground(void) const
+{
+    return this->graphicsHideCoordinateBackground;
 }
 
 void GameSettingsWidget::rebuildLanguageOptions(void)
@@ -3237,4 +3680,27 @@ void GameSettingsWidget::updateDraggedCameraScrollSpeedFromMouse(float mouseX)
 
         entryY += entryHeight + kControlsRowGap;
     }
+}
+
+GameSettingsWidget::GraphicsWindowMode GameSettingsWidget::getGraphicsWindowMode(void) const
+{
+    const RC2D_FullscreenInfo fullscreenInfo = rc2d_window_getFullscreen();
+    if (fullscreenInfo.is_fullscreen)
+    {
+        return GraphicsWindowMode::FULLSCREEN;
+    }
+
+    return GraphicsWindowMode::MAXIMIZED_WINDOW;
+}
+
+void GameSettingsWidget::applyGraphicsWindowMode(GraphicsWindowMode mode)
+{
+    if (mode == GraphicsWindowMode::FULLSCREEN)
+    {
+        rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
+        return;
+    }
+
+    rc2d_window_setFullscreen(false, RC2D_FULLSCREEN_NONE, true);
+    rc2d_window_maximize();
 }

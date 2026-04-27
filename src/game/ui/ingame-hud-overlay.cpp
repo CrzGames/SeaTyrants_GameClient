@@ -1493,12 +1493,19 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
     }
 
     applyHudCursor(desiredCursor);
-    this->scrollBarOverlay.update(
-        dt,
-        camera,
-        map,
-        map.rect,
-        this->gameSettingsWidget.getCameraScrollSpeedSectors());
+    if (this->gameSettingsWidget.getHideCoordinateBackground())
+    {
+        this->scrollBarOverlay.clearInteraction();
+    }
+    else
+    {
+        this->scrollBarOverlay.update(
+            dt,
+            camera,
+            map,
+            map.rect,
+            this->gameSettingsWidget.getCameraScrollSpeedSectors());
+    }
 }
 
 void IngameHudOverlay::drawBackgroundWidget(void)
@@ -1651,7 +1658,10 @@ void IngameHudOverlay::drawTileClickMarkerOverlay(const Map& map)
 
 void IngameHudOverlay::drawScrollBarOverlay(const Map& map)
 {
-    this->scrollBarOverlay.draw(map.rect, map);
+    this->scrollBarOverlay.draw(
+        map.rect,
+        map,
+        !this->gameSettingsWidget.getHideCoordinateBackground());
 }
 
 bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
@@ -1914,6 +1924,10 @@ bool IngameHudOverlay::handleMapOverlayMousePressed(float x, float y, RC2D_Mouse
     }
 
     if (button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return false;
+    }
+    if (this->gameSettingsWidget.getHideCoordinateBackground())
     {
         return false;
     }

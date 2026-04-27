@@ -77,6 +77,14 @@ public:
     };
 
     /**
+     * @brief Modes de fenetre proposes dans l'onglet graphiques.
+     */
+    enum class GraphicsWindowMode : int {
+        MAXIMIZED_WINDOW = 0, /**< Fenetre maximisee. */
+        FULLSCREEN = 1        /**< Plein ecran exclusif. */
+    };
+
+    /**
      * @brief Signature de callback pour le changement de taille d'un widget HUD.
      */
     using HudScaleChangedCallback = std::function<void(HudScaleTarget, float)>;
@@ -293,6 +301,11 @@ public:
      */
     void setCameraScrollSpeedSectors(float speedSectors);
 
+    /**
+     * @brief Retourne true si le fond des coordonnees de map doit etre masque.
+     */
+    bool getHideCoordinateBackground(void) const;
+
 private:
     /**
      * @brief Sous-onglets internes de la fenetre.
@@ -322,6 +335,7 @@ private:
     bool resourcesLoaded;     /**< True une fois les ressources chargees. */
     WindowControlIcons controlIcons; /**< Helper des icones de controle. */
     RC2D_Image arrowDownIcon;        /**< Icone de fleche pour la liste deroulante. */
+    RC2D_Image checkboxValidIcon;    /**< Icone affichee dans une case cochee. */
 
     SettingsTab activeTab;    /**< Sous-onglet actuellement affiche. */
 
@@ -364,6 +378,8 @@ private:
     ControlAction pendingConflictAction;         /**< Action cible de la confirmation de conflit. */
     ControlAction conflictingControlAction;      /**< Action deja associee a la touche demandee. */
     SDL_Scancode pendingConflictScancode;        /**< Touche demandee pendant la confirmation de conflit. */
+    bool graphicsWindowModeDropdownOpen;         /**< True si le selecteur de mode fenetre est ouvert. */
+    bool graphicsHideCoordinateBackground;       /**< True si les barres de fond des coordonnees sont masquees. */
 
     RedeemCodeCallback onRedeemCodeRequested;    /**< Callback appelee lors du clic sur "Activer". */
     VoidCallback onStartUiConfiguratorRequested; /**< Callback appelee lors du clic sur le configurateur UI. */
@@ -521,4 +537,14 @@ private:
      * @brief Met a jour le slider de vitesse camera depuis le drag souris.
      */
     void updateDraggedCameraScrollSpeedFromMouse(float mouseX);
+
+    /**
+     * @brief Retourne le mode fenetre actuellement applique via RC2D.
+     */
+    GraphicsWindowMode getGraphicsWindowMode(void) const;
+
+    /**
+     * @brief Applique un mode fenetre via RC2D.
+     */
+    void applyGraphicsWindowMode(GraphicsWindowMode mode);
 };
