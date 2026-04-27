@@ -481,6 +481,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       logBookWidget{},
       marketsAndBazarWidget{},
       accountManagementWidget{},
+      captchaWidget{},
       tooltipFont{},
       hudWidgetVisibility{},
       hudConfiguratorMode(false),
@@ -507,7 +508,8 @@ IngameHudOverlay::IngameHudOverlay(void)
           WindowLayer::ANNOUNCEMENTS,
           WindowLayer::LOG_BOOK,
           WindowLayer::MARKETS_AND_BAZAR,
-          WindowLayer::ACCOUNT_MANAGEMENT},
+          WindowLayer::ACCOUNT_MANAGEMENT,
+          WindowLayer::CAPTCHA},
       hoveredMinimapTooltip(MinimapTooltip::NONE),
       hoveredMinimapTooltipMouseX(0.0f),
       hoveredMinimapTooltipMouseY(0.0f),
@@ -520,6 +522,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       prevLogBookVisible(false),
       prevMarketsAndBazarVisible(false),
       prevAccountManagementVisible(false),
+      prevCaptchaVisible(false),
       keepDefaultCursorAfterClose(false),
       keepDefaultCursorMouseX(0.0f),
       keepDefaultCursorMouseY(0.0f)
@@ -565,6 +568,8 @@ bool IngameHudOverlay::isWindowLayerVisible(WindowLayer layer) const
             return this->marketsAndBazarWidget.isVisible();
         case WindowLayer::ACCOUNT_MANAGEMENT:
             return this->accountManagementWidget.isVisible();
+        case WindowLayer::CAPTCHA:
+            return this->captchaWidget.isVisible();
         default:
             return false;
     }
@@ -1156,6 +1161,8 @@ HudCursorType IngameHudOverlay::getWindowLayerDesiredCursor(WindowLayer layer, f
             return this->marketsAndBazarWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::ACCOUNT_MANAGEMENT:
             return this->accountManagementWidget.getDesiredCursor(mouseX, mouseY);
+        case WindowLayer::CAPTCHA:
+            return this->captchaWidget.getDesiredCursor(mouseX, mouseY);
         default:
             return HudCursorType::NONE;
     }
@@ -1198,6 +1205,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     const bool logBookVisible = this->logBookWidget.isVisible();
     const bool marketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     const bool accountManagementVisible = this->accountManagementWidget.isVisible();
+    const bool captchaVisible = this->captchaWidget.isVisible();
 
     if (chatVisible && !this->prevChatVisible)
     {
@@ -1235,6 +1243,10 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     {
         this->bringWindowToFront(WindowLayer::ACCOUNT_MANAGEMENT);
     }
+    if (captchaVisible && !this->prevCaptchaVisible)
+    {
+        this->bringWindowToFront(WindowLayer::CAPTCHA);
+    }
 
     this->prevChatVisible = chatVisible;
     this->prevEspionVisible = espionVisible;
@@ -1245,6 +1257,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     this->prevLogBookVisible = logBookVisible;
     this->prevMarketsAndBazarVisible = marketsAndBazarVisible;
     this->prevAccountManagementVisible = accountManagementVisible;
+    this->prevCaptchaVisible = captchaVisible;
 }
 
 void IngameHudOverlay::saveUserSettingsToDisk(void)
@@ -1656,7 +1669,8 @@ void IngameHudOverlay::load(void)
         WindowLayer::ANNOUNCEMENTS,
         WindowLayer::LOG_BOOK,
         WindowLayer::MARKETS_AND_BAZAR,
-        WindowLayer::ACCOUNT_MANAGEMENT};
+        WindowLayer::ACCOUNT_MANAGEMENT,
+        WindowLayer::CAPTCHA};
 
     this->backgroundWidget.load();
     this->topBarMenuWidget.load();
@@ -1681,6 +1695,8 @@ void IngameHudOverlay::load(void)
     this->logBookWidget.load();
     this->marketsAndBazarWidget.load();
     this->accountManagementWidget.load();
+    this->captchaWidget.load();
+    this->captchaWidget.show();
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::MINIMAP, this->minimapWidget.getUiScale());
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR, this->experienceBarWidget.getUiScale());
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::HP_BAR, this->hpBarWidget.getUiScale());
@@ -1774,6 +1790,7 @@ void IngameHudOverlay::load(void)
     this->prevLogBookVisible = this->logBookWidget.isVisible();
     this->prevMarketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     this->prevAccountManagementVisible = this->accountManagementWidget.isVisible();
+    this->prevCaptchaVisible = this->captchaWidget.isVisible();
     this->hoveredMinimapTooltip = MinimapTooltip::NONE;
     this->hoveredMinimapTooltipMouseX = 0.0f;
     this->hoveredMinimapTooltipMouseY = 0.0f;
@@ -1787,6 +1804,7 @@ void IngameHudOverlay::load(void)
 void IngameHudOverlay::unload(void)
 {
     ResetStorageFontRef(&this->tooltipFont);
+    this->captchaWidget.unload();
     this->accountManagementWidget.unload();
     this->marketsAndBazarWidget.unload();
     this->logBookWidget.unload();
@@ -1855,6 +1873,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
                 break;
             case WindowLayer::ACCOUNT_MANAGEMENT:
                 this->accountManagementWidget.update(dt);
+                break;
+            case WindowLayer::CAPTCHA:
+                this->captchaWidget.update(dt);
                 break;
         }
     }
@@ -2071,6 +2092,9 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
             case WindowLayer::ACCOUNT_MANAGEMENT:
                 this->accountManagementWidget.draw();
                 break;
+            case WindowLayer::CAPTCHA:
+                this->captchaWidget.draw();
+                break;
         }
     }
 
@@ -2181,6 +2205,9 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             case WindowLayer::ACCOUNT_MANAGEMENT:
                 consumed = this->accountManagementWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
+            case WindowLayer::CAPTCHA:
+                consumed = this->captchaWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
         }
 
         if (!consumed)
@@ -2205,6 +2232,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
         }
         else if (layer == WindowLayer::ESPION)
         {
@@ -2212,6 +2240,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
         }
         else if (layer == WindowLayer::MARKETS_AND_BAZAR)
         {
@@ -2219,6 +2248,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->espionSearchPlayerWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
         }
         else if (layer == WindowLayer::ACCOUNT_MANAGEMENT)
         {
@@ -2226,6 +2256,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
         }
         else if (layer == WindowLayer::GAME_SETTINGS)
         {
@@ -2233,6 +2264,15 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
+            this->captchaWidget.clearFocus();
+        }
+        else if (layer == WindowLayer::CAPTCHA)
+        {
+            this->chatWidget.clearFocus();
+            this->espionSearchPlayerWidget.clearFocus();
+            this->marketsAndBazarWidget.clearFocus();
+            this->accountManagementWidget.clearFocus();
+            this->gameSettingsWidget.clearFocus();
         }
         else
         {
@@ -2241,6 +2281,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
         }
         return true;
     }
@@ -2254,6 +2295,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
         this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
         return true;
     }
 
@@ -2274,6 +2316,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
         this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
         return true;
     }
 
@@ -2294,6 +2337,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
         this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
         return true;
     }
 
@@ -2305,6 +2349,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
         this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
         return true;
     }
 
@@ -2315,6 +2360,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
         this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
     }
     return false;
 }
@@ -2465,6 +2511,12 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
                     return true;
                 }
                 break;
+            case WindowLayer::CAPTCHA:
+                if (this->captchaWidget.keypressed(key, scancode, keycode, mod, isrepeat))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::CHAT:
                 if (this->chatWidget.keypressed(key, scancode, keycode, mod, isrepeat))
                 {
@@ -2474,6 +2526,35 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
             default:
                 break;
         }
+    }
+    return false;
+}
+
+bool IngameHudOverlay::isBlockingGameplayKeyboardInput(void) const
+{
+    if (this->chatWidget.hasBlockingTextInputFocus())
+    {
+        return true;
+    }
+    if (this->espionSearchPlayerWidget.hasBlockingTextInputFocus())
+    {
+        return true;
+    }
+    if (this->marketsAndBazarWidget.hasBlockingOfferInputFocus())
+    {
+        return true;
+    }
+    if (this->accountManagementWidget.hasBlockingProfileNameInputFocus())
+    {
+        return true;
+    }
+    if (this->gameSettingsWidget.hasBlockingRedeemInputFocus())
+    {
+        return true;
+    }
+    if (this->captchaWidget.hasBlockingTextInputFocus())
+    {
+        return true;
     }
     return false;
 }
@@ -2586,6 +2667,11 @@ void IngameHudOverlay::publishAnnouncementRow(const std::string& rowText)
 void IngameHudOverlay::publishEspionSearchResult(const std::string& resultText)
 {
     this->espionSearchPlayerWidget.publishSearchResult(resultText);
+}
+
+void IngameHudOverlay::publishCaptchaChallenge(const std::string& challengeFromServer)
+{
+    this->captchaWidget.publishCaptchaChallenge(challengeFromServer);
 }
 
 void IngameHudOverlay::publishLogbookRow(const LogBookWidget::LogBookRow& row)

@@ -174,6 +174,11 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief True si le champ de code d'activation a le focus clavier.
+     */
+    bool hasBlockingRedeemInputFocus(void) const { return this->visible && this->redeemInputFocused; }
+
+    /**
      * @brief Autorise/interdit le pilotage du curseur par ce widget.
      * @param enabled True pour autoriser les demandes de curseur.
      */

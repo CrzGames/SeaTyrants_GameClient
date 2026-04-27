@@ -215,6 +215,7 @@ void GameScene::load(void)
 
     // Charge les ressources HUD (interface utilisateur).
     GetIngameHudOverlay().load();
+    GetIngameHudOverlay().publishCaptchaChallenge("A7K9"); // texte serveur
     this->syncHudStatusWidgets(player);
     this->populateMoneyDemoData();
     this->populateAccountManagementDemoData();
@@ -262,20 +263,23 @@ void GameScene::update(double dt)
     // Met a jour tout le HUD (widgets + overlays monde).
     GetIngameHudOverlay().update(dt, camera, map);
 
-    // Deplacement camera continu avec les touches configurees dans l'onglet Controles.
-    if (GameplayCameraController::updateKeyboardScroll(
-            dt,
-            camera,
-            map,
-            map.rect,
-            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_UP),
-            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_DOWN),
-            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_LEFT),
-            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT),
-            GetIngameHudOverlay().getGameSettingsWidget().getCameraScrollSpeedSectors()))
+    // Deplacement camera continu : ignore tant qu'un champ texte HUD a le focus (ZQSD, fleches, etc.).
+    if (!GetIngameHudOverlay().isBlockingGameplayKeyboardInput())
     {
-        // L'utilisateur prend le controle manuel de la camera.
-        this->shipAutoFollowEnabled = false;
+        if (GameplayCameraController::updateKeyboardScroll(
+                dt,
+                camera,
+                map,
+                map.rect,
+                GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_UP),
+                GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_DOWN),
+                GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_LEFT),
+                GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT),
+                GetIngameHudOverlay().getGameSettingsWidget().getCameraScrollSpeedSectors()))
+        {
+            // L'utilisateur prend le controle manuel de la camera.
+            this->shipAutoFollowEnabled = false;
+        }
     }
 
     // Tant qu'aucun controle camera manuel n'est utilise,
@@ -361,6 +365,12 @@ void GameScene::keypressed(
 
     // Priorite au chat HUD: si la touche est consommee par l'UI, on stop ici.
     if (GetIngameHudOverlay().keypressed(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
+
+    // Champ texte HUD actif : ne pas declencher recentrage camera / raccourcis lies aux touches.
+    if (GetIngameHudOverlay().isBlockingGameplayKeyboardInput())
     {
         return;
     }

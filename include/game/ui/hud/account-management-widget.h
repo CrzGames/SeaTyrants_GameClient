@@ -393,6 +393,11 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief True si le champ de nom de profil a le focus clavier.
+     */
+    bool hasBlockingProfileNameInputFocus(void) const { return this->visible && this->profileInputFocused; }
+
+    /**
      * @brief Active ou desactive la prise de possession du curseur pour la frame courante.
      * @param enabled True pour laisser le widget demander un curseur, false sinon.
      */

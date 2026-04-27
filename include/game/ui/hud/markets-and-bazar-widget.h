@@ -154,6 +154,11 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief True si un champ d'offre / quantite a le focus clavier.
+     */
+    bool hasBlockingOfferInputFocus(void) const { return this->visible && this->inputFocused; }
+
+    /**
      * @brief Active/desactive la gestion du curseur par le widget.
      */
     void setCursorEnabled(bool enabled) { this->cursorEnabled = enabled; }

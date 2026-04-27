@@ -106,6 +106,11 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief True si la barre de saisie a le focus (le gameplay ne doit pas traiter les memes touches).
+     */
+    bool hasBlockingTextInputFocus(void) const { return this->visible && this->inputFocused; }
+
+    /**
      * @brief Autorise/interdit le pilotage du curseur par ce widget.
      * @param enabled True pour autoriser ce widget a definir le curseur ce frame.
      */

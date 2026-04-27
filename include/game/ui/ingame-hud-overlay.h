@@ -13,6 +13,7 @@
 #include "game/ui/hud/announcements-widget.h"
 #include "game/ui/hud/background-widget.h"
 #include "game/ui/hud/barre-action-widget.h"
+#include "game/ui/hud/captcha-widget.h"
 #include "game/ui/hud/center-ship-button-widget.h"
 #include "game/ui/hud/chat-widget.h"
 #include "game/ui/hud/espion-search-player-widget.h"
@@ -119,6 +120,11 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
+     * @brief True si un champ texte du HUD a le focus : pas de defilement camera ni raccourcis @ref GameScene.
+     */
+    bool isBlockingGameplayKeyboardInput(void) const;
+
+    /**
      * @brief Publie une ligne d'annonce dans la fenetre "Announcements".
      */
     void publishAnnouncementRow(const std::string& rowText);
@@ -127,6 +133,17 @@ public:
      * @brief Publie un resultat de recherche dans la fenetre "Espion".
      */
     void publishEspionSearchResult(const std::string& resultText);
+
+    /**
+     * @brief Publie le defi captcha recu du serveur dans la fenetre dediee.
+     * @param challengeFromServer Texte brut ; seuls les caracteres alphanumeriques sont affiches.
+     */
+    void publishCaptchaChallenge(const std::string& challengeFromServer);
+
+    /**
+     * @brief Acces au widget captcha (callbacks @ref CaptchaWidget::setOnValidateRequested, etc.).
+     */
+    CaptchaWidget& getCaptchaWidget(void) { return this->captchaWidget; }
 
     /**
      * @brief Publie une ligne dans la fenetre "Journal de bord".
@@ -206,7 +223,8 @@ private:
         ANNOUNCEMENTS = 5,      /**< Fenetre annonces serveur. */
         LOG_BOOK = 6,           /**< Fenetre journal de bord. */
         MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
-        ACCOUNT_MANAGEMENT = 8  /**< Fenetre compte/apparence/navires. */
+        ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
+        CAPTCHA = 9             /**< Verification captcha (reseau). */
     };
 
     /**
@@ -252,6 +270,7 @@ private:
     LogBookWidget logBookWidget;                           /**< Fenetre "Journal de bord". */
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
+    CaptchaWidget captchaWidget;                           /**< Fenetre de verification captcha serveur. */
     RC2D_Font tooltipFont;                                 /**< Police partagee des tooltips HUD locaux. */
     std::array<bool, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudWidgetVisibility; /**< Etats visibles des widgets HUD pilotables. */
     bool hudConfiguratorMode;                              /**< True si le mode de configuration des positions HUD est actif. */
@@ -299,6 +318,7 @@ private:
     bool prevLogBookVisible;            /**< Etat visible precedent de la fenetre journal de bord. */
     bool prevMarketsAndBazarVisible;    /**< Etat visible precedent de la fenetre marches + bazar. */
     bool prevAccountManagementVisible;  /**< Etat visible precedent de la fenetre compte/apparence/navires. */
+    bool prevCaptchaVisible;            /**< Etat visible precedent de la fenetre captcha. */
 
     /**
      * @brief Deplace une couche de fenetre en fin de pile de rendu.

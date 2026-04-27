@@ -56,6 +56,11 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief True si le champ ID joueur a le focus clavier.
+     */
+    bool hasBlockingTextInputFocus(void) const { return this->visible && this->inputFocused; }
+
+    /**
      * @brief Autorise/interdit le pilotage du curseur par ce widget.
      */
     void setCursorEnabled(bool enabled) { this->cursorEnabled = enabled; }
