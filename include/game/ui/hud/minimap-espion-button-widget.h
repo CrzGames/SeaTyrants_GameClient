@@ -40,12 +40,12 @@ public:
      */
     bool mousepressed(float x, float y, RC2D_MouseButton button, const MinimapWidget& minimapWidget) const;
 
-private:
     /**
      * @brief Calcule le rectangle courant de l'icone par rapport a la minimap.
      */
     SDL_FRect getCurrentRect(const MinimapWidget& minimapWidget) const;
 
+private:
     RC2D_Image iconImage;         /**< Texture GPU de l'icone espion. */
     RC2D_ImageData iconImageData; /**< Surface CPU de l'icone espion. */
 };

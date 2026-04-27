@@ -13,9 +13,28 @@ static constexpr float kZoomTooltipOffsetX = 14.0f;
 static constexpr float kZoomTooltipOffsetY = 18.0f;
 static constexpr float kZoomTooltipPaddingX = 10.0f;
 static constexpr float kZoomTooltipPaddingY = 6.0f;
+static constexpr float kHudWidgetScaleMin = 0.75f;
+static constexpr float kHudWidgetScaleMax = 1.0f;
 static constexpr RC2D_Color kZoomTooltipFill = RC2D_Color{67, 8, 8, 236};
 static constexpr RC2D_Color kZoomTooltipBorder = RC2D_Color{184, 132, 30, 250};
 static constexpr RC2D_Color kZoomTooltipText = RC2D_Color{217, 200, 134, 255};
+
+static float clampHudWidgetScale(float scale)
+{
+    return std::clamp(scale, kHudWidgetScaleMin, kHudWidgetScaleMax);
+}
+
+static SDL_FRect scaleRectFromCenter(const SDL_FRect& rect, float scale)
+{
+    const float clampedScale = clampHudWidgetScale(scale);
+    const float scaledWidth = rect.w * clampedScale;
+    const float scaledHeight = rect.h * clampedScale;
+    return SDL_FRect{
+        rect.x + ((rect.w - scaledWidth) * 0.5f),
+        rect.y + ((rect.h - scaledHeight) * 0.5f),
+        scaledWidth,
+        scaledHeight};
+}
 
 static void getMouseRenderPosition(float* outX, float* outY)
 {
@@ -48,18 +67,48 @@ static void getMouseRenderPosition(float* outX, float* outY)
     *outY = renderY;
 }
 
-static bool loadUiImage(
-    RC2D_UIImage* uiImage,
+static bool loadImageResources(
+    RC2D_Image* image,
+    RC2D_ImageData* imageData,
     const char* path)
 {
-    if (uiImage == nullptr)
+    if (image == nullptr || imageData == nullptr)
     {
         return false;
     }
 
-    uiImage->image = LoadStorageImage(path, RC2D_STORAGE_TITLE);
-    uiImage->imageData = LoadStorageImageData(path, RC2D_STORAGE_TITLE);
-    return (uiImage->image.sdl_texture != nullptr && uiImage->imageData.sdl_surface != nullptr);
+    *image = LoadStorageImage(path, RC2D_STORAGE_TITLE);
+    *imageData = LoadStorageImageData(path, RC2D_STORAGE_TITLE);
+    return (image->sdl_texture != nullptr && imageData->sdl_surface != nullptr);
+}
+
+static void drawImageToRect(RC2D_Image* image, const SDL_FRect& drawRect)
+{
+    if (image == nullptr || image->sdl_texture == nullptr || drawRect.w <= 0.0f || drawRect.h <= 0.0f)
+    {
+        return;
+    }
+
+    float textureWidth = 0.0f;
+    float textureHeight = 0.0f;
+    if (!SDL_GetTextureSize(image->sdl_texture, &textureWidth, &textureHeight) ||
+        textureWidth <= 0.0f ||
+        textureHeight <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_drawImage(
+        image,
+        drawRect.x,
+        drawRect.y,
+        0.0,
+        drawRect.w / textureWidth,
+        drawRect.h / textureHeight,
+        0.0f,
+        0.0f,
+        false,
+        false);
 }
 
 static float measureTextWidth(RC2D_Font* font, const char* text)
@@ -109,8 +158,10 @@ static void drawTextAt(RC2D_Font* font, const char* text, float x, float y, RC2D
 }
 
 ZoomWidget::ZoomWidget(void)
-    : zoomBarUi{},
-      zoomSliderUi{},
+    : zoomBarImage{},
+      zoomBarImageData{},
+      zoomSliderImage{},
+      zoomSliderImageData{},
       tooltipFont{},
       sliderDragging(false),
       sliderHovered(false),
@@ -123,7 +174,9 @@ ZoomWidget::ZoomWidget(void)
       zoomBarWidthPx(0.0f),
       zoomBarHeightPx(0.0f),
       zoomSliderWidthPx(0.0f),
-      zoomSliderHeightPx(0.0f)
+      zoomSliderHeightPx(0.0f),
+      uiScale(1.0f),
+      positionOffset{0.0f, 0.0f}
 {
 }
 
@@ -133,54 +186,43 @@ ZoomWidget::~ZoomWidget(void)
 
 void ZoomWidget::load(void)
 {
-    if (!loadUiImage(
-            &this->zoomBarUi,
+    if (!loadImageResources(
+            &this->zoomBarImage,
+            &this->zoomBarImageData,
             "assets/images/ui-scene-game/zoom-bar.png"))
     {
         RC2D_log(RC2D_LOG_WARN, "ZoomWidget: echec chargement zoom-bar.png");
     }
 
-    if (!loadUiImage(
-            &this->zoomSliderUi,
+    if (!loadImageResources(
+            &this->zoomSliderImage,
+            &this->zoomSliderImageData,
             "assets/images/ui-scene-game/zoom-slider.png"))
     {
         RC2D_log(RC2D_LOG_WARN, "ZoomWidget: echec chargement zoom-slider.png");
     }
 
-    this->zoomBarUi.anchor = RC2D_UI_ANCHOR_BOTTOM_LEFT;
-    this->zoomBarUi.margin_mode = RC2D_UI_MARGIN_PIXELS;
-    this->zoomBarUi.margin_x = kZoomWidgetScreenMarginPx;
-    this->zoomBarUi.margin_y = kZoomWidgetScreenMarginPx;
-    this->zoomBarUi.visible = true;
-    this->zoomBarUi.hittable = true;
-
-    this->zoomSliderUi.anchor = RC2D_UI_ANCHOR_BOTTOM_LEFT;
-    this->zoomSliderUi.margin_mode = RC2D_UI_MARGIN_PIXELS;
-    this->zoomSliderUi.margin_x = kZoomWidgetScreenMarginPx;
-    this->zoomSliderUi.margin_y = kZoomWidgetScreenMarginPx;
-    this->zoomSliderUi.visible = true;
-    this->zoomSliderUi.hittable = true;
     this->tooltipFont = OpenStorageFont(
         "assets/fonts/SegoeUI-Semibold.ttf",
         RC2D_STORAGE_TITLE,
         13.0f);
 
     this->zoomBarWidthPx =
-        (this->zoomBarUi.imageData.sdl_surface != nullptr)
-            ? static_cast<float>(this->zoomBarUi.imageData.sdl_surface->w)
+        (this->zoomBarImageData.sdl_surface != nullptr)
+            ? static_cast<float>(this->zoomBarImageData.sdl_surface->w)
             : 0.0f;
     this->zoomBarHeightPx =
-        (this->zoomBarUi.imageData.sdl_surface != nullptr)
-            ? static_cast<float>(this->zoomBarUi.imageData.sdl_surface->h)
+        (this->zoomBarImageData.sdl_surface != nullptr)
+            ? static_cast<float>(this->zoomBarImageData.sdl_surface->h)
             : 0.0f;
 
     this->zoomSliderWidthPx =
-        (this->zoomSliderUi.imageData.sdl_surface != nullptr)
-            ? static_cast<float>(this->zoomSliderUi.imageData.sdl_surface->w)
+        (this->zoomSliderImageData.sdl_surface != nullptr)
+            ? static_cast<float>(this->zoomSliderImageData.sdl_surface->w)
             : 0.0f;
     this->zoomSliderHeightPx =
-        (this->zoomSliderUi.imageData.sdl_surface != nullptr)
-            ? static_cast<float>(this->zoomSliderUi.imageData.sdl_surface->h)
+        (this->zoomSliderImageData.sdl_surface != nullptr)
+            ? static_cast<float>(this->zoomSliderImageData.sdl_surface->h)
             : 0.0f;
 
     // Position initiale: slider tout a droite (zoom max camera).
@@ -197,10 +239,10 @@ void ZoomWidget::load(void)
 void ZoomWidget::unload(void)
 {
     ResetStorageFontRef(&this->tooltipFont);
-    ResetStorageImageDataRef(&this->zoomSliderUi.imageData);
-    ResetStorageImageRef(&this->zoomSliderUi.image);
-    ResetStorageImageDataRef(&this->zoomBarUi.imageData);
-    ResetStorageImageRef(&this->zoomBarUi.image);
+    ResetStorageImageDataRef(&this->zoomSliderImageData);
+    ResetStorageImageRef(&this->zoomSliderImage);
+    ResetStorageImageDataRef(&this->zoomBarImageData);
+    ResetStorageImageRef(&this->zoomBarImage);
 }
 
 int ZoomWidget::getZoomStepsCount(void)
@@ -218,15 +260,8 @@ int ZoomWidget::getZoomStepsCount(void)
 
 void ZoomWidget::refreshTravelWidthFromDrawnRects(void)
 {
-    if (this->zoomBarUi.last_drawn_rect.w > 0.0f && this->zoomSliderUi.last_drawn_rect.w > 0.0f)
-    {
-        this->sliderTravelWidth =
-            (std::max)(this->zoomBarUi.last_drawn_rect.w - this->zoomSliderUi.last_drawn_rect.w, 0.0f);
-    }
-    else
-    {
-        this->sliderTravelWidth = (std::max)(this->zoomBarWidthPx - this->zoomSliderWidthPx, 0.0f);
-    }
+    this->sliderTravelWidth =
+        (std::max)((this->zoomBarWidthPx * this->uiScale) - (this->zoomSliderWidthPx * this->uiScale), 0.0f);
 }
 
 void ZoomWidget::setSliderOffsetFromRawValue(float rawOffset)
@@ -309,7 +344,7 @@ void ZoomWidget::update(Camera& camera)
     getMouseRenderPosition(&mouseX, &mouseY);
     this->hoveredMouseX = mouseX;
     this->hoveredMouseY = mouseY;
-    this->sliderHovered = this->isSliderHovered(mouseX, mouseY);
+    this->sliderHovered = ZoomWidget::pointInRect(mouseX, mouseY, this->computeSliderRect());
 
     // Pas de drag actif: le slider suit les autres changements de zoom (clavier, code, etc.).
     if (!this->sliderDragging)
@@ -332,8 +367,8 @@ void ZoomWidget::update(Camera& camera)
     this->refreshTravelWidthFromDrawnRects();
 
     // Position slider en coords locales de barre, puis snap sur les crans de zoom.
-    const float rawOffset =
-        (mouseX - this->zoomBarUi.last_drawn_rect.x) - this->sliderDragGrabOffsetX;
+    const SDL_FRect barRect = this->computeBarRect();
+    const float rawOffset = (mouseX - barRect.x) - this->sliderDragGrabOffsetX;
     this->setSliderOffsetFromRawValue(rawOffset);
     this->applySliderToCameraZoom(camera);
     this->displayedZoomFactor = camera.getZoomFactor();
@@ -341,24 +376,19 @@ void ZoomWidget::update(Camera& camera)
 
 void ZoomWidget::draw(void)
 {
-    if (this->zoomBarUi.image.sdl_texture == nullptr || this->zoomSliderUi.image.sdl_texture == nullptr)
+    if (this->zoomBarImage.sdl_texture == nullptr || this->zoomSliderImage.sdl_texture == nullptr)
     {
         return;
     }
 
-    // Barre: 5 px du bas/gauche.
-    this->zoomBarUi.margin_x = kZoomWidgetScreenMarginPx;
-    this->zoomBarUi.margin_y = kZoomWidgetScreenMarginPx;
-    rc2d_ui_drawImage(&this->zoomBarUi);
-
-    // Slider: sur la barre (centre vertical), avec offset horizontal pilote par le zoom.
     this->refreshTravelWidthFromDrawnRects();
     this->sliderOffsetX = std::clamp(this->sliderOffsetX, 0.0f, this->sliderTravelWidth);
+    drawImageToRect(&this->zoomBarImage, this->computeBarRect());
+    drawImageToRect(&this->zoomSliderImage, this->computeSliderRect());
+}
 
-    this->zoomSliderUi.margin_x = this->zoomBarUi.margin_x + this->sliderOffsetX;
-    const float centeredYOffset = (this->zoomBarUi.last_drawn_rect.h - this->zoomSliderUi.last_drawn_rect.h) * 0.5f;
-    this->zoomSliderUi.margin_y = this->zoomBarUi.margin_y + centeredYOffset;
-    rc2d_ui_drawImage(&this->zoomSliderUi);
+void ZoomWidget::drawTooltip(void) const
+{
     this->drawHoveredTooltip();
 }
 
@@ -369,15 +399,16 @@ bool ZoomWidget::mousepressed(float x, float y, RC2D_MouseButton button)
         return false;
     }
 
-    if (!ZoomWidget::pointInRect(x, y, this->zoomSliderUi.last_drawn_rect))
+    const SDL_FRect sliderRect = this->computeSliderRect();
+    if (!ZoomWidget::pointInRect(x, y, sliderRect))
     {
         return false;
     }
 
     this->sliderDragging = true;
-    this->sliderDragGrabOffsetX = x - this->zoomSliderUi.last_drawn_rect.x;
+    this->sliderDragGrabOffsetX = x - sliderRect.x;
     this->sliderDragGrabOffsetX =
-        std::clamp(this->sliderDragGrabOffsetX, 0.0f, this->zoomSliderUi.last_drawn_rect.w);
+        std::clamp(this->sliderDragGrabOffsetX, 0.0f, sliderRect.w);
     return true;
 }
 
@@ -388,7 +419,59 @@ bool ZoomWidget::isDraggingSlider(void) const
 
 bool ZoomWidget::isSliderHovered(float x, float y) const
 {
-    return ZoomWidget::pointInRect(x, y, this->zoomSliderUi.last_drawn_rect);
+    return ZoomWidget::pointInRect(x, y, this->computeSliderRect());
+}
+
+SDL_FRect ZoomWidget::getBarRect(void) const
+{
+    return this->computeBarRect();
+}
+
+SDL_FRect ZoomWidget::getCurrentRect(void) const
+{
+    const SDL_FRect barRect = this->computeBarRect();
+    const SDL_FRect sliderRect = this->computeSliderRect();
+    if (barRect.w <= 0.0f || barRect.h <= 0.0f)
+    {
+        return sliderRect;
+    }
+    if (sliderRect.w <= 0.0f || sliderRect.h <= 0.0f)
+    {
+        return barRect;
+    }
+
+    const float left = (std::min)(barRect.x, sliderRect.x);
+    const float top = (std::min)(barRect.y, sliderRect.y);
+    const float right = (std::max)(barRect.x + barRect.w, sliderRect.x + sliderRect.w);
+    const float bottom = (std::max)(barRect.y + barRect.h, sliderRect.y + sliderRect.h);
+    return SDL_FRect{
+        left,
+        top,
+        right - left,
+        bottom - top
+    };
+}
+
+void ZoomWidget::setUiScale(float scale)
+{
+    this->uiScale = clampHudWidgetScale(scale);
+    this->refreshTravelWidthFromDrawnRects();
+    this->sliderOffsetX = std::clamp(this->sliderOffsetX, 0.0f, this->sliderTravelWidth);
+}
+
+void ZoomWidget::setPositionOffset(float offsetX, float offsetY)
+{
+    this->positionOffset = SDL_FPoint{offsetX, offsetY};
+}
+
+SDL_FPoint ZoomWidget::getPositionOffset(void) const
+{
+    return this->positionOffset;
+}
+
+void ZoomWidget::resetPositionOffset(void)
+{
+    this->positionOffset = SDL_FPoint{0.0f, 0.0f};
 }
 
 bool ZoomWidget::pointInRect(float x, float y, const SDL_FRect& rect)
@@ -405,6 +488,51 @@ bool ZoomWidget::pointInRect(float x, float y, const SDL_FRect& rect)
         y <= (rect.y + rect.h));
 }
 
+SDL_FRect ZoomWidget::computeBarRect(void) const
+{
+    return scaleRectFromCenter(this->computeBaseBarRect(), this->uiScale);
+}
+
+SDL_FRect ZoomWidget::computeBaseBarRect(void) const
+{
+    if (this->zoomBarWidthPx <= 0.0f || this->zoomBarHeightPx <= 0.0f)
+    {
+        return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    const SDL_FRect safeRect = rc2d_engine_getVisibleSafeRectRender();
+    return SDL_FRect{
+        safeRect.x + kZoomWidgetScreenMarginPx + this->positionOffset.x,
+        safeRect.y + safeRect.h - kZoomWidgetScreenMarginPx - this->zoomBarHeightPx + this->positionOffset.y,
+        this->zoomBarWidthPx,
+        this->zoomBarHeightPx
+    };
+}
+
+SDL_FRect ZoomWidget::computeSliderRect(void) const
+{
+    if (this->zoomSliderWidthPx <= 0.0f || this->zoomSliderHeightPx <= 0.0f)
+    {
+        return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    const SDL_FRect barRect = this->computeBarRect();
+    if (barRect.w <= 0.0f || barRect.h <= 0.0f)
+    {
+        return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    const float width = this->zoomSliderWidthPx * this->uiScale;
+    const float height = this->zoomSliderHeightPx * this->uiScale;
+    const float clampedOffset = std::clamp(this->sliderOffsetX, 0.0f, (std::max)(barRect.w - width, 0.0f));
+    return SDL_FRect{
+        barRect.x + clampedOffset,
+        barRect.y + ((barRect.h - height) * 0.5f),
+        width,
+        height
+    };
+}
+
 void ZoomWidget::drawHoveredTooltip(void) const
 {
     if (!this->sliderHovered || this->tooltipFont.sdl_font == nullptr)
@@ -416,7 +544,7 @@ void ZoomWidget::drawHoveredTooltip(void) const
     SDL_snprintf(
         label,
         sizeof(label),
-        "Zoom: %.0f%%",
+        "Zoom Map : %.0f%%",
         std::round(this->displayedZoomFactor * 100.0f));
 
     const SDL_FRect gameScreenRect = GetGameScreen().rect;

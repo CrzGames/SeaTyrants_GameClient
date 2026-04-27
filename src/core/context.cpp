@@ -1,5 +1,7 @@
 #include "core/context.h"
 
+#include "game/ui/ingame-hud-overlay.h"
+
 static GameState g_gameState;
 static GameScreen g_gameScreen;
 static Camera g_camera;
@@ -16,6 +18,7 @@ static FogOfWarShader g_fogOfWarShader;
 static VisionCloudShader g_visionCloudShader;
 static TitleAssetCache g_titleAssetCache;
 static ClientLanguageState g_clientLanguageState;
+static IngameHudOverlay g_ingameHudOverlay;
 
 GameState& GetGameState()
 {
@@ -95,4 +98,9 @@ TitleAssetCache& GetTitleAssetCache()
 ClientLanguageState& GetClientLanguageState()
 {
     return g_clientLanguageState;
+}
+
+IngameHudOverlay& GetIngameHudOverlay()
+{
+    return g_ingameHudOverlay;
 }

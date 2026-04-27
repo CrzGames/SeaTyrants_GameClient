@@ -7,8 +7,9 @@
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
-#include "game/ui/ingame-hud-overlay.h"
 #include "game/vfx/vfx.h"
+
+class Player;
 
 /**
  * @brief Scene principale gameplay.
@@ -17,10 +18,13 @@ class GameScene : public Scene {
 private:
     void initializePlayerSpawnAndCamera(void);
     void populateMarketDemoData(void);
+    void populateMoneyDemoData(void);
+    void populateAccountManagementDemoData(void);
+    void syncHudStatusWidgets(const Player& player);
 
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
-    IngameHudOverlay hudOverlay;       /**< UI gameplay (fond + minimap + bouton centre). */
     std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */
+    int playerExperiencePointsCurrent; /**< Points d'experience courants pilotes par la scene gameplay. */
     //std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
     //VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
 
@@ -29,6 +33,16 @@ public:
      * @brief Constructeur de la scene gameplay.
      */
     GameScene(void);
+
+    /**
+     * @brief Definit les points d'experience affiches par le HUD gameplay.
+     *
+     * Cette valeur est memorisee par la scene puis republiee vers les widgets
+     * HUD lors des synchronisations de frame.
+     *
+     * @param points Points d'experience courants a afficher.
+     */
+    void setExperiencePointsCurrent(int points);
 
     /**
      * @brief Decharge les ressources de la scene.

@@ -4,16 +4,153 @@
 #include "game/controllers/gameplay-camera-controller.h"
 #include "game/render/world-render-clip.h"
 #include "game/shaders/gameplay-shader-controller.h"
+#include "game/ui/ingame-hud-overlay.h"
 
+#include <algorithm>
 #include <vector>
 
 GameScene::GameScene(void)
     : shipAutoFollowEnabled(true),
-      hudOverlay{},
-      playerShipFolderPath("assets/images/ships/ship-elite27")
+      playerShipFolderPath{},
+      playerExperiencePointsCurrent(0)
       //playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
       //shipVfx{}
 {
+}
+
+void GameScene::setExperiencePointsCurrent(int points)
+{
+    this->playerExperiencePointsCurrent = (std::max)(0, points);
+}
+
+void GameScene::populateMoneyDemoData(void)
+{
+    GetIngameHudOverlay().getMoneyWidget().setCurrencyEntries(
+        std::vector<MoneyWidget::CurrencyEntry>{
+            {MoneyWidget::CurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000},
+            {MoneyWidget::CurrencyType::RUBIES, "assets/images/ui-scene-game/money-rubies.png", 3500}
+        });
+}
+
+void GameScene::populateAccountManagementDemoData(void)
+{
+    using ShipEntry = AccountManagementWidget::ShipEntry;
+    using OptionEntry = AccountManagementWidget::OptionEntry;
+    using EliteProgressData = AccountManagementWidget::EliteProgressData;
+
+    // Exemple de flux d'alimentation:
+    // 1. le gameplay choisit le dossier du navire reel a charger en scene,
+    // 2. il injecte ensuite les images d'apercu et les listes dans le widget.
+    this->playerShipFolderPath = "assets/images/ships/bateau elite 4";
+
+    GetIngameHudOverlay().getAccountManagementWidget().setPlayerIdentifier("1985");
+    GetIngameHudOverlay().getAccountManagementWidget().setPirateSince("01.02.2024");
+    GetIngameHudOverlay().getAccountManagementWidget().setPlayerLevel(10);
+    GetIngameHudOverlay().getAccountManagementWidget().setExperiencePointsCurrent(this->playerExperiencePointsCurrent);
+    GetIngameHudOverlay().getAccountManagementWidget().setEliteProgressData(
+        EliteProgressData{
+            4250000,
+            5000000,
+            true
+        });
+    GetIngameHudOverlay().getAccountManagementWidget().setCombatPointsCurrent(1460);
+    GetIngameHudOverlay().getAccountManagementWidget().setPremiumSince("06.04.2026");
+    GetIngameHudOverlay().getAccountManagementWidget().setProfileName(".Crows");
+
+    GetIngameHudOverlay().getAccountManagementWidget().setEliteAcquiredShips(
+        std::vector<ShipEntry>{
+            {"Elite 1", "assets/images/ships/bateau elite 1"},
+            {"Elite 2", "assets/images/ships/bateau elite 2"},
+            {"Elite 3", "assets/images/ships/bateau elite 3"},
+            {"Elite 4", "assets/images/ships/bateau elite 4"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setSpecialAcquiredShips(
+        std::vector<ShipEntry>{
+            {"Boreas", "assets/images/ships/Boreas (1)"},
+            {"Fly dutchman", "assets/images/ships/Fly dutchman (1)"},
+            {"Morgan Boucanier", "assets/images/ships/Morgan Boucanier (1)"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setShipBonusOptions(
+        std::vector<OptionEntry>{
+            {"Bateau elite 4", "assets/images/ships/bateau elite 4"},
+            {"Bateau elite 3", "assets/images/ships/bateau elite 3"},
+            {"Bateau elite 2", "assets/images/ships/bateau elite 2"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setShipStyleOptions(
+        std::vector<OptionEntry>{
+            {"Bateau elite 4", "assets/images/ships/bateau elite 4"},
+            {"Bateau elite 5", "assets/images/ships/bateau elite 5"},
+            {"Bateau elite 7", "assets/images/ships/bateau elite 7"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setRepairStyleOptions(
+        std::vector<OptionEntry>{
+            {"Reparation par defaut", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
+            {"Reparation emeraude", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
+            {"Reparation abyssale", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setSpeedStyleOptions(
+        std::vector<OptionEntry>{
+            {"Vitesse blanche", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/2.png"},
+            {"Vitesse tempete", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/10.png"},
+            {"Vitesse neon", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/30.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setProjectileImpactStyleOptions(
+        std::vector<OptionEntry>{
+            {"Impact standard", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
+            {"Impact royal", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
+            {"Impact titan", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setRocketStyleOptions(
+        std::vector<OptionEntry>{
+            {"Fusee comete", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
+            {"Fusee oracle", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
+            {"Fusee solaire", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setProjectileStyleOptions(
+        std::vector<OptionEntry>{
+            {"Boulet lourd", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
+            {"Boulet arc", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
+            {"Boulet obsidienne", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setMoveClickStyleOptions(
+        std::vector<OptionEntry>{
+            {"Clic tempete", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
+            {"Clic royal", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
+            {"Clic aurore", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setEmoteOptions(
+        std::vector<OptionEntry>{
+            {"Hello", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
+            {"Attack", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
+            {"Laugh", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
+            {"Lets go", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"},
+            {"Support", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
+            {"Bravo", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"}
+        });
+
+    GetIngameHudOverlay().getAccountManagementWidget().setStorageEquipmentOptions(
+        std::vector<OptionEntry>{
+            {"Cannons", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
+            {"Harponneuse", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
+            {"Voiles", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/6.png"}
+        });
+}
+
+void GameScene::syncHudStatusWidgets(const Player& player)
+{
+    GetIngameHudOverlay().getHpBarWidget().setMaxHp(player.getHpMax());
+    GetIngameHudOverlay().getHpBarWidget().setCurrentHp(player.getHpCurrent());
+    GetIngameHudOverlay().getExperienceBarWidget().setCurrentExperiencePoints(this->playerExperiencePointsCurrent);
 }
 
 void GameScene::initializePlayerSpawnAndCamera(void)
@@ -52,91 +189,6 @@ void GameScene::initializePlayerSpawnAndCamera(void)
     camera.update(map, map.rect);
 }
 
-void GameScene::populateMarketDemoData(void)
-{
-    using Category = MarketsAndBazarWidget::MarketCategory;
-
-    const std::vector<MarketsAndBazarWidget::BazarRow> bazarRows = {
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Eliteball", "Degats: 50", Category::MUNITION_DE_CANNON, 12, "PerFeck", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Elite Class 1", "Sante: 75.000", Category::NAVIRES, 1, "", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "San Salvador", "Sante: 50.000", Category::NAVIRES, 1, "", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "15Kg Cannon", "Dommages canon: 24", Category::CANNONS, 9, "Canakkale_1915", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Advanced Sail", "Bonus vitesse: 6%", Category::VOILES, 7, "Canakkale_1915", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Healball", "Reparation: 25", Category::CONSOMMABLES, 2500, "BeNiZz", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Gold Harpoon", "Degats: 250", Category::MUNITION_DE_HARPON, 15, "PerFeck", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Ruthless Pirate", "Navire legendaire", Category::NAVIRES, 1, "", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "King's Legacy", "Dommages harpon: +8%", Category::BOOSTER, 3, "Santiago", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Abyss Cannon", "Precision: +5%", Category::CANNONS, 2, "Asterion", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Frostburn Sail", "Vitesse: +4%", Category::VOILES, 4, "Nox", "0"},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Guardian Hull", "Resistance: +7%", Category::BOOSTER, 5, "", "0"}
-    };
-
-    const auto buildPriceLines = [](
-        int goldAmount,
-        int rubiesAmount,
-        int crystalAmount) -> std::vector<MarketsAndBazarWidget::MarketPriceData>
-    {
-        std::vector<MarketsAndBazarWidget::MarketPriceData> lines;
-        if (goldAmount > 0)
-        {
-            lines.push_back(MarketsAndBazarWidget::MarketPriceData{goldAmount, MarketsAndBazarWidget::MarketCurrency::GOLD});
-        }
-        if (rubiesAmount > 0)
-        {
-            lines.push_back(MarketsAndBazarWidget::MarketPriceData{rubiesAmount, MarketsAndBazarWidget::MarketCurrency::RUBIES});
-        }
-        if (crystalAmount > 0)
-        {
-            lines.push_back(MarketsAndBazarWidget::MarketPriceData{crystalAmount, MarketsAndBazarWidget::MarketCurrency::CRISTAUX});
-        }
-        return lines;
-    };
-
-    const std::vector<MarketsAndBazarWidget::MarketRow> blackRows = {
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Silver Harpoon", "Degats: 150", Category::MUNITION_DE_HARPON, 7155, "1", buildPriceLines(300, 125, 2)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Explosive Rocket", "Degats: 5.000", Category::MUNITION_DE_CANNON, 626, "1", buildPriceLines(50000, 10000, 4)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Deceleration Rocket", "Ralentissement: 50%", Category::ACTIVABLES, 592, "1", buildPriceLines(80000, 0, 6)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Co2 Cartridge", "+20% degats harpon", Category::BOOSTER, 78846, "1", buildPriceLines(7500, 1515, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Hollowball", "Degats: 8", Category::MUNITION_DE_CANNON, 588573, "1", buildPriceLines(1, 0, 1)},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Sailors Salvation", "Supprime effets negatifs", Category::CONSOMMABLES, 481, "1", buildPriceLines(65000, 13015, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Dragon Powder", "Dommages critiques +12%", Category::BOOSTER, 902, "1", buildPriceLines(9000, 3025, 8)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Titan Plate", "Coque renforcee", Category::BOOSTER, 1540, "1", buildPriceLines(14000, 2815, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Phoenix Ammo", "Degats feu: 17", Category::MUNITION_DE_CANNON, 3200, "1", buildPriceLines(5200, 0, 10)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Storm Rocket", "Impact etourdissement", Category::UTILISABLE_SUR_CIBLE, 410, "1", buildPriceLines(33000, 11025, 0)}
-    };
-
-    const std::vector<MarketsAndBazarWidget::MarketRow> basicRows = {
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Bois de coque", "Materiau de base de construction", Category::BOOSTER, 24000, "1", buildPriceLines(120, 35, 1)},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Toile de voile", "Renfort voilure", Category::VOILES, 18000, "1", buildPriceLines(145, 0, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Fer brut", "Ressource de forge", Category::BOOSTER, 12500, "1", buildPriceLines(260, 70, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Canon 12 livres", "Dommages canon: 12", Category::CANNONS, 3800, "1", buildPriceLines(2100, 0, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Boulet perce-coque", "Degats coque: +6%", Category::MUNITION_DE_CANNON, 5300, "1", buildPriceLines(780, 200, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Kit matelot", "Reduction cout equipage", Category::MATELOTS, 7200, "1", buildPriceLines(420, 0, 1)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Goudron naval", "Reparation progressive", Category::CONSOMMABLES, 4100, "1", buildPriceLines(930, 235, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Lentille de vigie", "Portee de vue +3%", Category::BOOSTER, 2100, "1", buildPriceLines(1350, 0, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Carte de route", "XP navigation +2%", Category::UTILISABLE_SUR_CIBLE, 6500, "1", buildPriceLines(350, 95, 0)},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Pioche d'abordage", "Force abordage +4%", Category::HARPONEUSE, 2700, "1", buildPriceLines(1600, 0, 0)}
-    };
-
-    const std::vector<MarketsAndBazarWidget::MarketRow> eventRows = {
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Flamme lunaire", "Degats evenement: +10%", Category::BOOSTER, 850, "1", buildPriceLines(9900, 4990, 3)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Cle de faille", "Ouvre un coffre special", Category::UTILISABLE_SUR_CIBLE, 540, "1", buildPriceLines(18000, 9040, 4)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Banniere tempete", "Chance butin +6%", Category::ACTIVABLES, 720, "1", buildPriceLines(14500, 7290, 5)},
-        {"assets/images/ammo/bazar-marche/ammo-rep-icon.png", "Poudre astrale", "Critique +9% en event", Category::BOOSTER, 430, "1", buildPriceLines(22000, 11040, 6)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Plaque abyssale", "Reduction degats boss", Category::CONSOMMABLES, 390, "1", buildPriceLines(25000, 12540, 3)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Harpon spectral", "Degats monstres marins +12%", Category::HARPONEUSE, 610, "1", buildPriceLines(16750, 8415, 4)},
-        {"assets/images/ammo/bazar-marche/ammo-creux-icon.png", "Sceau royal", "Bonus reputation event", Category::CONSOMMABLES, 980, "1", buildPriceLines(8300, 4190, 5)},
-        {"assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png", "Totem du capitaine", "Recharge competence -5%", Category::ACTIVABLES, 340, "1", buildPriceLines(27500, 13790, 6)},
-        {"assets/images/ammo/bazar-marche/ammo-illu-icon.png", "Carte eclipse", "Acces zone cachee", Category::UTILISABLE_SUR_CIBLE, 250, "1", buildPriceLines(31000, 15540, 3)},
-        {"assets/images/ammo/bazar-marche/ammo-explo-icon.png", "Voile comete", "Vitesse +7% pendant event", Category::VOILES, 460, "1", buildPriceLines(19800, 9940, 4)}
-    };
-
-    this->hudOverlay.setBazarRows(bazarRows);
-    this->hudOverlay.setBlackMarketRows(blackRows);
-    this->hudOverlay.setBasicMarketRows(basicRows);
-    this->hudOverlay.setEventMarketRows(eventRows);
-}
-
 void GameScene::unload(void)
 {
     // Recupere les references aux systemes et objets necessaires.
@@ -146,7 +198,7 @@ void GameScene::unload(void)
     GameplayShaderController::unloadAll();
     //this->shipVfx.unload();
     player.unload();
-    this->hudOverlay.unload();
+    GetIngameHudOverlay().unload();
 }
 
 void GameScene::load(void)
@@ -162,8 +214,10 @@ void GameScene::load(void)
     GameplayShaderController::loadAll();
 
     // Charge les ressources HUD (interface utilisateur).
-    this->hudOverlay.load();
-    this->populateMarketDemoData();
+    GetIngameHudOverlay().load();
+    this->syncHudStatusWidgets(player);
+    this->populateMoneyDemoData();
+    this->populateAccountManagementDemoData();
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.update();
@@ -199,11 +253,22 @@ void GameScene::update(double dt)
     // Met a jour les shaders de visibilite (nuages + fog).
     GameplayShaderController::updateVisibility(dt, player);
 
-    // Met a jour tout le HUD (widgets + overlays monde).
-    this->hudOverlay.update(dt, camera, map);
+    this->syncHudStatusWidgets(player);
 
-    // Deplacement camera continu aux fleches clavier.
-    if (GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect))
+    // Met a jour tout le HUD (widgets + overlays monde).
+    GetIngameHudOverlay().update(dt, camera, map);
+
+    // Deplacement camera continu avec les touches configurees dans l'onglet Controles.
+    if (GameplayCameraController::updateKeyboardScroll(
+            dt,
+            camera,
+            map,
+            map.rect,
+            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_UP),
+            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_DOWN),
+            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_LEFT),
+            GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT),
+            GetIngameHudOverlay().getGameSettingsWidget().getCameraScrollSpeedSectors()))
     {
         // L'utilisateur prend le controle manuel de la camera.
         this->shipAutoFollowEnabled = false;
@@ -230,7 +295,7 @@ void GameScene::draw(void)
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
 
     // Dessine le fond UI en premier (coordonnees logiques absolues).
-    this->hudOverlay.drawBackgroundWidget();
+    GetIngameHudOverlay().drawBackgroundWidget();
 
     // Clip strict du rendu gameplay dans la zone map.
     SDL_Renderer* renderer = WorldRenderClip::begin(map.rect);
@@ -248,7 +313,7 @@ void GameScene::draw(void)
     }
 
     // Dessine le marqueur de clic.
-    this->hudOverlay.drawTileClickMarkerOverlay(map);
+    GetIngameHudOverlay().drawTileClickMarkerOverlay(map);
 
     // Dessine les VFX derriere le ship.
     //this->shipVfx.draw(map, player.getShip(), true);
@@ -266,13 +331,13 @@ void GameScene::draw(void)
     }
 
     // Dessine les barres de scroll par-dessus tout.
-    this->hudOverlay.drawScrollBarOverlay(map);
+    GetIngameHudOverlay().drawScrollBarOverlay(map);
 
     // Fin du clip monde: l'overlay/UI peut dessiner librement.
     WorldRenderClip::end(renderer);
 
     // Dessine les elements d'interface.
-    this->hudOverlay.drawWidgets(map, player);
+    GetIngameHudOverlay().drawWidgets(map, player);
 }
 
 void GameScene::keypressed(
@@ -290,17 +355,23 @@ void GameScene::keypressed(
     bool cameraChanged = false;
 
     // Priorite au chat HUD: si la touche est consommee par l'UI, on stop ici.
-    if (this->hudOverlay.keypressed(key, scancode, keycode, mod, isrepeat))
+    if (GetIngameHudOverlay().keypressed(key, scancode, keycode, mod, isrepeat))
     {
         return;
     }
-    
-    // Espace recentre la camera sur le joueur et reactive le suivi auto.
-    if (scancode == SDL_SCANCODE_SPACE)
+
+    // La touche configuree recentre la camera sur le joueur et reactive le suivi auto.
+    if (scancode == GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CENTER_CAMERA_ON_SHIP))
     {
         GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
         this->shipAutoFollowEnabled = true;
         cameraChanged = true;
+    }
+
+    if (!isrepeat &&
+        scancode == GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::TOGGLE_MINIMAP))
+    {
+        GetIngameHudOverlay().toggleHudWidgetVisibility(GameSettingsWidget::HudScaleTarget::MINIMAP);
     }
 
     // Applique la camera si elle a ete modifiee.
@@ -317,13 +388,13 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     Player& player = GetGameState().player;
 
     // Priorite au chat HUD: clic consomme => pas de propagation gameplay.
-    if (this->hudOverlay.mousepressed(x, y, button, clicks, mouseID))
+    if (GetIngameHudOverlay().mousepressed(x, y, button, clicks, mouseID))
     {
         return;
     }
 
     // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
-    if (this->hudOverlay.handleMapOverlayMousePressed(x, y, button, GetCamera(), map))
+    if (GetIngameHudOverlay().handleMapOverlayMousePressed(x, y, button, GetCamera(), map))
     {
         this->shipAutoFollowEnabled = false;
         return;
@@ -355,7 +426,7 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         player.moveToTile(map, tile.x, tile.y);
 
         // Affiche le marqueur de clic sur la tuile cliquee.
-        this->hudOverlay.notifyMapTileClicked(tile.x, tile.y);
+        GetIngameHudOverlay().notifyMapTileClicked(tile.x, tile.y);
     }
 }
 
@@ -370,11 +441,8 @@ void GameScene::mousewheelmoved(
     SDL_MouseID mouseID)
 {
     // Priorite au chat HUD pour la molette (souris + trackpad).
-    if (this->hudOverlay.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
+    if (GetIngameHudOverlay().mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
     {
         return;
     }
 }
-
-
-

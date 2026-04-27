@@ -17,6 +17,8 @@
 #include "game/state.h"
 #include "network/state.h"
 
+class IngameHudOverlay;
+
 /**
  * @brief Acces global au game state.
  * @return Reference mutable vers l'etat gameplay.
@@ -112,3 +114,9 @@ TitleAssetCache& GetTitleAssetCache();
  * @return Reference mutable vers l'etat de langue partage.
  */
 ClientLanguageState& GetClientLanguageState();
+
+/**
+ * @brief Acces global au HUD gameplay.
+ * @return Reference mutable vers l'overlay HUD gameplay.
+ */
+IngameHudOverlay& GetIngameHudOverlay();

@@ -33,7 +33,12 @@ public:
     /**
      * @brief Met a jour le scroll continu si le bouton gauche est maintenu sur une barre.
      */
-    void update(double dt, Camera& camera, const Map& map, const SDL_FRect& screenRect);
+    void update(
+        double dt,
+        Camera& camera,
+        const Map& map,
+        const SDL_FRect& screenRect,
+        float scrollSpeedSectors = 8.0f);
 
     /**
      * @brief Dessine les barres, coins et coordonnees.

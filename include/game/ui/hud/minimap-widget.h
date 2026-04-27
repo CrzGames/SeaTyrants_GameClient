@@ -10,7 +10,7 @@ class Map;
  *
  * Responsabilites:
  * - charger/decharger l'image minimap;
- * - configurer son ancrage/marges UI;
+ * - calculer manuellement son rectangle ecran;
  * - dessiner la minimap.
  */
 class MinimapWidget {
@@ -37,6 +37,36 @@ public:
      * @brief Dessine le widget minimap.
      */
     void draw(const Map& map) const;
+
+    /**
+     * @brief Definit le facteur d'echelle applique a la minimap HUD.
+     *
+     * @param scale Facteur d'echelle uniforme du widget.
+     */
+    void setUiScale(float scale);
+
+    /**
+     * @brief Definit le decalage ecran applique a la minimap.
+     *
+     * @param offsetX Decalage horizontal en pixels de rendu.
+     * @param offsetY Decalage vertical en pixels de rendu.
+     */
+    void setPositionOffset(float offsetX, float offsetY);
+
+    /**
+     * @brief Retourne le decalage ecran courant applique a la minimap.
+     */
+    SDL_FPoint getPositionOffset(void) const;
+
+    /**
+     * @brief Reinitialise le decalage ecran de la minimap.
+     */
+    void resetPositionOffset(void);
+
+    /**
+     * @brief Retourne le facteur d'echelle courant de la minimap.
+     */
+    float getUiScale(void) const { return this->uiScale; }
 
     /**
      * @brief Retourne le rectangle courant de la minimap dans l'espace de rendu.
@@ -68,7 +98,8 @@ private:
     /**
      * @brief Ressource image de la minimap HUD.
      */
-    RC2D_UIImage minimapUi; /**< Image UI de la minimap. */
+    RC2D_Image minimapImage;         /**< Texture de la minimap. */
+    RC2D_ImageData minimapImageData; /**< Metadonnees source de la minimap. */
 
     /**
      * @brief Fenetre transparente detectee dans la texture source de la minimap.
@@ -90,4 +121,6 @@ private:
      */
     float minimapDragOffsetX; /**< Offset X de drag minimap. */
     float minimapDragOffsetY; /**< Offset Y de drag minimap. */
+    float uiScale;            /**< Facteur d'echelle applique a l'image HUD. */
+    SDL_FPoint positionOffset; /**< Decalage ecran applique au widget. */
 };

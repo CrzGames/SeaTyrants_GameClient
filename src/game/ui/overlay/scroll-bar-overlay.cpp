@@ -130,7 +130,12 @@ int ScrollBarOverlay::hitTestBar(float x, float y, const SDL_FRect& screenRect) 
     return 0;
 }
 
-void ScrollBarOverlay::update(double dt, Camera& camera, const Map& map, const SDL_FRect& screenRect)
+void ScrollBarOverlay::update(
+    double dt,
+    Camera& camera,
+    const Map& map,
+    const SDL_FRect& screenRect,
+    float scrollSpeedSectors)
 {
     // Ignore l'update si le bouton gauche n'est pas maintenu.
     if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
@@ -147,7 +152,7 @@ void ScrollBarOverlay::update(double dt, Camera& camera, const Map& map, const S
     }
 
     // Deplace la camera selon la barre active et le temps ecoule.
-    const float sectorStep = Camera::CAMERA_SCROLL_SPEED_SECTORS * static_cast<float>(dt);
+    const float sectorStep = (std::max)(0.0f, scrollSpeedSectors) * static_cast<float>(dt);
     const float diagonalFactor = Camera::CAMERA_DIAGONAL_FACTOR;
 
     float deltaSectorX = 0.0f;

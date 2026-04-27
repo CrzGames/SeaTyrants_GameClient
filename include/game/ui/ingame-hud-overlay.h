@@ -2,6 +2,7 @@
 
 #include <RC2D/RC2D.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -15,11 +16,15 @@
 #include "game/ui/hud/center-ship-button-widget.h"
 #include "game/ui/hud/chat-widget.h"
 #include "game/ui/hud/espion-search-player-widget.h"
+#include "game/ui/hud/experience-bar-widget.h"
+#include "game/ui/hud/game-settings-widget.h"
+#include "game/ui/hud/hp-bar-widget.h"
 #include "game/ui/hud/log-book-widget.h"
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/ui/hud/minimap-espion-button-widget.h"
 #include "game/ui/hud/minimap-params-button-widget.h"
 #include "game/ui/hud/minimap-widget.h"
+#include "game/ui/hud/money-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/top-bar-menu-widget.h"
 #include "game/ui/hud/zoom-widget.h"
@@ -143,6 +148,46 @@ public:
      */
     void setEventMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows);
 
+    /**
+     * @brief Retourne la fenetre de gestion du compte pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers le widget compte / apparence / navires.
+     */
+    AccountManagementWidget& getAccountManagementWidget(void) { return this->accountManagementWidget; }
+
+    /**
+     * @brief Retourne la fenetre money pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers le widget des monnaies.
+     */
+    MoneyWidget& getMoneyWidget(void) { return this->moneyWidget; }
+
+    /**
+     * @brief Retourne la fenetre de parametres de jeu pour la configurer depuis le gameplay.
+     * @return Reference mutable vers le widget de parametres.
+     */
+    GameSettingsWidget& getGameSettingsWidget(void) { return this->gameSettingsWidget; }
+
+    /**
+     * @brief Applique la visibilite d'un widget HUD pilotable.
+     */
+    void setHudWidgetVisible(GameSettingsWidget::HudScaleTarget target, bool visible);
+
+    /**
+     * @brief Inverse la visibilite d'un widget HUD pilotable.
+     */
+    void toggleHudWidgetVisibility(GameSettingsWidget::HudScaleTarget target);
+
+    /**
+     * @brief Retourne la barre de HP HUD pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers la barre de points de vie.
+     */
+    HpBarWidget& getHpBarWidget(void) { return this->hpBarWidget; }
+
+    /**
+     * @brief Retourne la barre d'experience HUD pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers la barre d'experience.
+     */
+    ExperienceBarWidget& getExperienceBarWidget(void) { return this->experienceBarWidget; }
+
 private:
     /**
      * @brief Couches de fenetres flottantes dessinees de bas vers haut.
@@ -150,11 +195,13 @@ private:
     enum class WindowLayer : int {
         CHAT = 0,               /**< Fenetre chat. */
         ESPION = 1,             /**< Fenetre espion (recherche joueur). */
-        PARAMS_MINIMAP = 2,     /**< Fenetre des parametres minimap. */
-        ANNOUNCEMENTS = 3,      /**< Fenetre annonces serveur. */
-        LOG_BOOK = 4,           /**< Fenetre journal de bord. */
-        MARKETS_AND_BAZAR = 5,  /**< Fenetre marches + bazar. */
-        ACCOUNT_MANAGEMENT = 6  /**< Fenetre compte/apparence/navires. */
+        MONEY = 2,              /**< Fenetre money / monnaies du joueur. */
+        PARAMS_MINIMAP = 3,     /**< Fenetre des parametres minimap. */
+        GAME_SETTINGS = 4,      /**< Fenetre des parametres de jeu. */
+        ANNOUNCEMENTS = 5,      /**< Fenetre annonces serveur. */
+        LOG_BOOK = 6,           /**< Fenetre journal de bord. */
+        MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
+        ACCOUNT_MANAGEMENT = 8  /**< Fenetre compte/apparence/navires. */
     };
 
     /**
@@ -184,14 +231,34 @@ private:
     BarreActionWidget barreActionWidget;                   /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget;         /**< Widget bouton centrer navire. */
     ZoomWidget zoomWidget;                                 /**< Widget de zoom (barre + slider). */
+    HpBarWidget hpBarWidget;                               /**< Barre de HP affichee a droite de la zoom bar. */
+    ExperienceBarWidget experienceBarWidget;               /**< Barre d'XP affichee sous la barre HP. */
     ChatWidget chatWidget;                                 /**< Fenetre chat interactive. */
     EspionSearchPlayerWidget espionSearchPlayerWidget;     /**< Fenetre "Espion" de recherche joueur. */
+    MoneyWidget moneyWidget;                               /**< Fenetre "Money" des monnaies du joueur. */
     ParamsMinimapWidget paramsMinimapWidget;               /**< Fenetre de parametres de la minimap. */
+    GameSettingsWidget gameSettingsWidget;                 /**< Fenetre "Parametres" du client. */
     AnnouncementsWidget announcementsWidget;               /**< Fenetre "Announcements". */
     LogBookWidget logBookWidget;                           /**< Fenetre "Journal de bord". */
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
     RC2D_Font tooltipFont;                                 /**< Police partagee des tooltips HUD locaux. */
+    std::array<bool, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudWidgetVisibility; /**< Etats visibles des widgets HUD pilotables. */
+    bool hudConfiguratorMode;                              /**< True si le mode de configuration des positions HUD est actif. */
+    bool hudConfiguratorRestoreGameSettingsVisibility;     /**< True si les parametres doivent etre rouverts a la sortie du configurateur. */
+    bool hudConfiguratorDragging;                          /**< True pendant le drag d'un widget HUD configurable. */
+    GameSettingsWidget::HudScaleTarget hudConfiguratorDraggedTarget; /**< Widget HUD actuellement deplace. */
+    float hudConfiguratorDragGrabOffsetX;                  /**< Offset souris -> rect HUD au debut du drag. */
+    float hudConfiguratorDragGrabOffsetY;                  /**< Offset souris -> rect HUD au debut du drag. */
+    SDL_FPoint hudConfiguratorDragStartOffset;             /**< Offset memorise au debut du drag. */
+    SDL_FRect hudConfiguratorDragStartRect;                /**< Rect memorise au debut du drag. */
+    SDL_FRect hudConfiguratorDragStartTargetRect;          /**< Rect widget memorise au debut du drag (sans padding). */
+    bool hudConfiguratorPanelDragging;                     /**< True pendant le drag du panneau du configurateur. */
+    float hudConfiguratorPanelDragGrabOffsetX;             /**< Offset souris -> panneau au debut du drag. */
+    float hudConfiguratorPanelDragGrabOffsetY;             /**< Offset souris -> panneau au debut du drag. */
+    SDL_FPoint hudConfiguratorPanelOffset;                 /**< Decalage ecran applique au panneau du configurateur. */
+    SDL_FPoint hudConfiguratorPanelDragStartOffset;        /**< Offset panneau memorise au debut du drag. */
+    SDL_FRect hudConfiguratorPanelDragStartRect;           /**< Rect panneau memorise au debut du drag. */
 
     /**
      * @brief Pile de rendu des fenetres flottantes (bas -> haut).
@@ -206,7 +273,9 @@ private:
      */
     bool prevChatVisible;               /**< Etat visible precedent du chat. */
     bool prevEspionVisible;             /**< Etat visible precedent de la fenetre espion. */
+    bool prevMoneyVisible;              /**< Etat visible precedent de la fenetre money. */
     bool prevParamsMiniMapVisible;      /**< Etat visible precedent de la fenetre ParamsMiniMap. */
+    bool prevGameSettingsVisible;       /**< Etat visible precedent de la fenetre parametres. */
     bool prevAnnouncementsVisible;      /**< Etat visible precedent de la fenetre announcements. */
     bool prevLogBookVisible;            /**< Etat visible precedent de la fenetre journal de bord. */
     bool prevMarketsAndBazarVisible;    /**< Etat visible precedent de la fenetre marches + bazar. */
@@ -276,6 +345,75 @@ private:
      * @return true si le curseur doit rester en mode standard, sinon false.
      */
     bool shouldKeepDefaultCursorAfterClose(float mouseX, float mouseY);
+
+    /**
+     * @brief Retourne l'etat visible d'un widget HUD pilotable.
+     * @param target Cible HUD demandee.
+     * @return True si le widget doit etre dessine/interactable.
+     */
+    bool isHudWidgetVisible(GameSettingsWidget::HudScaleTarget target) const;
+
+    /**
+     * @brief Active le mode de configuration des positions HUD.
+     */
+    void startHudConfiguratorMode(void);
+
+    /**
+     * @brief Quitte le mode de configuration des positions HUD.
+     */
+    void stopHudConfiguratorMode(void);
+
+    /**
+     * @brief Gere les clics pendant le mode de configuration HUD.
+     *
+     * @return True si le clic est consomme.
+     */
+    bool handleHudConfiguratorMousePressed(float x, float y, RC2D_MouseButton button);
+
+    /**
+     * @brief Met a jour le drag et le curseur du configurateur HUD.
+     */
+    void updateHudConfigurator(float mouseX, float mouseY);
+
+    /**
+     * @brief Dessine l'overlay de configuration HUD.
+     */
+    void drawHudConfiguratorOverlay(void) const;
+
+    /**
+     * @brief Retourne le curseur desire par le configurateur HUD.
+     */
+    HudCursorType getHudConfiguratorDesiredCursor(float mouseX, float mouseY) const;
+
+    /**
+     * @brief Retourne le rectangle courant du widget HUD configurable.
+     */
+    SDL_FRect getHudConfiguratorTargetRect(GameSettingsWidget::HudScaleTarget target) const;
+
+    /**
+     * @brief Retourne le rectangle de mise en evidence du widget HUD configurable.
+     */
+    SDL_FRect getHudConfiguratorSelectionRect(GameSettingsWidget::HudScaleTarget target) const;
+
+    /**
+     * @brief Retourne l'offset ecran courant d'un widget HUD configurable.
+     */
+    SDL_FPoint getHudWidgetPositionOffset(GameSettingsWidget::HudScaleTarget target) const;
+
+    /**
+     * @brief Applique un offset ecran a un widget HUD configurable.
+     */
+    void setHudWidgetPositionOffset(GameSettingsWidget::HudScaleTarget target, const SDL_FPoint& offset);
+
+    /**
+     * @brief Reinitialise la position d'un widget HUD configurable.
+     */
+    void resetHudWidgetPositionOffset(GameSettingsWidget::HudScaleTarget target);
+
+    /**
+     * @brief Reinitialise toutes les positions configurables du HUD.
+     */
+    void resetAllHudConfiguratorPositions(void);
 
     bool keepDefaultCursorAfterClose;       /**< Suspension temporaire du hover apres fermeture. */
     float keepDefaultCursorMouseX;          /**< X de reference au moment de la fermeture. */

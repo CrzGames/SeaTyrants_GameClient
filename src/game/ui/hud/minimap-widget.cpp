@@ -11,22 +11,31 @@ constexpr RC2D_Color kMiniMapWaterColor = RC2D_Color{28, 63, 103, 255};
 constexpr RC2D_Color kMiniMapBorderColor = RC2D_Color{135, 150, 168, 235};
 constexpr RC2D_Color kMiniMapViewFillColor = RC2D_Color{125, 198, 255, 55};
 constexpr RC2D_Color kMiniMapViewLineColor = RC2D_Color{170, 222, 255, 245};
+static constexpr float kHudWidgetScaleMin = 0.75f;
+static constexpr float kHudWidgetScaleMax = 1.0f;
+static constexpr float kMiniMapMarginRightPercent = 0.03f;
+static constexpr float kMiniMapMarginTopPercent = 0.05f;
 
-static bool getUiImageSize(const RC2D_UIImage& uiImage, float* outWidth, float* outHeight)
+static float clampHudWidgetScale(float scale)
+{
+    return std::clamp(scale, kHudWidgetScaleMin, kHudWidgetScaleMax);
+}
+
+static bool getImageSize(const RC2D_ImageData& imageData, const RC2D_Image& image, float* outWidth, float* outHeight)
 {
     if (outWidth == nullptr || outHeight == nullptr)
     {
         return false;
     }
 
-    if (uiImage.imageData.sdl_surface != nullptr)
+    if (imageData.sdl_surface != nullptr)
     {
-        *outWidth = static_cast<float>(uiImage.imageData.sdl_surface->w);
-        *outHeight = static_cast<float>(uiImage.imageData.sdl_surface->h);
+        *outWidth = static_cast<float>(imageData.sdl_surface->w);
+        *outHeight = static_cast<float>(imageData.sdl_surface->h);
         return true;
     }
 
-    if (uiImage.image.sdl_texture != nullptr && SDL_GetTextureSize(uiImage.image.sdl_texture, outWidth, outHeight))
+    if (image.sdl_texture != nullptr && SDL_GetTextureSize(image.sdl_texture, outWidth, outHeight))
     {
         return true;
     }
@@ -36,7 +45,19 @@ static bool getUiImageSize(const RC2D_UIImage& uiImage, float* outWidth, float* 
     return false;
 }
 
-static SDL_FRect getUiImageCurrentRect(const RC2D_UIImage& uiImage)
+static SDL_FRect scaleRectFromCenter(const SDL_FRect& rect, float scale)
+{
+    const float clampedScale = clampHudWidgetScale(scale);
+    const float scaledWidth = rect.w * clampedScale;
+    const float scaledHeight = rect.h * clampedScale;
+    return SDL_FRect{
+        rect.x + ((rect.w - scaledWidth) * 0.5f),
+        rect.y + ((rect.h - scaledHeight) * 0.5f),
+        scaledWidth,
+        scaledHeight};
+}
+
+static SDL_FRect getMiniMapRect(const RC2D_ImageData& imageData, const RC2D_Image& image, float scale, const SDL_FPoint& offset)
 {
     const SDL_FRect visibleRect = rc2d_engine_getVisibleSafeRectRender();
     if (visibleRect.w <= 0.0f || visibleRect.h <= 0.0f)
@@ -46,48 +67,20 @@ static SDL_FRect getUiImageCurrentRect(const RC2D_UIImage& uiImage)
 
     float width = 0.0f;
     float height = 0.0f;
-    if (!getUiImageSize(uiImage, &width, &height))
+    if (!getImageSize(imageData, image, &width, &height))
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    float marginX = uiImage.margin_x;
-    float marginY = uiImage.margin_y;
-    if (uiImage.margin_mode == RC2D_UI_MARGIN_PERCENT)
-    {
-        marginX = visibleRect.w * uiImage.margin_x;
-        marginY = visibleRect.h * uiImage.margin_y;
-    }
-
-    switch (uiImage.anchor)
-    {
-        case RC2D_UI_ANCHOR_TOP_LEFT:
-            return SDL_FRect{visibleRect.x + marginX, visibleRect.y + marginY, width, height};
-        case RC2D_UI_ANCHOR_TOP_RIGHT:
-            return SDL_FRect{visibleRect.x + visibleRect.w - marginX - width, visibleRect.y + marginY, width, height};
-        case RC2D_UI_ANCHOR_BOTTOM_LEFT:
-            return SDL_FRect{visibleRect.x + marginX, visibleRect.y + visibleRect.h - marginY - height, width, height};
-        case RC2D_UI_ANCHOR_BOTTOM_RIGHT:
-            return SDL_FRect{visibleRect.x + visibleRect.w - marginX - width, visibleRect.y + visibleRect.h - marginY - height, width, height};
-        case RC2D_UI_ANCHOR_TOP_CENTER:
-            return SDL_FRect{visibleRect.x + ((visibleRect.w - width) * 0.5f) + marginX, visibleRect.y + marginY, width, height};
-        case RC2D_UI_ANCHOR_BOTTOM_CENTER:
-            return SDL_FRect{
-                visibleRect.x + ((visibleRect.w - width) * 0.5f) + marginX,
-                visibleRect.y + visibleRect.h - marginY - height,
-                width,
-                height
-            };
-        case RC2D_UI_ANCHOR_CENTER:
-            return SDL_FRect{
-                visibleRect.x + ((visibleRect.w - width) * 0.5f) + marginX,
-                visibleRect.y + ((visibleRect.h - height) * 0.5f) + marginY,
-                width,
-                height
-            };
-        default:
-            return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
-    }
+    const float marginRight = visibleRect.w * kMiniMapMarginRightPercent;
+    const float marginTop = visibleRect.h * kMiniMapMarginTopPercent;
+    return scaleRectFromCenter(
+        SDL_FRect{
+            visibleRect.x + visibleRect.w - marginRight - width + offset.x,
+            visibleRect.y + marginTop + offset.y,
+            width,
+            height},
+        scale);
 }
 
 static bool pointInRect(float x, float y, const SDL_FRect& rect)
@@ -255,14 +248,19 @@ static float miniMapNormalizedToSectorCenter(float normalizedValue, int sectorCo
     return std::clamp((normalizedValue * span) - 0.5f, 0.0f, maxSectorCenter);
 }
 
-static SDL_FRect getScaledContentRect(const RC2D_UIImage& uiImage, const SDL_Rect& sourceRect)
+static SDL_FRect getScaledContentRect(
+    const RC2D_ImageData& imageData,
+    const RC2D_Image& image,
+    const SDL_Rect& sourceRect,
+    float scale,
+    const SDL_FPoint& offset)
 {
     if (sourceRect.w <= 0 || sourceRect.h <= 0)
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    const SDL_FRect widgetRect = getUiImageCurrentRect(uiImage);
+    const SDL_FRect widgetRect = getMiniMapRect(imageData, image, scale, offset);
     if (widgetRect.w <= 0.0f || widgetRect.h <= 0.0f)
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
@@ -270,7 +268,7 @@ static SDL_FRect getScaledContentRect(const RC2D_UIImage& uiImage, const SDL_Rec
 
     float sourceWidth = 0.0f;
     float sourceHeight = 0.0f;
-    if (!getUiImageSize(uiImage, &sourceWidth, &sourceHeight) ||
+    if (!getImageSize(imageData, image, &sourceWidth, &sourceHeight) ||
         sourceWidth <= 0.0f ||
         sourceHeight <= 0.0f)
     {
@@ -285,6 +283,35 @@ static SDL_FRect getScaledContentRect(const RC2D_UIImage& uiImage, const SDL_Rec
         static_cast<float>(sourceRect.w) * scaleX,
         static_cast<float>(sourceRect.h) * scaleY
     };
+}
+
+static void drawImageToRect(RC2D_Image* image, const SDL_FRect& drawRect)
+{
+    if (image == nullptr || image->sdl_texture == nullptr || drawRect.w <= 0.0f || drawRect.h <= 0.0f)
+    {
+        return;
+    }
+
+    float textureWidth = 0.0f;
+    float textureHeight = 0.0f;
+    if (!SDL_GetTextureSize(image->sdl_texture, &textureWidth, &textureHeight) ||
+        textureWidth <= 0.0f ||
+        textureHeight <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_drawImage(
+        image,
+        drawRect.x,
+        drawRect.y,
+        0.0,
+        drawRect.w / textureWidth,
+        drawRect.h / textureHeight,
+        0.0f,
+        0.0f,
+        false,
+        false);
 }
 
 static void getMouseRenderPosition(float* outX, float* outY)
@@ -319,12 +346,15 @@ static void getMouseRenderPosition(float* outX, float* outY)
 }
 
 MinimapWidget::MinimapWidget(void)
-    : minimapUi{},
+    : minimapImage{},
+      minimapImageData{},
       minimapContentSourceRect{0, 0, 0, 0},
       hasMinimapContentRect(false),
       minimapDragActive(false),
       minimapDragOffsetX(0.0f),
-      minimapDragOffsetY(0.0f)
+      minimapDragOffsetY(0.0f),
+      uiScale(1.0f),
+      positionOffset{0.0f, 0.0f}
 {
 }
 
@@ -334,21 +364,14 @@ MinimapWidget::~MinimapWidget(void)
 
 void MinimapWidget::load(void)
 {
-    // Minimap ancree en haut a droite, avec des marges relatives a l'ecran.
-    this->minimapUi.image = LoadStorageImage(
+    this->minimapImage = LoadStorageImage(
         "assets/images/ui-scene-game/minimap.png",
         RC2D_STORAGE_TITLE);
-    this->minimapUi.imageData = LoadStorageImageData(
+    this->minimapImageData = LoadStorageImageData(
         "assets/images/ui-scene-game/minimap.png",
         RC2D_STORAGE_TITLE);
-    this->minimapUi.anchor = RC2D_UI_ANCHOR_TOP_RIGHT;
-    this->minimapUi.margin_mode = RC2D_UI_MARGIN_PERCENT;
-    this->minimapUi.margin_x = 0.03f;
-    this->minimapUi.margin_y = 0.05f;
-    this->minimapUi.visible = true;
-    this->minimapUi.hittable = true;
     this->hasMinimapContentRect = detectLargestTransparentRect(
-        this->minimapUi.imageData.sdl_surface,
+        this->minimapImageData.sdl_surface,
         &this->minimapContentSourceRect);
 }
 
@@ -385,13 +408,13 @@ void MinimapWidget::unload(void)
     this->minimapDragActive = false;
     this->minimapDragOffsetX = 0.0f;
     this->minimapDragOffsetY = 0.0f;
-    ResetStorageImageDataRef(&this->minimapUi.imageData);
-    ResetStorageImageRef(&this->minimapUi.image);
+    ResetStorageImageDataRef(&this->minimapImageData);
+    ResetStorageImageRef(&this->minimapImage);
 }
 
 void MinimapWidget::draw(const Map& map) const
 {
-    if (this->minimapUi.image.sdl_texture == nullptr || !this->minimapUi.visible)
+    if (this->minimapImage.sdl_texture == nullptr)
     {
         return;
     }
@@ -417,29 +440,50 @@ void MinimapWidget::draw(const Map& map) const
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
     }
 
-    rc2d_ui_drawImage(&const_cast<RC2D_UIImage&>(this->minimapUi));
+    drawImageToRect(
+        &const_cast<RC2D_Image&>(this->minimapImage),
+        this->getCurrentRect());
+}
+
+void MinimapWidget::setUiScale(float scale)
+{
+    this->uiScale = clampHudWidgetScale(scale);
+}
+
+void MinimapWidget::setPositionOffset(float offsetX, float offsetY)
+{
+    this->positionOffset = SDL_FPoint{offsetX, offsetY};
+}
+
+SDL_FPoint MinimapWidget::getPositionOffset(void) const
+{
+    return this->positionOffset;
+}
+
+void MinimapWidget::resetPositionOffset(void)
+{
+    this->positionOffset = SDL_FPoint{0.0f, 0.0f};
 }
 
 SDL_FRect MinimapWidget::getCurrentRect(void) const
 {
-    if (this->minimapUi.image.sdl_texture == nullptr || !this->minimapUi.visible)
+    if (this->minimapImage.sdl_texture == nullptr)
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    return getUiImageCurrentRect(this->minimapUi);
+    return getMiniMapRect(this->minimapImageData, this->minimapImage, this->uiScale, this->positionOffset);
 }
 
 SDL_FRect MinimapWidget::getContentRect(void) const
 {
     if (!this->hasMinimapContentRect ||
-        this->minimapUi.image.sdl_texture == nullptr ||
-        !this->minimapUi.visible)
+        this->minimapImage.sdl_texture == nullptr)
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
 
-    return getScaledContentRect(this->minimapUi, this->minimapContentSourceRect);
+    return getScaledContentRect(this->minimapImageData, this->minimapImage, this->minimapContentSourceRect, this->uiScale, this->positionOffset);
 }
 
 bool MinimapWidget::containsContentPoint(float x, float y) const

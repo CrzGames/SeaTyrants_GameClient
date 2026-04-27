@@ -33,8 +33,8 @@ public:
     /**
      * @brief Charge les assets UI et initialise la geometrie du widget.
      *
-     * Configure les ancrages/marges de la barre et du slider, memorise les
-     * dimensions natives des textures et reinitialise l'etat de drag.
+     * Charge les textures, memorise leurs dimensions natives et reinitialise
+     * l'etat de drag.
      */
     void load(void);
 
@@ -61,6 +61,15 @@ public:
      * verticalement sur la barre.
      */
     void draw(void);
+
+    /**
+     * @brief Dessine le tooltip de zoom au-dessus des autres GUI.
+     *
+     * Cette methode est volontairement separee de draw() pour permettre
+     * au HUD overlay de la rendre en toute fin de frame, au-dessus des
+     * fenetres flottantes.
+     */
+    void drawTooltip(void) const;
 
     /**
      * @brief Traite un appui souris pour potentiellement demarrer un drag slider.
@@ -91,10 +100,63 @@ public:
      */
     bool isSliderHovered(float x, float y) const;
 
+    /**
+     * @brief Retourne le rectangle courant de la barre de zoom.
+     *
+     * Le rectangle est calcule a partir de la geometrie HUD connue
+     * et sert aux autres widgets bas d'ecran pour s'aligner proprement
+     * sur la barre de zoom.
+     *
+     * @return Rectangle de rendu actuel de la barre de zoom.
+     */
+    SDL_FRect getBarRect(void) const;
+
+    /**
+     * @brief Retourne le rectangle courant complet du widget de zoom.
+     *
+     * Inclut la barre et le slider afin de pouvoir manipuler / mettre
+     * en evidence l'ensemble du widget depuis l'overlay HUD.
+     *
+     * @return Rectangle englobant actuellement dessine.
+     */
+    SDL_FRect getCurrentRect(void) const;
+
+    /**
+     * @brief Definit le facteur d'echelle applique a la barre et au slider.
+     *
+     * @param scale Facteur d'echelle uniforme du widget.
+     */
+    void setUiScale(float scale);
+
+    /**
+     * @brief Definit le decalage ecran applique au widget de zoom.
+     *
+     * @param offsetX Decalage horizontal en pixels de rendu.
+     * @param offsetY Decalage vertical en pixels de rendu.
+     */
+    void setPositionOffset(float offsetX, float offsetY);
+
+    /**
+     * @brief Retourne le decalage ecran courant du widget de zoom.
+     */
+    SDL_FPoint getPositionOffset(void) const;
+
+    /**
+     * @brief Reinitialise le decalage ecran du widget de zoom.
+     */
+    void resetPositionOffset(void);
+
+    /**
+     * @brief Retourne le facteur d'echelle courant du widget de zoom.
+     */
+    float getUiScale(void) const { return this->uiScale; }
+
 private:
-    RC2D_UIImage zoomBarUi;     /**< Barre de zoom. */
-    RC2D_UIImage zoomSliderUi;  /**< Slider de zoom. */
-    RC2D_Font tooltipFont;      /**< Police du tooltip de zoom. */
+    RC2D_Image zoomBarImage;         /**< Texture de la barre de zoom. */
+    RC2D_ImageData zoomBarImageData; /**< Metadonnees source de la barre. */
+    RC2D_Image zoomSliderImage;         /**< Texture du slider de zoom. */
+    RC2D_ImageData zoomSliderImageData; /**< Metadonnees source du slider. */
+    RC2D_Font tooltipFont;             /**< Police du tooltip de zoom. */
 
     bool sliderDragging;          /**< true tant que le drag gauche est actif. */
     bool sliderHovered;           /**< true si la souris survole le slider. */
@@ -110,6 +172,8 @@ private:
     float zoomBarHeightPx;        /**< Hauteur native de la barre. */
     float zoomSliderWidthPx;      /**< Largeur native du slider. */
     float zoomSliderHeightPx;     /**< Hauteur native du slider. */
+    float uiScale;                /**< Facteur d'echelle applique au widget. */
+    SDL_FPoint positionOffset;    /**< Decalage ecran applique au widget. */
 
     /**
      * @brief Teste si un point est inclus dans un rectangle SDL.
@@ -131,10 +195,30 @@ private:
     /**
      * @brief Recalcule la course horizontale disponible du slider.
      *
-     * Priorise les dimensions des rectangles effectivement dessines, avec
-     * fallback sur les dimensions natives des textures.
+     * Utilise les dimensions natives des textures et l'echelle courante.
      */
     void refreshTravelWidthFromDrawnRects(void);
+
+    /**
+     * @brief Calcule le rectangle courant de la barre de zoom.
+     *
+     * @return Rectangle de rendu de la barre.
+     */
+    SDL_FRect computeBarRect(void) const;
+
+    /**
+     * @brief Calcule le rectangle de reference non reduit de la barre.
+     *
+     * @return Rectangle de base avant application de l'echelle HUD.
+     */
+    SDL_FRect computeBaseBarRect(void) const;
+
+    /**
+     * @brief Calcule le rectangle courant du slider de zoom.
+     *
+     * @return Rectangle de rendu du slider.
+     */
+    SDL_FRect computeSliderRect(void) const;
 
     /**
      * @brief Met a jour la position X du slider a partir d'une valeur brute.

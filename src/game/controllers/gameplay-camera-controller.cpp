@@ -2,20 +2,55 @@
 
 #include <RC2D/RC2D.h>
 
+#include <algorithm>
+
 #include "game/camera.h"
 #include "game/entities/player.h"
 #include "game/map/map.h"
 
+static bool isConfiguredScancodeDown(SDL_Scancode scancode)
+{
+    if (scancode == SDL_SCANCODE_UNKNOWN)
+    {
+        return false;
+    }
+
+    return rc2d_keyboard_isScancodeDown((RC2D_Scancode)scancode);
+}
+
 bool GameplayCameraController::updateKeyboardScroll(double dt, Camera& camera, const Map& map, const SDL_FRect& viewportRect)
 {
+    return GameplayCameraController::updateKeyboardScroll(
+        dt,
+        camera,
+        map,
+        viewportRect,
+        SDL_SCANCODE_UP,
+        SDL_SCANCODE_DOWN,
+        SDL_SCANCODE_LEFT,
+        SDL_SCANCODE_RIGHT,
+        Camera::CAMERA_SCROLL_SPEED_SECTORS);
+}
+
+bool GameplayCameraController::updateKeyboardScroll(
+    double dt,
+    Camera& camera,
+    const Map& map,
+    const SDL_FRect& viewportRect,
+    SDL_Scancode upScancode,
+    SDL_Scancode downScancode,
+    SDL_Scancode leftScancode,
+    SDL_Scancode rightScancode,
+    float scrollSpeedSectors)
+{
     const bool upPressed =
-        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP);
+        isConfiguredScancodeDown(upScancode);
     const bool downPressed =
-        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN);
+        isConfiguredScancodeDown(downScancode);
     const bool leftPressed =
-        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT);
+        isConfiguredScancodeDown(leftScancode);
     const bool rightPressed =
-        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT);
+        isConfiguredScancodeDown(rightScancode);
 
     float deltaSectorX = 0.0f;
     float deltaSectorY = 0.0f;
@@ -51,7 +86,7 @@ bool GameplayCameraController::updateKeyboardScroll(double dt, Camera& camera, c
     }
 
     const float sectorDistance =
-        Camera::CAMERA_SCROLL_SPEED_SECTORS * static_cast<float>(dt);
+        (std::max)(0.0f, scrollSpeedSectors) * static_cast<float>(dt);
 
     deltaSectorX *= sectorDistance;
     deltaSectorY *= sectorDistance;

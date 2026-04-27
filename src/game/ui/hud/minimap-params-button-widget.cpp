@@ -79,6 +79,9 @@ SDL_FRect MinimapParamsButtonWidget::getCurrentRect(const MinimapWidget& minimap
     {
         return SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     }
+    const float scale = minimapWidget.getUiScale();
+    width *= scale;
+    height *= scale;
 
     return SDL_FRect{
         minimapRect.x - (width * 0.5f),
@@ -101,7 +104,26 @@ void MinimapParamsButtonWidget::draw(const MinimapWidget& minimapWidget) const
         return;
     }
 
-    rc2d_graphics_drawImage(&const_cast<RC2D_Image&>(this->iconImage), rect.x, rect.y, 0.0, 1.0f, 1.0f, 0.0f, 0.0f, false, false);
+    float textureWidth = 0.0f;
+    float textureHeight = 0.0f;
+    if (!SDL_GetTextureSize(this->iconImage.sdl_texture, &textureWidth, &textureHeight) ||
+        textureWidth <= 0.0f ||
+        textureHeight <= 0.0f)
+    {
+        return;
+    }
+
+    rc2d_graphics_drawImage(
+        &const_cast<RC2D_Image&>(this->iconImage),
+        rect.x,
+        rect.y,
+        0.0,
+        rect.w / textureWidth,
+        rect.h / textureHeight,
+        0.0f,
+        0.0f,
+        false,
+        false);
 }
 
 bool MinimapParamsButtonWidget::containsPoint(float x, float y, const MinimapWidget& minimapWidget) const

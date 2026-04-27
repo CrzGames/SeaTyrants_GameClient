@@ -25,6 +25,20 @@ public:
     static bool updateKeyboardScroll(double dt, Camera& camera, const Map& map, const SDL_FRect& viewportRect);
 
     /**
+     * @brief Met a jour le scroll clavier avec un mapping et une vitesse configurables.
+     */
+    static bool updateKeyboardScroll(
+        double dt,
+        Camera& camera,
+        const Map& map,
+        const SDL_FRect& viewportRect,
+        SDL_Scancode upScancode,
+        SDL_Scancode downScancode,
+        SDL_Scancode leftScancode,
+        SDL_Scancode rightScancode,
+        float scrollSpeedSectors);
+
+    /**
      * @brief Centre la camera sur le joueur.
      * @param camera Camera a centrer.
      * @param map Map de reference.
