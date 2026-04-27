@@ -1597,12 +1597,17 @@ void GameSettingsWidget::update(double dt)
 
     if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
     {
+        const bool endedCameraSpeedDrag = this->cameraScrollSpeedDragging;
         this->widgetDragging = false;
         this->languageScrollDragging = false;
         this->hudScaleDragging = false;
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
         this->graphicsScrollDragging = false;
+        if (endedCameraSpeedDrag && this->onUserSettingsChanged)
+        {
+            this->onUserSettingsChanged();
+        }
         return;
     }
 
@@ -2158,6 +2163,10 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->graphicsHideCoordinateBackground = !this->graphicsHideCoordinateBackground;
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
+            if (this->onUserSettingsChanged)
+            {
+                this->onUserSettingsChanged();
+            }
             return true;
         }
 
@@ -2166,6 +2175,10 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             g_graphicsFogOfWarEnabled = !g_graphicsFogOfWarEnabled;
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
+            if (this->onUserSettingsChanged)
+            {
+                this->onUserSettingsChanged();
+            }
             return true;
         }
 
@@ -2174,6 +2187,10 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             g_graphicsShipWakeTrailsEnabled = !g_graphicsShipWakeTrailsEnabled;
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
+            if (this->onUserSettingsChanged)
+            {
+                this->onUserSettingsChanged();
+            }
             return true;
         }
 
@@ -2182,6 +2199,10 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->graphicsHideOtherPlayersVfx = !this->graphicsHideOtherPlayersVfx;
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
+            if (this->onUserSettingsChanged)
+            {
+                this->onUserSettingsChanged();
+            }
             return true;
         }
 
@@ -2195,6 +2216,10 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->graphicsSalvoBulletPreset = static_cast<SalvoBulletPreset>(static_cast<int>(index));
             this->graphicsWindowModeDropdownOpen = false;
             this->graphicsPresentationModeDropdownOpen = false;
+            if (this->onUserSettingsChanged)
+            {
+                this->onUserSettingsChanged();
+            }
             return true;
         }
 
@@ -3846,6 +3871,10 @@ float GameSettingsWidget::getCameraScrollSpeedSectors(void) const
 void GameSettingsWidget::setCameraScrollSpeedSectors(float speedSectors)
 {
     this->cameraScrollSpeedSectors = snapCameraScrollSpeed(speedSectors);
+    if (!this->cameraScrollSpeedDragging && this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
 }
 
 bool GameSettingsWidget::getHideCoordinateBackground(void) const
@@ -3861,6 +3890,71 @@ bool GameSettingsWidget::getFogOfWarEnabled(void) const
 bool GameSettingsWidget::getShipWakeTrailsEnabled(void) const
 {
     return g_graphicsShipWakeTrailsEnabled;
+}
+
+bool GameSettingsWidget::getHideOtherPlayersVfxEnabled(void) const
+{
+    return this->graphicsHideOtherPlayersVfx;
+}
+
+void GameSettingsWidget::setHideOtherPlayersVfxEnabled(bool enabled)
+{
+    this->graphicsHideOtherPlayersVfx = enabled;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+GameSettingsWidget::SalvoBulletPreset GameSettingsWidget::getSalvoBulletPreset(void) const
+{
+    return this->graphicsSalvoBulletPreset;
+}
+
+void GameSettingsWidget::setSalvoBulletPreset(SalvoBulletPreset preset)
+{
+    this->graphicsSalvoBulletPreset = preset;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+void GameSettingsWidget::setHideCoordinateBackground(bool value)
+{
+    this->graphicsHideCoordinateBackground = value;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+void GameSettingsWidget::setFogOfWarEnabled(bool value)
+{
+    g_graphicsFogOfWarEnabled = value;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+void GameSettingsWidget::setShipWakeTrailsEnabled(bool value)
+{
+    g_graphicsShipWakeTrailsEnabled = value;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+void GameSettingsWidget::setControlActionScancode(ControlAction action, SDL_Scancode scancode)
+{
+    this->applyControlActionScancode(action, scancode);
+}
+
+void GameSettingsWidget::setOnUserSettingsChanged(VoidCallback callback)
+{
+    this->onUserSettingsChanged = std::move(callback);
 }
 
 void GameSettingsWidget::rebuildLanguageOptions(void)
@@ -4097,6 +4191,10 @@ void GameSettingsWidget::applyControlActionScancode(ControlAction action, SDL_Sc
     }
 
     this->controlActionScancodes[index] = scancode;
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
 }
 
 bool GameSettingsWidget::findControlActionUsingScancode(
@@ -4168,6 +4266,10 @@ void GameSettingsWidget::confirmPendingControlConflict(void)
 
     this->controlActionScancodes[targetIndex] = this->pendingConflictScancode;
     this->cancelPendingControlConflict();
+    if (this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
 }
 
 void GameSettingsWidget::cancelPendingControlConflict(void)

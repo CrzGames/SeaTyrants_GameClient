@@ -85,6 +85,18 @@ public:
     };
 
     /**
+     * @brief Presets du nombre de projectiles visibles par salve (onglet Graphiques).
+     *
+     * Valeur persistee dans les parametres utilisateur et reappliquee au chargement.
+     * Les effets precis dependent du rendu gameplay / shaders du client.
+     */
+    enum class SalvoBulletPreset : int {
+        LOW = 0,    /**< Charge ou densite de projectiles reduite. */
+        NORMAL = 1, /**< Preset equilibre par defaut. */
+        HIGH = 2    /**< Charge ou densite de projectiles plus elevee. */
+    };
+
+    /**
      * @brief Signature de callback pour le changement de taille d'un widget HUD.
      */
     using HudScaleChangedCallback = std::function<void(HudScaleTarget, float)>;
@@ -316,6 +328,85 @@ public:
      */
     bool getShipWakeTrailsEnabled(void) const;
 
+    /**
+     * @brief Indique si les effets visuels des autres joueurs doivent etre masques.
+     *
+     * Lorsque true, le client peut reduire la charge GPU / visuelle en n'affichant pas
+     * (ou en simplifiant) certaines VFX issues des autres navires.
+     *
+     * @return true si les VFX des autres joueurs sont desactivees ou attenuees.
+     */
+    bool getHideOtherPlayersVfxEnabled(void) const;
+
+    /**
+     * @brief Active ou desactive le masquage / attenuation des VFX des autres joueurs.
+     *
+     * @param enabled true pour masquer ou attenuer ces effets, false pour les afficher normalement.
+     */
+    void setHideOtherPlayersVfxEnabled(bool enabled);
+
+    /**
+     * @brief Retourne le preset courant pour le nombre de boulets par salve (affichage / gameplay).
+     *
+     * @return Valeur @ref SalvoBulletPreset memorisee dans le widget.
+     */
+    SalvoBulletPreset getSalvoBulletPreset(void) const;
+
+    /**
+     * @brief Definit le preset "nombre de boulets par salve" et met a jour l'etat interne.
+     *
+     * @param preset Nouvelle valeur a appliquer (@ref SalvoBulletPreset).
+     */
+    void setSalvoBulletPreset(SalvoBulletPreset preset);
+
+    /**
+     * @brief Active ou desactive le masquage du fond derriere l'affichage des coordonnees de secteur.
+     *
+     * @param value true pour masquer le fond decoratif, false pour l'afficher.
+     */
+    void setHideCoordinateBackground(bool value);
+
+    /**
+     * @brief Active ou desactive le rendu / l'animation du brouillard de guerre.
+     *
+     * @param value true pour activer le fog of war, false pour le desactiver (gain de perf possible).
+     */
+    void setFogOfWarEnabled(bool value);
+
+    /**
+     * @brief Active ou desactive les trainees de sillage des navires sur l'eau.
+     *
+     * @param value true pour afficher les trainees, false pour les couper.
+     */
+    void setShipWakeTrailsEnabled(bool value);
+
+    /**
+     * @brief Associe une touche (scancode physique SDL) a une action configurable.
+     *
+     * Met a jour la table interne et declenche la callback eventuelle enregistree via
+     * @ref setOnUserSettingsChanged.
+     * Contrairement au rebind depuis l'onglet Controles, aucune capture clavier ni dialogue
+     * de conflit n'est affiche : plusieurs actions peuvent temporairement partager le meme
+     * scancode jusqu'a correction par le joueur dans l'UI.
+     *
+     * @param action Action logique a modifier (@ref ControlAction).
+     * @param scancode Scancode SDL a assigner (ex. SDL_SCANCODE_W). Les scancodes que
+     *        le widget refuse comme liaison sont simplement ignores (aucune modification).
+     */
+    void setControlActionScancode(ControlAction action, SDL_Scancode scancode);
+
+    /**
+     * @brief Enregistre une callback pour les changements de parametres utilisateur "metier".
+     *
+     * Appelee lorsqu'une valeur susceptible d'etre ecrite dans `user_settings.json` change
+     * (echelles HUD, visibilite, controles, graphiques inclus VFX / salve, etc.), afin que
+     * l'overlay ou un autre module declenche une sauvegarde disque. Remplace tout callback
+     * precedemment enregistre ; passer une fonction vide pour desinscrire le comportement.
+     *
+     * @param callback Fonction sans argument invoque apres application d'un reglage persistant.
+     */
+    void setOnUserSettingsChanged(VoidCallback callback);
+
 private:
     /**
      * @brief Sous-onglets internes de la fenetre.
@@ -325,15 +416,6 @@ private:
         CONTROLS = 1,  /**< Sous-onglet controles. */
         GRAPHICS = 2,  /**< Sous-onglet graphiques. */
         SOUNDS = 3     /**< Sous-onglet sons. */
-    };
-
-    /**
-     * @brief Presets "Nombre de boulets par salve" affiches dans l'onglet Graphiques.
-     */
-    enum class SalvoBulletPreset : int {
-        LOW = 0,    /**< 1 boulet. */
-        NORMAL = 1, /**< 5 boulets. */
-        HIGH = 2    /**< 10 boulets. */
     };
 
     /**
@@ -411,6 +493,10 @@ private:
     LanguageChangedCallback onLanguageChanged;   /**< Callback appelee lors d'un changement de langue. */
     HudScaleChangedCallback onHudScaleChanged;   /**< Callback appelee lors d'un changement de reduction HUD. */
     HudVisibilityChangedCallback onHudVisibilityChanged; /**< Callback appelee lors d'un changement de visibilite HUD. */
+    /**
+     * @brief Callback optionnelle : changement d'un reglage persistant (voir @ref setOnUserSettingsChanged).
+     */
+    VoidCallback onUserSettingsChanged;
 
     /**
      * @brief Charge la liste fixe des langues disponibles dans le widget.

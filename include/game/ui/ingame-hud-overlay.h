@@ -219,6 +219,11 @@ private:
     };
 
     /**
+     * @brief Doit preceder les widgets : evite toute lecture pendant construction partielle de l'overlay.
+     */
+    bool suppressUserSettingsSave = false;
+
+    /**
      * @brief Overlay de l'UI gameplay.
      */
     SectorCoordinateOverlay sectorCoordinateOverlay; /**< Overlay texte du secteur courant. */
@@ -266,9 +271,18 @@ private:
     SDL_FRect hudConfiguratorPanelDragStartRect;           /**< Rect panneau memorise au debut du drag. */
 
     /**
-     * @brief Pile de rendu des fenetres flottantes (bas -> haut).
+     * @brief Ordre de mise a jour et de dessin des fenetres flottantes (fond -> premier plan).
+     *
+     * Chaque entree est une @ref WindowLayer. Le premier element est traite le plus tot
+     * dans les boucles d'@c update / @c draw ; le dernier correspond a la fenetre la plus
+     * au-dessus (empilement visuel). Les tests de hit souris parcourent la liste en sens
+     * inverse pour privilegier la fenetre du dessus.
+     *
+     * L'ordre est reinitialise a la valeur par defaut dans @ref load ; @ref bringWindowToFront
+     * fait tourner une couche vers la fin du conteneur. Ce classement n'est pas actuellement
+     * serialise dans le fichier utilisateur (seules echelles, visibilites, offsets, etc. le sont).
      */
-    std::vector<WindowLayer> windowDrawOrder; /**< Ordre de rendu de bas vers haut. */
+    std::vector<WindowLayer> windowDrawOrder;
     MinimapTooltip hoveredMinimapTooltip;     /**< Tooltip minimap actuellement survole. */
     float hoveredMinimapTooltipMouseX;        /**< Position X souris pour tooltip minimap. */
     float hoveredMinimapTooltipMouseY;        /**< Position Y souris pour tooltip minimap. */
@@ -419,6 +433,33 @@ private:
      * @brief Reinitialise toutes les positions configurables du HUD.
      */
     void resetAllHudConfiguratorPositions(void);
+
+    /**
+     * @brief Lit `settings/user_settings.json` depuis le stockage utilisateur RC2D/SDL.
+     *
+     * Attend que le stockage utilisateur soit pret (`rc2d_storage_user`). Si le fichier
+     * est absent ou vide, cree le repertoire `settings` et ecrit un JSON par defaut
+     * (l'ecriture force transient @ref suppressUserSettingsSave a false le temps du flush).
+     *
+     * Applique au widget des parametres et aux widgets HUD concernees : echelles, visibilites,
+     * offsets des blocs configurables, decalage du panneau du configurateur, liaisons clavier,
+     * options graphiques (fond des coordonnees, fog of war, sillages, VFX des autres joueurs,
+     * preset de salve), etc. Silencieux si fichier invalide, trop gros, ou parse JSON en echec.
+     */
+    void loadUserSettingsFromDisk(void);
+
+    /**
+     * @brief Ecrit l'etat courant des reglages persistants dans `settings/user_settings.json`.
+     *
+     * Ne fait rien si @ref suppressUserSettingsSave est true (chargement ou operations groupes)
+     * ou si le stockage utilisateur n'est pas pret. Sinon serialise une version de schema,
+     * le bloc HUD (echelles, visibilites, offsets, panneau configurateur), les controles
+     * (vitesse de defilement camera, scancodes) et le bloc graphique du @ref GameSettingsWidget.
+     *
+     * @note Appeler depuis les callbacks du widget parametres ou apres modification locale
+     *       des donnees a persister ; la fonction alloue et libere le JSON via cJSON.
+     */
+    void saveUserSettingsToDisk(void);
 
     bool keepDefaultCursorAfterClose;       /**< Suspension temporaire du hover apres fermeture. */
     float keepDefaultCursorMouseX;          /**< X de reference au moment de la fermeture. */

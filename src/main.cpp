@@ -75,7 +75,7 @@ const RC2D_EngineConfig* rc2d_engine_setup(int argc, char* argv[])
 #endif
     config->textureScaleMode = RC2D_TEXTURE_SCALE_LINEAR;
     config->appInfo->name = "SeaTyrants";
-    config->appInfo->organization = "Crzgames";
+    config->appInfo->organization = "CrzGames";
     config->appInfo->version = "1.0.0";
     config->appInfo->identifier = "com.crzgames.seatyrants";
 

@@ -2,8 +2,32 @@
 
 #include "core/context.h"
 
+#include <RC2D/RC2D_memory.h>
+#include <RC2D/RC2D_storage.h>
+
+#include <SDL3/SDL.h>
+#include <cJSON.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <limits>
+
+static constexpr const char* kUserSettingsPath = "settings/user_settings.json";
+static constexpr Uint64 kMaxUserSettingsBytes = 512ULL * 1024ULL;
+
+static bool waitRc2dUserStorageReady(void)
+{
+    for (int spin = 0; spin < 4000; ++spin)
+    {
+        if (rc2d_storage_userReady())
+        {
+            return true;
+        }
+        SDL_Delay(1);
+    }
+    return rc2d_storage_userReady();
+}
 
 static constexpr float kHudTooltipOffsetX = 14.0f;
 static constexpr float kHudTooltipOffsetY = 18.0f;
@@ -474,7 +498,16 @@ IngameHudOverlay::IngameHudOverlay(void)
       hudConfiguratorPanelOffset{0.0f, 0.0f},
       hudConfiguratorPanelDragStartOffset{0.0f, 0.0f},
       hudConfiguratorPanelDragStartRect{0.0f, 0.0f, 0.0f, 0.0f},
-      windowDrawOrder{},
+      windowDrawOrder{
+          WindowLayer::CHAT,
+          WindowLayer::ESPION,
+          WindowLayer::MONEY,
+          WindowLayer::PARAMS_MINIMAP,
+          WindowLayer::GAME_SETTINGS,
+          WindowLayer::ANNOUNCEMENTS,
+          WindowLayer::LOG_BOOK,
+          WindowLayer::MARKETS_AND_BAZAR,
+          WindowLayer::ACCOUNT_MANAGEMENT},
       hoveredMinimapTooltip(MinimapTooltip::NONE),
       hoveredMinimapTooltipMouseX(0.0f),
       hoveredMinimapTooltipMouseY(0.0f),
@@ -500,15 +533,14 @@ IngameHudOverlay::~IngameHudOverlay(void)
 
 void IngameHudOverlay::bringWindowToFront(WindowLayer layer)
 {
-    const auto it = std::find(this->windowDrawOrder.begin(), this->windowDrawOrder.end(), layer);
-    if (it == this->windowDrawOrder.end())
+    const auto begin = this->windowDrawOrder.begin();
+    const auto end = this->windowDrawOrder.end();
+    const auto it = std::find(begin, end, layer);
+    if (it == end)
     {
         return;
     }
-
-    const WindowLayer target = *it;
-    this->windowDrawOrder.erase(it);
-    this->windowDrawOrder.push_back(target);
+    std::rotate(it, it + 1, end);
 }
 
 bool IngameHudOverlay::isWindowLayerVisible(WindowLayer layer) const
@@ -716,8 +748,13 @@ void IngameHudOverlay::updateHudConfigurator(float mouseX, float mouseY)
 
     if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
     {
+        const bool endedDrag = this->hudConfiguratorDragging || this->hudConfiguratorPanelDragging;
         this->hudConfiguratorDragging = false;
         this->hudConfiguratorPanelDragging = false;
+        if (endedDrag && !this->suppressUserSettingsSave)
+        {
+            this->saveUserSettingsToDisk();
+        }
         return;
     }
 
@@ -1043,6 +1080,11 @@ void IngameHudOverlay::setHudWidgetPositionOffset(GameSettingsWidget::HudScaleTa
         default:
             break;
     }
+
+    if (!this->suppressUserSettingsSave)
+    {
+        this->saveUserSettingsToDisk();
+    }
 }
 
 void IngameHudOverlay::resetHudWidgetPositionOffset(GameSettingsWidget::HudScaleTarget target)
@@ -1070,13 +1112,25 @@ void IngameHudOverlay::resetHudWidgetPositionOffset(GameSettingsWidget::HudScale
         default:
             break;
     }
+
+    if (!this->suppressUserSettingsSave)
+    {
+        this->saveUserSettingsToDisk();
+    }
 }
 
 void IngameHudOverlay::resetAllHudConfiguratorPositions(void)
 {
+    const bool prevSuppress = this->suppressUserSettingsSave;
+    this->suppressUserSettingsSave = true;
     for (const GameSettingsWidget::HudScaleTarget target : kHudConfiguratorTargets)
     {
         this->resetHudWidgetPositionOffset(target);
+    }
+    this->suppressUserSettingsSave = prevSuppress;
+    if (!this->suppressUserSettingsSave)
+    {
+        this->saveUserSettingsToDisk();
     }
 }
 
@@ -1193,8 +1247,417 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     this->prevAccountManagementVisible = accountManagementVisible;
 }
 
+void IngameHudOverlay::saveUserSettingsToDisk(void)
+{
+    if (this->suppressUserSettingsSave)
+    {
+        return;
+    }
+    if (!waitRc2dUserStorageReady())
+    {
+        return;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (root == nullptr)
+    {
+        return;
+    }
+    cJSON_AddNumberToObject(root, "version", 1);
+
+    cJSON* hud = cJSON_AddObjectToObject(root, "hud");
+    cJSON* scales = cJSON_AddObjectToObject(hud, "scale");
+    cJSON* visible = cJSON_AddObjectToObject(hud, "visible");
+    cJSON* offsets = cJSON_AddObjectToObject(hud, "offset");
+    cJSON* panel = cJSON_AddObjectToObject(hud, "configuratorPanelOffset");
+    cJSON_AddNumberToObject(panel, "x", this->hudConfiguratorPanelOffset.x);
+    cJSON_AddNumberToObject(panel, "y", this->hudConfiguratorPanelOffset.y);
+
+    auto addHudKey = [&](GameSettingsWidget::HudScaleTarget tgt, const char* key)
+    {
+        cJSON_AddNumberToObject(scales, key, this->gameSettingsWidget.getHudScaleValue(tgt));
+        cJSON_AddBoolToObject(visible, key, this->gameSettingsWidget.getHudVisibilityValue(tgt) ? 1 : 0);
+        const SDL_FPoint off = this->getHudWidgetPositionOffset(tgt);
+        cJSON* offObj = cJSON_AddObjectToObject(offsets, key);
+        cJSON_AddNumberToObject(offObj, "x", off.x);
+        cJSON_AddNumberToObject(offObj, "y", off.y);
+    };
+
+    addHudKey(GameSettingsWidget::HudScaleTarget::MINIMAP, "MINIMAP");
+    addHudKey(GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR, "EXPERIENCE_BAR");
+    addHudKey(GameSettingsWidget::HudScaleTarget::HP_BAR, "HP_BAR");
+    addHudKey(GameSettingsWidget::HudScaleTarget::MAP_ZOOM, "MAP_ZOOM");
+    addHudKey(GameSettingsWidget::HudScaleTarget::CENTER_SHIP, "CENTER_SHIP");
+    addHudKey(GameSettingsWidget::HudScaleTarget::ACTION_BAR, "ACTION_BAR");
+
+    cJSON* controls = cJSON_AddObjectToObject(root, "controls");
+    cJSON_AddNumberToObject(controls, "cameraScrollSpeedSectors", this->gameSettingsWidget.getCameraScrollSpeedSectors());
+    cJSON* bindings = cJSON_AddObjectToObject(controls, "bindings");
+
+    auto addBind = [&](GameSettingsWidget::ControlAction action, const char* key)
+    {
+        cJSON_AddNumberToObject(bindings, key, static_cast<int>(this->gameSettingsWidget.getControlActionScancode(action)));
+    };
+
+    addBind(GameSettingsWidget::ControlAction::CAMERA_MOVE_UP, "CAMERA_MOVE_UP");
+    addBind(GameSettingsWidget::ControlAction::CAMERA_MOVE_DOWN, "CAMERA_MOVE_DOWN");
+    addBind(GameSettingsWidget::ControlAction::CAMERA_MOVE_LEFT, "CAMERA_MOVE_LEFT");
+    addBind(GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT, "CAMERA_MOVE_RIGHT");
+    addBind(GameSettingsWidget::ControlAction::CENTER_CAMERA_ON_SHIP, "CENTER_CAMERA_ON_SHIP");
+    addBind(GameSettingsWidget::ControlAction::TOOLBAR_ATTACK, "TOOLBAR_ATTACK");
+    addBind(GameSettingsWidget::ControlAction::TOOLBAR_CANCEL_ATTACK, "TOOLBAR_CANCEL_ATTACK");
+    addBind(GameSettingsWidget::ControlAction::TOOLBAR_BOARDING, "TOOLBAR_BOARDING");
+    addBind(GameSettingsWidget::ControlAction::TOOLBAR_REPAIR, "TOOLBAR_REPAIR");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_1, "SHORTCUT_1");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_2, "SHORTCUT_2");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_3, "SHORTCUT_3");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_4, "SHORTCUT_4");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_5, "SHORTCUT_5");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_6, "SHORTCUT_6");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_7, "SHORTCUT_7");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_8, "SHORTCUT_8");
+    addBind(GameSettingsWidget::ControlAction::SHORTCUT_9, "SHORTCUT_9");
+    addBind(GameSettingsWidget::ControlAction::JUMP_MAP, "JUMP_MAP");
+    addBind(GameSettingsWidget::ControlAction::FORCE_CLICKED_POSITION_MOVE, "FORCE_CLICKED_POSITION_MOVE");
+    addBind(GameSettingsWidget::ControlAction::TOGGLE_MINIMAP, "TOGGLE_MINIMAP");
+
+    cJSON* graphics = cJSON_AddObjectToObject(root, "graphics");
+    cJSON_AddBoolToObject(graphics, "hideCoordinateBackground", this->gameSettingsWidget.getHideCoordinateBackground() ? 1 : 0);
+    cJSON_AddBoolToObject(graphics, "fogOfWarEnabled", this->gameSettingsWidget.getFogOfWarEnabled() ? 1 : 0);
+    cJSON_AddBoolToObject(graphics, "shipWakeTrailsEnabled", this->gameSettingsWidget.getShipWakeTrailsEnabled() ? 1 : 0);
+    cJSON_AddBoolToObject(graphics, "hideOtherPlayersVfx", this->gameSettingsWidget.getHideOtherPlayersVfxEnabled() ? 1 : 0);
+    cJSON_AddNumberToObject(graphics, "salvoBulletPreset", static_cast<int>(this->gameSettingsWidget.getSalvoBulletPreset()));
+
+    char* rendered = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (rendered == nullptr)
+    {
+        return;
+    }
+
+    rc2d_storage_userMkdir("settings");
+    (void)rc2d_storage_userWriteFile(
+        kUserSettingsPath,
+        rendered,
+        static_cast<Uint64>(std::strlen(rendered)));
+    cJSON_free(rendered);
+}
+
+void IngameHudOverlay::loadUserSettingsFromDisk(void)
+{
+    if (!waitRc2dUserStorageReady())
+    {
+        return;
+    }
+
+    Uint64 settingsLen = 0;
+    if (!rc2d_storage_userGetFileSize(kUserSettingsPath, &settingsLen) || settingsLen == 0)
+    {
+        rc2d_storage_userMkdir("settings");
+        const bool prevSuppress = this->suppressUserSettingsSave;
+        this->suppressUserSettingsSave = false;
+        this->saveUserSettingsToDisk();
+        this->suppressUserSettingsSave = prevSuppress;
+        return;
+    }
+
+    if (settingsLen > kMaxUserSettingsBytes ||
+        settingsLen > static_cast<Uint64>((std::numeric_limits<std::size_t>::max)()))
+    {
+        return;
+    }
+
+    void* fileData = nullptr;
+    Uint64 fileLen = 0;
+    if (!rc2d_storage_userReadFile(kUserSettingsPath, &fileData, &fileLen) || fileData == nullptr || fileLen == 0)
+    {
+        RC2D_safe_free(fileData);
+        return;
+    }
+
+    if (fileLen > kMaxUserSettingsBytes)
+    {
+        RC2D_safe_free(fileData);
+        return;
+    }
+
+    cJSON* root = cJSON_ParseWithLength(static_cast<const char*>(fileData), static_cast<std::size_t>(fileLen));
+    RC2D_safe_free(fileData);
+    if (root == nullptr)
+    {
+        return;
+    }
+
+    const cJSON* hud = cJSON_GetObjectItemCaseSensitive(root, "hud");
+    if (cJSON_IsObject(hud))
+    {
+        const cJSON* scales = cJSON_GetObjectItemCaseSensitive(hud, "scale");
+        const cJSON* visJson = cJSON_GetObjectItemCaseSensitive(hud, "visible");
+        const cJSON* offsets = cJSON_GetObjectItemCaseSensitive(hud, "offset");
+        const cJSON* panel = cJSON_GetObjectItemCaseSensitive(hud, "configuratorPanelOffset");
+
+        for (std::size_t i = 0; i < static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT); ++i)
+        {
+            const auto target = static_cast<GameSettingsWidget::HudScaleTarget>(i);
+            const char* key = nullptr;
+            switch (target)
+            {
+                case GameSettingsWidget::HudScaleTarget::MINIMAP:
+                    key = "MINIMAP";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR:
+                    key = "EXPERIENCE_BAR";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::HP_BAR:
+                    key = "HP_BAR";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::MAP_ZOOM:
+                    key = "MAP_ZOOM";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::CENTER_SHIP:
+                    key = "CENTER_SHIP";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::ACTION_BAR:
+                    key = "ACTION_BAR";
+                    break;
+                case GameSettingsWidget::HudScaleTarget::COUNT:
+                default:
+                    continue;
+            }
+
+            if (cJSON_IsObject(scales))
+            {
+                const cJSON* v = cJSON_GetObjectItemCaseSensitive(scales, key);
+                if (cJSON_IsNumber(v))
+                {
+                    const float scale = static_cast<float>(v->valuedouble);
+                    this->gameSettingsWidget.setHudScaleValue(target, scale);
+                    switch (target)
+                    {
+                        case GameSettingsWidget::HudScaleTarget::MINIMAP:
+                            this->minimapWidget.setUiScale(scale);
+                            break;
+                        case GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR:
+                            this->experienceBarWidget.setUiScale(scale);
+                            break;
+                        case GameSettingsWidget::HudScaleTarget::HP_BAR:
+                            this->hpBarWidget.setUiScale(scale);
+                            break;
+                        case GameSettingsWidget::HudScaleTarget::MAP_ZOOM:
+                            this->zoomWidget.setUiScale(scale);
+                            break;
+                        case GameSettingsWidget::HudScaleTarget::CENTER_SHIP:
+                            this->centerShipButtonWidget.setUiScale(scale);
+                            break;
+                        case GameSettingsWidget::HudScaleTarget::ACTION_BAR:
+                            this->barreActionWidget.setUiScale(scale);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+
+            if (cJSON_IsObject(visJson))
+            {
+                const cJSON* v = cJSON_GetObjectItemCaseSensitive(visJson, key);
+                if (cJSON_IsBool(v))
+                {
+                    const bool vis = cJSON_IsTrue(v);
+                    this->gameSettingsWidget.setHudVisibilityValue(target, vis);
+                    const std::size_t idx = static_cast<std::size_t>(target);
+                    if (idx < this->hudWidgetVisibility.size())
+                    {
+                        this->hudWidgetVisibility[idx] = vis;
+                    }
+                }
+            }
+
+            if (cJSON_IsObject(offsets))
+            {
+                const cJSON* off = cJSON_GetObjectItemCaseSensitive(offsets, key);
+                if (cJSON_IsObject(off))
+                {
+                    const cJSON* ox = cJSON_GetObjectItemCaseSensitive(off, "x");
+                    const cJSON* oy = cJSON_GetObjectItemCaseSensitive(off, "y");
+                    if (cJSON_IsNumber(ox) && cJSON_IsNumber(oy))
+                    {
+                        this->setHudWidgetPositionOffset(
+                            target,
+                            SDL_FPoint{static_cast<float>(ox->valuedouble), static_cast<float>(oy->valuedouble)});
+                    }
+                }
+            }
+        }
+
+        if (cJSON_IsObject(panel))
+        {
+            const cJSON* px = cJSON_GetObjectItemCaseSensitive(panel, "x");
+            const cJSON* py = cJSON_GetObjectItemCaseSensitive(panel, "y");
+            if (cJSON_IsNumber(px) && cJSON_IsNumber(py))
+            {
+                this->hudConfiguratorPanelOffset = SDL_FPoint{
+                    static_cast<float>(px->valuedouble),
+                    static_cast<float>(py->valuedouble)};
+            }
+        }
+    }
+
+    const cJSON* controls = cJSON_GetObjectItemCaseSensitive(root, "controls");
+    if (cJSON_IsObject(controls))
+    {
+        const cJSON* cam = cJSON_GetObjectItemCaseSensitive(controls, "cameraScrollSpeedSectors");
+        if (cJSON_IsNumber(cam))
+        {
+            this->gameSettingsWidget.setCameraScrollSpeedSectors(static_cast<float>(cam->valuedouble));
+        }
+
+        const cJSON* binds = cJSON_GetObjectItemCaseSensitive(controls, "bindings");
+        if (cJSON_IsObject(binds))
+        {
+            for (std::size_t i = 0; i < static_cast<std::size_t>(GameSettingsWidget::ControlAction::COUNT); ++i)
+            {
+                const auto action = static_cast<GameSettingsWidget::ControlAction>(i);
+                const char* bk = nullptr;
+                switch (action)
+                {
+                    case GameSettingsWidget::ControlAction::CAMERA_MOVE_UP:
+                        bk = "CAMERA_MOVE_UP";
+                        break;
+                    case GameSettingsWidget::ControlAction::CAMERA_MOVE_DOWN:
+                        bk = "CAMERA_MOVE_DOWN";
+                        break;
+                    case GameSettingsWidget::ControlAction::CAMERA_MOVE_LEFT:
+                        bk = "CAMERA_MOVE_LEFT";
+                        break;
+                    case GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT:
+                        bk = "CAMERA_MOVE_RIGHT";
+                        break;
+                    case GameSettingsWidget::ControlAction::CENTER_CAMERA_ON_SHIP:
+                        bk = "CENTER_CAMERA_ON_SHIP";
+                        break;
+                    case GameSettingsWidget::ControlAction::TOOLBAR_ATTACK:
+                        bk = "TOOLBAR_ATTACK";
+                        break;
+                    case GameSettingsWidget::ControlAction::TOOLBAR_CANCEL_ATTACK:
+                        bk = "TOOLBAR_CANCEL_ATTACK";
+                        break;
+                    case GameSettingsWidget::ControlAction::TOOLBAR_BOARDING:
+                        bk = "TOOLBAR_BOARDING";
+                        break;
+                    case GameSettingsWidget::ControlAction::TOOLBAR_REPAIR:
+                        bk = "TOOLBAR_REPAIR";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_1:
+                        bk = "SHORTCUT_1";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_2:
+                        bk = "SHORTCUT_2";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_3:
+                        bk = "SHORTCUT_3";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_4:
+                        bk = "SHORTCUT_4";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_5:
+                        bk = "SHORTCUT_5";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_6:
+                        bk = "SHORTCUT_6";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_7:
+                        bk = "SHORTCUT_7";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_8:
+                        bk = "SHORTCUT_8";
+                        break;
+                    case GameSettingsWidget::ControlAction::SHORTCUT_9:
+                        bk = "SHORTCUT_9";
+                        break;
+                    case GameSettingsWidget::ControlAction::JUMP_MAP:
+                        bk = "JUMP_MAP";
+                        break;
+                    case GameSettingsWidget::ControlAction::FORCE_CLICKED_POSITION_MOVE:
+                        bk = "FORCE_CLICKED_POSITION_MOVE";
+                        break;
+                    case GameSettingsWidget::ControlAction::TOGGLE_MINIMAP:
+                        bk = "TOGGLE_MINIMAP";
+                        break;
+                    case GameSettingsWidget::ControlAction::COUNT:
+                    default:
+                        continue;
+                }
+
+                const cJSON* bv = cJSON_GetObjectItemCaseSensitive(binds, bk);
+                if (cJSON_IsNumber(bv))
+                {
+                    const int sc = bv->valueint;
+                    if (sc >= 0 && sc <= 512)
+                    {
+                        this->gameSettingsWidget.setControlActionScancode(action, static_cast<SDL_Scancode>(sc));
+                    }
+                }
+            }
+        }
+    }
+
+    const cJSON* graphics = cJSON_GetObjectItemCaseSensitive(root, "graphics");
+    if (cJSON_IsObject(graphics))
+    {
+        const cJSON* hideCoord = cJSON_GetObjectItemCaseSensitive(graphics, "hideCoordinateBackground");
+        if (cJSON_IsBool(hideCoord))
+        {
+            this->gameSettingsWidget.setHideCoordinateBackground(cJSON_IsTrue(hideCoord));
+        }
+
+        const cJSON* fog = cJSON_GetObjectItemCaseSensitive(graphics, "fogOfWarEnabled");
+        if (cJSON_IsBool(fog))
+        {
+            this->gameSettingsWidget.setFogOfWarEnabled(cJSON_IsTrue(fog));
+        }
+
+        const cJSON* wake = cJSON_GetObjectItemCaseSensitive(graphics, "shipWakeTrailsEnabled");
+        if (cJSON_IsBool(wake))
+        {
+            this->gameSettingsWidget.setShipWakeTrailsEnabled(cJSON_IsTrue(wake));
+        }
+
+        const cJSON* hideVfx = cJSON_GetObjectItemCaseSensitive(graphics, "hideOtherPlayersVfx");
+        if (cJSON_IsBool(hideVfx))
+        {
+            this->gameSettingsWidget.setHideOtherPlayersVfxEnabled(cJSON_IsTrue(hideVfx));
+        }
+
+        const cJSON* preset = cJSON_GetObjectItemCaseSensitive(graphics, "salvoBulletPreset");
+        if (cJSON_IsNumber(preset))
+        {
+            const int p = preset->valueint;
+            if (p >= 0 && p <= 2)
+            {
+                this->gameSettingsWidget.setSalvoBulletPreset(static_cast<GameSettingsWidget::SalvoBulletPreset>(p));
+            }
+        }
+    }
+
+    cJSON_Delete(root);
+}
+
 void IngameHudOverlay::load(void)
 {
+    this->suppressUserSettingsSave = true;
+
+    this->windowDrawOrder = {
+        WindowLayer::CHAT,
+        WindowLayer::ESPION,
+        WindowLayer::MONEY,
+        WindowLayer::PARAMS_MINIMAP,
+        WindowLayer::GAME_SETTINGS,
+        WindowLayer::ANNOUNCEMENTS,
+        WindowLayer::LOG_BOOK,
+        WindowLayer::MARKETS_AND_BAZAR,
+        WindowLayer::ACCOUNT_MANAGEMENT};
+
     this->backgroundWidget.load();
     this->topBarMenuWidget.load();
     this->scrollBarOverlay.load();
@@ -1257,6 +1720,11 @@ void IngameHudOverlay::load(void)
                 default:
                     break;
             }
+
+            if (!this->suppressUserSettingsSave)
+            {
+                this->saveUserSettingsToDisk();
+            }
         });
     this->gameSettingsWidget.setOnHudVisibilityChanged(
         [this](GameSettingsWidget::HudScaleTarget target, bool visible)
@@ -1268,6 +1736,10 @@ void IngameHudOverlay::load(void)
             }
 
             this->hudWidgetVisibility[index] = visible;
+            if (!this->suppressUserSettingsSave)
+            {
+                this->saveUserSettingsToDisk();
+            }
         });
     this->gameSettingsWidget.setOnStartUiConfiguratorRequested(
         [this]()
@@ -1281,17 +1753,18 @@ void IngameHudOverlay::load(void)
 
     this->marketsAndBazarWidget.openBasicMarket();
 
-    this->windowDrawOrder = {
-        WindowLayer::CHAT,
-        WindowLayer::ESPION,
-        WindowLayer::MONEY,
-        WindowLayer::PARAMS_MINIMAP,
-        WindowLayer::GAME_SETTINGS,
-        WindowLayer::ANNOUNCEMENTS,
-        WindowLayer::LOG_BOOK,
-        WindowLayer::MARKETS_AND_BAZAR,
-        WindowLayer::ACCOUNT_MANAGEMENT
-    };
+    this->gameSettingsWidget.setOnUserSettingsChanged(
+        [this]()
+        {
+            if (!this->suppressUserSettingsSave)
+            {
+                this->saveUserSettingsToDisk();
+            }
+        });
+
+    this->loadUserSettingsFromDisk();
+    this->suppressUserSettingsSave = false;
+
     this->prevChatVisible = this->chatWidget.isVisible();
     this->prevEspionVisible = this->espionSearchPlayerWidget.isVisible();
     this->prevMoneyVisible = this->moneyWidget.isVisible();
