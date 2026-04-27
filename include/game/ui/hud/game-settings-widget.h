@@ -379,6 +379,7 @@ private:
     ControlAction conflictingControlAction;      /**< Action deja associee a la touche demandee. */
     SDL_Scancode pendingConflictScancode;        /**< Touche demandee pendant la confirmation de conflit. */
     bool graphicsWindowModeDropdownOpen;         /**< True si le selecteur de mode fenetre est ouvert. */
+    bool graphicsPresentationModeDropdownOpen;   /**< True si le selecteur letterbox / overscan est ouvert. */
     bool graphicsHideCoordinateBackground;       /**< True si les barres de fond des coordonnees sont masquees. */
 
     RedeemCodeCallback onRedeemCodeRequested;    /**< Callback appelee lors du clic sur "Activer". */
@@ -547,4 +548,14 @@ private:
      * @brief Applique un mode fenetre via RC2D.
      */
     void applyGraphicsWindowMode(GraphicsWindowMode mode);
+
+    /**
+     * @brief Retourne le mode de presentation logique RC2D courant.
+     */
+    RC2D_LogicalPresentationMode getGraphicsPresentationMode(void) const;
+
+    /**
+     * @brief Applique le mode de presentation logique RC2D.
+     */
+    void applyGraphicsPresentationMode(RC2D_LogicalPresentationMode mode);
 };

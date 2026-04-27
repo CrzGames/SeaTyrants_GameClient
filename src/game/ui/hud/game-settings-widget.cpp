@@ -49,7 +49,7 @@ static constexpr float kControlsThumbWidth = 14.0f;
 static constexpr float kControlsThumbHeight = 22.0f;
 static constexpr float kControlsWheelStep = 52.0f;
 static constexpr float kGraphicsSectionGeneralHeight = 112.0f;
-static constexpr float kGraphicsSectionWindowHeight = 236.0f;
+static constexpr float kGraphicsSectionWindowHeight = 280.0f;
 static constexpr float kGraphicsSectionInterfaceHeight = 112.0f;
 static constexpr float kGraphicsOptionRowHeight = 34.0f;
 static constexpr float kGraphicsCheckboxSize = 24.0f;
@@ -133,6 +133,10 @@ struct GameSettingsLayout {
     SDL_FRect graphicsWindowModeButton;
     SDL_FRect graphicsWindowModeDropdown;
     std::array<SDL_FRect, 2> graphicsWindowModeOptions;
+    SDL_FRect graphicsPresentationModeRow;
+    SDL_FRect graphicsPresentationModeButton;
+    SDL_FRect graphicsPresentationModeDropdown;
+    std::array<SDL_FRect, 2> graphicsPresentationModeOptions;
     SDL_FRect graphicsMonitorFpsRow;
     SDL_FRect graphicsMonitorFpsBox;
     SDL_FRect graphicsCursorLockRow;
@@ -270,6 +274,18 @@ static const char* getGraphicsWindowModeLabel(GameSettingsWidget::GraphicsWindow
         case GameSettingsWidget::GraphicsWindowMode::MAXIMIZED_WINDOW:
         default:
             return "Maximized Window";
+    }
+}
+
+static const char* getGraphicsPresentationModeLabel(RC2D_LogicalPresentationMode mode)
+{
+    switch (mode)
+    {
+        case RC2D_LOGICAL_PRESENTATION_LETTERBOX:
+            return "Letterbox";
+        case RC2D_LOGICAL_PRESENTATION_OVERSCAN:
+        default:
+            return "Overscan";
     }
 }
 
@@ -1114,9 +1130,36 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
             kGraphicsOptionRowHeight
         };
     }
+    layout.graphicsPresentationModeRow = SDL_FRect{
+        layout.graphicsWindowPanel.x + 16.0f,
+        layout.graphicsWindowModeRow.y + layout.graphicsWindowModeRow.h + 14.0f,
+        layout.graphicsWindowPanel.w - 32.0f,
+        kGraphicsSelectHeight
+    };
+    layout.graphicsPresentationModeButton = SDL_FRect{
+        layout.graphicsPresentationModeRow.x + layout.graphicsPresentationModeRow.w - kGraphicsSelectWidth,
+        layout.graphicsPresentationModeRow.y,
+        kGraphicsSelectWidth,
+        kGraphicsSelectHeight
+    };
+    layout.graphicsPresentationModeDropdown = SDL_FRect{
+        layout.graphicsPresentationModeButton.x,
+        layout.graphicsPresentationModeButton.y + layout.graphicsPresentationModeButton.h + 4.0f,
+        layout.graphicsPresentationModeButton.w,
+        8.0f + (2.0f * kGraphicsOptionRowHeight)
+    };
+    for (std::size_t index = 0; index < layout.graphicsPresentationModeOptions.size(); ++index)
+    {
+        layout.graphicsPresentationModeOptions[index] = SDL_FRect{
+            layout.graphicsPresentationModeDropdown.x + 4.0f,
+            layout.graphicsPresentationModeDropdown.y + 4.0f + (static_cast<float>(index) * kGraphicsOptionRowHeight),
+            layout.graphicsPresentationModeDropdown.w - 8.0f,
+            kGraphicsOptionRowHeight
+        };
+    }
     layout.graphicsMonitorFpsRow = SDL_FRect{
         layout.graphicsWindowPanel.x + 16.0f,
-        layout.graphicsWindowModeRow.y + layout.graphicsWindowModeRow.h + 18.0f,
+        layout.graphicsPresentationModeRow.y + layout.graphicsPresentationModeRow.h + 18.0f,
         layout.graphicsWindowPanel.w - 32.0f,
         kGraphicsSelectHeight
     };
@@ -1210,6 +1253,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       conflictingControlAction(ControlAction::CAMERA_MOVE_UP),
       pendingConflictScancode(SDL_SCANCODE_UNKNOWN),
       graphicsWindowModeDropdownOpen(false),
+      graphicsPresentationModeDropdownOpen(false),
       graphicsHideCoordinateBackground(false),
       onRedeemCodeRequested{},
       onStartUiConfiguratorRequested{},
@@ -1265,6 +1309,7 @@ void GameSettingsWidget::load(void)
     this->conflictingControlAction = ControlAction::CAMERA_MOVE_UP;
     this->pendingConflictScancode = SDL_SCANCODE_UNKNOWN;
     this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsPresentationModeDropdownOpen = false;
     this->graphicsHideCoordinateBackground = false;
     this->cameraScrollSpeedSectors = snapCameraScrollSpeed(this->cameraScrollSpeedSectors);
     this->hudVisibilityValues.fill(true);
@@ -1283,6 +1328,7 @@ void GameSettingsWidget::unload(void)
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
     this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsPresentationModeDropdownOpen = false;
     this->controlIcons.unload();
     ResetStorageImageRef(&this->checkboxValidIcon);
     ResetStorageImageRef(&this->arrowDownIcon);
@@ -1845,6 +1891,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
                         ? GraphicsWindowMode::MAXIMIZED_WINDOW
                         : GraphicsWindowMode::FULLSCREEN);
                 this->graphicsWindowModeDropdownOpen = false;
+                this->graphicsPresentationModeDropdownOpen = false;
                 return true;
             }
 
@@ -1859,10 +1906,40 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             }
         }
 
+        if (this->graphicsPresentationModeDropdownOpen)
+        {
+            for (std::size_t index = 0; index < layout.graphicsPresentationModeOptions.size(); ++index)
+            {
+                if (!isPointInRect(x, y, layout.graphicsPresentationModeOptions[index]))
+                {
+                    continue;
+                }
+
+                this->applyGraphicsPresentationMode(
+                    index == 0U
+                        ? RC2D_LOGICAL_PRESENTATION_OVERSCAN
+                        : RC2D_LOGICAL_PRESENTATION_LETTERBOX);
+                this->graphicsWindowModeDropdownOpen = false;
+                this->graphicsPresentationModeDropdownOpen = false;
+                return true;
+            }
+
+            if (isPointInRect(x, y, layout.graphicsPresentationModeDropdown))
+            {
+                return true;
+            }
+
+            if (!isPointInRect(x, y, layout.graphicsPresentationModeButton))
+            {
+                this->graphicsPresentationModeDropdownOpen = false;
+            }
+        }
+
         if (isPointInRect(x, y, layout.graphicsVsyncRow))
         {
             rc2d_window_setVSync(!rc2d_window_getVSync());
             this->graphicsWindowModeDropdownOpen = false;
+            this->graphicsPresentationModeDropdownOpen = false;
             return true;
         }
 
@@ -1870,6 +1947,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         {
             rc2d_window_setMouseGrabbed(!rc2d_window_isMouseGrabbed());
             this->graphicsWindowModeDropdownOpen = false;
+            this->graphicsPresentationModeDropdownOpen = false;
             return true;
         }
 
@@ -1877,12 +1955,21 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         {
             this->graphicsHideCoordinateBackground = !this->graphicsHideCoordinateBackground;
             this->graphicsWindowModeDropdownOpen = false;
+            this->graphicsPresentationModeDropdownOpen = false;
             return true;
         }
 
         if (isPointInRect(x, y, layout.graphicsWindowModeButton))
         {
             this->graphicsWindowModeDropdownOpen = !this->graphicsWindowModeDropdownOpen;
+            this->graphicsPresentationModeDropdownOpen = false;
+            return true;
+        }
+
+        if (isPointInRect(x, y, layout.graphicsPresentationModeButton))
+        {
+            this->graphicsPresentationModeDropdownOpen = !this->graphicsPresentationModeDropdownOpen;
+            this->graphicsWindowModeDropdownOpen = false;
             return true;
         }
     }
@@ -1895,6 +1982,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
         this->graphicsWindowModeDropdownOpen = false;
+        this->graphicsPresentationModeDropdownOpen = false;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
         this->redeemInputFocused = false;
@@ -2765,13 +2853,40 @@ void GameSettingsWidget::draw(void) const
             layout.graphicsWindowModeButton.x + 10.0f,
             kTextGold);
 
-        const SDL_FRect arrowRect = SDL_FRect{
+        const SDL_FRect windowModeArrowRect = SDL_FRect{
             layout.graphicsWindowModeButton.x + layout.graphicsWindowModeButton.w - 22.0f,
             layout.graphicsWindowModeButton.y + ((layout.graphicsWindowModeButton.h - 14.0f) * 0.5f),
             14.0f,
             14.0f
         };
-        drawImageFit(self->arrowDownIcon, arrowRect, 0.0f);
+        drawImageFit(self->arrowDownIcon, windowModeArrowRect, 0.0f);
+
+        drawLeftCenteredY(
+            &self->bodyFont,
+            "Mode d'affichage",
+            layout.graphicsPresentationModeRow,
+            layout.graphicsPresentationModeRow.x,
+            kTextBody);
+
+        const bool presentationModeHovered = isPointInRect(mouseX, mouseY, layout.graphicsPresentationModeButton);
+        rc2d_graphics_setColor(presentationModeHovered ? kButtonFillHover : kFieldFill);
+        rc2d_graphics_rectangle("fill", &layout.graphicsPresentationModeButton);
+        rc2d_graphics_setColor(presentationModeHovered ? kSliderThumbBorder : kGold);
+        rc2d_graphics_rectangle("line", &layout.graphicsPresentationModeButton);
+        drawLeftCenteredY(
+            &self->bodyFont,
+            getGraphicsPresentationModeLabel(self->getGraphicsPresentationMode()),
+            layout.graphicsPresentationModeButton,
+            layout.graphicsPresentationModeButton.x + 10.0f,
+            kTextGold);
+
+        const SDL_FRect presentationModeArrowRect = SDL_FRect{
+            layout.graphicsPresentationModeButton.x + layout.graphicsPresentationModeButton.w - 22.0f,
+            layout.graphicsPresentationModeButton.y + ((layout.graphicsPresentationModeButton.h - 14.0f) * 0.5f),
+            14.0f,
+            14.0f
+        };
+        drawImageFit(self->arrowDownIcon, presentationModeArrowRect, 0.0f);
 
         drawLeftCenteredY(
             &self->bodyFont,
@@ -2854,6 +2969,39 @@ void GameSettingsWidget::draw(void) const
                     getGraphicsWindowModeLabel(mode),
                     layout.graphicsWindowModeOptions[index],
                     layout.graphicsWindowModeOptions[index].x + 10.0f,
+                    selected ? kTextGold : kTextBody);
+            }
+        }
+
+        if (self->graphicsPresentationModeDropdownOpen)
+        {
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &layout.graphicsPresentationModeDropdown);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &layout.graphicsPresentationModeDropdown);
+
+            const RC2D_LogicalPresentationMode currentMode = self->getGraphicsPresentationMode();
+            for (std::size_t index = 0; index < layout.graphicsPresentationModeOptions.size(); ++index)
+            {
+                const RC2D_LogicalPresentationMode mode =
+                    index == 0U
+                        ? RC2D_LOGICAL_PRESENTATION_OVERSCAN
+                        : RC2D_LOGICAL_PRESENTATION_LETTERBOX;
+                const bool selected = mode == currentMode;
+                const bool hovered = isPointInRect(mouseX, mouseY, layout.graphicsPresentationModeOptions[index]);
+                if (selected || hovered)
+                {
+                    rc2d_graphics_setColor(selected ? kTabActive : kSelectionFill);
+                    rc2d_graphics_rectangle("fill", &layout.graphicsPresentationModeOptions[index]);
+                }
+
+                rc2d_graphics_setColor(kRowLine);
+                rc2d_graphics_rectangle("line", &layout.graphicsPresentationModeOptions[index]);
+                drawLeftCenteredY(
+                    &self->bodyFont,
+                    getGraphicsPresentationModeLabel(mode),
+                    layout.graphicsPresentationModeOptions[index],
+                    layout.graphicsPresentationModeOptions[index].x + 10.0f,
                     selected ? kTextGold : kTextBody);
             }
         }
@@ -3101,11 +3249,22 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
                 }
             }
         }
+        if (this->graphicsPresentationModeDropdownOpen)
+        {
+            for (const SDL_FRect& optionRect : layout.graphicsPresentationModeOptions)
+            {
+                if (isPointInRect(x, y, optionRect))
+                {
+                    return HudCursorType::POINTER;
+                }
+            }
+        }
 
         if (isPointInRect(x, y, layout.graphicsVsyncRow) ||
             isPointInRect(x, y, layout.graphicsCursorLockRow) ||
             isPointInRect(x, y, layout.graphicsHideCoordinateBackgroundRow) ||
-            isPointInRect(x, y, layout.graphicsWindowModeButton))
+            isPointInRect(x, y, layout.graphicsWindowModeButton) ||
+            isPointInRect(x, y, layout.graphicsPresentationModeButton))
         {
             return HudCursorType::POINTER;
         }
@@ -3133,6 +3292,7 @@ void GameSettingsWidget::clearFocus(void)
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
     this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsPresentationModeDropdownOpen = false;
     this->hoveredLanguageIndex = -1;
 }
 
@@ -3148,6 +3308,7 @@ void GameSettingsWidget::show(void)
     this->controlCaptureActive = false;
     this->controlConflictPending = false;
     this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsPresentationModeDropdownOpen = false;
     this->syncSelectedLanguageFromContext();
     this->scrollLanguageToSelection();
     this->clampControlsScroll();
@@ -3163,6 +3324,7 @@ void GameSettingsWidget::hide(void)
     this->cameraScrollSpeedDragging = false;
     this->controlCaptureActive = false;
     this->graphicsWindowModeDropdownOpen = false;
+    this->graphicsPresentationModeDropdownOpen = false;
     this->clearFocus();
 }
 
@@ -3703,4 +3865,24 @@ void GameSettingsWidget::applyGraphicsWindowMode(GraphicsWindowMode mode)
 
     rc2d_window_setFullscreen(false, RC2D_FULLSCREEN_NONE, true);
     rc2d_window_maximize();
+}
+
+RC2D_LogicalPresentationMode GameSettingsWidget::getGraphicsPresentationMode(void) const
+{
+    const RC2D_LogicalPresentationMode mode = rc2d_engine_getLogicalPresentationMode();
+    if (mode == RC2D_LOGICAL_PRESENTATION_LETTERBOX)
+    {
+        return RC2D_LOGICAL_PRESENTATION_LETTERBOX;
+    }
+
+    return RC2D_LOGICAL_PRESENTATION_OVERSCAN;
+}
+
+void GameSettingsWidget::applyGraphicsPresentationMode(RC2D_LogicalPresentationMode mode)
+{
+    const RC2D_LogicalPresentationMode appliedMode =
+        (mode == RC2D_LOGICAL_PRESENTATION_LETTERBOX)
+            ? RC2D_LOGICAL_PRESENTATION_LETTERBOX
+            : RC2D_LOGICAL_PRESENTATION_OVERSCAN;
+    (void)rc2d_engine_setLogicalPresentationMode(appliedMode);
 }
