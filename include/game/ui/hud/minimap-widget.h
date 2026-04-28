@@ -15,6 +15,15 @@ class Map;
  */
 class MinimapWidget {
 public:
+    /**
+     * @brief Tooltip specifique aux actions rattachees a la minimap.
+     */
+    enum class Tooltip : int {
+        NONE = 0,
+        ESPION = 1,
+        PARAMS_MINIMAP = 2
+    };
+
     MinimapWidget(void);
     ~MinimapWidget(void);
 

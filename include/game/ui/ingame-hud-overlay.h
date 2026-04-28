@@ -126,140 +126,59 @@ public:
     bool isBlockingGameplayKeyboardInput(void) const;
 
     /**
-     * @brief Publie une ligne d'annonce dans la fenetre "Announcements".
+     * @brief Retourne l'overlay texte du secteur courant.
      */
-    void publishAnnouncementRow(const std::string& rowText);
+    SectorCoordinateOverlay& getSectorCoordinateOverlay(void) { return this->sectorCoordinateOverlay; }
 
     /**
-     * @brief Publie un resultat de recherche dans la fenetre "Espion".
+     * @brief Retourne le marqueur de clic sur tuile.
      */
-    void publishEspionSearchResult(const std::string& resultText);
+    TileClickMarkerOverlay& getTileClickMarkerOverlay(void) { return this->tileClickMarkerOverlay; }
 
     /**
-     * @brief Publie le defi captcha recu du serveur dans la fenetre dediee.
-     * @param challengeFromServer Texte brut ; seuls les caracteres alphanumeriques sont affiches.
+     * @brief Retourne les barres de scroll monde.
      */
-    void publishCaptchaChallenge(const std::string& challengeFromServer);
+    ScrollBarOverlay& getScrollBarOverlay(void) { return this->scrollBarOverlay; }
 
     /**
-     * @brief Acces au widget captcha (callbacks @ref CaptchaWidget::setOnValidateRequested, etc.).
+     * @brief Retourne le fond UI gameplay.
      */
-    CaptchaWidget& getCaptchaWidget(void) { return this->captchaWidget; }
+    BackgroundWidget& getBackgroundWidget(void) { return this->backgroundWidget; }
 
     /**
-     * @brief Publie une ligne dans la fenetre "Journal de bord".
+     * @brief Retourne la barre de menu haute.
      */
-    void publishLogbookRow(const LogBookWidget::LogBookRow& row);
+    TopBarMenuWidget& getTopBarMenuWidget(void) { return this->topBarMenuWidget; }
 
     /**
-     * @brief Remplace les lignes de l'onglet Bazar.
+     * @brief Retourne la minimap.
      */
-    void setBazarRows(const std::vector<MarketsAndBazarWidget::BazarRow>& rows);
+    MinimapWidget& getMinimapWidget(void) { return this->minimapWidget; }
 
     /**
-     * @brief Remplace les lignes de l'onglet Marche noir.
+     * @brief Retourne le bouton espion ancre sur la minimap.
      */
-    void setBlackMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows);
+    MinimapEspionButtonWidget& getMinimapEspionButtonWidget(void) { return this->minimapEspionButtonWidget; }
 
     /**
-     * @brief Remplace les lignes de l'onglet Marche basique.
+     * @brief Retourne le bouton parametres ancre sur la minimap.
      */
-    void setBasicMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows);
+    MinimapParamsButtonWidget& getMinimapParamsButtonWidget(void) { return this->minimapParamsButtonWidget; }
 
     /**
-     * @brief Remplace les lignes de l'onglet Marche d'evenement.
+     * @brief Retourne la barre d'action.
      */
-    void setEventMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows);
+    BarreActionWidget& getBarreActionWidget(void) { return this->barreActionWidget; }
 
     /**
-     * @brief Retourne la fenetre de gestion du compte pour l'alimenter depuis le gameplay.
-     * @return Reference mutable vers le widget compte / apparence / navires.
+     * @brief Retourne le bouton de recentrage du navire.
      */
-    AccountManagementWidget& getAccountManagementWidget(void) { return this->accountManagementWidget; }
+    CenterShipButtonWidget& getCenterShipButtonWidget(void) { return this->centerShipButtonWidget; }
 
     /**
-     * @brief Alimente les lignes de stats canons (panneau "Valeurs equipees", categorie Cannons).
-     *
-     * Delegue a @ref AccountManagementWidget::setStorageEquippedCannonStats. Les textes sont fournis
-     * par le gameplay deja formates ; la GUI ne fixe que les libelles de ligne (degats, critiques,
-     * portee, recharge).
-     *
-     * @param cannonsEquippedSummary Resume de l'equipement canons (ligne "Cannons").
-     * @param cannonDamageDisplay Valeur affichee pour les degats.
-     * @param cannonCritDamageDisplay Valeur affichee pour les degats critiques.
-     * @param cannonCritChanceDisplay Valeur affichee pour la chance de coup critique.
-     * @param cannonRangeDisplay Valeur affichee pour la portee.
-     * @param cannonReloadDisplay Valeur affichee pour le temps de rechargement.
+     * @brief Retourne le widget de zoom.
      */
-    void setAccountStorageEquippedCannonStats(
-        const std::string& cannonsEquippedSummary,
-        const std::string& cannonDamageDisplay,
-        const std::string& cannonCritDamageDisplay,
-        const std::string& cannonCritChanceDisplay,
-        const std::string& cannonRangeDisplay,
-        const std::string& cannonReloadDisplay)
-    {
-        this->accountManagementWidget.setStorageEquippedCannonStats(
-            cannonsEquippedSummary,
-            cannonDamageDisplay,
-            cannonCritDamageDisplay,
-            cannonCritChanceDisplay,
-            cannonRangeDisplay,
-            cannonReloadDisplay);
-    }
-
-    /**
-     * @brief Alimente les lignes voiles (vitesse en noeuds + phrase de coulage avec seuil configurable).
-     *
-     * Delegue a @ref AccountManagementWidget::setStorageEquippedSailStats. Le denominateur de coulage
-     * (@p sailSinkMaxPoints) depend du type de voiles / navire et est fourni par le gameplay.
-     *
-     * @param speedKnotsDisplay Vitesse, texte formate (ex. "12" ou "12,5 nds").
-     * @param sailSinkCurrentPoints Numerateur affiche dans la phrase de coulage.
-     * @param sailSinkMaxPoints Seuil avant destruction des voiles ; si <= 0, la ligne de coulage affiche "-".
-     */
-    void setAccountStorageEquippedSailStats(
-        const std::string& speedKnotsDisplay,
-        int sailSinkCurrentPoints,
-        int sailSinkMaxPoints)
-    {
-        this->accountManagementWidget.setStorageEquippedSailStats(
-            speedKnotsDisplay,
-            sailSinkCurrentPoints,
-            sailSinkMaxPoints);
-    }
-
-    /**
-     * @brief Alimente le resume harponneuse (une seule ligne de valeur dans le panneau equipe).
-     *
-     * @param summary Texte libre (equipement, indisponible, etc.).
-     */
-    void setAccountStorageEquippedHarpoonSummary(const std::string& summary)
-    {
-        this->accountManagementWidget.setStorageEquippedHarpoonSummary(summary);
-    }
-
-    /**
-     * @brief Retourne la fenetre money pour l'alimenter depuis le gameplay.
-     * @return Reference mutable vers le widget des monnaies.
-     */
-    MoneyWidget& getMoneyWidget(void) { return this->moneyWidget; }
-
-    /**
-     * @brief Retourne la fenetre de parametres de jeu pour la configurer depuis le gameplay.
-     * @return Reference mutable vers le widget de parametres.
-     */
-    GameSettingsWidget& getGameSettingsWidget(void) { return this->gameSettingsWidget; }
-
-    /**
-     * @brief Applique la visibilite d'un widget HUD pilotable.
-     */
-    void setHudWidgetVisible(GameSettingsWidget::HudScaleTarget target, bool visible);
-
-    /**
-     * @brief Inverse la visibilite d'un widget HUD pilotable.
-     */
-    void toggleHudWidgetVisibility(GameSettingsWidget::HudScaleTarget target);
+    ZoomWidget& getZoomWidget(void) { return this->zoomWidget; }
 
     /**
      * @brief Retourne la barre de HP HUD pour l'alimenter depuis le gameplay.
@@ -272,6 +191,74 @@ public:
      * @return Reference mutable vers la barre d'experience.
      */
     ExperienceBarWidget& getExperienceBarWidget(void) { return this->experienceBarWidget; }
+
+    /**
+     * @brief Retourne la fenetre de chat.
+     */
+    ChatWidget& getChatWidget(void) { return this->chatWidget; }
+
+    /**
+     * @brief Retourne la fenetre Espion.
+     */
+    EspionSearchPlayerWidget& getEspionSearchPlayerWidget(void) { return this->espionSearchPlayerWidget; }
+
+    /**
+     * @brief Retourne la fenetre money pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers le widget des monnaies.
+     */
+    MoneyWidget& getMoneyWidget(void) { return this->moneyWidget; }
+
+    /**
+     * @brief Retourne la fenetre de parametres minimap.
+     */
+    ParamsMinimapWidget& getParamsMinimapWidget(void) { return this->paramsMinimapWidget; }
+
+    /**
+     * @brief Retourne la fenetre de parametres de jeu pour la configurer depuis le gameplay.
+     * @return Reference mutable vers le widget de parametres.
+     */
+    GameSettingsWidget& getGameSettingsWidget(void) { return this->gameSettingsWidget; }
+
+    /**
+     * @brief Retourne la fenetre d'annonces.
+     */
+    AnnouncementsWidget& getAnnouncementsWidget(void) { return this->announcementsWidget; }
+
+    /**
+     * @brief Retourne la fenetre Journal de bord.
+     */
+    LogBookWidget& getLogBookWidget(void) { return this->logBookWidget; }
+
+    /**
+     * @brief Retourne la fenetre Marches / Bazar.
+     */
+    MarketsAndBazarWidget& getMarketsAndBazarWidget(void) { return this->marketsAndBazarWidget; }
+
+    /**
+     * @brief Retourne la fenetre de gestion du compte pour l'alimenter depuis le gameplay.
+     * @return Reference mutable vers le widget compte / apparence / navires.
+     */
+    AccountManagementWidget& getAccountManagementWidget(void) { return this->accountManagementWidget; }
+
+    /**
+     * @brief Acces au widget captcha (callbacks @ref CaptchaWidget::setOnValidateRequested, etc.).
+     */
+    CaptchaWidget& getCaptchaWidget(void) { return this->captchaWidget; }
+
+    /**
+     * @brief Retourne la fenetre de classements.
+     */
+    LeaderboardWidget& getLeaderboardWidget(void) { return this->leaderboardWidget; }
+
+    /**
+     * @brief Applique la visibilite d'un widget HUD pilotable.
+     */
+    void setHudWidgetVisible(GameSettingsWidget::HudScaleTarget target, bool visible);
+
+    /**
+     * @brief Inverse la visibilite d'un widget HUD pilotable.
+     */
+    void toggleHudWidgetVisibility(GameSettingsWidget::HudScaleTarget target);
 
 private:
     /**
@@ -289,15 +276,6 @@ private:
         ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
         CAPTCHA = 9,            /**< Verification captcha (reseau). */
         LEADERBOARD = 10        /**< Fenetre classements (lien site). */
-    };
-
-    /**
-     * @brief Tooltip actuellement survole pour les boutons ancrés a la minimap.
-     */
-    enum class MinimapTooltip : int {
-        NONE = 0,
-        ESPION = 1,
-        PARAMS_MINIMAP = 2
     };
 
     /**
@@ -335,11 +313,23 @@ private:
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
     CaptchaWidget captchaWidget;                           /**< Fenetre de verification captcha serveur. */
-    LeaderboardWidget leaderboardWidget;                 /**< Fenetre classements (URL selon environnement). */
-    RC2D_Font tooltipFont;                                 /**< Police partagee des tooltips HUD locaux. */
+    LeaderboardWidget leaderboardWidget;                   /**< Fenetre classements (URL selon environnement). */
+
+    /**
+     * @brief Ressources partagees par le HUD.
+     */
+    RC2D_Font tooltipFont; /**< Police partagee des tooltips HUD locaux. */
+
+    /**
+     * @brief Visibilite et mode de configuration des widgets HUD.
+     */
     std::array<bool, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudWidgetVisibility; /**< Etats visibles des widgets HUD pilotables. */
     bool hudConfiguratorMode;                              /**< True si le mode de configuration des positions HUD est actif. */
     bool hudConfiguratorRestoreGameSettingsVisibility;     /**< True si les parametres doivent etre rouverts a la sortie du configurateur. */
+
+    /**
+     * @brief Etat de drag d'un widget HUD configurable.
+     */
     bool hudConfiguratorDragging;                          /**< True pendant le drag d'un widget HUD configurable. */
     GameSettingsWidget::HudScaleTarget hudConfiguratorDraggedTarget; /**< Widget HUD actuellement deplace. */
     float hudConfiguratorDragGrabOffsetX;                  /**< Offset souris -> rect HUD au debut du drag. */
@@ -347,6 +337,10 @@ private:
     SDL_FPoint hudConfiguratorDragStartOffset;             /**< Offset memorise au debut du drag. */
     SDL_FRect hudConfiguratorDragStartRect;                /**< Rect memorise au debut du drag. */
     SDL_FRect hudConfiguratorDragStartTargetRect;          /**< Rect widget memorise au debut du drag (sans padding). */
+
+    /**
+     * @brief Etat de drag du panneau de configuration HUD.
+     */
     bool hudConfiguratorPanelDragging;                     /**< True pendant le drag du panneau du configurateur. */
     float hudConfiguratorPanelDragGrabOffsetX;             /**< Offset souris -> panneau au debut du drag. */
     float hudConfiguratorPanelDragGrabOffsetY;             /**< Offset souris -> panneau au debut du drag. */
@@ -367,9 +361,9 @@ private:
      * serialise dans le fichier utilisateur (seules echelles, visibilites, offsets, etc. le sont).
      */
     std::vector<WindowLayer> windowDrawOrder;
-    MinimapTooltip hoveredMinimapTooltip;     /**< Tooltip minimap actuellement survole. */
-    float hoveredMinimapTooltipMouseX;        /**< Position X souris pour tooltip minimap. */
-    float hoveredMinimapTooltipMouseY;        /**< Position Y souris pour tooltip minimap. */
+    MinimapWidget::Tooltip hoveredMinimapTooltip; /**< Tooltip minimap actuellement survole. */
+    float hoveredMinimapTooltipMouseX;            /**< Position X souris pour tooltip minimap. */
+    float hoveredMinimapTooltipMouseY;            /**< Position Y souris pour tooltip minimap. */
 
     /**
      * @brief Etats precedents de visibilite pour detecter les ouvertures.
@@ -385,6 +379,10 @@ private:
     bool prevAccountManagementVisible;  /**< Etat visible precedent de la fenetre compte/apparence/navires. */
     bool prevCaptchaVisible;            /**< Etat visible precedent de la fenetre captcha. */
     bool prevLeaderboardVisible;        /**< Etat visible precedent de la fenetre classements. */
+
+    bool keepDefaultCursorAfterClose;   /**< Suspension temporaire du hover apres fermeture. */
+    float keepDefaultCursorMouseX;      /**< X de reference au moment de la fermeture. */
+    float keepDefaultCursorMouseY;      /**< Y de reference au moment de la fermeture. */
 
     /**
      * @brief Deplace une couche de fenetre en fin de pile de rendu.
@@ -547,7 +545,4 @@ private:
      */
     void saveUserSettingsToDisk(void);
 
-    bool keepDefaultCursorAfterClose;       /**< Suspension temporaire du hover apres fermeture. */
-    float keepDefaultCursorMouseX;          /**< X de reference au moment de la fermeture. */
-    float keepDefaultCursorMouseY;          /**< Y de reference au moment de la fermeture. */
 };

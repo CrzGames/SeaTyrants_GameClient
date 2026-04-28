@@ -512,7 +512,7 @@ IngameHudOverlay::IngameHudOverlay(void)
           WindowLayer::ACCOUNT_MANAGEMENT,
           WindowLayer::CAPTCHA,
           WindowLayer::LEADERBOARD},
-      hoveredMinimapTooltip(MinimapTooltip::NONE),
+      hoveredMinimapTooltip(MinimapWidget::Tooltip::NONE),
       hoveredMinimapTooltipMouseX(0.0f),
       hoveredMinimapTooltipMouseY(0.0f),
       prevChatVisible(false),
@@ -1846,7 +1846,7 @@ void IngameHudOverlay::load(void)
     this->prevAccountManagementVisible = this->accountManagementWidget.isVisible();
     this->prevCaptchaVisible = this->captchaWidget.isVisible();
     this->prevLeaderboardVisible = this->leaderboardWidget.isVisible();
-    this->hoveredMinimapTooltip = MinimapTooltip::NONE;
+    this->hoveredMinimapTooltip = MinimapWidget::Tooltip::NONE;
     this->hoveredMinimapTooltipMouseX = 0.0f;
     this->hoveredMinimapTooltipMouseY = 0.0f;
     this->hudConfiguratorMode = false;
@@ -1893,7 +1893,7 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     getMouseRenderPosition(&mouseX, &mouseY);
-    this->hoveredMinimapTooltip = MinimapTooltip::NONE;
+    this->hoveredMinimapTooltip = MinimapWidget::Tooltip::NONE;
     this->hoveredMinimapTooltipMouseX = mouseX;
     this->hoveredMinimapTooltipMouseY = mouseY;
     const bool keepDefaultCursor = this->shouldKeepDefaultCursorAfterClose(mouseX, mouseY);
@@ -1978,11 +1978,11 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
 
     if (minimapEspionHovered)
     {
-        this->hoveredMinimapTooltip = MinimapTooltip::ESPION;
+        this->hoveredMinimapTooltip = MinimapWidget::Tooltip::ESPION;
     }
     else if (minimapParamsHovered)
     {
-        this->hoveredMinimapTooltip = MinimapTooltip::PARAMS_MINIMAP;
+        this->hoveredMinimapTooltip = MinimapWidget::Tooltip::PARAMS_MINIMAP;
     }
 
     HudCursorType desiredCursor = HudCursorType::DEFAULT;
@@ -2172,13 +2172,13 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
 
 void IngameHudOverlay::drawHoveredMinimapTooltip(void) const
 {
-    if (this->hoveredMinimapTooltip == MinimapTooltip::NONE || this->tooltipFont.sdl_font == nullptr)
+    if (this->hoveredMinimapTooltip == MinimapWidget::Tooltip::NONE || this->tooltipFont.sdl_font == nullptr)
     {
         return;
     }
 
     const char* label =
-        (this->hoveredMinimapTooltip == MinimapTooltip::ESPION)
+        (this->hoveredMinimapTooltip == MinimapWidget::Tooltip::ESPION)
             ? "Espion"
             : "Params minimap";
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
@@ -2732,44 +2732,4 @@ void IngameHudOverlay::syncTopBarActionState(void)
         TopBarMenuWidget::Action::SETTINGS,
         this->gameSettingsWidget.isVisible() || this->hudConfiguratorMode);
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::DISCONNECT, false);
-}
-
-void IngameHudOverlay::publishAnnouncementRow(const std::string& rowText)
-{
-    this->announcementsWidget.publishAnnouncementRow(rowText);
-}
-
-void IngameHudOverlay::publishEspionSearchResult(const std::string& resultText)
-{
-    this->espionSearchPlayerWidget.publishSearchResult(resultText);
-}
-
-void IngameHudOverlay::publishCaptchaChallenge(const std::string& challengeFromServer)
-{
-    this->captchaWidget.publishCaptchaChallenge(challengeFromServer);
-}
-
-void IngameHudOverlay::publishLogbookRow(const LogBookWidget::LogBookRow& row)
-{
-    this->logBookWidget.publishLogBookRow(row);
-}
-
-void IngameHudOverlay::setBazarRows(const std::vector<MarketsAndBazarWidget::BazarRow>& rows)
-{
-    this->marketsAndBazarWidget.setBazarRows(rows);
-}
-
-void IngameHudOverlay::setBlackMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows)
-{
-    this->marketsAndBazarWidget.setBlackMarketRows(rows);
-}
-
-void IngameHudOverlay::setBasicMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows)
-{
-    this->marketsAndBazarWidget.setBasicMarketRows(rows);
-}
-
-void IngameHudOverlay::setEventMarketRows(const std::vector<MarketsAndBazarWidget::MarketRow>& rows)
-{
-    this->marketsAndBazarWidget.setEventMarketRows(rows);
 }
