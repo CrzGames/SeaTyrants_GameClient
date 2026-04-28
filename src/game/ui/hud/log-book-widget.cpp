@@ -18,10 +18,12 @@ static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kTextBody = RC2D_Color{210, 215, 225, 255};
 static constexpr RC2D_Color kScrollTrackColor = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumbColor = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 static constexpr RC2D_Color kSeparatorColor = RC2D_Color{134, 102, 39, 220};
 static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 static constexpr int kMaxMessagesPerPage = 20;
 
 struct JournalVisualRow {
@@ -271,6 +273,7 @@ LogBookWidget::LogBookWidget(void)
       scrollFirstRow(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
+      scrollBarWheelHighlightSec(0.0f),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
@@ -300,6 +303,7 @@ void LogBookWidget::load(void)
     this->scrollFirstRow = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->widgetDragging = false;
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
@@ -335,7 +339,15 @@ void LogBookWidget::publishLogBookRow(const LogBookWidget::LogBookRow& row)
 
 void LogBookWidget::update(double dt)
 {
-    (void)dt;
+    const float dtF = static_cast<float>(dt);
+    if (this->scrollBarWheelHighlightSec > 0.0f)
+    {
+        this->scrollBarWheelHighlightSec -= dtF;
+        if (this->scrollBarWheelHighlightSec < 0.0f)
+        {
+            this->scrollBarWheelHighlightSec = 0.0f;
+        }
+    }
 
     const SDL_FRect baseRect = getJournalRectFromGameScreen();
     this->widgetRect = SDL_FRect{
@@ -592,8 +604,13 @@ bool LogBookWidget::mousewheelmoved(
 
     if (delta != 0)
     {
+        const int rowBefore = this->scrollFirstRow;
         this->scrollFirstRow -= delta;
         this->scrollFirstRow = (std::max)(0, (std::min)(this->scrollFirstRow, maxFirstRow));
+        if (this->scrollFirstRow != rowBefore)
+        {
+            this->scrollBarWheelHighlightSec = kScrollThumbWheelHighlightSec;
+        }
     }
     return true;
 }
@@ -809,7 +826,7 @@ void LogBookWidget::draw(void) const
 
         rc2d_graphics_setColor(kScrollTrackColor);
         rc2d_graphics_rectangle("fill", &scrollTrack);
-        rc2d_graphics_setColor(kScrollThumbColor);
+        rc2d_graphics_setColor(self->scrollBarDragging || (self->scrollBarWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumbColor);
         rc2d_graphics_rectangle("fill", &scrollThumb);
     }
 
@@ -830,5 +847,6 @@ void LogBookWidget::hide(void)
     this->visible = false;
     this->widgetDragging = false;
     this->scrollBarDragging = false;
+    this->scrollBarWheelHighlightSec = 0.0f;
 }
 

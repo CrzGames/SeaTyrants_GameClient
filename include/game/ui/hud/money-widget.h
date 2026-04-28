@@ -160,6 +160,7 @@ private:
     int scrollFirstRow; /**< Premiere ligne de monnaie visible dans la liste. */
     bool scrollBarDragging; /**< True si le pouce de scrollbar est en cours de drag. */
     float scrollDragOffsetY; /**< Offset souris->thumb pendant le drag vertical. */
+    float scrollBarWheelHighlightSec; /**< Surlignage du pouce apres un scroll molette (decroit chaque frame). */
     float widgetDragOffsetX; /**< Offset X souris->coin haut gauche pendant le drag. */
     float widgetDragOffsetY; /**< Offset Y souris->coin haut gauche pendant le drag. */
     float widgetOffsetX; /**< Decalage X applique a la position de base. */

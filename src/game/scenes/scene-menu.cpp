@@ -48,6 +48,7 @@ namespace menu_scene
     static constexpr float kLanguageScrollBarPadding = 0.0f;
     static constexpr int kLanguageVisibleItemCount = 5;
     static constexpr float kLanguageScrollWheelStep = kLanguageListItemHeight + kLanguageListGapY;
+    static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
     static constexpr float kLoginButtonPulseSpeed = 1.7f;
     static constexpr float kLoginButtonPulseScaleAmplitude = 0.022f;
     static constexpr float kMinScrollThumbHeight = 28.0f;
@@ -400,6 +401,7 @@ MenuScene::MenuScene(void)
       selectedLanguageFlagIndex(-1),
       languageDropdownOpen(false),
       languageScrollDragging(false),
+      languageScrollWheelHighlightSec(0.0f),
       languageScrollOffset(0.0f),
       maxLanguageScrollOffset(0.0f),
       languageScrollDragOffsetY(0.0f),
@@ -924,6 +926,7 @@ void MenuScene::unload(void)
     this->selectedLanguageFlagIndex = -1;
     this->languageDropdownOpen = false;
     this->languageScrollDragging = false;
+    this->languageScrollWheelHighlightSec = 0.0f;
     this->languageScrollOffset = 0.0f;
     this->maxLanguageScrollOffset = 0.0f;
     this->languageScrollDragOffsetY = 0.0f;
@@ -989,6 +992,7 @@ void MenuScene::load(void)
     this->selectedLanguageFlagIndex = -1;
     this->languageDropdownOpen = false;
     this->languageScrollDragging = false;
+    this->languageScrollWheelHighlightSec = 0.0f;
     this->languageScrollOffset = 0.0f;
     this->maxLanguageScrollOffset = 0.0f;
     this->languageScrollDragOffsetY = 0.0f;
@@ -1225,6 +1229,15 @@ void MenuScene::update(double dt)
     this->updateLanguageScrollbarDrag();
     this->updateLanguageFlagLayout();
     this->updateMenuInteractivity();
+
+    if (this->languageScrollWheelHighlightSec > 0.0f)
+    {
+        this->languageScrollWheelHighlightSec -= static_cast<float>(dt);
+        if (this->languageScrollWheelHighlightSec < 0.0f)
+        {
+            this->languageScrollWheelHighlightSec = 0.0f;
+        }
+    }
 }
 
 void MenuScene::drawLoginCard(void)
@@ -1425,9 +1438,9 @@ void MenuScene::drawLanguageSelector(void)
     if (this->maxLanguageScrollOffset > 0.0f && menu_scene::isValidRect(this->languageScrollTrackRect))
     {
         const RC2D_Color thumbColor =
-            (this->languageScrollDragging || this->hoveredLanguageScrollbar)
-                ? menu_scene::kFlagHoverBorder
-                : menu_scene::kFlagSelectedBorder;
+            (this->languageScrollDragging || (this->languageScrollWheelHighlightSec > 0.0f))
+                ? RC2D_Color{184, 132, 30, 245}
+                : (this->hoveredLanguageScrollbar ? menu_scene::kFlagHoverBorder : menu_scene::kFlagSelectedBorder);
         rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
         rc2d_graphics_setColor(menu_scene::applyAlpha(menu_scene::kFlagNormalFill, alpha01));
         rc2d_graphics_rectangle("fill", &this->languageScrollTrackRect);
@@ -1583,6 +1596,7 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
             this->selectedLanguageFlagIndex = static_cast<int>(index);
             this->languageDropdownOpen = false;
             this->languageScrollDragging = false;
+            this->languageScrollWheelHighlightSec = 0.0f;
             this->snapLanguageScrollToSelection();
             this->updateLanguageFlagLayout();
             this->updateMenuInteractivity();
@@ -1601,6 +1615,7 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
 
         this->languageDropdownOpen = false;
         this->languageScrollDragging = false;
+        this->languageScrollWheelHighlightSec = 0.0f;
         this->updateLanguageFlagLayout();
         this->updateMenuInteractivity();
     }
@@ -1667,7 +1682,12 @@ void MenuScene::mousewheelmoved(
 
     if (delta != 0)
     {
+        const float offsetBefore = this->languageScrollOffset;
         this->scrollLanguageDropdown(-(static_cast<float>(delta) * menu_scene::kLanguageScrollWheelStep));
+        if (this->languageScrollOffset != offsetBefore)
+        {
+            this->languageScrollWheelHighlightSec = menu_scene::kScrollThumbWheelHighlightSec;
+        }
         this->updateLanguageFlagLayout();
         this->updateMenuInteractivity();
     }

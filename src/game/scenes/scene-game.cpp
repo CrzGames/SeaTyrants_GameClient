@@ -7,6 +7,7 @@
 #include "game/ui/ingame-hud-overlay.h"
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 GameScene::GameScene(void)
@@ -57,93 +58,218 @@ void GameScene::populateAccountManagementDemoData(void)
     GetIngameHudOverlay().getAccountManagementWidget().setPremiumSince("06.04.2026");
     GetIngameHudOverlay().getAccountManagementWidget().setProfileName(".Crows");
 
-    GetIngameHudOverlay().getAccountManagementWidget().setEliteAcquiredShips(
-        std::vector<ShipEntry>{
-            {"Elite 1", "assets/images/ships/bateau elite 1"},
-            {"Elite 2", "assets/images/ships/bateau elite 2"},
-            {"Elite 3", "assets/images/ships/bateau elite 3"},
-            {"Elite 4", "assets/images/ships/bateau elite 4"}
-        });
+    static constexpr const char* kEliteDemoAssetPaths[4] = {
+        "assets/images/ships/bateau elite 1",
+        "assets/images/ships/bateau elite 2",
+        "assets/images/ships/bateau elite 3",
+        "assets/images/ships/bateau elite 4"
+    };
+    static constexpr const char* kSpecialDemoNames[3] = {"Boreas", "Fly dutchman", "Morgan Boucanier"};
+    static constexpr const char* kSpecialDemoAssetPaths[3] = {
+        "assets/images/ships/Boreas (1)",
+        "assets/images/ships/Fly dutchman (1)",
+        "assets/images/ships/Morgan Boucanier (1)"
+    };
 
-    GetIngameHudOverlay().getAccountManagementWidget().setSpecialAcquiredShips(
-        std::vector<ShipEntry>{
-            {"Boreas", "assets/images/ships/Boreas (1)"},
-            {"Fly dutchman", "assets/images/ships/Fly dutchman (1)"},
-            {"Morgan Boucanier", "assets/images/ships/Morgan Boucanier (1)"}
-        });
+    std::vector<ShipEntry> eliteDemoShips{
+        {"Elite 1", kEliteDemoAssetPaths[0]},
+        {"Elite 2", kEliteDemoAssetPaths[1]},
+        {"Elite 3", kEliteDemoAssetPaths[2]},
+        {"Elite 4", kEliteDemoAssetPaths[3]},
+    };
+    for (int i = 0; i < 25; ++i)
+    {
+        eliteDemoShips.push_back(
+            {std::string("Elite ") + std::to_string(5 + i), kEliteDemoAssetPaths[static_cast<std::size_t>(i % 4)]});
+    }
+    GetIngameHudOverlay().getAccountManagementWidget().setEliteAcquiredShips(eliteDemoShips);
 
-    GetIngameHudOverlay().getAccountManagementWidget().setShipBonusOptions(
-        std::vector<OptionEntry>{
-            {"Bateau elite 4", "assets/images/ships/bateau elite 4"},
-            {"Bateau elite 3", "assets/images/ships/bateau elite 3"},
-            {"Bateau elite 2", "assets/images/ships/bateau elite 2"}
-        });
+    std::vector<ShipEntry> specialDemoShips{
+        {kSpecialDemoNames[0], kSpecialDemoAssetPaths[0]},
+        {kSpecialDemoNames[1], kSpecialDemoAssetPaths[1]},
+        {kSpecialDemoNames[2], kSpecialDemoAssetPaths[2]},
+    };
+    for (int i = 0; i < 25; ++i)
+    {
+        const std::size_t slot = static_cast<std::size_t>(i % 3);
+        specialDemoShips.push_back(
+            {std::string(kSpecialDemoNames[slot]) + " +" + std::to_string(i + 1), kSpecialDemoAssetPaths[slot]});
+    }
+    GetIngameHudOverlay().getAccountManagementWidget().setSpecialAcquiredShips(specialDemoShips);
 
-    GetIngameHudOverlay().getAccountManagementWidget().setShipStyleOptions(
-        std::vector<OptionEntry>{
-            {"Bateau elite 4", "assets/images/ships/bateau elite 4"},
-            {"Bateau elite 5", "assets/images/ships/bateau elite 5"},
-            {"Bateau elite 7", "assets/images/ships/bateau elite 7"}
-        });
+    // Icones reparties sur les nombreuses lignes demo (scrollbars pickers 7 lignes max, effets 5).
+    static constexpr const char* kDemoPickerIcons[10] = {
+        "assets/images/ships/bateau elite 4",
+        "assets/images/ships/bateau elite 3",
+        "assets/images/ships/bateau elite 2",
+        "assets/images/ships/bateau elite 5",
+        "assets/images/ships/bateau elite 7",
+        "assets/images/ammo/bazar-marche/ammo-rep-icon.png",
+        "assets/images/ammo/bazar-marche/ammo-creux-icon.png",
+        "assets/images/ammo/bazar-marche/ammo-explo-icon.png",
+        "assets/images/ammo/bazar-marche/ammo-illu-icon.png",
+        "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"};
+    static constexpr const char* kDemoVfxSpeedIcons[6] = {
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/2.png",
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/6.png",
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/10.png",
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/14.png",
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/20.png",
+        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/30.png"};
 
-    GetIngameHudOverlay().getAccountManagementWidget().setRepairStyleOptions(
-        std::vector<OptionEntry>{
-            {"Reparation par defaut", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
-            {"Reparation emeraude", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
-            {"Reparation abyssale", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"}
-        });
+    auto pushNumberedShipBonuses = [&]() {
+        std::vector<OptionEntry> v{
+            {"Bateau elite 4", kDemoPickerIcons[0]},
+            {"Bateau elite 3", kDemoPickerIcons[1]},
+            {"Bateau elite 2", kDemoPickerIcons[2]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Bonus navire demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setShipBonusOptions(pushNumberedShipBonuses());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setSpeedStyleOptions(
-        std::vector<OptionEntry>{
-            {"Vitesse blanche", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/2.png"},
-            {"Vitesse tempete", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/10.png"},
-            {"Vitesse neon", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/30.png"}
-        });
+    auto pushNumberedShipStyles = [&]() {
+        std::vector<OptionEntry> v{
+            {"Bateau elite 4", kDemoPickerIcons[0]},
+            {"Bateau elite 5", kDemoPickerIcons[3]},
+            {"Bateau elite 7", kDemoPickerIcons[4]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Style navire demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setShipStyleOptions(pushNumberedShipStyles());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setProjectileImpactStyleOptions(
-        std::vector<OptionEntry>{
-            {"Impact standard", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
-            {"Impact royal", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
-            {"Impact titan", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"}
-        });
+    auto pushNumberedRepair = [&]() {
+        std::vector<OptionEntry> v{
+            {"Reparation par defaut", kDemoPickerIcons[5]},
+            {"Reparation emeraude", kDemoPickerIcons[6]},
+            {"Reparation abyssale", kDemoPickerIcons[7]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Reparation variante ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setRepairStyleOptions(pushNumberedRepair());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setRocketStyleOptions(
-        std::vector<OptionEntry>{
-            {"Fusee comete", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
-            {"Fusee oracle", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
-            {"Fusee solaire", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"}
-        });
+    auto pushNumberedSpeed = [&]() {
+        std::vector<OptionEntry> v{
+            {"Vitesse blanche", kDemoVfxSpeedIcons[0]},
+            {"Vitesse tempete", kDemoVfxSpeedIcons[2]},
+            {"Vitesse neon", kDemoVfxSpeedIcons[5]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Vitesse demo ") + std::to_string(i),
+                 kDemoVfxSpeedIcons[static_cast<std::size_t>(i) % 6U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setSpeedStyleOptions(pushNumberedSpeed());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setProjectileStyleOptions(
-        std::vector<OptionEntry>{
-            {"Boulet lourd", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
-            {"Boulet arc", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
-            {"Boulet obsidienne", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"}
-        });
+    auto pushNumberedImpact = [&]() {
+        std::vector<OptionEntry> v{
+            {"Impact standard", kDemoPickerIcons[7]},
+            {"Impact royal", kDemoPickerIcons[8]},
+            {"Impact titan", kDemoPickerIcons[9]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Impact demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setProjectileImpactStyleOptions(pushNumberedImpact());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setMoveClickStyleOptions(
-        std::vector<OptionEntry>{
-            {"Clic tempete", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
-            {"Clic royal", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
-            {"Clic aurore", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"}
-        });
+    auto pushNumberedRocket = [&]() {
+        std::vector<OptionEntry> v{
+            {"Fusee comete", kDemoPickerIcons[7]},
+            {"Fusee oracle", kDemoPickerIcons[6]},
+            {"Fusee solaire", kDemoPickerIcons[5]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Fusee demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setRocketStyleOptions(pushNumberedRocket());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setEmoteOptions(
-        std::vector<OptionEntry>{
-            {"Hello", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"},
-            {"Attack", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
-            {"Laugh", "assets/images/ammo/bazar-marche/ammo-creux-icon.png"},
-            {"Lets go", "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"},
-            {"Support", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
-            {"Bravo", "assets/images/ammo/bazar-marche/ammo-illu-icon.png"}
-        });
+    auto pushNumberedProjectile = [&]() {
+        std::vector<OptionEntry> v{
+            {"Boulet lourd", kDemoPickerIcons[7]},
+            {"Boulet arc", kDemoPickerIcons[8]},
+            {"Boulet obsidienne", kDemoPickerIcons[9]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Projectile demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setProjectileStyleOptions(pushNumberedProjectile());
 
-    GetIngameHudOverlay().getAccountManagementWidget().setStorageEquipmentOptions(
-        std::vector<OptionEntry>{
-            {"Cannons", "assets/images/ammo/bazar-marche/ammo-explo-icon.png"},
-            {"Harponneuse", "assets/images/ammo/bazar-marche/ammo-rep-icon.png"},
-            {"Voiles", "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/6.png"}
-        });
+    auto pushNumberedMoveClick = [&]() {
+        std::vector<OptionEntry> v{
+            {"Clic tempete", kDemoPickerIcons[5]},
+            {"Clic royal", kDemoPickerIcons[8]},
+            {"Clic aurore", kDemoPickerIcons[6]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Clic deplacement demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setMoveClickStyleOptions(pushNumberedMoveClick());
+
+    auto pushNumberedEmotes = [&]() {
+        std::vector<OptionEntry> v{
+            {"Hello", kDemoPickerIcons[8]},
+            {"Attack", kDemoPickerIcons[7]},
+            {"Laugh", kDemoPickerIcons[6]},
+            {"Lets go", kDemoPickerIcons[9]},
+            {"Support", kDemoPickerIcons[5]},
+            {"Bravo", kDemoPickerIcons[8]}};
+        for (int i = 7; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Emote demo ") + std::to_string(i),
+                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setEmoteOptions(pushNumberedEmotes());
+
+    auto pushNumberedStorage = [&]() {
+        std::vector<OptionEntry> v{
+            {"Cannons", kDemoPickerIcons[7]},
+            {"Harponneuse", kDemoPickerIcons[5]},
+            {"Voiles", kDemoVfxSpeedIcons[1]}};
+        for (int i = 4; i <= 28; ++i)
+        {
+            v.push_back(
+                {std::string("Equipement demo ") + std::to_string(i),
+                 i % 2 == 0 ? kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]
+                            : kDemoVfxSpeedIcons[static_cast<std::size_t>(i) % 6U]});
+        }
+        return v;
+    };
+    GetIngameHudOverlay().getAccountManagementWidget().setStorageEquipmentOptions(pushNumberedStorage());
 }
 
 void GameScene::syncHudStatusWidgets(const Player& player)

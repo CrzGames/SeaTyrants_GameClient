@@ -38,9 +38,11 @@ static constexpr RC2D_Color kTextMuted = RC2D_Color{126, 132, 142, 255};
 static constexpr RC2D_Color kRowLine = RC2D_Color{134, 102, 39, 220};
 static constexpr RC2D_Color kScrollTrack = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumb = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 
 struct MarketLayout {
     SDL_FRect outer;
@@ -552,6 +554,7 @@ MarketsAndBazarWidget::MarketsAndBazarWidget(void)
       categoryFilterEnabled{},
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
+      scrollBarWheelHighlightSec(0.0f),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
@@ -943,6 +946,7 @@ void MarketsAndBazarWidget::load(void)
     this->eventFirstRow = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->widgetDragging = false;
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
@@ -964,6 +968,16 @@ void MarketsAndBazarWidget::unload(void)
 
 void MarketsAndBazarWidget::update(double dt)
 {
+    const float dtF = static_cast<float>(dt);
+    if (this->scrollBarWheelHighlightSec > 0.0f)
+    {
+        this->scrollBarWheelHighlightSec -= dtF;
+        if (this->scrollBarWheelHighlightSec < 0.0f)
+        {
+            this->scrollBarWheelHighlightSec = 0.0f;
+        }
+    }
+
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     this->widgetRect = SDL_FRect{
         baseRect.x + this->widgetOffsetX,
@@ -1365,8 +1379,13 @@ bool MarketsAndBazarWidget::mousewheelmoved(
 
     if (delta != 0)
     {
+        const int rowBefore = firstRow;
         firstRow -= delta;
         firstRow = (std::max)(0, (std::min)(firstRow, maxFirstRow));
+        if (firstRow != rowBefore)
+        {
+            this->scrollBarWheelHighlightSec = kScrollThumbWheelHighlightSec;
+        }
     }
     return true;
 }
@@ -1619,6 +1638,7 @@ void MarketsAndBazarWidget::openBasicMarket(void)
     this->activeTab = ActiveTab::BASIC_MARKET;
     this->widgetDragging = false;
     this->scrollBarDragging = false;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->clearFocus();
 }
 
@@ -1988,7 +2008,7 @@ void MarketsAndBazarWidget::draw(void) const
 
         rc2d_graphics_setColor(kScrollTrack);
         rc2d_graphics_rectangle("fill", &layout.scrollTrack);
-        rc2d_graphics_setColor(kScrollThumb);
+        rc2d_graphics_setColor(self->scrollBarDragging || (self->scrollBarWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumb);
         rc2d_graphics_rectangle("fill", &thumb);
     }
 

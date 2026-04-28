@@ -89,6 +89,7 @@ static constexpr RC2D_Color kSliderTrackFill = RC2D_Color{18, 20, 24, 238};
 static constexpr RC2D_Color kSliderActiveFill = RC2D_Color{78, 58, 29, 240};
 static constexpr RC2D_Color kSliderInactiveFill = RC2D_Color{48, 55, 64, 236};
 static constexpr RC2D_Color kSliderThumbFill = RC2D_Color{184, 132, 30, 245};
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 static constexpr RC2D_Color kSliderThumbBorder = RC2D_Color{227, 210, 153, 255};
 static constexpr RC2D_Color kButtonFillMuted = RC2D_Color{28, 31, 36, 236};
 
@@ -1376,6 +1377,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       languageDropdownOpen(false),
       languageScrollDragging(false),
       languageScrollDragOffsetY(0.0f),
+      languageScrollWheelHighlightSec(0.0f),
       redeemCode{},
       redeemInputFocused(false),
       redeemCursorIndex(0U),
@@ -1393,6 +1395,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       controlsScrollOffsetY(0.0f),
       controlsScrollDragging(false),
       controlsScrollDragOffsetY(0.0f),
+      controlsScrollWheelHighlightSec(0.0f),
       cameraScrollSpeedDragging(false),
       cameraScrollSpeedDragGrabOffsetX(0.0f),
       controlCaptureActive(false),
@@ -1408,6 +1411,7 @@ GameSettingsWidget::GameSettingsWidget(void)
       graphicsScrollOffsetY(0.0f),
       graphicsScrollDragging(false),
       graphicsScrollDragOffsetY(0.0f),
+      graphicsScrollWheelHighlightSec(0.0f),
       graphicsSalvoBulletPreset(SalvoBulletPreset::NORMAL),
       onRedeemCodeRequested{},
       onStartUiConfiguratorRequested{},
@@ -1454,6 +1458,7 @@ void GameSettingsWidget::load(void)
     this->controlsScrollOffsetY = 0.0f;
     this->controlsScrollDragging = false;
     this->controlsScrollDragOffsetY = 0.0f;
+    this->controlsScrollWheelHighlightSec = 0.0f;
     this->cameraScrollSpeedDragging = false;
     this->cameraScrollSpeedDragGrabOffsetX = 0.0f;
     this->controlCaptureActive = false;
@@ -1469,6 +1474,8 @@ void GameSettingsWidget::load(void)
     this->graphicsScrollOffsetY = 0.0f;
     this->graphicsScrollDragging = false;
     this->graphicsScrollDragOffsetY = 0.0f;
+    this->graphicsScrollWheelHighlightSec = 0.0f;
+    this->languageScrollWheelHighlightSec = 0.0f;
     this->graphicsSalvoBulletPreset = SalvoBulletPreset::NORMAL;
     g_graphicsFogOfWarEnabled = true;
     g_graphicsShipWakeTrailsEnabled = true;
@@ -1510,7 +1517,36 @@ void GameSettingsWidget::update(double dt)
 
     if (!this->visible)
     {
+        this->languageScrollWheelHighlightSec = 0.0f;
+        this->controlsScrollWheelHighlightSec = 0.0f;
+        this->graphicsScrollWheelHighlightSec = 0.0f;
         return;
+    }
+
+    const float wheelDt = static_cast<float>(dt);
+    if (this->languageScrollWheelHighlightSec > 0.0f)
+    {
+        this->languageScrollWheelHighlightSec -= wheelDt;
+        if (this->languageScrollWheelHighlightSec < 0.0f)
+        {
+            this->languageScrollWheelHighlightSec = 0.0f;
+        }
+    }
+    if (this->controlsScrollWheelHighlightSec > 0.0f)
+    {
+        this->controlsScrollWheelHighlightSec -= wheelDt;
+        if (this->controlsScrollWheelHighlightSec < 0.0f)
+        {
+            this->controlsScrollWheelHighlightSec = 0.0f;
+        }
+    }
+    if (this->graphicsScrollWheelHighlightSec > 0.0f)
+    {
+        this->graphicsScrollWheelHighlightSec -= wheelDt;
+        if (this->graphicsScrollWheelHighlightSec < 0.0f)
+        {
+            this->graphicsScrollWheelHighlightSec = 0.0f;
+        }
     }
 
     this->syncSelectedLanguageFromContext();
@@ -2310,8 +2346,13 @@ bool GameSettingsWidget::mousewheelmoved(
     {
         if (delta != 0)
         {
+            const float beforeControlsScroll = this->controlsScrollOffsetY;
             this->controlsScrollOffsetY -= static_cast<float>(delta) * kControlsWheelStep;
             this->clampControlsScroll();
+            if (this->controlsScrollOffsetY != beforeControlsScroll)
+            {
+                this->controlsScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+            }
         }
         return true;
     }
@@ -2320,8 +2361,13 @@ bool GameSettingsWidget::mousewheelmoved(
     {
         if (delta != 0)
         {
+            const float beforeGraphicsScroll = this->graphicsScrollOffsetY;
             this->graphicsScrollOffsetY -= static_cast<float>(delta) * kGraphicsWheelStep;
             this->clampGraphicsScroll();
+            if (this->graphicsScrollOffsetY != beforeGraphicsScroll)
+            {
+                this->graphicsScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+            }
         }
         return true;
     }
@@ -2341,8 +2387,13 @@ bool GameSettingsWidget::mousewheelmoved(
 
     if (delta != 0)
     {
+        const int beforeLanguageRow = this->languageFirstRow;
         this->languageFirstRow -= delta;
         this->clampLanguageScroll();
+        if (this->languageFirstRow != beforeLanguageRow)
+        {
+            this->languageScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+        }
     }
     return true;
 }
@@ -2828,7 +2879,7 @@ void GameSettingsWidget::draw(void) const
                 rc2d_graphics_rectangle("fill", &layout.languageScrollTrack);
                 rc2d_graphics_setColor(kRowLine);
                 rc2d_graphics_rectangle("line", &layout.languageScrollTrack);
-                rc2d_graphics_setColor(kScrollThumb);
+                rc2d_graphics_setColor((self->languageScrollDragging || (self->languageScrollWheelHighlightSec > 0.0f)) ? kSliderThumbFill : kScrollThumb);
                 rc2d_graphics_rectangle("fill", &thumbRect);
             }
         }
@@ -3009,7 +3060,7 @@ void GameSettingsWidget::draw(void) const
             rc2d_graphics_rectangle("fill", &layout.controlsScrollTrack);
             rc2d_graphics_setColor(kRowLine);
             rc2d_graphics_rectangle("line", &layout.controlsScrollTrack);
-            rc2d_graphics_setColor(self->controlsScrollDragging ? kSliderThumbFill : kScrollThumb);
+            rc2d_graphics_setColor((self->controlsScrollDragging || (self->controlsScrollWheelHighlightSec > 0.0f)) ? kSliderThumbFill : kScrollThumb);
             rc2d_graphics_rectangle("fill", &thumbRect);
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &thumbRect);
@@ -3416,7 +3467,7 @@ void GameSettingsWidget::draw(void) const
             rc2d_graphics_rectangle("fill", &layout.graphicsScrollTrack);
             rc2d_graphics_setColor(kRowLine);
             rc2d_graphics_rectangle("line", &layout.graphicsScrollTrack);
-            rc2d_graphics_setColor(self->graphicsScrollDragging ? kSliderThumbFill : kScrollThumb);
+            rc2d_graphics_setColor((self->graphicsScrollDragging || (self->graphicsScrollWheelHighlightSec > 0.0f)) ? kSliderThumbFill : kScrollThumb);
             rc2d_graphics_rectangle("fill", &thumbRect);
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &thumbRect);
@@ -3733,6 +3784,7 @@ void GameSettingsWidget::clearFocus(void)
     this->clearRedeemSelection();
     this->languageDropdownOpen = false;
     this->languageScrollDragging = false;
+    this->languageScrollWheelHighlightSec = 0.0f;
     this->hudScaleDragging = false;
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
@@ -3773,6 +3825,9 @@ void GameSettingsWidget::hide(void)
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     this->graphicsScrollDragging = false;
+    this->languageScrollWheelHighlightSec = 0.0f;
+    this->controlsScrollWheelHighlightSec = 0.0f;
+    this->graphicsScrollWheelHighlightSec = 0.0f;
     this->controlCaptureActive = false;
     this->graphicsWindowModeDropdownOpen = false;
     this->graphicsPresentationModeDropdownOpen = false;

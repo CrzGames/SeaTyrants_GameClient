@@ -482,6 +482,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       marketsAndBazarWidget{},
       accountManagementWidget{},
       captchaWidget{},
+      leaderboardWidget{},
       tooltipFont{},
       hudWidgetVisibility{},
       hudConfiguratorMode(false),
@@ -509,7 +510,8 @@ IngameHudOverlay::IngameHudOverlay(void)
           WindowLayer::LOG_BOOK,
           WindowLayer::MARKETS_AND_BAZAR,
           WindowLayer::ACCOUNT_MANAGEMENT,
-          WindowLayer::CAPTCHA},
+          WindowLayer::CAPTCHA,
+          WindowLayer::LEADERBOARD},
       hoveredMinimapTooltip(MinimapTooltip::NONE),
       hoveredMinimapTooltipMouseX(0.0f),
       hoveredMinimapTooltipMouseY(0.0f),
@@ -523,6 +525,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       prevMarketsAndBazarVisible(false),
       prevAccountManagementVisible(false),
       prevCaptchaVisible(false),
+      prevLeaderboardVisible(false),
       keepDefaultCursorAfterClose(false),
       keepDefaultCursorMouseX(0.0f),
       keepDefaultCursorMouseY(0.0f)
@@ -570,6 +573,8 @@ bool IngameHudOverlay::isWindowLayerVisible(WindowLayer layer) const
             return this->accountManagementWidget.isVisible();
         case WindowLayer::CAPTCHA:
             return this->captchaWidget.isVisible();
+        case WindowLayer::LEADERBOARD:
+            return this->leaderboardWidget.isVisible();
         default:
             return false;
     }
@@ -1163,6 +1168,8 @@ HudCursorType IngameHudOverlay::getWindowLayerDesiredCursor(WindowLayer layer, f
             return this->accountManagementWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::CAPTCHA:
             return this->captchaWidget.getDesiredCursor(mouseX, mouseY);
+        case WindowLayer::LEADERBOARD:
+            return this->leaderboardWidget.getDesiredCursor(mouseX, mouseY);
         default:
             return HudCursorType::NONE;
     }
@@ -1206,6 +1213,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     const bool marketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     const bool accountManagementVisible = this->accountManagementWidget.isVisible();
     const bool captchaVisible = this->captchaWidget.isVisible();
+    const bool leaderboardVisible = this->leaderboardWidget.isVisible();
 
     if (chatVisible && !this->prevChatVisible)
     {
@@ -1247,6 +1255,10 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     {
         this->bringWindowToFront(WindowLayer::CAPTCHA);
     }
+    if (leaderboardVisible && !this->prevLeaderboardVisible)
+    {
+        this->bringWindowToFront(WindowLayer::LEADERBOARD);
+    }
 
     this->prevChatVisible = chatVisible;
     this->prevEspionVisible = espionVisible;
@@ -1258,6 +1270,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     this->prevMarketsAndBazarVisible = marketsAndBazarVisible;
     this->prevAccountManagementVisible = accountManagementVisible;
     this->prevCaptchaVisible = captchaVisible;
+    this->prevLeaderboardVisible = leaderboardVisible;
 }
 
 void IngameHudOverlay::saveUserSettingsToDisk(void)
@@ -1670,7 +1683,8 @@ void IngameHudOverlay::load(void)
         WindowLayer::LOG_BOOK,
         WindowLayer::MARKETS_AND_BAZAR,
         WindowLayer::ACCOUNT_MANAGEMENT,
-        WindowLayer::CAPTCHA};
+        WindowLayer::CAPTCHA,
+        WindowLayer::LEADERBOARD};
 
     this->backgroundWidget.load();
     this->topBarMenuWidget.load();
@@ -1697,6 +1711,7 @@ void IngameHudOverlay::load(void)
     this->accountManagementWidget.load();
     this->captchaWidget.load();
     this->captchaWidget.show();
+    this->leaderboardWidget.load();
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::MINIMAP, this->minimapWidget.getUiScale());
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR, this->experienceBarWidget.getUiScale());
     this->gameSettingsWidget.setHudScaleValue(GameSettingsWidget::HudScaleTarget::HP_BAR, this->hpBarWidget.getUiScale());
@@ -1791,6 +1806,7 @@ void IngameHudOverlay::load(void)
     this->prevMarketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     this->prevAccountManagementVisible = this->accountManagementWidget.isVisible();
     this->prevCaptchaVisible = this->captchaWidget.isVisible();
+    this->prevLeaderboardVisible = this->leaderboardWidget.isVisible();
     this->hoveredMinimapTooltip = MinimapTooltip::NONE;
     this->hoveredMinimapTooltipMouseX = 0.0f;
     this->hoveredMinimapTooltipMouseY = 0.0f;
@@ -1805,6 +1821,7 @@ void IngameHudOverlay::unload(void)
 {
     ResetStorageFontRef(&this->tooltipFont);
     this->captchaWidget.unload();
+    this->leaderboardWidget.unload();
     this->accountManagementWidget.unload();
     this->marketsAndBazarWidget.unload();
     this->logBookWidget.unload();
@@ -1876,6 +1893,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
                 break;
             case WindowLayer::CAPTCHA:
                 this->captchaWidget.update(dt);
+                break;
+            case WindowLayer::LEADERBOARD:
+                this->leaderboardWidget.update(dt);
                 break;
         }
     }
@@ -2095,6 +2115,9 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
             case WindowLayer::CAPTCHA:
                 this->captchaWidget.draw();
                 break;
+            case WindowLayer::LEADERBOARD:
+                this->leaderboardWidget.draw();
+                break;
         }
     }
 
@@ -2207,6 +2230,9 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
                 break;
             case WindowLayer::CAPTCHA:
                 consumed = this->captchaWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
+            case WindowLayer::LEADERBOARD:
+                consumed = this->leaderboardWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
         }
 
@@ -2632,9 +2658,19 @@ void IngameHudOverlay::handleTopBarAction(TopBarMenuWidget::Action action)
                 this->bringWindowToFront(WindowLayer::GAME_SETTINGS);
             }
             break;
+        case TopBarMenuWidget::Action::LEADERBOARD:
+            if (this->leaderboardWidget.isVisible())
+            {
+                this->leaderboardWidget.hide();
+            }
+            else
+            {
+                this->leaderboardWidget.show();
+                this->bringWindowToFront(WindowLayer::LEADERBOARD);
+            }
+            break;
         case TopBarMenuWidget::Action::GUILD:
         case TopBarMenuWidget::Action::QUEST:
-        case TopBarMenuWidget::Action::LEADERBOARD:
         case TopBarMenuWidget::Action::DISCONNECT:
         case TopBarMenuWidget::Action::NONE:
         default:
@@ -2648,7 +2684,7 @@ void IngameHudOverlay::syncTopBarActionState(void)
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::CHAT, this->chatWidget.isVisible());
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::GUILD, false);
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::QUEST, false);
-    this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::LEADERBOARD, false);
+    this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::LEADERBOARD, this->leaderboardWidget.isVisible());
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::MONEY, this->moneyWidget.isVisible());
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::SHIP, this->accountManagementWidget.isVisible());
     this->topBarMenuWidget.setActionActive(TopBarMenuWidget::Action::ANNOUNCEMENT, this->announcementsWidget.isVisible());

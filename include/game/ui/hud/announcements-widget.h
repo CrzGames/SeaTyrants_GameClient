@@ -153,6 +153,7 @@ private:
     int scrollFirstLine; /**< Premiere ligne visible dans la zone annonces. */
     bool scrollBarDragging; /**< True si le pouce de scrollbar est en cours de drag. */
     float scrollDragOffsetY; /**< Offset souris->thumb pour un drag fluide. */
+    float scrollBarWheelHighlightSec; /**< Surlignage du pouce apres un scroll molette (decroit chaque frame). */
 
     /**
      * @brief Etat de deplacement de la fenetre.

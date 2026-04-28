@@ -18,7 +18,8 @@ static constexpr float kMinThumbHeight = 22.0f;
 static constexpr float kFleetCardW = 126.0f;
 static constexpr float kFleetCardH = 150.0f;
 static constexpr float kFleetCardGap = 6.0f;
-static constexpr float kFleetTopPadding = 6.0f;
+/** Marge verticale identique entre le viewport et la zone des cartes (haut et bas). */
+static constexpr float kFleetVerticalPadding = 6.0f;
 static constexpr float kPickerRowHeight = 36.0f;
 static constexpr int kPickerMaxVisibleRows = 7;
 static constexpr int kEffectPickerMaxVisibleRows = 5;
@@ -39,6 +40,8 @@ static constexpr RC2D_Color kTextMuted = RC2D_Color{126, 132, 142, 255};
 static constexpr RC2D_Color kRowLine = RC2D_Color{134, 102, 39, 220};
 static constexpr RC2D_Color kScrollTrack = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumb = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 static constexpr RC2D_Color kSelectionFill = RC2D_Color{28, 33, 44, 240};
 
 struct WidgetLayout {
@@ -102,6 +105,8 @@ struct FleetMetrics {
     float cardStartX;
     float cardStrideY;
     float contentWidth;
+    /** Decalage depuis viewport.y jusqu'au haut de la premiere rangee de cartes (marges haut/bas symetriques). */
+    float fleetContentTopOffset;
     SDL_FRect scrollTrack;
 };
 
@@ -112,6 +117,8 @@ struct PickerLayout {
     int totalRows;
     int visibleRows;
     int maxFirstRow;
+    /** True seulement si une scrollbar verticale est affichee (maxFirstRow > 0). */
+    bool showScrollBar;
 };
 
 static SDL_FRect getWidgetRectFromGameScreen(void)
@@ -542,6 +549,7 @@ static FleetMetrics buildFleetMetrics(const SDL_FRect& viewport, int totalItems)
     metrics.cardStrideY = kFleetCardH + kFleetCardGap;
     metrics.cardStartX = viewport.x + 2.0f;
     metrics.contentWidth = viewport.w;
+    metrics.fleetContentTopOffset = kFleetVerticalPadding;
     metrics.scrollTrack = SDL_FRect{
         viewport.x + viewport.w - (kScrollBarWidth + kScrollBarPadding),
         viewport.y + kScrollBarPadding,
@@ -549,8 +557,16 @@ static FleetMetrics buildFleetMetrics(const SDL_FRect& viewport, int totalItems)
         viewport.h - (kScrollBarPadding * 2.0f)
     };
 
-    const float usableHeight = (std::max)(0.0f, viewport.h - kFleetTopPadding);
-    metrics.visibleRows = (std::max)(1, static_cast<int>(std::floor(usableHeight / metrics.cardStrideY)));
+    const float innerH = (std::max)(0.0f, viewport.h - (2.0f * kFleetVerticalPadding));
+    metrics.visibleRows = (std::max)(
+        1,
+        static_cast<int>(std::floor((innerH + kFleetCardGap) / metrics.cardStrideY)));
+    const float contentHeight =
+        (static_cast<float>(metrics.visibleRows) * metrics.cardStrideY) - kFleetCardGap;
+    const float verticalCenterFiller =
+        (innerH > 0.0f) ? ((innerH - contentHeight) * 0.5f) : 0.0f;
+    metrics.fleetContentTopOffset =
+        kFleetVerticalPadding + (std::max)(0.0f, verticalCenterFiller);
 
     const float scrollReserve = kScrollBarWidth + (kScrollBarPadding * 2.0f);
     const float availableWNoScroll = (std::max)(80.0f, viewport.w - 2.0f);
@@ -656,7 +672,17 @@ static PickerLayout buildPickerLayout(
         layout.body.h - (kScrollBarPadding * 2.0f)
     };
 
+    layout.showScrollBar = layout.maxFirstRow > 0;
     return layout;
+}
+
+static float getPickerListRowWidth(const PickerLayout& layout)
+{
+    if (!layout.showScrollBar)
+    {
+        return layout.body.w;
+    }
+    return layout.body.w - (kScrollBarWidth + (kScrollBarPadding * 2.0f));
 }
 
 static char extractDigitFromKeyLabel(const char* key)
@@ -808,7 +834,7 @@ static SDL_FRect getFleetCardRect(
     }
 
     const float x = metrics.cardStartX + (static_cast<float>(column) * (kFleetCardW + kFleetCardGap));
-    const float y = viewport.y + kFleetTopPadding + (static_cast<float>(visualRow) * metrics.cardStrideY);
+    const float y = viewport.y + metrics.fleetContentTopOffset + (static_cast<float>(visualRow) * metrics.cardStrideY);
     return SDL_FRect{x, y, kFleetCardW, kFleetCardH};
 }
 
@@ -844,6 +870,7 @@ AccountManagementWidget::AccountManagementWidget(void)
       specialFirstRow(0),
       fleetScrollDragging(false),
       fleetScrollDragOffsetY(0.0f),
+      fleetScrollWheelHighlightSec(0.0f),
       shipOptions{},
       coatingOptions{},
       repairStyleOptions{},
@@ -879,6 +906,7 @@ AccountManagementWidget::AccountManagementWidget(void)
       pickerFirstRow(0),
       pickerScrollDragging(false),
       pickerScrollDragOffsetY(0.0f),
+      pickerScrollWheelHighlightSec(0.0f),
       profileName{},
       profileInputFocused(false),
       profileCursorIndex(0),
@@ -1923,6 +1951,7 @@ void AccountManagementWidget::closeAppearancePicker(void)
     this->pickerFirstRow = 0;
     this->pickerScrollDragging = false;
     this->pickerScrollDragOffsetY = 0.0f;
+    this->pickerScrollWheelHighlightSec = 0.0f;
 }
 
 void AccountManagementWidget::clearProfileInputFocus(void)
@@ -1960,6 +1989,7 @@ void AccountManagementWidget::load(void)
     this->widgetDragOffsetY = 0.0f;
     this->fleetScrollDragging = false;
     this->fleetScrollDragOffsetY = 0.0f;
+    this->fleetScrollWheelHighlightSec = 0.0f;
 
     this->profileInputFocused = false;
     this->profileCursorIndex = this->profileName.size();
@@ -2168,12 +2198,31 @@ void AccountManagementWidget::hide(void)
     this->widgetDragging = false;
     this->fleetScrollDragging = false;
     this->pickerScrollDragging = false;
+    this->fleetScrollWheelHighlightSec = 0.0f;
     this->clearFocus();
     this->closeAppearancePicker();
 }
 
 void AccountManagementWidget::update(double dt)
 {
+    const float dtF = static_cast<float>(dt);
+    if (this->fleetScrollWheelHighlightSec > 0.0f)
+    {
+        this->fleetScrollWheelHighlightSec -= dtF;
+        if (this->fleetScrollWheelHighlightSec < 0.0f)
+        {
+            this->fleetScrollWheelHighlightSec = 0.0f;
+        }
+    }
+    if (this->pickerScrollWheelHighlightSec > 0.0f)
+    {
+        this->pickerScrollWheelHighlightSec -= dtF;
+        if (this->pickerScrollWheelHighlightSec < 0.0f)
+        {
+            this->pickerScrollWheelHighlightSec = 0.0f;
+        }
+    }
+
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
     this->widgetRect = SDL_FRect{
         baseRect.x + this->widgetOffsetX,
@@ -2477,7 +2526,7 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
                 const SDL_FRect rowRect = SDL_FRect{
                     pickerLayout.body.x,
                     pickerLayout.body.y + (static_cast<float>(visualRow) * kPickerRowHeight),
-                    pickerLayout.body.w - (kScrollBarWidth + (kScrollBarPadding * 2.0f)),
+                    getPickerListRowWidth(pickerLayout),
                     kPickerRowHeight
                 };
                 if (!isPointInRect(x, y, rowRect))
@@ -2825,8 +2874,16 @@ bool AccountManagementWidget::mousewheelmoved(
             openUpward);
         if (isPointInRect(mouse_x, mouse_y, pickerLayout.panel))
         {
-            this->pickerFirstRow -= delta;
-            this->pickerFirstRow = (std::max)(0, (std::min)(this->pickerFirstRow, pickerLayout.maxFirstRow));
+            if (pickerLayout.maxFirstRow > 0)
+            {
+                const int rowBefore = this->pickerFirstRow;
+                this->pickerFirstRow -= delta;
+                this->pickerFirstRow = (std::max)(0, (std::min)(this->pickerFirstRow, pickerLayout.maxFirstRow));
+                if (this->pickerFirstRow != rowBefore)
+                {
+                    this->pickerScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+                }
+            }
             return true;
         }
     }
@@ -2851,8 +2908,16 @@ bool AccountManagementWidget::mousewheelmoved(
 
         const FleetMetrics metrics = buildFleetMetrics(viewport, this->getVisibleShipCountForTab(this->activeTab));
         int& firstRow = *firstRowPtr;
-        firstRow -= delta;
-        firstRow = (std::max)(0, (std::min)(firstRow, metrics.maxFirstRow));
+        if (metrics.maxFirstRow > 0)
+        {
+            const int rowBefore = firstRow;
+            firstRow -= delta;
+            firstRow = (std::max)(0, (std::min)(firstRow, metrics.maxFirstRow));
+            if (firstRow != rowBefore)
+            {
+                this->fleetScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+            }
+        }
         return true;
     }
 
@@ -3559,7 +3624,7 @@ void AccountManagementWidget::draw(void) const
 
                 rc2d_graphics_setColor(kScrollTrack);
                 rc2d_graphics_rectangle("fill", &metrics.scrollTrack);
-                rc2d_graphics_setColor(kScrollThumb);
+                rc2d_graphics_setColor(self->fleetScrollDragging || (self->fleetScrollWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumb);
                 rc2d_graphics_rectangle("fill", &thumb);
             }
         }
@@ -3610,7 +3675,7 @@ void AccountManagementWidget::draw(void) const
             SDL_FRect rowRect = SDL_FRect{
                 pickerLayout.body.x,
                 pickerLayout.body.y + (static_cast<float>(visualRow) * kPickerRowHeight),
-                pickerLayout.body.w - (kScrollBarWidth + (kScrollBarPadding * 2.0f)),
+                getPickerListRowWidth(pickerLayout),
                 kPickerRowHeight
             };
 
@@ -3657,7 +3722,7 @@ void AccountManagementWidget::draw(void) const
 
             rc2d_graphics_setColor(kScrollTrack);
             rc2d_graphics_rectangle("fill", &pickerLayout.scrollTrack);
-            rc2d_graphics_setColor(kScrollThumb);
+            rc2d_graphics_setColor(self->pickerScrollDragging || (self->pickerScrollWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumb);
             rc2d_graphics_rectangle("fill", &thumb);
         }
     }

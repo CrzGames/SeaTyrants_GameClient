@@ -65,6 +65,7 @@ private:
     int selectedLanguageFlagIndex;                    /**< Drapeau actuellement selectionne, ou -1. */
     bool languageDropdownOpen;                        /**< True quand la liste des langues est ouverte. */
     bool languageScrollDragging;                      /**< True pendant le drag du thumb de scroll. */
+    float languageScrollWheelHighlightSec;           /**< Surlignage du thumb apres scroll molette. */
     float languageScrollOffset;                       /**< Scroll vertical courant du panneau langue. */
     float maxLanguageScrollOffset;                    /**< Scroll max du panneau langue. */
     float languageScrollDragOffsetY;                  /**< Offset souris->thumb pour un drag fluide. */

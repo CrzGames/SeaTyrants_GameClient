@@ -20,6 +20,7 @@ static constexpr RC2D_Color kTextWhite = RC2D_Color{210, 215, 225, 255};
 static constexpr RC2D_Color kTextMuted = RC2D_Color{124, 109, 84, 255};
 static constexpr RC2D_Color kScrollTrackColor = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumbColor = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 
 static constexpr float kBodyPadding = 10.0f;
 static constexpr float kRowHeight = 42.0f;
@@ -27,6 +28,7 @@ static constexpr float kRowGap = 8.0f;
 static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 
 static SDL_FRect getMoneyRectFromGameScreen(void)
 {
@@ -195,6 +197,7 @@ MoneyWidget::MoneyWidget(void)
       scrollFirstRow(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
+      scrollBarWheelHighlightSec(0.0f),
       widgetDragOffsetX(0.0f),
       widgetDragOffsetY(0.0f),
       widgetOffsetX(0.0f),
@@ -223,6 +226,7 @@ void MoneyWidget::load(void)
     this->scrollFirstRow = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->widgetDragOffsetX = 0.0f;
     this->widgetDragOffsetY = 0.0f;
     this->clearCurrencyEntries();
@@ -238,7 +242,15 @@ void MoneyWidget::unload(void)
 
 void MoneyWidget::update(double dt)
 {
-    (void)dt;
+    const float dtF = static_cast<float>(dt);
+    if (this->scrollBarWheelHighlightSec > 0.0f)
+    {
+        this->scrollBarWheelHighlightSec -= dtF;
+        if (this->scrollBarWheelHighlightSec < 0.0f)
+        {
+            this->scrollBarWheelHighlightSec = 0.0f;
+        }
+    }
 
     const SDL_FRect baseRect = getMoneyRectFromGameScreen();
     this->widgetRect = SDL_FRect{
@@ -493,8 +505,13 @@ bool MoneyWidget::mousewheelmoved(
 
     if (delta != 0)
     {
+        const int rowBefore = this->scrollFirstRow;
         this->scrollFirstRow -= delta;
         this->scrollFirstRow = (std::max)(0, (std::min)(this->scrollFirstRow, maxFirstRow));
+        if (this->scrollFirstRow != rowBefore)
+        {
+            this->scrollBarWheelHighlightSec = kScrollThumbWheelHighlightSec;
+        }
     }
     return true;
 }
@@ -646,7 +663,8 @@ void MoneyWidget::draw(void) const
 
         rc2d_graphics_setColor(kScrollTrackColor);
         rc2d_graphics_rectangle("fill", &scrollTrackRect);
-        rc2d_graphics_setColor(kScrollThumbColor);
+        const bool thumbActive = self->scrollBarDragging || (self->scrollBarWheelHighlightSec > 0.0f);
+        rc2d_graphics_setColor(thumbActive ? kScrollThumbDragFill : kScrollThumbColor);
         rc2d_graphics_rectangle("fill", &scrollThumbRect);
     }
 
@@ -703,6 +721,7 @@ void MoneyWidget::clearCurrencyEntries(void)
     this->scrollFirstRow = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
 }
 
 void MoneyWidget::show(void)
@@ -717,6 +736,7 @@ void MoneyWidget::hide(void)
     this->visible = false;
     this->widgetDragging = false;
     this->scrollBarDragging = false;
+    this->scrollBarWheelHighlightSec = 0.0f;
 }
 
 bool MoneyWidget::containsPoint(float x, float y) const

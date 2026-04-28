@@ -19,11 +19,13 @@ static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kMessageTextColor = RC2D_Color{210, 215, 225, 255}; // Meme teinte que les messages du chat.
 static constexpr RC2D_Color kScrollTrackColor = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumbColor = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 static constexpr RC2D_Color kSeparatorColor = RC2D_Color{134, 102, 39, 220};
 static constexpr int kScrollLinesStep = 3;
 static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 16.0f;
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 static constexpr const char* kAnnouncementPrefix = "Annonce serveur";
 
 static SDL_FRect getAnnouncementsRectFromGameScreen(void)
@@ -281,6 +283,7 @@ AnnouncementsWidget::AnnouncementsWidget(void)
       scrollFirstLine(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
+      scrollBarWheelHighlightSec(0.0f),
       widgetDragging(false),
       widgetDragLocked(false),
       widgetPlacementCustomized(false),
@@ -336,6 +339,7 @@ void AnnouncementsWidget::load(void)
     this->scrollFirstLine = 0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
     // Nettoie l'historique d'annonces.
     this->announcementRows.clear();
 }
@@ -351,8 +355,15 @@ void AnnouncementsWidget::unload(void)
 
 void AnnouncementsWidget::update(double dt)
 {
-    // Aucun calcul temporel actuellement, mais on garde le parametre pour l'API commune.
-    (void)dt;
+    const float dtF = static_cast<float>(dt);
+    if (this->scrollBarWheelHighlightSec > 0.0f)
+    {
+        this->scrollBarWheelHighlightSec -= dtF;
+        if (this->scrollBarWheelHighlightSec < 0.0f)
+        {
+            this->scrollBarWheelHighlightSec = 0.0f;
+        }
+    }
 
     // Recalcule la rect finale a partir de la base + offsets.
     const SDL_FRect baseRect = getAnnouncementsRectFromGameScreen();
@@ -676,10 +687,15 @@ bool AnnouncementsWidget::mousewheelmoved(
         step = (std::max)(1, std::abs(integer_y));
     }
     // Applique le sens de scroll.
+    const int lineBefore = this->scrollFirstLine;
     if (direction == RC2D_SCROLL_UP) { this->scrollFirstLine -= step; }
     else if (direction == RC2D_SCROLL_DOWN) { this->scrollFirstLine += step; }
     // Clamp sur la plage autorisee.
     this->scrollFirstLine = (std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine));
+    if (this->scrollFirstLine != lineBefore)
+    {
+        this->scrollBarWheelHighlightSec = kScrollThumbWheelHighlightSec;
+    }
     return true;
 }
 
@@ -926,7 +942,8 @@ void AnnouncementsWidget::draw(void) const
 
         rc2d_graphics_setColor(kScrollTrackColor);
         rc2d_graphics_rectangle("fill", &scrollTrack);
-        rc2d_graphics_setColor(kScrollThumbColor);
+        const bool thumbActive = self->scrollBarDragging || (self->scrollBarWheelHighlightSec > 0.0f);
+        rc2d_graphics_setColor(thumbActive ? kScrollThumbDragFill : kScrollThumbColor);
         rc2d_graphics_rectangle("fill", &scrollThumb);
     }
 
@@ -966,6 +983,7 @@ void AnnouncementsWidget::hide(void)
     this->widgetDragging = false;
     this->widgetResizing = false;
     this->scrollBarDragging = false;
+    this->scrollBarWheelHighlightSec = 0.0f;
 }
 
 

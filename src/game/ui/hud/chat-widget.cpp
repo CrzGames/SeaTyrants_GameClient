@@ -27,11 +27,13 @@ static constexpr RC2D_Color kPlaceholderTextColor = RC2D_Color{145, 152, 166, 23
 static constexpr RC2D_Color kCursorColor = RC2D_Color{239, 226, 163, 255};
 static constexpr RC2D_Color kScrollTrackColor = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumbColor = RC2D_Color{124, 132, 142, 240};
+static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 
 static constexpr float kCursorBlinkPeriod = 0.55f;
 static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
+static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 
 /**
  * @brief Ligne visuelle issue du wrapping d'un message.
@@ -409,6 +411,7 @@ ChatWidget::ChatWidget(void)
       scrollFirstLine(0),
       scrollBarDragging(false),
       scrollDragOffsetY(0.0f),
+      scrollBarWheelHighlightSec(0.0f),
       visible(true),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
@@ -466,6 +469,7 @@ void ChatWidget::load(void)
     this->cursorBlinkElapsed = 0.0;
     this->scrollBarDragging = false;
     this->scrollDragOffsetY = 0.0f;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->visible = false;
     this->widgetDragging = false;
     this->widgetDragOffsetX = 0.0f;
@@ -605,7 +609,18 @@ void ChatWidget::update(double dt)
         this->clearFocus();
         this->scrollBarDragging = false;
         this->widgetResizing = false;
+        this->scrollBarWheelHighlightSec = 0.0f;
         return;
+    }
+
+    const float wheelDt = static_cast<float>(dt);
+    if (this->scrollBarWheelHighlightSec > 0.0f)
+    {
+        this->scrollBarWheelHighlightSec -= wheelDt;
+        if (this->scrollBarWheelHighlightSec < 0.0f)
+        {
+            this->scrollBarWheelHighlightSec = 0.0f;
+        }
     }
 
     // --- Selection de texte au drag dans la barre input ---
@@ -1008,8 +1023,13 @@ bool ChatWidget::mousewheelmoved(
     // Applique et clamp.
     if (delta != 0)
     {
+        const int lineBefore = this->scrollFirstLine;
         this->scrollFirstLine -= delta;
         this->scrollFirstLine = (std::max)(0, (std::min)(this->scrollFirstLine, maxFirstLine));
+        if (this->scrollFirstLine != lineBefore)
+        {
+            this->scrollBarWheelHighlightSec = kScrollThumbWheelHighlightSec;
+        }
     }
     return true;
 }
@@ -1316,7 +1336,7 @@ void ChatWidget::draw(void) const
             scrollTrack.w,
             thumbHeight
         };
-        rc2d_graphics_setColor(kScrollThumbColor);
+        rc2d_graphics_setColor(self->scrollBarDragging || (self->scrollBarWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumbColor);
         rc2d_graphics_rectangle("fill", &scrollThumb);
     }
 
@@ -1532,6 +1552,7 @@ void ChatWidget::hide(void)
     this->widgetDragging = false;
     this->widgetResizing = false;
     this->scrollBarDragging = false;
+    this->scrollBarWheelHighlightSec = 0.0f;
     this->clearFocus();
 }
 

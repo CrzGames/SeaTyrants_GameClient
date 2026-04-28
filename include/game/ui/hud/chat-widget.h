@@ -174,6 +174,7 @@ private:
     int scrollFirstLine; /**< Premiere ligne visuelle actuellement affichee dans la zone messages. */
     bool scrollBarDragging; /**< True quand l'utilisateur maintient/drag le pouce de scrollbar. */
     float scrollDragOffsetY; /**< Offset Y souris->thumb pour conserver un drag fluide du scroll. */
+    float scrollBarWheelHighlightSec; /**< Surlignage du pouce apres un scroll molette (decroit chaque frame). */
 
     /**
      * @brief Etat global et deplacement de la fenetre chat.

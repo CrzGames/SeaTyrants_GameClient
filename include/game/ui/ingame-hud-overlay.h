@@ -20,6 +20,7 @@
 #include "game/ui/hud/experience-bar-widget.h"
 #include "game/ui/hud/game-settings-widget.h"
 #include "game/ui/hud/hp-bar-widget.h"
+#include "game/ui/hud/leaderboard-widget.h"
 #include "game/ui/hud/log-book-widget.h"
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/ui/hud/minimap-espion-button-widget.h"
@@ -224,7 +225,8 @@ private:
         LOG_BOOK = 6,           /**< Fenetre journal de bord. */
         MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
         ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
-        CAPTCHA = 9             /**< Verification captcha (reseau). */
+        CAPTCHA = 9,            /**< Verification captcha (reseau). */
+        LEADERBOARD = 10        /**< Fenetre classements (lien site). */
     };
 
     /**
@@ -271,6 +273,7 @@ private:
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
     CaptchaWidget captchaWidget;                           /**< Fenetre de verification captcha serveur. */
+    LeaderboardWidget leaderboardWidget;                 /**< Fenetre classements (URL selon environnement). */
     RC2D_Font tooltipFont;                                 /**< Police partagee des tooltips HUD locaux. */
     std::array<bool, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudWidgetVisibility; /**< Etats visibles des widgets HUD pilotables. */
     bool hudConfiguratorMode;                              /**< True si le mode de configuration des positions HUD est actif. */
@@ -319,6 +322,7 @@ private:
     bool prevMarketsAndBazarVisible;    /**< Etat visible precedent de la fenetre marches + bazar. */
     bool prevAccountManagementVisible;  /**< Etat visible precedent de la fenetre compte/apparence/navires. */
     bool prevCaptchaVisible;            /**< Etat visible precedent de la fenetre captcha. */
+    bool prevLeaderboardVisible;        /**< Etat visible precedent de la fenetre classements. */
 
     /**
      * @brief Deplace une couche de fenetre en fin de pile de rendu.

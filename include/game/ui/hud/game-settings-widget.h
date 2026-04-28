@@ -458,6 +458,7 @@ private:
     bool languageDropdownOpen;                   /**< True si la liste deroulante est ouverte. */
     bool languageScrollDragging;                 /**< True pendant le drag du thumb vertical. */
     float languageScrollDragOffsetY;             /**< Offset souris -> thumb pendant le drag. */
+    float languageScrollWheelHighlightSec;       /**< Surlignage du thumb langue apres scroll molette. */
 
     std::string redeemCode;                      /**< Texte actuellement saisi dans le champ de code. */
     bool redeemInputFocused;                     /**< True si l'input de code possede le focus clavier. */
@@ -476,6 +477,7 @@ private:
     float controlsScrollOffsetY;                 /**< Offset vertical de l'onglet controles. */
     bool controlsScrollDragging;                 /**< True pendant le drag de la scrollbar controles. */
     float controlsScrollDragOffsetY;             /**< Offset souris -> thumb de la scrollbar controles. */
+    float controlsScrollWheelHighlightSec;     /**< Surlignage du thumb controles apres scroll molette. */
     bool cameraScrollSpeedDragging;              /**< True pendant le drag du slider vitesse camera. */
     float cameraScrollSpeedDragGrabOffsetX;      /**< Offset souris -> thumb du slider vitesse camera. */
     bool controlCaptureActive;                   /**< True si une action attend la prochaine touche clavier. */
@@ -491,6 +493,7 @@ private:
     float graphicsScrollOffsetY;                 /**< Offset vertical de l'onglet graphiques. */
     bool graphicsScrollDragging;                 /**< True pendant le drag de la scrollbar graphiques. */
     float graphicsScrollDragOffsetY;             /**< Offset souris -> thumb de la scrollbar graphiques. */
+    float graphicsScrollWheelHighlightSec;     /**< Surlignage du thumb graphiques apres scroll molette. */
     SalvoBulletPreset graphicsSalvoBulletPreset; /**< Preset selectionne pour "Nombre de boulets par salve". */
 
     RedeemCodeCallback onRedeemCodeRequested;    /**< Callback appelee lors du clic sur "Activer". */

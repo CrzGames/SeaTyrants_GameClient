@@ -124,6 +124,7 @@ private:
     int scrollFirstRow; /**< Premiere ligne visuelle affichee. */
     bool scrollBarDragging; /**< True si le pouce de scrollbar est en drag. */
     float scrollDragOffsetY; /**< Offset souris->thumb pour drag fluide. */
+    float scrollBarWheelHighlightSec; /**< Surlignage du pouce apres un scroll molette (decroit chaque frame). */
 
     /**
      * @brief Etat de deplacement de la fenetre.

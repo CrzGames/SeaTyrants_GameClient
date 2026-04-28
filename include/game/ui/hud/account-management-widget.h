@@ -528,6 +528,7 @@ private:
 
     bool fleetScrollDragging;   /**< True pendant le drag du thumb de scrollbar de flotte. */
     float fleetScrollDragOffsetY; /**< Offset souris a l'interieur du thumb de scrollbar de flotte. */
+    float fleetScrollWheelHighlightSec; /**< Surlignage du pouce flotte apres scroll molette. */
 
     std::vector<AppearanceOption> shipOptions;             /**< Options de bonus / configuration du navire. */
     std::vector<AppearanceOption> coatingOptions;          /**< Options de style visuel / coating du navire. */
@@ -567,6 +568,7 @@ private:
     int pickerFirstRow;              /**< Premiere ligne visible dans le picker courant. */
     bool pickerScrollDragging;       /**< True pendant le drag du thumb de scrollbar du picker. */
     float pickerScrollDragOffsetY;   /**< Offset souris a l'interieur du thumb de scrollbar du picker. */
+    float pickerScrollWheelHighlightSec; /**< Surlignage du pouce picker apres scroll molette. */
 
     std::string profileName;         /**< Nom de profil editable affiche dans l'onglet compte. */
     bool profileInputFocused;        /**< True quand le champ de profil possede le focus clavier. */

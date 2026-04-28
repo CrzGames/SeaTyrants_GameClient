@@ -257,6 +257,7 @@ private:
      */
     bool scrollBarDragging; /**< `true` pendant un drag actif du thumb de scroll vertical. */
     float scrollDragOffsetY; /**< Decalage Y entre curseur et sommet du thumb pendant le drag. */
+    float scrollBarWheelHighlightSec; /**< Surlignage du pouce apres un scroll molette (decroit chaque frame). */
 
     /**
      * @brief Etat de deplacement de la fenetre.
