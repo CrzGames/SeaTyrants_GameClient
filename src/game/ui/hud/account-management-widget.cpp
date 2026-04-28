@@ -7,6 +7,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <utility>
 
 static constexpr float kRefW = 1030.0f;
 static constexpr float kRefH = 700.0f;
@@ -25,6 +27,14 @@ static constexpr int kPickerMaxVisibleRows = 7;
 static constexpr int kEffectPickerMaxVisibleRows = 5;
 static constexpr int kMaxProfileNameChars = 20;
 static constexpr double kCursorBlinkPeriod = 0.55;
+static constexpr float kStorageItemRowHeight = 72.0f;
+static constexpr float kStorageItemRowGap = 6.0f;
+static constexpr float kStorageItemSidePad = 8.0f;
+static constexpr float kStorageDragIconSize = 60.0f;
+static constexpr float kBoardingLootRowHeight = 56.0f;
+static constexpr float kBoardingLootRowGap = 6.0f;
+static constexpr float kBoardingLootSidePad = 10.0f;
+static constexpr float kBoardingLootIconSize = 38.0f;
 
 static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 242};
 static constexpr RC2D_Color kGold = RC2D_Color{184, 132, 30, 250};
@@ -43,6 +53,10 @@ static constexpr RC2D_Color kScrollThumb = RC2D_Color{124, 132, 142, 240};
 static constexpr RC2D_Color kScrollThumbDragFill = RC2D_Color{184, 132, 30, 245};
 static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
 static constexpr RC2D_Color kSelectionFill = RC2D_Color{28, 33, 44, 240};
+static constexpr RC2D_Color kStorageDropReadyFill = RC2D_Color{24, 86, 62, 178};
+static constexpr RC2D_Color kStorageDropReadyLine = RC2D_Color{92, 220, 144, 255};
+static constexpr RC2D_Color kStorageDragGhostFill = RC2D_Color{12, 12, 14, 210};
+static constexpr RC2D_Color kPopupOverlayFill = RC2D_Color{0, 0, 0, 120};
 
 struct WidgetLayout {
     SDL_FRect outer;
@@ -55,6 +69,7 @@ struct WidgetLayout {
     SDL_FRect tabElite;
     SDL_FRect tabSpecial;
     SDL_FRect tabStorageEquipped;
+    SDL_FRect tabBoardingLoot;
     SDL_FRect headerDragRect;
     SDL_FRect content;
 
@@ -94,7 +109,9 @@ struct WidgetLayout {
     SDL_FRect storageMiddlePanel;
     SDL_FRect storageMiddleDropdown;
     SDL_FRect storageMiddleContent;
-    SDL_FRect storageRightPanel;
+    SDL_FRect boardingLootLeftPanel;
+    SDL_FRect boardingLootRightPanel;
+    SDL_FRect boardingLootTransferAllButton;
 };
 
 struct FleetMetrics {
@@ -119,6 +136,27 @@ struct PickerLayout {
     int maxFirstRow;
     /** True seulement si une scrollbar verticale est affichee (maxFirstRow > 0). */
     bool showScrollBar;
+};
+
+struct StorageTransferPopupLayout {
+    SDL_FRect overlay;
+    SDL_FRect panel;
+    SDL_FRect titleBar;
+    SDL_FRect icon;
+    SDL_FRect quantityMinusButton;
+    SDL_FRect quantityValue;
+    SDL_FRect quantityPlusButton;
+    SDL_FRect cancelButton;
+    SDL_FRect transferButton;
+};
+
+struct BoardingLootMetrics {
+    int totalRows;
+    int visibleRows;
+    int maxFirstRow;
+    SDL_FRect leftBody;
+    SDL_FRect rightBody;
+    SDL_FRect scrollTrack;
 };
 
 static SDL_FRect getWidgetRectFromGameScreen(void)
@@ -309,6 +347,136 @@ static void drawImageFit(const RC2D_Image* image, const SDL_FRect& target)
     rc2d_graphics_drawQuad(&imageCopy, &quad, drawX, drawY, 0.0, scale, scale, -1.0f, -1.0f, false, false);
 }
 
+static SDL_FRect getStorageItemRowRect(const SDL_FRect& contentRect, int visibleRow)
+{
+    return SDL_FRect{
+        contentRect.x + kStorageItemSidePad,
+        contentRect.y + kStorageItemSidePad +
+            (static_cast<float>((std::max)(0, visibleRow)) * (kStorageItemRowHeight + kStorageItemRowGap)),
+        (std::max)(0.0f, contentRect.w - (kStorageItemSidePad * 2.0f)),
+        kStorageItemRowHeight
+    };
+}
+
+static int getStorageVisibleRowCapacity(const SDL_FRect& contentRect)
+{
+    const float availableH = (std::max)(0.0f, contentRect.h - (kStorageItemSidePad * 2.0f));
+    return (std::max)(0, static_cast<int>(std::floor((availableH + kStorageItemRowGap) / (kStorageItemRowHeight + kStorageItemRowGap))));
+}
+
+static BoardingLootMetrics buildBoardingLootMetrics(
+    const SDL_FRect& leftPanel,
+    const SDL_FRect& rightPanel,
+    int totalRows)
+{
+    BoardingLootMetrics metrics{};
+    metrics.totalRows = (std::max)(0, totalRows);
+    metrics.leftBody = SDL_FRect{
+        leftPanel.x + kBoardingLootSidePad,
+        leftPanel.y + kBoardingLootSidePad,
+        leftPanel.w - (kBoardingLootSidePad * 2.0f),
+        leftPanel.h - (kBoardingLootSidePad * 2.0f)
+    };
+    metrics.rightBody = SDL_FRect{
+        rightPanel.x + kBoardingLootSidePad,
+        rightPanel.y + kBoardingLootSidePad,
+        rightPanel.w - (kBoardingLootSidePad * 2.0f),
+        rightPanel.h - (kBoardingLootSidePad * 2.0f)
+    };
+
+    const bool needsScrollProbe =
+        metrics.totalRows * static_cast<int>(kBoardingLootRowHeight + kBoardingLootRowGap) >
+        static_cast<int>((std::max)(metrics.leftBody.h, 0.0f) + kBoardingLootRowGap);
+    if (needsScrollProbe)
+    {
+        const float scrollReserve = kScrollBarWidth + kScrollBarPadding;
+        metrics.rightBody.w = (std::max)(0.0f, metrics.rightBody.w - scrollReserve);
+    }
+
+    const float availableH = (std::max)(0.0f, metrics.leftBody.h);
+    metrics.visibleRows = (std::max)(
+        1,
+        static_cast<int>(std::floor((availableH + kBoardingLootRowGap) / (kBoardingLootRowHeight + kBoardingLootRowGap))));
+    metrics.visibleRows = (std::min)(metrics.visibleRows, (std::max)(1, metrics.totalRows));
+    metrics.maxFirstRow = (std::max)(0, metrics.totalRows - metrics.visibleRows);
+    metrics.scrollTrack = SDL_FRect{
+        rightPanel.x + rightPanel.w - (kScrollBarWidth + kScrollBarPadding),
+        rightPanel.y + kBoardingLootSidePad,
+        kScrollBarWidth,
+        rightPanel.h - (kBoardingLootSidePad * 2.0f)
+    };
+    return metrics;
+}
+
+static SDL_FRect getBoardingLootRowRect(const SDL_FRect& bodyRect, int visibleRow)
+{
+    return SDL_FRect{
+        bodyRect.x,
+        bodyRect.y + (static_cast<float>((std::max)(0, visibleRow)) * (kBoardingLootRowHeight + kBoardingLootRowGap)),
+        bodyRect.w,
+        kBoardingLootRowHeight
+    };
+}
+
+static StorageTransferPopupLayout buildStorageTransferPopupLayout(const SDL_FRect& widgetRect)
+{
+    StorageTransferPopupLayout layout{};
+    layout.overlay = widgetRect;
+
+    const float panelW = 390.0f;
+    const float panelH = 260.0f;
+    layout.panel = SDL_FRect{
+        widgetRect.x + ((widgetRect.w - panelW) * 0.5f),
+        widgetRect.y + ((widgetRect.h - panelH) * 0.5f),
+        panelW,
+        panelH
+    };
+    layout.titleBar = SDL_FRect{layout.panel.x, layout.panel.y, layout.panel.w, 34.0f};
+    layout.icon = SDL_FRect{layout.panel.x + 18.0f, layout.titleBar.y + layout.titleBar.h + 18.0f, 64.0f, 64.0f};
+
+    const float quantityY = layout.icon.y + layout.icon.h + 24.0f;
+    layout.quantityMinusButton = SDL_FRect{layout.panel.x + 116.0f, quantityY, 34.0f, 34.0f};
+    layout.quantityValue = SDL_FRect{
+        layout.quantityMinusButton.x + layout.quantityMinusButton.w + 8.0f,
+        quantityY,
+        86.0f,
+        34.0f
+    };
+    layout.quantityPlusButton = SDL_FRect{
+        layout.quantityValue.x + layout.quantityValue.w + 8.0f,
+        quantityY,
+        34.0f,
+        34.0f
+    };
+
+    const float buttonY = layout.panel.y + layout.panel.h - 50.0f;
+    layout.cancelButton = SDL_FRect{layout.panel.x + 18.0f, buttonY, 150.0f, 34.0f};
+    layout.transferButton = SDL_FRect{
+        layout.panel.x + layout.panel.w - 168.0f,
+        buttonY,
+        150.0f,
+        34.0f
+    };
+
+    return layout;
+}
+
+static const char* storageLocationLabel(AccountManagementWidget::StorageTabTransferLocation location)
+{
+    return location == AccountManagementWidget::StorageTabTransferLocation::WAREHOUSE
+        ? "Entrepot"
+        : "Navire";
+}
+
+static bool storageItemIdentityMatches(
+    const AccountManagementWidget::StorageTabItemEntry& lhs,
+    const AccountManagementWidget::StorageTabItemEntry& rhs)
+{
+    return lhs.category == rhs.category &&
+           lhs.name == rhs.name &&
+           lhs.previewAssetPath == rhs.previewAssetPath;
+}
+
 static std::string formatWithDots(int value)
 {
     if (value <= 0)
@@ -362,14 +530,15 @@ static WidgetLayout buildLayout(const SDL_FRect& outer)
     const float tabY = layout.topBar.y + 3.0f;
     const float tabH = layout.topBar.h - 6.0f;
     const float tabGap = 2.0f;
-    layout.tabAccount = SDL_FRect{outer.x + 10.0f, tabY, 90.0f, tabH};
-    layout.tabAppearance = SDL_FRect{layout.tabAccount.x + layout.tabAccount.w + tabGap, tabY, 108.0f, tabH};
-    layout.tabShipManagement = SDL_FRect{layout.tabAppearance.x + layout.tabAppearance.w + tabGap, tabY, 146.0f, tabH};
-    layout.tabElite = SDL_FRect{layout.tabShipManagement.x + layout.tabShipManagement.w + tabGap, tabY, 162.0f, tabH};
-    layout.tabSpecial = SDL_FRect{layout.tabElite.x + layout.tabElite.w + tabGap, tabY, 182.0f, tabH};
-    layout.tabStorageEquipped = SDL_FRect{layout.tabSpecial.x + layout.tabSpecial.w + tabGap, tabY, 160.0f, tabH};
+    layout.tabAccount = SDL_FRect{outer.x + 10.0f, tabY, 76.0f, tabH};
+    layout.tabStorageEquipped = SDL_FRect{layout.tabAccount.x + layout.tabAccount.w + tabGap, tabY, 128.0f, tabH};
+    layout.tabBoardingLoot = SDL_FRect{layout.tabStorageEquipped.x + layout.tabStorageEquipped.w + tabGap, tabY, 190.0f, tabH};
+    layout.tabShipManagement = SDL_FRect{layout.tabBoardingLoot.x + layout.tabBoardingLoot.w + tabGap, tabY, 126.0f, tabH};
+    layout.tabAppearance = SDL_FRect{layout.tabShipManagement.x + layout.tabShipManagement.w + tabGap, tabY, 92.0f, tabH};
+    layout.tabElite = SDL_FRect{layout.tabAppearance.x + layout.tabAppearance.w + tabGap, tabY, 144.0f, tabH};
+    layout.tabSpecial = SDL_FRect{layout.tabElite.x + layout.tabElite.w + tabGap, tabY, 162.0f, tabH};
 
-    const float dragLeft = layout.tabStorageEquipped.x + layout.tabStorageEquipped.w + 4.0f;
+    const float dragLeft = layout.tabSpecial.x + layout.tabSpecial.w + 4.0f;
     const float dragRight = layout.closeButton.x - 4.0f;
     if (dragRight > dragLeft)
     {
@@ -504,12 +673,11 @@ static WidgetLayout buildLayout(const SDL_FRect& outer)
     const float storagePanelY = layout.content.y + storageTopInset;
     const float storagePanelH = (std::max)(100.0f, layout.content.h - storageTopInset);
     const float storageGap = 2.0f;
-    const float storageColW = (layout.content.w - (storageGap * 2.0f)) / 3.0f;
+    const float storageColW = (layout.content.w - storageGap) / 2.0f;
     const float storageDropH = 34.0f;
 
     layout.storageLeftPanel = SDL_FRect{layout.content.x, storagePanelY, storageColW, storagePanelH};
     layout.storageMiddlePanel = SDL_FRect{layout.storageLeftPanel.x + storageColW + storageGap, storagePanelY, storageColW, storagePanelH};
-    layout.storageRightPanel = SDL_FRect{layout.storageMiddlePanel.x + storageColW + storageGap, storagePanelY, storageColW, storagePanelH};
 
     layout.storageLeftDropdown = SDL_FRect{
         layout.storageLeftPanel.x + 1.0f,
@@ -534,6 +702,29 @@ static WidgetLayout buildLayout(const SDL_FRect& outer)
         layout.storageMiddleDropdown.y + layout.storageMiddleDropdown.h + 1.0f,
         layout.storageMiddlePanel.w - 2.0f,
         layout.storageMiddlePanel.h - layout.storageMiddleDropdown.h - 2.0f
+    };
+
+    const float boardingLootTopInset = 58.0f;
+    const float boardingLootPanelY = layout.content.y + boardingLootTopInset;
+    const float boardingLootButtonW = 236.0f;
+    const float boardingLootButtonH = 32.0f;
+    layout.boardingLootTransferAllButton = SDL_FRect{
+        layout.content.x + layout.content.w - boardingLootButtonW,
+        layout.content.y + 6.0f,
+        boardingLootButtonW,
+        boardingLootButtonH
+    };
+    layout.boardingLootLeftPanel = SDL_FRect{
+        layout.content.x,
+        boardingLootPanelY,
+        (layout.content.w - storageGap) * 0.5f,
+        (layout.content.y + layout.content.h) - boardingLootPanelY
+    };
+    layout.boardingLootRightPanel = SDL_FRect{
+        layout.boardingLootLeftPanel.x + layout.boardingLootLeftPanel.w + storageGap,
+        boardingLootPanelY,
+        layout.boardingLootLeftPanel.w,
+        layout.boardingLootLeftPanel.h
     };
 
     return layout;
@@ -847,6 +1038,7 @@ AccountManagementWidget::AccountManagementWidget(void)
       cursorEnabled(true),
       resourcesLoaded(false),
       controlIcons{},
+      storageDropdownArrowImage{},
       activeTab(ActiveTab::ACCOUNT),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
@@ -881,6 +1073,11 @@ AccountManagementWidget::AccountManagementWidget(void)
       moveClickStyleOptions{},
       emoteOptions{},
       storageEquipmentOptions{},
+      storageEquipmentOptionCategories{},
+      storageEquipmentOptionMaxEquipped{},
+      storageWarehouseItems{},
+      storageEquippedItems{},
+      boardingLootCurrencies{},
       shipOptionIcons{},
       coatingOptionIcons{},
       repairStyleOptionIcons{},
@@ -891,6 +1088,9 @@ AccountManagementWidget::AccountManagementWidget(void)
       moveClickStyleOptionIcons{},
       emoteOptionIcons{},
       storageEquipmentOptionIcons{},
+      storageWarehouseItemIcons{},
+      storageEquippedItemIcons{},
+      boardingLootCurrencyIcons{},
       selectedShipOption(0),
       selectedCoatingOption(0),
       selectedRepairStyleOption(0),
@@ -901,6 +1101,32 @@ AccountManagementWidget::AccountManagementWidget(void)
       selectedMoveClickStyleOption(0),
       selectedEmoteOption(0),
       selectedStorageEquipmentOption(0),
+      storageDrag{
+          false,
+          StorageTabTransferLocation::WAREHOUSE,
+          -1,
+          0,
+          StorageTabEquipmentCategory::CANNONS,
+          {},
+          {},
+          0.0f,
+          0.0f},
+      storageTransferPopup{
+          false,
+          StorageTabTransferLocation::WAREHOUSE,
+          StorageTabTransferLocation::SHIP,
+          -1,
+          0,
+          1,
+          StorageTabEquipmentCategory::CANNONS,
+          {},
+          {}},
+      storageTabOnTransferRequested{},
+      boardingLootOnTransferAllToSecureReserveRequested{},
+      boardingLootFirstRow(0),
+      boardingLootScrollDragging(false),
+      boardingLootScrollDragOffsetY(0.0f),
+      boardingLootScrollWheelHighlightSec(0.0f),
       openPicker(AppearancePickerType::NONE),
       openPickerAnchorRect{0.0f, 0.0f, 0.0f, 0.0f},
       pickerFirstRow(0),
@@ -920,191 +1146,427 @@ AccountManagementWidget::~AccountManagementWidget(void)
 {
 }
 
-void AccountManagementWidget::setEliteAcquiredShips(const std::vector<ShipEntry>& ships)
+void AccountManagementWidget::setEliteShipsTabAcquiredShips(const std::vector<EliteShipsTabShipEntry>& ships)
 {
-    this->setShipsForCollection(ShipCollectionType::ELITE_ACQUIRED, ships);
+    std::vector<InternalShipEntry> converted;
+    converted.reserve(ships.size());
+    for (const EliteShipsTabShipEntry& ship : ships)
+    {
+        converted.push_back(InternalShipEntry{ship.name, ship.previewAssetPath});
+    }
+    this->setShipsForCollection(ShipCollectionType::ELITE_ACQUIRED, converted);
 }
 
-void AccountManagementWidget::addEliteAcquiredShip(const ShipEntry& ship)
+void AccountManagementWidget::addEliteShipsTabAcquiredShip(const EliteShipsTabShipEntry& ship)
 {
-    this->addShipToCollection(ShipCollectionType::ELITE_ACQUIRED, ship);
+    this->addShipToCollection(ShipCollectionType::ELITE_ACQUIRED, InternalShipEntry{ship.name, ship.previewAssetPath});
 }
 
-void AccountManagementWidget::clearEliteAcquiredShips(void)
+void AccountManagementWidget::clearEliteShipsTabAcquiredShips(void)
 {
     this->clearShipsForCollection(ShipCollectionType::ELITE_ACQUIRED);
 }
 
-void AccountManagementWidget::setSpecialAcquiredShips(const std::vector<ShipEntry>& ships)
+void AccountManagementWidget::setSpecialShipsTabAcquiredShips(const std::vector<SpecialShipsTabShipEntry>& ships)
 {
-    this->setShipsForCollection(ShipCollectionType::SPECIAL_ACQUIRED, ships);
+    std::vector<InternalShipEntry> converted;
+    converted.reserve(ships.size());
+    for (const SpecialShipsTabShipEntry& ship : ships)
+    {
+        converted.push_back(InternalShipEntry{ship.name, ship.previewAssetPath});
+    }
+    this->setShipsForCollection(ShipCollectionType::SPECIAL_ACQUIRED, converted);
 }
 
-void AccountManagementWidget::addSpecialAcquiredShip(const ShipEntry& ship)
+void AccountManagementWidget::addSpecialShipsTabAcquiredShip(const SpecialShipsTabShipEntry& ship)
 {
-    this->addShipToCollection(ShipCollectionType::SPECIAL_ACQUIRED, ship);
+    this->addShipToCollection(ShipCollectionType::SPECIAL_ACQUIRED, InternalShipEntry{ship.name, ship.previewAssetPath});
 }
 
-void AccountManagementWidget::clearSpecialAcquiredShips(void)
+void AccountManagementWidget::clearSpecialShipsTabAcquiredShips(void)
 {
     this->clearShipsForCollection(ShipCollectionType::SPECIAL_ACQUIRED);
 }
 
-void AccountManagementWidget::setShipBonusOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setShipManagementTabBonusOptions(const std::vector<ShipManagementTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::SHIP_BONUS, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const ShipManagementTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::SHIP_BONUS, converted);
 }
 
-void AccountManagementWidget::addShipBonusOption(const OptionEntry& option)
+void AccountManagementWidget::addShipManagementTabBonusOption(const ShipManagementTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::SHIP_BONUS, option);
+    this->addOptionToCollection(OptionCollectionType::SHIP_BONUS, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearShipBonusOptions(void)
+void AccountManagementWidget::clearShipManagementTabBonusOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::SHIP_BONUS);
 }
 
-void AccountManagementWidget::setShipStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabShipStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::SHIP_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::SHIP_STYLE, converted);
 }
 
-void AccountManagementWidget::addShipStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabShipStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::SHIP_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::SHIP_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearShipStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabShipStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::SHIP_STYLE);
 }
 
-void AccountManagementWidget::setRepairStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabRepairStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::REPAIR_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::REPAIR_STYLE, converted);
 }
 
-void AccountManagementWidget::addRepairStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabRepairStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::REPAIR_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::REPAIR_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearRepairStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabRepairStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::REPAIR_STYLE);
 }
 
-void AccountManagementWidget::setSpeedStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabSpeedStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::SPEED_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::SPEED_STYLE, converted);
 }
 
-void AccountManagementWidget::addSpeedStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabSpeedStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::SPEED_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::SPEED_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearSpeedStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabSpeedStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::SPEED_STYLE);
 }
 
-void AccountManagementWidget::setProjectileImpactStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabProjectileImpactStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::PROJECTILE_IMPACT_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::PROJECTILE_IMPACT_STYLE, converted);
 }
 
-void AccountManagementWidget::addProjectileImpactStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabProjectileImpactStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::PROJECTILE_IMPACT_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::PROJECTILE_IMPACT_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearProjectileImpactStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabProjectileImpactStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::PROJECTILE_IMPACT_STYLE);
 }
 
-void AccountManagementWidget::setRocketStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabRocketStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::ROCKET_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::ROCKET_STYLE, converted);
 }
 
-void AccountManagementWidget::addRocketStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabRocketStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::ROCKET_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::ROCKET_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearRocketStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabRocketStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::ROCKET_STYLE);
 }
 
-void AccountManagementWidget::setProjectileStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabProjectileStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::PROJECTILE_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::PROJECTILE_STYLE, converted);
 }
 
-void AccountManagementWidget::addProjectileStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabProjectileStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::PROJECTILE_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::PROJECTILE_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearProjectileStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabProjectileStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::PROJECTILE_STYLE);
 }
 
-void AccountManagementWidget::setMoveClickStyleOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabMoveClickStyleOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::MOVE_CLICK_STYLE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::MOVE_CLICK_STYLE, converted);
 }
 
-void AccountManagementWidget::addMoveClickStyleOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabMoveClickStyleOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::MOVE_CLICK_STYLE, option);
+    this->addOptionToCollection(OptionCollectionType::MOVE_CLICK_STYLE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearMoveClickStyleOptions(void)
+void AccountManagementWidget::clearAppearanceTabMoveClickStyleOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::MOVE_CLICK_STYLE);
 }
 
-void AccountManagementWidget::setEmoteOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::setAppearanceTabEmoteOptions(const std::vector<AppearanceTabOptionEntry>& options)
 {
-    this->setOptionsForCollection(OptionCollectionType::EMOTE, options);
+    std::vector<InternalOptionEntry> converted;
+    converted.reserve(options.size());
+    for (const AppearanceTabOptionEntry& option : options)
+    {
+        converted.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    }
+    this->setOptionsForCollection(OptionCollectionType::EMOTE, converted);
 }
 
-void AccountManagementWidget::addEmoteOption(const OptionEntry& option)
+void AccountManagementWidget::addAppearanceTabEmoteOption(const AppearanceTabOptionEntry& option)
 {
-    this->addOptionToCollection(OptionCollectionType::EMOTE, option);
+    this->addOptionToCollection(OptionCollectionType::EMOTE, InternalOptionEntry{option.name, option.previewAssetPath});
 }
 
-void AccountManagementWidget::clearEmoteOptions(void)
+void AccountManagementWidget::clearAppearanceTabEmoteOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::EMOTE);
 }
 
-void AccountManagementWidget::setStorageEquipmentOptions(const std::vector<OptionEntry>& options)
+void AccountManagementWidget::clearStorageTabEquipmentOptions(void)
 {
-    this->setOptionsForCollection(OptionCollectionType::STORAGE_EQUIPMENT, options);
+    this->storageEquipmentOptions.clear();
+    this->storageEquipmentOptionCategories.clear();
+    this->storageEquipmentOptionMaxEquipped.clear();
+    this->syncOptionCollectionState(OptionCollectionType::STORAGE_EQUIPMENT);
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadAppearanceIcons();
+    }
 }
 
-void AccountManagementWidget::addStorageEquipmentOption(const OptionEntry& option)
+void AccountManagementWidget::setStorageTabEquipmentCategoryOptions(
+    const std::vector<StorageTabEquipmentOptionEntry>& options)
 {
-    this->addOptionToCollection(OptionCollectionType::STORAGE_EQUIPMENT, option);
+    this->storageEquipmentOptions.clear();
+    this->storageEquipmentOptionCategories.clear();
+    this->storageEquipmentOptionMaxEquipped.clear();
+    this->storageEquipmentOptions.reserve(options.size());
+    this->storageEquipmentOptionCategories.reserve(options.size());
+    this->storageEquipmentOptionMaxEquipped.reserve(options.size());
+
+    for (const StorageTabEquipmentOptionEntry& option : options)
+    {
+        this->storageEquipmentOptions.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+        this->storageEquipmentOptionCategories.push_back(option.category);
+        this->storageEquipmentOptionMaxEquipped.push_back((std::max)(0, option.maxEquippedOnShip));
+    }
+
+    this->syncOptionCollectionState(OptionCollectionType::STORAGE_EQUIPMENT);
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadAppearanceIcons();
+    }
 }
 
-void AccountManagementWidget::clearStorageEquipmentOptions(void)
+void AccountManagementWidget::addStorageTabEquipmentCategoryOption(
+    const StorageTabEquipmentOptionEntry& option)
 {
-    this->clearOptionsForCollection(OptionCollectionType::STORAGE_EQUIPMENT);
+    this->storageEquipmentOptions.push_back(InternalOptionEntry{option.name, option.previewAssetPath});
+    this->storageEquipmentOptionCategories.push_back(option.category);
+    this->storageEquipmentOptionMaxEquipped.push_back((std::max)(0, option.maxEquippedOnShip));
+    this->syncOptionCollectionState(OptionCollectionType::STORAGE_EQUIPMENT);
+
+    if (this->resourcesLoaded)
+    {
+        this->loadAppearanceIcons();
+    }
+}
+
+void AccountManagementWidget::setStorageTabWarehouseItems(const std::vector<StorageTabItemEntry>& items)
+{
+    this->storageWarehouseItems = items;
+    for (StorageTabItemEntry& item : this->storageWarehouseItems)
+    {
+        item.quantity = (std::max)(0, item.quantity);
+    }
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::addStorageTabWarehouseItem(const StorageTabItemEntry& item)
+{
+    StorageTabItemEntry sanitized = item;
+    sanitized.quantity = (std::max)(0, sanitized.quantity);
+    this->storageWarehouseItems.push_back(sanitized);
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::clearStorageTabWarehouseItems(void)
+{
+    this->storageWarehouseItems.clear();
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::setStorageTabEquippedItems(const std::vector<StorageTabItemEntry>& items)
+{
+    this->storageEquippedItems = items;
+    for (StorageTabItemEntry& item : this->storageEquippedItems)
+    {
+        item.quantity = (std::max)(0, item.quantity);
+    }
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::addStorageTabEquippedItem(const StorageTabItemEntry& item)
+{
+    StorageTabItemEntry sanitized = item;
+    sanitized.quantity = (std::max)(0, sanitized.quantity);
+    this->storageEquippedItems.push_back(sanitized);
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::clearStorageTabEquippedItems(void)
+{
+    this->storageEquippedItems.clear();
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+}
+
+void AccountManagementWidget::setStorageTabOnTransferRequested(StorageTabTransferCallback callback)
+{
+    this->storageTabOnTransferRequested = std::move(callback);
+}
+
+void AccountManagementWidget::setBoardingLootManagementTabCurrencies(
+    const std::vector<BoardingLootCurrencyEntry>& currencies)
+{
+    this->boardingLootCurrencies = currencies;
+    for (BoardingLootCurrencyEntry& currency : this->boardingLootCurrencies)
+    {
+        currency.shipQuantity = (std::max)(0, currency.shipQuantity);
+        currency.secureReserveQuantity = (std::max)(0, currency.secureReserveQuantity);
+        currency.minQuantityToSecureReserve = (std::max)(0, currency.minQuantityToSecureReserve);
+    }
+    this->boardingLootFirstRow = 0;
+    if (this->resourcesLoaded)
+    {
+        this->loadBoardingLootCurrencyIcons();
+    }
+}
+
+void AccountManagementWidget::addBoardingLootManagementTabCurrency(const BoardingLootCurrencyEntry& currency)
+{
+    BoardingLootCurrencyEntry sanitized = currency;
+    sanitized.shipQuantity = (std::max)(0, sanitized.shipQuantity);
+    sanitized.secureReserveQuantity = (std::max)(0, sanitized.secureReserveQuantity);
+    sanitized.minQuantityToSecureReserve = (std::max)(0, sanitized.minQuantityToSecureReserve);
+    this->boardingLootCurrencies.push_back(sanitized);
+    if (this->resourcesLoaded)
+    {
+        this->loadBoardingLootCurrencyIcons();
+    }
+}
+
+void AccountManagementWidget::clearBoardingLootManagementTabCurrencies(void)
+{
+    this->boardingLootCurrencies.clear();
+    this->boardingLootFirstRow = 0;
+    this->boardingLootScrollDragging = false;
+    this->clearIcons(this->boardingLootCurrencyIcons);
+}
+
+void AccountManagementWidget::setBoardingLootManagementTabOnTransferAllToSecureReserveRequested(
+    BoardingLootTransferAllCallback callback)
+{
+    this->boardingLootOnTransferAllToSecureReserveRequested = std::move(callback);
 }
 
 void AccountManagementWidget::setShipsForCollection(
     ShipCollectionType collection,
-    const std::vector<ShipEntry>& ships)
+    const std::vector<InternalShipEntry>& ships)
 {
-    std::vector<ShipEntry>* target = this->getShipsForCollection(collection);
+    std::vector<InternalShipEntry>* target = this->getShipsForCollection(collection);
     if (target == nullptr)
     {
         return;
@@ -1119,9 +1581,9 @@ void AccountManagementWidget::setShipsForCollection(
     }
 }
 
-void AccountManagementWidget::addShipToCollection(ShipCollectionType collection, const ShipEntry& ship)
+void AccountManagementWidget::addShipToCollection(ShipCollectionType collection, const InternalShipEntry& ship)
 {
-    std::vector<ShipEntry>* target = this->getShipsForCollection(collection);
+    std::vector<InternalShipEntry>* target = this->getShipsForCollection(collection);
     if (target == nullptr)
     {
         return;
@@ -1138,7 +1600,7 @@ void AccountManagementWidget::addShipToCollection(ShipCollectionType collection,
 
 void AccountManagementWidget::clearShipsForCollection(ShipCollectionType collection)
 {
-    std::vector<ShipEntry>* target = this->getShipsForCollection(collection);
+    std::vector<InternalShipEntry>* target = this->getShipsForCollection(collection);
     if (target == nullptr)
     {
         return;
@@ -1155,7 +1617,7 @@ void AccountManagementWidget::clearShipsForCollection(ShipCollectionType collect
 
 void AccountManagementWidget::setOptionsForCollection(
     OptionCollectionType collection,
-    const std::vector<OptionEntry>& options)
+    const std::vector<InternalOptionEntry>& options)
 {
     std::vector<AppearanceOption>* target = this->getOptionsForCollection(collection);
     if (target == nullptr)
@@ -1174,7 +1636,7 @@ void AccountManagementWidget::setOptionsForCollection(
 
 void AccountManagementWidget::addOptionToCollection(
     OptionCollectionType collection,
-    const OptionEntry& option)
+    const InternalOptionEntry& option)
 {
     std::vector<AppearanceOption>* target = this->getOptionsForCollection(collection);
     if (target == nullptr)
@@ -1208,7 +1670,7 @@ void AccountManagementWidget::clearOptionsForCollection(OptionCollectionType col
     }
 }
 
-void AccountManagementWidget::setEliteProgressData(const EliteProgressData& progressData)
+void AccountManagementWidget::setAccountTabEliteProgressData(const AccountTabEliteProgressData& progressData)
 {
     this->eliteProgressData.currentPoints = (std::max)(0, progressData.currentPoints);
     this->eliteProgressData.hasNextShip = progressData.hasNextShip;
@@ -1223,7 +1685,7 @@ void AccountManagementWidget::setEliteProgressData(const EliteProgressData& prog
     this->eliteProgressData.nextShipPointsRequired = 0;
 }
 
-void AccountManagementWidget::setElitePointsCurrent(int points)
+void AccountManagementWidget::setAccountTabElitePointsCurrent(int points)
 {
     this->eliteProgressData.currentPoints = (std::max)(0, points);
     if (this->eliteProgressData.hasNextShip)
@@ -1233,45 +1695,45 @@ void AccountManagementWidget::setElitePointsCurrent(int points)
     }
 }
 
-void AccountManagementWidget::setPlayerIdentifier(const std::string& value)
+void AccountManagementWidget::setAccountTabPlayerIdentifier(const std::string& value)
 {
     this->playerIdentifier = value;
 }
 
-void AccountManagementWidget::setPirateSince(const std::string& value)
+void AccountManagementWidget::setAccountTabPirateSince(const std::string& value)
 {
     this->pirateSinceText = value;
 }
 
-void AccountManagementWidget::setPlayerLevel(int level)
+void AccountManagementWidget::setAccountTabPlayerLevel(int level)
 {
     this->playerLevel = (std::max)(0, level);
 }
 
-void AccountManagementWidget::setExperiencePointsCurrent(int points)
+void AccountManagementWidget::setAccountTabExperiencePointsCurrent(int points)
 {
     this->experiencePointsCurrent = (std::max)(0, points);
 }
 
-void AccountManagementWidget::setCombatPointsCurrent(int points)
+void AccountManagementWidget::setAccountTabCombatPointsCurrent(int points)
 {
     this->combatPointsCurrent = (std::max)(0, points);
 }
 
-void AccountManagementWidget::setPremiumSince(const std::string& value)
+void AccountManagementWidget::setAccountTabPremiumSince(const std::string& value)
 {
     this->premiumSinceText = value;
 }
 
-void AccountManagementWidget::setProfileName(const std::string& value)
+void AccountManagementWidget::setAccountTabProfileName(const std::string& value)
 {
     this->profileName = clampProfileNameToUiLimit(value);
     this->profileCursorIndex = this->profileName.size();
 }
 
-AccountManagementWidget::EliteProgressData AccountManagementWidget::getEliteProgress(void) const
+AccountManagementWidget::AccountTabEliteProgressData AccountManagementWidget::getAccountTabEliteProgress(void) const
 {
-    EliteProgressData data = this->eliteProgressData;
+    AccountTabEliteProgressData data = this->eliteProgressData;
     data.currentPoints = (std::max)(0, data.currentPoints);
     if (data.hasNextShip)
     {
@@ -1307,6 +1769,9 @@ void AccountManagementWidget::clearAllData(void)
     this->clearIcons(this->moveClickStyleOptionIcons);
     this->clearIcons(this->emoteOptionIcons);
     this->clearIcons(this->storageEquipmentOptionIcons);
+    this->clearIcons(this->storageWarehouseItemIcons);
+    this->clearIcons(this->storageEquippedItemIcons);
+    this->clearIcons(this->boardingLootCurrencyIcons);
 
     this->eliteShips.clear();
     this->specialShips.clear();
@@ -1320,12 +1785,17 @@ void AccountManagementWidget::clearAllData(void)
     this->moveClickStyleOptions.clear();
     this->emoteOptions.clear();
     this->storageEquipmentOptions.clear();
+    this->storageEquipmentOptionCategories.clear();
+    this->storageEquipmentOptionMaxEquipped.clear();
+    this->storageWarehouseItems.clear();
+    this->storageEquippedItems.clear();
+    this->boardingLootCurrencies.clear();
 
     this->playerIdentifier.clear();
     this->pirateSinceText.clear();
     this->playerLevel = 0;
     this->experiencePointsCurrent = 0;
-    this->eliteProgressData = EliteProgressData{0, 0, false};
+    this->eliteProgressData = AccountTabEliteProgressData{0, 0, false};
     this->combatPointsCurrent = 0;
     this->premiumSinceText.clear();
     this->selectedEliteShip = 0;
@@ -1342,11 +1812,19 @@ void AccountManagementWidget::clearAllData(void)
     this->selectedMoveClickStyleOption = 0;
     this->selectedEmoteOption = 0;
     this->selectedStorageEquipmentOption = 0;
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
+    this->storageTabOnTransferRequested = nullptr;
+    this->boardingLootOnTransferAllToSecureReserveRequested = nullptr;
+    this->boardingLootFirstRow = 0;
+    this->boardingLootScrollDragging = false;
+    this->boardingLootScrollDragOffsetY = 0.0f;
+    this->boardingLootScrollWheelHighlightSec = 0.0f;
     this->profileName.clear();
     this->profileCursorIndex = 0;
 }
 
-std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShipsForCollection(
+std::vector<AccountManagementWidget::InternalShipEntry>* AccountManagementWidget::getShipsForCollection(
     ShipCollectionType collection)
 {
     switch (collection)
@@ -1361,7 +1839,7 @@ std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShi
     return nullptr;
 }
 
-const std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShipsForCollection(
+const std::vector<AccountManagementWidget::InternalShipEntry>* AccountManagementWidget::getShipsForCollection(
     ShipCollectionType collection) const
 {
     switch (collection)
@@ -1470,7 +1948,7 @@ int* AccountManagementWidget::getSelectedIndexForCollection(OptionCollectionType
 
 void AccountManagementWidget::syncShipCollectionState(ShipCollectionType collection)
 {
-    std::vector<ShipEntry>* ships = this->getShipsForCollection(collection);
+    std::vector<InternalShipEntry>* ships = this->getShipsForCollection(collection);
     if (ships == nullptr)
     {
         return;
@@ -1508,11 +1986,341 @@ void AccountManagementWidget::syncOptionCollectionState(OptionCollectionType col
         ? 0
         : (std::max)(0, (std::min)(*selectedIndex, static_cast<int>(options->size()) - 1));
 
+    if (collection == OptionCollectionType::STORAGE_EQUIPMENT &&
+        this->storageEquipmentOptionCategories.size() != this->storageEquipmentOptions.size())
+    {
+        this->storageEquipmentOptionCategories.resize(
+            this->storageEquipmentOptions.size(),
+            StorageTabEquipmentCategory::CANNONS);
+    }
+    if (collection == OptionCollectionType::STORAGE_EQUIPMENT &&
+        this->storageEquipmentOptionMaxEquipped.size() != this->storageEquipmentOptions.size())
+    {
+        this->storageEquipmentOptionMaxEquipped.resize(this->storageEquipmentOptions.size(), 0);
+    }
+
     if (this->openPicker != AppearancePickerType::NONE &&
         this->getCollectionForPicker(this->openPicker) == collection &&
         options->empty())
     {
         this->closeAppearancePicker();
+    }
+}
+
+AccountManagementWidget::StorageTabEquipmentCategory AccountManagementWidget::getSelectedStorageTabEquipmentCategory(void) const
+{
+    if (this->storageEquipmentOptionCategories.empty())
+    {
+        return StorageTabEquipmentCategory::CANNONS;
+    }
+
+    const int index = (std::max)(
+        0,
+        (std::min)(this->selectedStorageEquipmentOption, static_cast<int>(this->storageEquipmentOptionCategories.size()) - 1));
+    return this->storageEquipmentOptionCategories[static_cast<std::size_t>(index)];
+}
+
+int AccountManagementWidget::getStorageEquippedQuantityForCategory(StorageTabEquipmentCategory category) const
+{
+    int totalQuantity = 0;
+    for (const StorageTabItemEntry& item : this->storageEquippedItems)
+    {
+        if (item.category == category)
+        {
+            totalQuantity += (std::max)(0, item.quantity);
+        }
+    }
+    return totalQuantity;
+}
+
+int AccountManagementWidget::getStorageMaxEquippedForCategory(StorageTabEquipmentCategory category) const
+{
+    int maxEquipped = 0;
+    const std::size_t optionCount = (std::min)(
+        this->storageEquipmentOptionCategories.size(),
+        this->storageEquipmentOptionMaxEquipped.size());
+    for (std::size_t i = 0; i < optionCount; ++i)
+    {
+        if (this->storageEquipmentOptionCategories[i] == category)
+        {
+            maxEquipped = (std::max)(maxEquipped, (std::max)(0, this->storageEquipmentOptionMaxEquipped[i]));
+        }
+    }
+    return maxEquipped;
+}
+
+int AccountManagementWidget::getStorageRemainingEquipCapacityForCategory(StorageTabEquipmentCategory category) const
+{
+    const int maxEquipped = this->getStorageMaxEquippedForCategory(category);
+    if (maxEquipped <= 0)
+    {
+        return (std::numeric_limits<int>::max)();
+    }
+
+    return (std::max)(0, maxEquipped - this->getStorageEquippedQuantityForCategory(category));
+}
+
+bool AccountManagementWidget::isStorageWarehouseItemDisabledForEquip(const StorageTabItemEntry& item) const
+{
+    return item.quantity <= 0 || this->getStorageRemainingEquipCapacityForCategory(item.category) <= 0;
+}
+
+bool AccountManagementWidget::isStorageItemVisibleForSelectedCategory(const StorageTabItemEntry& item) const
+{
+    return item.category == this->getSelectedStorageTabEquipmentCategory();
+}
+
+std::vector<AccountManagementWidget::StorageTabItemEntry>* AccountManagementWidget::getStorageItemsForLocation(
+    StorageTabTransferLocation location)
+{
+    return location == StorageTabTransferLocation::WAREHOUSE
+        ? &this->storageWarehouseItems
+        : &this->storageEquippedItems;
+}
+
+const std::vector<AccountManagementWidget::StorageTabItemEntry>* AccountManagementWidget::getStorageItemsForLocation(
+    StorageTabTransferLocation location) const
+{
+    return location == StorageTabTransferLocation::WAREHOUSE
+        ? &this->storageWarehouseItems
+        : &this->storageEquippedItems;
+}
+
+std::vector<RC2D_Image>* AccountManagementWidget::getStorageItemIconsForLocation(StorageTabTransferLocation location)
+{
+    return location == StorageTabTransferLocation::WAREHOUSE
+        ? &this->storageWarehouseItemIcons
+        : &this->storageEquippedItemIcons;
+}
+
+const std::vector<RC2D_Image>* AccountManagementWidget::getStorageItemIconsForLocation(StorageTabTransferLocation location) const
+{
+    return location == StorageTabTransferLocation::WAREHOUSE
+        ? &this->storageWarehouseItemIcons
+        : &this->storageEquippedItemIcons;
+}
+
+int AccountManagementWidget::hitTestStorageItem(
+    StorageTabTransferLocation location,
+    const SDL_FRect& contentRect,
+    float x,
+    float y,
+    bool requireDraggable) const
+{
+    if (!isPointInRect(x, y, contentRect))
+    {
+        return -1;
+    }
+
+    const std::vector<StorageTabItemEntry>* items = this->getStorageItemsForLocation(location);
+    if (items == nullptr)
+    {
+        return -1;
+    }
+
+    const int rowCapacity = getStorageVisibleRowCapacity(contentRect);
+    int visibleRow = 0;
+    for (int sourceIndex = 0; sourceIndex < static_cast<int>(items->size()); ++sourceIndex)
+    {
+        const StorageTabItemEntry& item = (*items)[static_cast<std::size_t>(sourceIndex)];
+        if (!this->isStorageItemVisibleForSelectedCategory(item) || item.quantity <= 0)
+        {
+            continue;
+        }
+
+        if (visibleRow >= rowCapacity)
+        {
+            break;
+        }
+
+        const SDL_FRect rowRect = getStorageItemRowRect(contentRect, visibleRow);
+        if (isPointInRect(x, y, rowRect))
+        {
+            if (requireDraggable &&
+                location == StorageTabTransferLocation::WAREHOUSE &&
+                this->isStorageWarehouseItemDisabledForEquip(item))
+            {
+                return -1;
+            }
+            return sourceIndex;
+        }
+
+        ++visibleRow;
+    }
+
+    return -1;
+}
+
+void AccountManagementWidget::openStorageTransferPopupFromDrag(StorageTabTransferLocation target)
+{
+    if (!this->storageDrag.active)
+    {
+        return;
+    }
+
+    int maxQuantity = (std::max)(1, this->storageDrag.maxQuantity);
+    if (this->storageDrag.source == StorageTabTransferLocation::WAREHOUSE &&
+        target == StorageTabTransferLocation::SHIP)
+    {
+        maxQuantity = (std::min)(
+            maxQuantity,
+            this->getStorageRemainingEquipCapacityForCategory(this->storageDrag.category));
+    }
+    if (maxQuantity <= 0)
+    {
+        this->cancelStorageDrag();
+        return;
+    }
+
+    this->storageTransferPopup.open = true;
+    this->storageTransferPopup.source = this->storageDrag.source;
+    this->storageTransferPopup.target = target;
+    this->storageTransferPopup.sourceIndex = this->storageDrag.sourceIndex;
+    this->storageTransferPopup.maxQuantity = maxQuantity;
+    this->storageTransferPopup.quantity = this->storageTransferPopup.maxQuantity;
+    this->storageTransferPopup.category = this->storageDrag.category;
+    this->storageTransferPopup.itemName = this->storageDrag.itemName;
+    this->storageTransferPopup.previewAssetPath = this->storageDrag.previewAssetPath;
+    this->cancelStorageDrag();
+}
+
+void AccountManagementWidget::closeStorageTransferPopup(void)
+{
+    this->storageTransferPopup = StorageTransferPopupState{
+        false,
+        StorageTabTransferLocation::WAREHOUSE,
+        StorageTabTransferLocation::SHIP,
+        -1,
+        0,
+        1,
+        StorageTabEquipmentCategory::CANNONS,
+        {},
+        {}
+    };
+}
+
+void AccountManagementWidget::cancelStorageDrag(void)
+{
+    this->storageDrag = StorageDragState{
+        false,
+        StorageTabTransferLocation::WAREHOUSE,
+        -1,
+        0,
+        StorageTabEquipmentCategory::CANNONS,
+        {},
+        {},
+        0.0f,
+        0.0f
+    };
+}
+
+void AccountManagementWidget::applyStorageTransferPopup(void)
+{
+    if (!this->storageTransferPopup.open)
+    {
+        return;
+    }
+
+    std::vector<StorageTabItemEntry>* sourceItems = this->getStorageItemsForLocation(this->storageTransferPopup.source);
+    std::vector<StorageTabItemEntry>* targetItems = this->getStorageItemsForLocation(this->storageTransferPopup.target);
+    if (sourceItems == nullptr ||
+        targetItems == nullptr ||
+        this->storageTransferPopup.sourceIndex < 0 ||
+        this->storageTransferPopup.sourceIndex >= static_cast<int>(sourceItems->size()))
+    {
+        this->closeStorageTransferPopup();
+        return;
+    }
+
+    StorageTabItemEntry movedItem = (*sourceItems)[static_cast<std::size_t>(this->storageTransferPopup.sourceIndex)];
+    const int movableQuantity = (std::max)(0, movedItem.quantity);
+    if (movableQuantity <= 0)
+    {
+        this->closeStorageTransferPopup();
+        return;
+    }
+
+    int maxQuantity = (std::min)(this->storageTransferPopup.maxQuantity, movableQuantity);
+    if (this->storageTransferPopup.source == StorageTabTransferLocation::WAREHOUSE &&
+        this->storageTransferPopup.target == StorageTabTransferLocation::SHIP)
+    {
+        maxQuantity = (std::min)(
+            maxQuantity,
+            this->getStorageRemainingEquipCapacityForCategory(movedItem.category));
+    }
+    if (maxQuantity <= 0)
+    {
+        this->closeStorageTransferPopup();
+        return;
+    }
+
+    const int quantity = (std::max)(1, (std::min)(this->storageTransferPopup.quantity, maxQuantity));
+
+    movedItem.quantity = quantity;
+    (*sourceItems)[static_cast<std::size_t>(this->storageTransferPopup.sourceIndex)].quantity -= quantity;
+    if ((*sourceItems)[static_cast<std::size_t>(this->storageTransferPopup.sourceIndex)].quantity <= 0)
+    {
+        sourceItems->erase(sourceItems->begin() + this->storageTransferPopup.sourceIndex);
+    }
+
+    auto targetIt = std::find_if(
+        targetItems->begin(),
+        targetItems->end(),
+        [&movedItem](const StorageTabItemEntry& entry) {
+            return storageItemIdentityMatches(entry, movedItem);
+        });
+    if (targetIt != targetItems->end())
+    {
+        targetIt->quantity += quantity;
+    }
+    else
+    {
+        targetItems->push_back(movedItem);
+    }
+
+    StorageTabTransferRequest request{};
+    request.source = this->storageTransferPopup.source;
+    request.target = this->storageTransferPopup.target;
+    request.item = movedItem;
+    request.quantity = quantity;
+
+    this->closeStorageTransferPopup();
+
+    if (this->resourcesLoaded)
+    {
+        this->loadStorageItemIcons();
+    }
+
+    if (this->storageTabOnTransferRequested)
+    {
+        this->storageTabOnTransferRequested(request);
+    }
+}
+
+void AccountManagementWidget::transferAllBoardingLootToSecureReserve(void)
+{
+    BoardingLootTransferAllToSecureReserveRequest request{};
+    for (BoardingLootCurrencyEntry& currency : this->boardingLootCurrencies)
+    {
+        const int quantity = (std::max)(0, currency.shipQuantity);
+        const int minQuantity = (std::max)(0, currency.minQuantityToSecureReserve);
+        if (currency.forceStoreOnShip || quantity <= 0 || quantity < minQuantity)
+        {
+            continue;
+        }
+
+        currency.shipQuantity = 0;
+        currency.secureReserveQuantity = (std::max)(0, currency.secureReserveQuantity) + quantity;
+
+        BoardingLootTransferEntry moved{};
+        moved.type = currency.type;
+        moved.quantity = quantity;
+        request.currencies.push_back(moved);
+    }
+
+    if (!request.currencies.empty() && this->boardingLootOnTransferAllToSecureReserveRequested)
+    {
+        this->boardingLootOnTransferAllToSecureReserveRequested(request);
     }
 }
 
@@ -1549,7 +2357,7 @@ AccountManagementWidget::OptionCollectionType AccountManagementWidget::getCollec
 
 int AccountManagementWidget::getVisibleShipCountForTab(ActiveTab tab) const
 {
-    const std::vector<ShipEntry>* ships = this->getShipsForTab(tab);
+    const std::vector<InternalShipEntry>* ships = this->getShipsForTab(tab);
     if (ships == nullptr)
     {
         return 0;
@@ -1565,7 +2373,7 @@ int AccountManagementWidget::getVisibleShipSourceIndexForTab(ActiveTab tab, int 
         return -1;
     }
 
-    const std::vector<ShipEntry>* ships = this->getShipsForTab(tab);
+    const std::vector<InternalShipEntry>* ships = this->getShipsForTab(tab);
     if (ships == nullptr)
     {
         return -1;
@@ -1580,13 +2388,13 @@ void AccountManagementWidget::loadShipIcons(void)
     this->clearIcons(this->specialShipIcons);
 
     this->eliteShipIcons.reserve(this->eliteShips.size());
-    for (const ShipEntry& entry : this->eliteShips)
+    for (const InternalShipEntry& entry : this->eliteShips)
     {
         this->eliteShipIcons.push_back(loadImageFromTitleOrEmpty(entry.previewAssetPath));
     }
 
     this->specialShipIcons.reserve(this->specialShips.size());
-    for (const ShipEntry& entry : this->specialShips)
+    for (const InternalShipEntry& entry : this->specialShips)
     {
         this->specialShipIcons.push_back(loadImageFromTitleOrEmpty(entry.previewAssetPath));
     }
@@ -1666,7 +2474,36 @@ void AccountManagementWidget::loadAppearanceIcons(void)
     }
 }
 
-std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShipsForTab(ActiveTab tab)
+void AccountManagementWidget::loadStorageItemIcons(void)
+{
+    this->clearIcons(this->storageWarehouseItemIcons);
+    this->clearIcons(this->storageEquippedItemIcons);
+
+    this->storageWarehouseItemIcons.reserve(this->storageWarehouseItems.size());
+    for (const StorageTabItemEntry& item : this->storageWarehouseItems)
+    {
+        this->storageWarehouseItemIcons.push_back(loadImageFromTitleOrEmpty(item.previewAssetPath));
+    }
+
+    this->storageEquippedItemIcons.reserve(this->storageEquippedItems.size());
+    for (const StorageTabItemEntry& item : this->storageEquippedItems)
+    {
+        this->storageEquippedItemIcons.push_back(loadImageFromTitleOrEmpty(item.previewAssetPath));
+    }
+}
+
+void AccountManagementWidget::loadBoardingLootCurrencyIcons(void)
+{
+    this->clearIcons(this->boardingLootCurrencyIcons);
+
+    this->boardingLootCurrencyIcons.reserve(this->boardingLootCurrencies.size());
+    for (const BoardingLootCurrencyEntry& currency : this->boardingLootCurrencies)
+    {
+        this->boardingLootCurrencyIcons.push_back(loadImageFromTitleOrEmpty(currency.previewAssetPath));
+    }
+}
+
+std::vector<AccountManagementWidget::InternalShipEntry>* AccountManagementWidget::getShipsForTab(ActiveTab tab)
 {
     switch (tab)
     {
@@ -1680,7 +2517,7 @@ std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShi
     return nullptr;
 }
 
-const std::vector<AccountManagementWidget::ShipEntry>* AccountManagementWidget::getShipsForTab(ActiveTab tab) const
+const std::vector<AccountManagementWidget::InternalShipEntry>* AccountManagementWidget::getShipsForTab(ActiveTab tab) const
 {
     switch (tab)
     {
@@ -1973,6 +2810,12 @@ void AccountManagementWidget::load(void)
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
     this->smallFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
     this->controlIcons.load();
+    this->storageDropdownArrowImage =
+        LoadStorageImage("assets/images/ui-scene-game/icon-arrowdown.png", RC2D_STORAGE_TITLE);
+    if (this->storageDropdownArrowImage.sdl_texture == nullptr)
+    {
+        RC2D_log(RC2D_LOG_WARN, "AccountManagementWidget: echec chargement icon-arrowdown.png");
+    }
     this->resourcesLoaded = true;
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
@@ -1997,8 +2840,12 @@ void AccountManagementWidget::load(void)
     this->profileCursorBlinkElapsed = 0.0;
     this->loadShipIcons();
     this->loadAppearanceIcons();
+    this->loadStorageItemIcons();
+    this->loadBoardingLootCurrencyIcons();
 
     this->closeAppearancePicker();
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
 }
 
 void AccountManagementWidget::unload(void)
@@ -2015,6 +2862,10 @@ void AccountManagementWidget::unload(void)
     this->clearIcons(this->moveClickStyleOptionIcons);
     this->clearIcons(this->emoteOptionIcons);
     this->clearIcons(this->storageEquipmentOptionIcons);
+    this->clearIcons(this->storageWarehouseItemIcons);
+    this->clearIcons(this->storageEquippedItemIcons);
+    this->clearIcons(this->boardingLootCurrencyIcons);
+    ResetStorageImageRef(&this->storageDropdownArrowImage);
     this->controlIcons.unload();
     this->resourcesLoaded = false;
     ResetStorageFontRef(&this->smallFont);
@@ -2041,13 +2892,17 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         return HudCursorType::NONE;
     }
 
-    if (this->pickerScrollDragging || this->fleetScrollDragging)
+    if (this->pickerScrollDragging || this->fleetScrollDragging || this->boardingLootScrollDragging)
     {
         return HudCursorType::RESIZE_VERTICAL;
     }
     if (this->widgetDragging)
     {
         return HudCursorType::MOVE;
+    }
+    if (this->storageDrag.active)
+    {
+        return HudCursorType::POINTER;
     }
 
     const SDL_FRect baseRect = getWidgetRectFromGameScreen();
@@ -2058,6 +2913,21 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         baseRect.h
     };
     const WidgetLayout layout = buildLayout(currentRect);
+
+    if (this->storageTransferPopup.open)
+    {
+        const StorageTransferPopupLayout popupLayout = buildStorageTransferPopupLayout(currentRect);
+        if (isPointInRect(x, y, popupLayout.cancelButton) ||
+            isPointInRect(x, y, popupLayout.transferButton) ||
+            isPointInRect(x, y, popupLayout.quantityMinusButton) ||
+            isPointInRect(x, y, popupLayout.quantityPlusButton))
+        {
+            return HudCursorType::POINTER;
+        }
+        return isPointInRect(x, y, popupLayout.panel)
+            ? HudCursorType::DEFAULT
+            : HudCursorType::DEFAULT;
+    }
 
     if (this->openPicker != AppearancePickerType::NONE)
     {
@@ -2107,7 +2977,8 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         isPointInRect(x, y, layout.tabShipManagement) ||
         isPointInRect(x, y, layout.tabElite) ||
         isPointInRect(x, y, layout.tabSpecial) ||
-        isPointInRect(x, y, layout.tabStorageEquipped))
+        isPointInRect(x, y, layout.tabStorageEquipped) ||
+        isPointInRect(x, y, layout.tabBoardingLoot))
     {
         return HudCursorType::POINTER;
     }
@@ -2151,10 +3022,30 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         {
             return HudCursorType::POINTER;
         }
+        if (this->hitTestStorageItem(StorageTabTransferLocation::WAREHOUSE, layout.storageLeftContent, x, y, true) >= 0 ||
+            this->hitTestStorageItem(StorageTabTransferLocation::SHIP, layout.storageMiddleContent, x, y) >= 0)
+        {
+            return HudCursorType::POINTER;
+        }
+    }
+    else if (this->activeTab == ActiveTab::BOARDING_LOOT)
+    {
+        const BoardingLootMetrics metrics = buildBoardingLootMetrics(
+            layout.boardingLootLeftPanel,
+            layout.boardingLootRightPanel,
+            static_cast<int>(this->boardingLootCurrencies.size()));
+        if (metrics.maxFirstRow > 0 && isPointInRect(x, y, metrics.scrollTrack))
+        {
+            return HudCursorType::RESIZE_VERTICAL;
+        }
+        if (isPointInRect(x, y, layout.boardingLootTransferAllButton))
+        {
+            return HudCursorType::POINTER;
+        }
     }
     else if (this->activeTab == ActiveTab::ELITE_SHIPS || this->activeTab == ActiveTab::SPECIAL_SHIPS)
     {
-        const std::vector<ShipEntry>* ships = this->getShipsForTab(this->activeTab);
+        const std::vector<InternalShipEntry>* ships = this->getShipsForTab(this->activeTab);
         if (ships != nullptr)
         {
             const SDL_FRect viewport = (this->activeTab == ActiveTab::ELITE_SHIPS)
@@ -2179,6 +3070,8 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
 void AccountManagementWidget::clearFocus(void)
 {
     this->clearAllFocus();
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
 }
 
 void AccountManagementWidget::openShipManagement(void)
@@ -2188,8 +3081,10 @@ void AccountManagementWidget::openShipManagement(void)
     this->widgetDragging = false;
     this->fleetScrollDragging = false;
     this->pickerScrollDragging = false;
+    this->boardingLootScrollDragging = false;
     this->clearFocus();
     this->closeAppearancePicker();
+    this->cancelStorageDrag();
 }
 
 void AccountManagementWidget::hide(void)
@@ -2198,9 +3093,13 @@ void AccountManagementWidget::hide(void)
     this->widgetDragging = false;
     this->fleetScrollDragging = false;
     this->pickerScrollDragging = false;
+    this->boardingLootScrollDragging = false;
     this->fleetScrollWheelHighlightSec = 0.0f;
+    this->boardingLootScrollWheelHighlightSec = 0.0f;
     this->clearFocus();
     this->closeAppearancePicker();
+    this->cancelStorageDrag();
+    this->closeStorageTransferPopup();
 }
 
 void AccountManagementWidget::update(double dt)
@@ -2220,6 +3119,14 @@ void AccountManagementWidget::update(double dt)
         if (this->pickerScrollWheelHighlightSec < 0.0f)
         {
             this->pickerScrollWheelHighlightSec = 0.0f;
+        }
+    }
+    if (this->boardingLootScrollWheelHighlightSec > 0.0f)
+    {
+        this->boardingLootScrollWheelHighlightSec -= dtF;
+        if (this->boardingLootScrollWheelHighlightSec < 0.0f)
+        {
+            this->boardingLootScrollWheelHighlightSec = 0.0f;
         }
     }
 
@@ -2247,17 +3154,58 @@ void AccountManagementWidget::update(double dt)
     }
 
     const WidgetLayout layout = buildLayout(this->widgetRect);
+    const bool leftMouseDown = rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT);
 
-    if (!this->widgetDragging && !this->fleetScrollDragging && !this->pickerScrollDragging)
+    if (this->storageDrag.active)
+    {
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+
+        const StorageTabTransferLocation targetLocation =
+            this->storageDrag.source == StorageTabTransferLocation::WAREHOUSE
+                ? StorageTabTransferLocation::SHIP
+                : StorageTabTransferLocation::WAREHOUSE;
+        const SDL_FRect targetRect =
+            targetLocation == StorageTabTransferLocation::SHIP
+                ? layout.storageMiddleContent
+                : layout.storageLeftContent;
+        const bool validDrop =
+            this->visible &&
+            this->activeTab == ActiveTab::STORAGE_EQUIPPED &&
+            isPointInRect(mouseX, mouseY, targetRect) &&
+            (this->storageDrag.source != StorageTabTransferLocation::WAREHOUSE ||
+                targetLocation != StorageTabTransferLocation::SHIP ||
+                this->getStorageRemainingEquipCapacityForCategory(this->storageDrag.category) > 0);
+
+        if (!leftMouseDown)
+        {
+            if (validDrop)
+            {
+                this->openStorageTransferPopupFromDrag(targetLocation);
+            }
+            else
+            {
+                this->cancelStorageDrag();
+            }
+        }
+        return;
+    }
+
+    if (!this->widgetDragging &&
+        !this->fleetScrollDragging &&
+        !this->pickerScrollDragging &&
+        !this->boardingLootScrollDragging)
     {
         return;
     }
 
-    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    if (!leftMouseDown)
     {
         this->widgetDragging = false;
         this->fleetScrollDragging = false;
         this->pickerScrollDragging = false;
+        this->boardingLootScrollDragging = false;
         return;
     }
 
@@ -2313,9 +3261,43 @@ void AccountManagementWidget::update(double dt)
         return;
     }
 
+    if (this->boardingLootScrollDragging)
+    {
+        const BoardingLootMetrics metrics = buildBoardingLootMetrics(
+            layout.boardingLootLeftPanel,
+            layout.boardingLootRightPanel,
+            static_cast<int>(this->boardingLootCurrencies.size()));
+        if (this->activeTab != ActiveTab::BOARDING_LOOT || metrics.maxFirstRow <= 0)
+        {
+            this->boardingLootFirstRow = 0;
+            this->boardingLootScrollDragging = false;
+            return;
+        }
+
+        const float thumbHeight = (std::max)(
+            kMinThumbHeight,
+            (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                static_cast<float>((std::max)(1, metrics.totalRows))));
+        const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+
+        float mx = 0.0f;
+        float my = 0.0f;
+        getMouseRenderPosition(&mx, &my);
+        (void)mx;
+
+        const float thumbTop = clampf(
+            my - this->boardingLootScrollDragOffsetY,
+            metrics.scrollTrack.y,
+            metrics.scrollTrack.y + thumbTravel);
+        const float t = (thumbTop - metrics.scrollTrack.y) / thumbTravel;
+        this->boardingLootFirstRow = static_cast<int>(t * static_cast<float>(metrics.maxFirstRow) + 0.5f);
+        this->boardingLootFirstRow = (std::max)(0, (std::min)(this->boardingLootFirstRow, metrics.maxFirstRow));
+        return;
+    }
+
     if (this->fleetScrollDragging)
     {
-        std::vector<ShipEntry>* ships = this->getShipsForTab(this->activeTab);
+        std::vector<InternalShipEntry>* ships = this->getShipsForTab(this->activeTab);
         int* firstRowPtr = this->getFirstRowForTab(this->activeTab);
         if (ships == nullptr || firstRowPtr == nullptr)
         {
@@ -2387,12 +3369,41 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
 
     const WidgetLayout layout = buildLayout(this->widgetRect);
 
+    if (this->storageTransferPopup.open)
+    {
+        const StorageTransferPopupLayout popupLayout = buildStorageTransferPopupLayout(this->widgetRect);
+        if (isPointInRect(x, y, popupLayout.cancelButton))
+        {
+            this->closeStorageTransferPopup();
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.transferButton))
+        {
+            this->applyStorageTransferPopup();
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.quantityMinusButton))
+        {
+            this->storageTransferPopup.quantity = (std::max)(1, this->storageTransferPopup.quantity - 1);
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.quantityPlusButton))
+        {
+            this->storageTransferPopup.quantity =
+                (std::min)(this->storageTransferPopup.maxQuantity, this->storageTransferPopup.quantity + 1);
+            return true;
+        }
+        return true;
+    }
+
     if (isPointInRect(x, y, layout.closeButton))
     {
         this->visible = false;
         this->widgetDragging = false;
         this->fleetScrollDragging = false;
         this->pickerScrollDragging = false;
+        this->cancelStorageDrag();
+        this->closeStorageTransferPopup();
         this->clearAllFocus();
         return true;
     }
@@ -2404,9 +3415,16 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
         return true;
     }
 
-    if (isPointInRect(x, y, layout.tabAppearance))
+    if (isPointInRect(x, y, layout.tabStorageEquipped))
     {
-        this->activeTab = ActiveTab::APPEARANCE;
+        this->activeTab = ActiveTab::STORAGE_EQUIPPED;
+        this->clearAllFocus();
+        return true;
+    }
+
+    if (isPointInRect(x, y, layout.tabBoardingLoot))
+    {
+        this->activeTab = ActiveTab::BOARDING_LOOT;
         this->clearAllFocus();
         return true;
     }
@@ -2414,6 +3432,13 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
     if (isPointInRect(x, y, layout.tabShipManagement))
     {
         this->activeTab = ActiveTab::SHIP_MANAGEMENT;
+        this->clearAllFocus();
+        return true;
+    }
+
+    if (isPointInRect(x, y, layout.tabAppearance))
+    {
+        this->activeTab = ActiveTab::APPEARANCE;
         this->clearAllFocus();
         return true;
     }
@@ -2428,13 +3453,6 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
     if (isPointInRect(x, y, layout.tabSpecial))
     {
         this->activeTab = ActiveTab::SPECIAL_SHIPS;
-        this->clearAllFocus();
-        return true;
-    }
-
-    if (isPointInRect(x, y, layout.tabStorageEquipped))
-    {
-        this->activeTab = ActiveTab::STORAGE_EQUIPPED;
         this->clearAllFocus();
         return true;
     }
@@ -2740,6 +3758,115 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
             return true;
         }
 
+        const int warehouseSourceIndex =
+            this->hitTestStorageItem(StorageTabTransferLocation::WAREHOUSE, layout.storageLeftContent, x, y, true);
+        if (warehouseSourceIndex >= 0)
+        {
+            const std::vector<StorageTabItemEntry>* sourceItems =
+                this->getStorageItemsForLocation(StorageTabTransferLocation::WAREHOUSE);
+            if (sourceItems != nullptr && warehouseSourceIndex < static_cast<int>(sourceItems->size()))
+            {
+                const StorageTabItemEntry& item = (*sourceItems)[static_cast<std::size_t>(warehouseSourceIndex)];
+                const int maxTransferQuantity = (std::min)(
+                    (std::max)(1, item.quantity),
+                    this->getStorageRemainingEquipCapacityForCategory(item.category));
+                if (maxTransferQuantity <= 0)
+                {
+                    this->closeAppearancePicker();
+                    return true;
+                }
+                this->storageDrag = StorageDragState{
+                    true,
+                    StorageTabTransferLocation::WAREHOUSE,
+                    warehouseSourceIndex,
+                    maxTransferQuantity,
+                    item.category,
+                    item.name,
+                    item.previewAssetPath,
+                    x,
+                    y
+                };
+                this->closeAppearancePicker();
+                return true;
+            }
+        }
+
+        const int shipSourceIndex =
+            this->hitTestStorageItem(StorageTabTransferLocation::SHIP, layout.storageMiddleContent, x, y);
+        if (shipSourceIndex >= 0)
+        {
+            const std::vector<StorageTabItemEntry>* sourceItems =
+                this->getStorageItemsForLocation(StorageTabTransferLocation::SHIP);
+            if (sourceItems != nullptr && shipSourceIndex < static_cast<int>(sourceItems->size()))
+            {
+                const StorageTabItemEntry& item = (*sourceItems)[static_cast<std::size_t>(shipSourceIndex)];
+                this->storageDrag = StorageDragState{
+                    true,
+                    StorageTabTransferLocation::SHIP,
+                    shipSourceIndex,
+                    (std::max)(1, item.quantity),
+                    item.category,
+                    item.name,
+                    item.previewAssetPath,
+                    x,
+                    y
+                };
+                this->closeAppearancePicker();
+                return true;
+            }
+        }
+
+        this->closeAppearancePicker();
+        return true;
+    }
+
+    if (this->activeTab == ActiveTab::BOARDING_LOOT)
+    {
+        const BoardingLootMetrics metrics = buildBoardingLootMetrics(
+            layout.boardingLootLeftPanel,
+            layout.boardingLootRightPanel,
+            static_cast<int>(this->boardingLootCurrencies.size()));
+        this->boardingLootFirstRow = (std::max)(0, (std::min)(this->boardingLootFirstRow, metrics.maxFirstRow));
+        if (metrics.maxFirstRow > 0 && isPointInRect(x, y, metrics.scrollTrack))
+        {
+            const float thumbHeight = (std::max)(
+                kMinThumbHeight,
+                (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                    static_cast<float>((std::max)(1, metrics.totalRows))));
+            const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+            const float ratio =
+                static_cast<float>(this->boardingLootFirstRow) /
+                static_cast<float>((std::max)(1, metrics.maxFirstRow));
+            const float thumbY = metrics.scrollTrack.y + (thumbTravel * ratio);
+            const SDL_FRect thumb = SDL_FRect{metrics.scrollTrack.x, thumbY, metrics.scrollTrack.w, thumbHeight};
+
+            this->boardingLootScrollDragging = true;
+            this->fleetScrollDragging = false;
+            this->pickerScrollDragging = false;
+            this->widgetDragging = false;
+
+            if (isPointInRect(x, y, thumb))
+            {
+                this->boardingLootScrollDragOffsetY = y - thumb.y;
+            }
+            else
+            {
+                this->boardingLootScrollDragOffsetY = thumbHeight * 0.5f;
+                const float thumbTop = clampf(
+                    y - this->boardingLootScrollDragOffsetY,
+                    metrics.scrollTrack.y,
+                    metrics.scrollTrack.y + thumbTravel);
+                const float t = (thumbTop - metrics.scrollTrack.y) / thumbTravel;
+                this->boardingLootFirstRow = static_cast<int>(t * static_cast<float>(metrics.maxFirstRow) + 0.5f);
+                this->boardingLootFirstRow = (std::max)(0, (std::min)(this->boardingLootFirstRow, metrics.maxFirstRow));
+            }
+            return true;
+        }
+
+        if (isPointInRect(x, y, layout.boardingLootTransferAllButton))
+        {
+            this->transferAllBoardingLootToSecureReserve();
+        }
         this->closeAppearancePicker();
         return true;
     }
@@ -2749,7 +3876,7 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
         return true;
     }
 
-    std::vector<ShipEntry>* ships = this->getShipsForTab(this->activeTab);
+    std::vector<InternalShipEntry>* ships = this->getShipsForTab(this->activeTab);
     int* firstRowPtr = this->getFirstRowForTab(this->activeTab);
     if (ships == nullptr || firstRowPtr == nullptr)
     {
@@ -2888,9 +4015,35 @@ bool AccountManagementWidget::mousewheelmoved(
         }
     }
 
+    if (this->activeTab == ActiveTab::BOARDING_LOOT)
+    {
+        const WidgetLayout layout = buildLayout(this->widgetRect);
+        if (!isPointInRect(mouse_x, mouse_y, layout.boardingLootLeftPanel) &&
+            !isPointInRect(mouse_x, mouse_y, layout.boardingLootRightPanel))
+        {
+            return true;
+        }
+
+        const BoardingLootMetrics metrics = buildBoardingLootMetrics(
+            layout.boardingLootLeftPanel,
+            layout.boardingLootRightPanel,
+            static_cast<int>(this->boardingLootCurrencies.size()));
+        if (metrics.maxFirstRow > 0)
+        {
+            const int rowBefore = this->boardingLootFirstRow;
+            this->boardingLootFirstRow -= delta;
+            this->boardingLootFirstRow = (std::max)(0, (std::min)(this->boardingLootFirstRow, metrics.maxFirstRow));
+            if (this->boardingLootFirstRow != rowBefore)
+            {
+                this->boardingLootScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+            }
+        }
+        return true;
+    }
+
     if (this->activeTab == ActiveTab::ELITE_SHIPS || this->activeTab == ActiveTab::SPECIAL_SHIPS)
     {
-        std::vector<ShipEntry>* ships = this->getShipsForTab(this->activeTab);
+        std::vector<InternalShipEntry>* ships = this->getShipsForTab(this->activeTab);
         int* firstRowPtr = this->getFirstRowForTab(this->activeTab);
         if (ships == nullptr || firstRowPtr == nullptr)
         {
@@ -3049,11 +4202,12 @@ void AccountManagementWidget::draw(void) const
     };
 
     drawTab(layout.tabAccount, "Compte", self->activeTab == ActiveTab::ACCOUNT);
-    drawTab(layout.tabAppearance, "Apparence", self->activeTab == ActiveTab::APPEARANCE);
+    drawTab(layout.tabStorageEquipped, "Depot / Equipe", self->activeTab == ActiveTab::STORAGE_EQUIPPED);
+    drawTab(layout.tabBoardingLoot, "Gestion de butin d'abordage", self->activeTab == ActiveTab::BOARDING_LOOT);
     drawTab(layout.tabShipManagement, "Gestion du navire", self->activeTab == ActiveTab::SHIP_MANAGEMENT);
+    drawTab(layout.tabAppearance, "Apparence", self->activeTab == ActiveTab::APPEARANCE);
     drawTab(layout.tabElite, "Navires elite acquis", self->activeTab == ActiveTab::ELITE_SHIPS);
     drawTab(layout.tabSpecial, "Navires speciaux acquis", self->activeTab == ActiveTab::SPECIAL_SHIPS);
-    drawTab(layout.tabStorageEquipped, "Entrepot / Equipe", self->activeTab == ActiveTab::STORAGE_EQUIPPED);
 
     self->controlIcons.drawCloseButton(layout.closeButton, kHeaderFill, kGold);
 
@@ -3308,12 +4462,21 @@ void AccountManagementWidget::draw(void) const
             rc2d_graphics_rectangle("line", &r);
 
             drawTextAt(&self->bodyFont, label, r.x + 10.0f, r.y + 8.0f, kTextGold);
-            drawTextAt(&self->bodyFont, "v", r.x + r.w - 16.0f, r.y + 6.0f, kTextGold);
+            if (self->storageDropdownArrowImage.sdl_texture != nullptr)
+            {
+                static constexpr float kArrowSize = 18.0f;
+                const SDL_FRect arrowRect = SDL_FRect{
+                    r.x + r.w - kArrowSize - 8.0f,
+                    r.y + (r.h - kArrowSize) * 0.5f,
+                    kArrowSize,
+                    kArrowSize
+                };
+                drawImageFit(&self->storageDropdownArrowImage, arrowRect);
+            }
         };
 
         drawStoragePanel(layout.storageLeftPanel);
         drawStoragePanel(layout.storageMiddlePanel);
-        drawStoragePanel(layout.storageRightPanel);
 
         drawCentered(
             &self->smallFont,
@@ -3325,11 +4488,6 @@ void AccountManagementWidget::draw(void) const
             "Equipe",
             SDL_FRect{layout.storageMiddlePanel.x, layout.storageMiddlePanel.y - 18.0f, layout.storageMiddlePanel.w, 18.0f},
             kTextGold);
-        drawCentered(
-            &self->smallFont,
-            "Valeurs equipees",
-            SDL_FRect{layout.storageRightPanel.x, layout.storageRightPanel.y - 18.0f, layout.storageRightPanel.w, 18.0f},
-            kTextGold);
 
         const int equipmentIndex = self->storageEquipmentOptions.empty()
             ? -1
@@ -3337,9 +4495,6 @@ void AccountManagementWidget::draw(void) const
         const std::string equipmentLabel = (equipmentIndex >= 0 && equipmentIndex < static_cast<int>(self->storageEquipmentOptions.size()))
             ? self->storageEquipmentOptions[static_cast<std::size_t>(equipmentIndex)].name
             : std::string("-");
-        RC2D_Image* equipmentIcon = (equipmentIndex >= 0 && equipmentIndex < static_cast<int>(self->storageEquipmentOptionIcons.size()))
-            ? &self->storageEquipmentOptionIcons[static_cast<std::size_t>(equipmentIndex)]
-            : nullptr;
 
         drawStorageDropdown(
             layout.storageLeftDropdown,
@@ -3350,119 +4505,365 @@ void AccountManagementWidget::draw(void) const
             equipmentLabel,
             self->openPicker == AppearancePickerType::STORAGE_ITEM_RIGHT);
 
-        rc2d_graphics_setColor(kPanelFill);
-        rc2d_graphics_rectangle("fill", &layout.storageLeftContent);
-        rc2d_graphics_rectangle("fill", &layout.storageMiddleContent);
-        rc2d_graphics_setColor(kGold);
-        rc2d_graphics_rectangle("line", &layout.storageLeftContent);
-        rc2d_graphics_rectangle("line", &layout.storageMiddleContent);
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+        const bool leftDropReady =
+            self->storageDrag.active &&
+            self->storageDrag.source == StorageTabTransferLocation::SHIP &&
+            isPointInRect(mouseX, mouseY, layout.storageLeftContent);
+        const bool middleDropReady =
+            self->storageDrag.active &&
+            self->storageDrag.source == StorageTabTransferLocation::WAREHOUSE &&
+            isPointInRect(mouseX, mouseY, layout.storageMiddleContent) &&
+            self->getStorageRemainingEquipCapacityForCategory(self->storageDrag.category) > 0;
+        const StorageTabItemEntry* hoveredCannonItem = nullptr;
+        const RC2D_Image* hoveredCannonIcon = nullptr;
 
-        const SDL_FRect storageIconLeft = SDL_FRect{
-            layout.storageLeftContent.x + 10.0f,
-            layout.storageLeftContent.y + 10.0f,
-            64.0f,
-            64.0f
+        auto drawStorageContent = [&](const SDL_FRect& r, bool dropReady) {
+            rc2d_graphics_setColor(dropReady ? kStorageDropReadyFill : kPanelFill);
+            rc2d_graphics_rectangle("fill", &r);
+            rc2d_graphics_setColor(dropReady ? kStorageDropReadyLine : kGold);
+            rc2d_graphics_rectangle("line", &r);
         };
-        const SDL_FRect storageIconRight = SDL_FRect{
-            layout.storageMiddleContent.x + layout.storageMiddleContent.w - 74.0f,
-            layout.storageMiddleContent.y + 10.0f,
-            64.0f,
-            64.0f
-        };
-        rc2d_graphics_setColor(kFieldFill);
-        rc2d_graphics_rectangle("fill", &storageIconLeft);
-        rc2d_graphics_rectangle("fill", &storageIconRight);
-        rc2d_graphics_setColor(kGold);
-        rc2d_graphics_rectangle("line", &storageIconLeft);
-        rc2d_graphics_rectangle("line", &storageIconRight);
-        drawImageFit(equipmentIcon, storageIconLeft);
-        drawImageFit(equipmentIcon, storageIconRight);
 
-        std::vector<std::pair<std::string, std::string>> valueRows;
-        if (equipmentIndex < 0)
+        auto drawStorageRows = [&](StorageTabTransferLocation location, const SDL_FRect& contentRect, const char* emptyText) {
+            const std::vector<StorageTabItemEntry>* items = self->getStorageItemsForLocation(location);
+            const std::vector<RC2D_Image>* icons = self->getStorageItemIconsForLocation(location);
+            if (items == nullptr)
+            {
+                return;
+            }
+
+            const int rowCapacity = getStorageVisibleRowCapacity(contentRect);
+            int visibleRow = 0;
+            int hiddenRows = 0;
+            for (int sourceIndex = 0; sourceIndex < static_cast<int>(items->size()); ++sourceIndex)
+            {
+                const StorageTabItemEntry& item = (*items)[static_cast<std::size_t>(sourceIndex)];
+                if (!self->isStorageItemVisibleForSelectedCategory(item) || item.quantity <= 0)
+                {
+                    continue;
+                }
+
+                if (visibleRow >= rowCapacity)
+                {
+                    ++hiddenRows;
+                    continue;
+                }
+
+                const SDL_FRect rowRect = getStorageItemRowRect(contentRect, visibleRow);
+                const bool draggingThis =
+                    self->storageDrag.active &&
+                    self->storageDrag.source == location &&
+                    self->storageDrag.sourceIndex == sourceIndex;
+                const bool disabledForEquip =
+                    location == StorageTabTransferLocation::WAREHOUSE &&
+                    self->isStorageWarehouseItemDisabledForEquip(item);
+
+                rc2d_graphics_setColor(disabledForEquip ? RC2D_Color{10, 10, 12, 210} : (draggingThis ? kSelectionFill : kFieldFill));
+                rc2d_graphics_rectangle("fill", &rowRect);
+                rc2d_graphics_setColor(disabledForEquip ? RC2D_Color{72, 72, 78, 190} : kRowLine);
+                rc2d_graphics_rectangle("line", &rowRect);
+
+                const SDL_FRect itemIconRect = SDL_FRect{rowRect.x + 8.0f, rowRect.y + 8.0f, 56.0f, 56.0f};
+                rc2d_graphics_setColor(disabledForEquip ? RC2D_Color{14, 14, 16, 228} : kPanelFill);
+                rc2d_graphics_rectangle("fill", &itemIconRect);
+                rc2d_graphics_setColor(disabledForEquip ? RC2D_Color{82, 82, 88, 210} : kGold);
+                rc2d_graphics_rectangle("line", &itemIconRect);
+                if (icons != nullptr && sourceIndex >= 0 && sourceIndex < static_cast<int>(icons->size()))
+                {
+                    drawImageFit(&(*icons)[static_cast<std::size_t>(sourceIndex)], itemIconRect);
+                }
+                if (disabledForEquip)
+                {
+                    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 145});
+                    rc2d_graphics_rectangle("fill", &itemIconRect);
+                }
+
+                const bool canShowCannonOverlay =
+                    item.category == StorageTabEquipmentCategory::CANNONS &&
+                    isPointInRect(mouseX, mouseY, rowRect);
+                if (!self->storageDrag.active && canShowCannonOverlay)
+                {
+                    hoveredCannonItem = &item;
+                    hoveredCannonIcon = (icons != nullptr &&
+                        sourceIndex >= 0 &&
+                        sourceIndex < static_cast<int>(icons->size()))
+                        ? &(*icons)[static_cast<std::size_t>(sourceIndex)]
+                        : nullptr;
+                }
+
+                const float textX = itemIconRect.x + itemIconRect.w + 10.0f;
+                drawTextAt(
+                    &self->bodyFont,
+                    item.name.empty() ? std::string("-") : item.name,
+                    textX,
+                    rowRect.y + 13.0f,
+                    disabledForEquip ? kTextMuted : kTextGold);
+                drawTextAt(
+                    &self->smallFont,
+                    disabledForEquip ? std::string("Maximum equipe") : ("Quantite : " + std::to_string(item.quantity)),
+                    textX,
+                    rowRect.y + 42.0f,
+                    disabledForEquip ? kTextMuted : kTextBody);
+
+                ++visibleRow;
+            }
+
+            if (visibleRow == 0)
+            {
+                drawCentered(&self->bodyFont, emptyText, contentRect, kTextMuted);
+            }
+            else if (hiddenRows > 0)
+            {
+                const std::string more = "+" + std::to_string(hiddenRows) + " autre(s)";
+                drawTextAt(
+                    &self->smallFont,
+                    more,
+                    contentRect.x + 10.0f,
+                    contentRect.y + contentRect.h - 22.0f,
+                    kTextMuted);
+            }
+        };
+
+        drawStorageContent(layout.storageLeftContent, leftDropReady);
+        drawStorageContent(layout.storageMiddleContent, middleDropReady);
+        drawStorageRows(StorageTabTransferLocation::WAREHOUSE, layout.storageLeftContent, "Aucun objet en entrepot");
+        drawStorageRows(StorageTabTransferLocation::SHIP, layout.storageMiddleContent, "Aucun objet equipe");
+
+        auto drawHoveredCannonTooltip = [&]() {
+            if (hoveredCannonItem != nullptr)
+            {
+                const float tooltipW = 336.0f;
+                const float tooltipH = 184.0f;
+                float tooltipX = mouseX + 18.0f;
+                float tooltipY = mouseY + 16.0f;
+                if (tooltipX + tooltipW > self->widgetRect.x + self->widgetRect.w - 8.0f)
+                {
+                    tooltipX = mouseX - tooltipW - 18.0f;
+                }
+                if (tooltipY + tooltipH > self->widgetRect.y + self->widgetRect.h - 8.0f)
+                {
+                    tooltipY = mouseY - tooltipH - 16.0f;
+                }
+                tooltipX = clampf(tooltipX, self->widgetRect.x + 8.0f, self->widgetRect.x + self->widgetRect.w - tooltipW - 8.0f);
+                tooltipY = clampf(tooltipY, self->widgetRect.y + 8.0f, self->widgetRect.y + self->widgetRect.h - tooltipH - 8.0f);
+
+                const SDL_FRect tooltipRect = SDL_FRect{tooltipX, tooltipY, tooltipW, tooltipH};
+                const SDL_FRect tooltipHeader = SDL_FRect{tooltipRect.x, tooltipRect.y, tooltipRect.w, 36.0f};
+                rc2d_graphics_setColor(kPanelFill);
+                rc2d_graphics_rectangle("fill", &tooltipRect);
+                rc2d_graphics_setColor(kGold);
+                rc2d_graphics_rectangle("line", &tooltipRect);
+                rc2d_graphics_setColor(kHeaderFill);
+                rc2d_graphics_rectangle("fill", &tooltipHeader);
+                rc2d_graphics_setColor(kGold);
+                rc2d_graphics_rectangle("line", &tooltipHeader);
+
+                drawTextAt(
+                    &self->bodyFont,
+                    hoveredCannonItem->name.empty() ? std::string("Canon") : hoveredCannonItem->name,
+                    tooltipHeader.x + 10.0f,
+                    tooltipHeader.y + 8.0f,
+                    kTextGold);
+
+                auto valOrDash = [](const std::string& s) -> std::string {
+                    return s.empty() ? std::string("-") : s;
+                };
+                const std::array<std::pair<std::string, std::string>, 5> cannonRows = {{
+                    {"Degats des cannons", valOrDash(hoveredCannonItem->cannonStats.damageDisplay)},
+                    {"Degats critique des cannons", valOrDash(hoveredCannonItem->cannonStats.critDamageDisplay)},
+                    {"Chance de coup critique des cannons", valOrDash(hoveredCannonItem->cannonStats.critChanceDisplay)},
+                    {"Portee des cannons", valOrDash(hoveredCannonItem->cannonStats.rangeDisplay)},
+                    {"Temps de recharge des cannons", valOrDash(hoveredCannonItem->cannonStats.reloadDisplay)}
+                }};
+
+                const float rowTop = tooltipHeader.y + tooltipHeader.h + 6.0f;
+                const float rowH = 27.0f;
+                for (int row = 0; row < static_cast<int>(cannonRows.size()); ++row)
+                {
+                    const SDL_FRect rowRect = SDL_FRect{
+                        tooltipRect.x + 7.0f,
+                        rowTop + (static_cast<float>(row) * rowH),
+                        tooltipRect.w - 14.0f,
+                        rowH
+                    };
+                    rc2d_graphics_setColor(kFieldFill);
+                    rc2d_graphics_rectangle("fill", &rowRect);
+                    rc2d_graphics_setColor(kRowLine);
+                    rc2d_graphics_rectangle("line", &rowRect);
+
+                    const std::string& label = cannonRows[static_cast<std::size_t>(row)].first;
+                    const std::string& value = cannonRows[static_cast<std::size_t>(row)].second;
+                    drawTextAt(&self->smallFont, label, rowRect.x + 7.0f, rowRect.y + 6.0f, kTextGold);
+                    const float valueW = measureTextWidth(&self->smallFont, value);
+                    drawTextAt(&self->smallFont, value, rowRect.x + rowRect.w - valueW - 7.0f, rowRect.y + 6.0f, kTextBody);
+                }
+            }
+        };
+
+        drawHoveredCannonTooltip();
+    }
+    else if (self->activeTab == ActiveTab::BOARDING_LOOT)
+    {
+        auto drawLootPanel = [&](const SDL_FRect& panel, const char* title) {
+            rc2d_graphics_setColor(kPanelFill);
+            rc2d_graphics_rectangle("fill", &panel);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &panel);
+            drawCentered(
+                &self->smallFont,
+                title,
+                SDL_FRect{panel.x, panel.y - 18.0f, panel.w, 18.0f},
+                kTextGold);
+        };
+
+        const bool canTransferAny = std::any_of(
+            self->boardingLootCurrencies.begin(),
+            self->boardingLootCurrencies.end(),
+            [](const BoardingLootCurrencyEntry& currency) {
+                const int quantity = (std::max)(0, currency.shipQuantity);
+                const int minQuantity = (std::max)(0, currency.minQuantityToSecureReserve);
+                return !currency.forceStoreOnShip && quantity > 0 && quantity >= minQuantity;
+            });
+
+        rc2d_graphics_setColor(canTransferAny ? kButtonFill : kFieldFill);
+        rc2d_graphics_rectangle("fill", &layout.boardingLootTransferAllButton);
+        rc2d_graphics_setColor(canTransferAny ? kStorageDropReadyLine : kRowLine);
+        rc2d_graphics_rectangle("line", &layout.boardingLootTransferAllButton);
+        drawCentered(
+            &self->smallFont,
+            "Tout transferer vers la reserve securisee",
+            layout.boardingLootTransferAllButton,
+            canTransferAny ? kTextGold : kTextMuted);
+
+        drawLootPanel(layout.boardingLootLeftPanel, "Sur le navire");
+        drawLootPanel(layout.boardingLootRightPanel, "Reserve securisee");
+
+        if (self->boardingLootCurrencies.empty())
         {
-            valueRows = {
-                {"Aucune categorie", "Aucune donnee alimentee"}
-            };
-        }
-        else if (equipmentIndex == 1)
-        {
-            valueRows = {
-                {"Harponneuse", "Aucun n'est equipe"},
-                {"Champ de tir de harpons", "+4,0"},
-                {"Temps de recharge du harpon", "+5,0/s"},
-                {"Degats critiques du harpon", "+0%"},
-                {"Probabilite critique du harpon", "+5,0%"},
-                {"Sante", "+0"},
-                {"Montant de la reparation", "+0"}
-            };
-        }
-        else if (equipmentIndex == 2)
-        {
-            valueRows = {
-                {"Voiles", "Aucune n'est equipee"},
-                {"Points de voiles", "+0"},
-                {"Acceleration", "+0%"},
-                {"Vitesse max", "+0%"},
-                {"Maniabilite", "+0"},
-                {"Durabilite", "+0"}
-            };
+            drawCentered(&self->bodyFont, "Aucun butin d'abordage", layout.boardingLootLeftPanel, kTextMuted);
+            drawCentered(&self->bodyFont, "Aucune reserve", layout.boardingLootRightPanel, kTextMuted);
         }
         else
         {
-            valueRows = {
-                {"Cannons", "Aucun n'est equipe"},
-                {"Canons correcteurs", "Aucun n'est equipe"},
-                {"Degats des cannons", "+0%"},
-                {"Portee des cannons", "+0"},
-                {"Precision des cannons", "+0%"},
-                {"Temps de recharge des cannons", "+0,0/s"}
+            const BoardingLootMetrics metrics = buildBoardingLootMetrics(
+                layout.boardingLootLeftPanel,
+                layout.boardingLootRightPanel,
+                static_cast<int>(self->boardingLootCurrencies.size()));
+            int firstRow = (std::max)(0, (std::min)(self->boardingLootFirstRow, metrics.maxFirstRow));
+            const int lastRow = (std::min)(metrics.totalRows, firstRow + metrics.visibleRows);
+
+            auto drawCurrencyRow = [&](const SDL_FRect& panel,
+                                       int visualRow,
+                                       const RC2D_Image* icon,
+                                       const std::string& value,
+                                       const char* note,
+                                       bool muted) {
+                const SDL_FRect rowRect = getBoardingLootRowRect(panel, visualRow);
+                rc2d_graphics_setColor(muted ? RC2D_Color{12, 12, 14, 210} : kFieldFill);
+                rc2d_graphics_rectangle("fill", &rowRect);
+                rc2d_graphics_setColor(muted ? RC2D_Color{72, 72, 78, 190} : kRowLine);
+                rc2d_graphics_rectangle("line", &rowRect);
+
+                const SDL_FRect iconRect = SDL_FRect{
+                    rowRect.x + 8.0f,
+                    rowRect.y + ((rowRect.h - kBoardingLootIconSize) * 0.5f),
+                    kBoardingLootIconSize,
+                    kBoardingLootIconSize
+                };
+                rc2d_graphics_setColor(muted ? RC2D_Color{18, 18, 20, 220} : kPanelFill);
+                rc2d_graphics_rectangle("fill", &iconRect);
+                rc2d_graphics_setColor(muted ? RC2D_Color{72, 72, 78, 190} : kGold);
+                rc2d_graphics_rectangle("line", &iconRect);
+                drawImageFit(icon, iconRect);
+
+                const float valueW = measureTextWidth(&self->bodyFont, value);
+                drawTextAt(
+                    &self->bodyFont,
+                    value,
+                    rowRect.x + rowRect.w - valueW - 8.0f,
+                    rowRect.y + 9.0f,
+                    muted ? kTextMuted : kTextBody);
+
+                if (note != nullptr && note[0] != '\0')
+                {
+                    drawTextAt(
+                        &self->smallFont,
+                        note,
+                        iconRect.x + iconRect.w + 10.0f,
+                        rowRect.y + 32.0f,
+                        kTextMuted);
+                }
             };
-        }
 
-        const float rightInnerPad = 1.0f;
-        const SDL_FRect valueTopBand = SDL_FRect{
-            layout.storageRightPanel.x + rightInnerPad,
-            layout.storageRightPanel.y + rightInnerPad,
-            layout.storageRightPanel.w - (rightInnerPad * 2.0f),
-            34.0f
-        };
-        rc2d_graphics_setColor(kHeaderFill);
-        rc2d_graphics_rectangle("fill", &valueTopBand);
-        rc2d_graphics_setColor(kGold);
-        rc2d_graphics_rectangle("line", &valueTopBand);
-        drawTextAt(&self->bodyFont, equipmentLabel, valueTopBand.x + 8.0f, valueTopBand.y + 8.0f, kTextGold);
+            for (int sourceRow = firstRow; sourceRow < lastRow; ++sourceRow)
+            {
+                const BoardingLootCurrencyEntry& currency =
+                    self->boardingLootCurrencies[static_cast<std::size_t>(sourceRow)];
+                const int visualRow = sourceRow - firstRow;
+                const bool lockedToShip = currency.forceStoreOnShip;
+                const int minQuantity = (std::max)(0, currency.minQuantityToSecureReserve);
+                std::string shipNote;
+                if (lockedToShip)
+                {
+                    shipNote = "Stockage obligatoire sur le navire";
+                }
+                else if (minQuantity > 0 && currency.shipQuantity < minQuantity)
+                {
+                    shipNote = "Minimum " + formatWithDots(minQuantity) + " pour transferer dans la reserve securisee";
+                }
+                const RC2D_Image* icon =
+                    sourceRow >= 0 && sourceRow < static_cast<int>(self->boardingLootCurrencyIcons.size())
+                        ? &self->boardingLootCurrencyIcons[static_cast<std::size_t>(sourceRow)]
+                        : nullptr;
 
-        const float valuesStartY = valueTopBand.y + valueTopBand.h + 2.0f;
-        const float valuesAvailableH = (layout.storageRightPanel.y + layout.storageRightPanel.h - 1.0f) - valuesStartY;
-        const float rowH = valueRows.empty() ? 0.0f : (valuesAvailableH / static_cast<float>(valueRows.size()));
-        for (int i = 0; i < static_cast<int>(valueRows.size()); ++i)
-        {
-            SDL_FRect rowRect = SDL_FRect{
-                layout.storageRightPanel.x + rightInnerPad,
-                valuesStartY + (rowH * static_cast<float>(i)),
-                layout.storageRightPanel.w - (rightInnerPad * 2.0f),
-                rowH
-            };
+                drawCurrencyRow(
+                    metrics.leftBody,
+                    visualRow,
+                    icon,
+                    formatWithDots(currency.shipQuantity),
+                    shipNote.c_str(),
+                    false);
+                drawCurrencyRow(
+                    metrics.rightBody,
+                    visualRow,
+                    icon,
+                    lockedToShip ? std::string("-") : formatWithDots(currency.secureReserveQuantity),
+                    lockedToShip ? "Bloque sur le navire" : "",
+                    lockedToShip);
+            }
 
-            rc2d_graphics_setColor(kFieldFill);
-            rc2d_graphics_rectangle("fill", &rowRect);
-            rc2d_graphics_setColor(kRowLine);
-            rc2d_graphics_rectangle("line", &rowRect);
+            if (metrics.maxFirstRow > 0)
+            {
+                rc2d_graphics_setColor(kScrollTrack);
+                rc2d_graphics_rectangle("fill", &metrics.scrollTrack);
 
-            const std::string& title = valueRows[static_cast<std::size_t>(i)].first;
-            const std::string& value = valueRows[static_cast<std::size_t>(i)].second;
-            drawTextAt(&self->bodyFont, title, rowRect.x + 8.0f, rowRect.y + 8.0f, kTextGold);
-            const RC2D_Color valueColor = (!value.empty() && value[0] == '+')
-                ? RC2D_Color{82, 204, 106, 255}
-                : kTextBody;
-            drawTextAt(&self->bodyFont, value, rowRect.x + 8.0f, rowRect.y + 30.0f, valueColor);
+                const float thumbHeight = (std::max)(
+                    kMinThumbHeight,
+                    (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                        static_cast<float>((std::max)(1, metrics.totalRows))));
+                const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+                const float ratio = static_cast<float>(firstRow) / static_cast<float>(metrics.maxFirstRow);
+                const SDL_FRect thumb = SDL_FRect{
+                    metrics.scrollTrack.x,
+                    metrics.scrollTrack.y + (thumbTravel * ratio),
+                    metrics.scrollTrack.w,
+                    thumbHeight
+                };
+                rc2d_graphics_setColor(
+                    self->boardingLootScrollDragging || (self->boardingLootScrollWheelHighlightSec > 0.0f)
+                        ? kScrollThumbDragFill
+                        : kScrollThumb);
+                rc2d_graphics_rectangle("fill", &thumb);
+            }
         }
     }
     else
     {
         const bool eliteTab = self->activeTab == ActiveTab::ELITE_SHIPS;
-        std::vector<ShipEntry>* ships = self->getShipsForTab(self->activeTab);
+        std::vector<InternalShipEntry>* ships = self->getShipsForTab(self->activeTab);
         std::vector<RC2D_Image>* shipIcons = self->getShipIconsForTab(self->activeTab);
         int* firstRowPtr = self->getFirstRowForTab(self->activeTab);
 
@@ -3492,7 +4893,7 @@ void AccountManagementWidget::draw(void) const
                 rc2d_graphics_setColor(kGold);
                 rc2d_graphics_rectangle("line", &layout.fleetPointsPanel);
 
-                const EliteProgressData eliteProgress = self->getEliteProgress();
+                const AccountTabEliteProgressData eliteProgress = self->getAccountTabEliteProgress();
                 const int currentElitePoints = eliteProgress.currentPoints;
                 const int nextEliteTargetPoints = eliteProgress.hasNextShip
                     ? eliteProgress.nextShipPointsRequired
@@ -3564,7 +4965,7 @@ void AccountManagementWidget::draw(void) const
                     continue;
                 }
 
-                const ShipEntry& entry = (*ships)[static_cast<std::size_t>(sourceIndex)];
+                const InternalShipEntry& entry = (*ships)[static_cast<std::size_t>(sourceIndex)];
 
                 rc2d_graphics_setColor(kFieldFill);
                 rc2d_graphics_rectangle("fill", &cardRect);
@@ -3725,6 +5126,112 @@ void AccountManagementWidget::draw(void) const
             rc2d_graphics_setColor(self->pickerScrollDragging || (self->pickerScrollWheelHighlightSec > 0.0f) ? kScrollThumbDragFill : kScrollThumb);
             rc2d_graphics_rectangle("fill", &thumb);
         }
+    }
+
+    if (self->storageTransferPopup.open)
+    {
+        const StorageTransferPopupLayout popupLayout = buildStorageTransferPopupLayout(self->widgetRect);
+        const std::vector<RC2D_Image>* sourceIcons =
+            self->getStorageItemIconsForLocation(self->storageTransferPopup.source);
+        RC2D_Image* popupIcon = nullptr;
+        if (sourceIcons != nullptr &&
+            self->storageTransferPopup.sourceIndex >= 0 &&
+            self->storageTransferPopup.sourceIndex < static_cast<int>(sourceIcons->size()))
+        {
+            popupIcon = const_cast<RC2D_Image*>(&(*sourceIcons)[static_cast<std::size_t>(self->storageTransferPopup.sourceIndex)]);
+        }
+
+        rc2d_graphics_setColor(kPopupOverlayFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.overlay);
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.panel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.panel);
+
+        rc2d_graphics_setColor(kHeaderFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.titleBar);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.titleBar);
+        drawCentered(&self->bodyFont, "Transfert", popupLayout.titleBar, kTextGold);
+
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.icon);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.icon);
+        drawImageFit(popupIcon, popupLayout.icon);
+
+        const std::string directionLabel =
+            std::string(storageLocationLabel(self->storageTransferPopup.source)) +
+            " -> " +
+            storageLocationLabel(self->storageTransferPopup.target);
+        drawTextAt(
+            &self->bodyFont,
+            self->storageTransferPopup.itemName.empty() ? std::string("-") : self->storageTransferPopup.itemName,
+            popupLayout.icon.x + popupLayout.icon.w + 24.0f,
+            popupLayout.icon.y - 2.0f,
+            kTextGold);
+        drawTextAt(
+            &self->smallFont,
+            directionLabel,
+            popupLayout.icon.x + popupLayout.icon.w + 24.0f,
+            popupLayout.icon.y + 24.0f,
+            kTextBody);
+        drawTextAt(
+            &self->smallFont,
+            "Quantite a transferer",
+            popupLayout.icon.x + popupLayout.icon.w + 24.0f,
+            popupLayout.icon.y + 50.0f,
+            kTextMuted);
+
+        auto drawPopupButton = [&](const SDL_FRect& r, const char* label, bool primary) {
+            rc2d_graphics_setColor(primary ? kButtonFill : kFieldFill);
+            rc2d_graphics_rectangle("fill", &r);
+            rc2d_graphics_setColor(primary ? kStorageDropReadyLine : kGold);
+            rc2d_graphics_rectangle("line", &r);
+            drawCentered(&self->smallFont, label, r, primary ? kTextGold : kTextBody);
+        };
+
+        drawPopupButton(popupLayout.quantityMinusButton, "-", false);
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.quantityValue);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.quantityValue);
+        const std::string quantityLabel =
+            std::to_string(self->storageTransferPopup.quantity) +
+            " / " +
+            std::to_string((std::max)(1, self->storageTransferPopup.maxQuantity));
+        drawCentered(&self->bodyFont, quantityLabel.c_str(), popupLayout.quantityValue, kTextGold);
+        drawPopupButton(popupLayout.quantityPlusButton, "+", false);
+        drawPopupButton(popupLayout.cancelButton, "ANNULER", false);
+        drawPopupButton(popupLayout.transferButton, "TRANSFERT", true);
+    }
+
+    if (self->storageDrag.active)
+    {
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        getMouseRenderPosition(&mouseX, &mouseY);
+
+        const std::vector<RC2D_Image>* dragIcons = self->getStorageItemIconsForLocation(self->storageDrag.source);
+        RC2D_Image* dragIcon = nullptr;
+        if (dragIcons != nullptr &&
+            self->storageDrag.sourceIndex >= 0 &&
+            self->storageDrag.sourceIndex < static_cast<int>(dragIcons->size()))
+        {
+            dragIcon = const_cast<RC2D_Image*>(&(*dragIcons)[static_cast<std::size_t>(self->storageDrag.sourceIndex)]);
+        }
+
+        const SDL_FRect ghostRect = SDL_FRect{
+            mouseX - (kStorageDragIconSize * 0.5f),
+            mouseY - (kStorageDragIconSize * 0.5f),
+            kStorageDragIconSize,
+            kStorageDragIconSize
+        };
+        rc2d_graphics_setColor(kStorageDragGhostFill);
+        rc2d_graphics_rectangle("fill", &ghostRect);
+        rc2d_graphics_setColor(kStorageDropReadyLine);
+        rc2d_graphics_rectangle("line", &ghostRect);
+        drawImageFit(dragIcon, ghostRect);
     }
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);

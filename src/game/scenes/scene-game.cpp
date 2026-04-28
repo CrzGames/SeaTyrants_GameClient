@@ -35,28 +35,36 @@ void GameScene::populateMoneyDemoData(void)
 
 void GameScene::populateAccountManagementDemoData(void)
 {
-    using ShipEntry = AccountManagementWidget::ShipEntry;
-    using OptionEntry = AccountManagementWidget::OptionEntry;
-    using EliteProgressData = AccountManagementWidget::EliteProgressData;
+    using EliteShipsTabShipEntry = AccountManagementWidget::EliteShipsTabShipEntry;
+    using SpecialShipsTabShipEntry = AccountManagementWidget::SpecialShipsTabShipEntry;
+    using ShipManagementTabOptionEntry = AccountManagementWidget::ShipManagementTabOptionEntry;
+    using AppearanceTabOptionEntry = AccountManagementWidget::AppearanceTabOptionEntry;
+    using StorageTabItemEntry = AccountManagementWidget::StorageTabItemEntry;
+    using StorageTabEquipmentCategory = AccountManagementWidget::StorageTabEquipmentCategory;
+    using StorageTabEquipmentOptionEntry = AccountManagementWidget::StorageTabEquipmentOptionEntry;
+    using StorageTabCannonStatsDisplay = AccountManagementWidget::StorageTabCannonStatsDisplay;
+    using AccountTabEliteProgressData = AccountManagementWidget::AccountTabEliteProgressData;
+    using BoardingLootCurrencyEntry = AccountManagementWidget::BoardingLootCurrencyEntry;
+    using BoardingLootCurrencyType = AccountManagementWidget::BoardingLootCurrencyType;
 
     // Exemple de flux d'alimentation:
     // 1. le gameplay choisit le dossier du navire reel a charger en scene,
     // 2. il injecte ensuite les images d'apercu et les listes dans le widget.
     this->playerShipFolderPath = "assets/images/ships/bateau elite 4";
 
-    GetIngameHudOverlay().getAccountManagementWidget().setPlayerIdentifier("1985");
-    GetIngameHudOverlay().getAccountManagementWidget().setPirateSince("01.02.2024");
-    GetIngameHudOverlay().getAccountManagementWidget().setPlayerLevel(10);
-    GetIngameHudOverlay().getAccountManagementWidget().setExperiencePointsCurrent(this->playerExperiencePointsCurrent);
-    GetIngameHudOverlay().getAccountManagementWidget().setEliteProgressData(
-        EliteProgressData{
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPlayerIdentifier("1985");
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPirateSince("01.02.2024");
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPlayerLevel(10);
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabExperiencePointsCurrent(this->playerExperiencePointsCurrent);
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabEliteProgressData(
+        AccountTabEliteProgressData{
             4250000,
             5000000,
             true
         });
-    GetIngameHudOverlay().getAccountManagementWidget().setCombatPointsCurrent(1460);
-    GetIngameHudOverlay().getAccountManagementWidget().setPremiumSince("06.04.2026");
-    GetIngameHudOverlay().getAccountManagementWidget().setProfileName(".Crows");
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabCombatPointsCurrent(1460);
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPremiumSince("06.04.2026");
+    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabProfileName(".Crows");
 
     static constexpr const char* kEliteDemoAssetPaths[4] = {
         "assets/images/ships/bateau elite 1",
@@ -71,7 +79,7 @@ void GameScene::populateAccountManagementDemoData(void)
         "assets/images/ships/Morgan Boucanier (1)"
     };
 
-    std::vector<ShipEntry> eliteDemoShips{
+    std::vector<EliteShipsTabShipEntry> eliteDemoShips{
         {"Elite 1", kEliteDemoAssetPaths[0]},
         {"Elite 2", kEliteDemoAssetPaths[1]},
         {"Elite 3", kEliteDemoAssetPaths[2]},
@@ -82,9 +90,9 @@ void GameScene::populateAccountManagementDemoData(void)
         eliteDemoShips.push_back(
             {std::string("Elite ") + std::to_string(5 + i), kEliteDemoAssetPaths[static_cast<std::size_t>(i % 4)]});
     }
-    GetIngameHudOverlay().getAccountManagementWidget().setEliteAcquiredShips(eliteDemoShips);
+    GetIngameHudOverlay().getAccountManagementWidget().setEliteShipsTabAcquiredShips(eliteDemoShips);
 
-    std::vector<ShipEntry> specialDemoShips{
+    std::vector<SpecialShipsTabShipEntry> specialDemoShips{
         {kSpecialDemoNames[0], kSpecialDemoAssetPaths[0]},
         {kSpecialDemoNames[1], kSpecialDemoAssetPaths[1]},
         {kSpecialDemoNames[2], kSpecialDemoAssetPaths[2]},
@@ -95,7 +103,7 @@ void GameScene::populateAccountManagementDemoData(void)
         specialDemoShips.push_back(
             {std::string(kSpecialDemoNames[slot]) + " +" + std::to_string(i + 1), kSpecialDemoAssetPaths[slot]});
     }
-    GetIngameHudOverlay().getAccountManagementWidget().setSpecialAcquiredShips(specialDemoShips);
+    GetIngameHudOverlay().getAccountManagementWidget().setSpecialShipsTabAcquiredShips(specialDemoShips);
 
     // Icones reparties sur les nombreuses lignes demo (scrollbars pickers 7 lignes max, effets 5).
     static constexpr const char* kDemoPickerIcons[10] = {
@@ -116,9 +124,14 @@ void GameScene::populateAccountManagementDemoData(void)
         "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/14.png",
         "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/20.png",
         "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/30.png"};
+    static constexpr const char* kDemoCannonIcons[4] = {
+        "assets/images/cannons/10-livres.png",
+        "assets/images/cannons/20-livres.png",
+        "assets/images/cannons/30-livres.png",
+        "assets/images/cannons/40-livres.png"};
 
     auto pushNumberedShipBonuses = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<ShipManagementTabOptionEntry> v{
             {"Bateau elite 4", kDemoPickerIcons[0]},
             {"Bateau elite 3", kDemoPickerIcons[1]},
             {"Bateau elite 2", kDemoPickerIcons[2]}};
@@ -130,10 +143,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setShipBonusOptions(pushNumberedShipBonuses());
+    GetIngameHudOverlay().getAccountManagementWidget().setShipManagementTabBonusOptions(pushNumberedShipBonuses());
 
     auto pushNumberedShipStyles = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Bateau elite 4", kDemoPickerIcons[0]},
             {"Bateau elite 5", kDemoPickerIcons[3]},
             {"Bateau elite 7", kDemoPickerIcons[4]}};
@@ -145,10 +158,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setShipStyleOptions(pushNumberedShipStyles());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabShipStyleOptions(pushNumberedShipStyles());
 
     auto pushNumberedRepair = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Reparation par defaut", kDemoPickerIcons[5]},
             {"Reparation emeraude", kDemoPickerIcons[6]},
             {"Reparation abyssale", kDemoPickerIcons[7]}};
@@ -160,10 +173,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setRepairStyleOptions(pushNumberedRepair());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabRepairStyleOptions(pushNumberedRepair());
 
     auto pushNumberedSpeed = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Vitesse blanche", kDemoVfxSpeedIcons[0]},
             {"Vitesse tempete", kDemoVfxSpeedIcons[2]},
             {"Vitesse neon", kDemoVfxSpeedIcons[5]}};
@@ -175,10 +188,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setSpeedStyleOptions(pushNumberedSpeed());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabSpeedStyleOptions(pushNumberedSpeed());
 
     auto pushNumberedImpact = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Impact standard", kDemoPickerIcons[7]},
             {"Impact royal", kDemoPickerIcons[8]},
             {"Impact titan", kDemoPickerIcons[9]}};
@@ -190,10 +203,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setProjectileImpactStyleOptions(pushNumberedImpact());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabProjectileImpactStyleOptions(pushNumberedImpact());
 
     auto pushNumberedRocket = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Fusee comete", kDemoPickerIcons[7]},
             {"Fusee oracle", kDemoPickerIcons[6]},
             {"Fusee solaire", kDemoPickerIcons[5]}};
@@ -205,10 +218,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setRocketStyleOptions(pushNumberedRocket());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabRocketStyleOptions(pushNumberedRocket());
 
     auto pushNumberedProjectile = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Boulet lourd", kDemoPickerIcons[7]},
             {"Boulet arc", kDemoPickerIcons[8]},
             {"Boulet obsidienne", kDemoPickerIcons[9]}};
@@ -220,10 +233,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setProjectileStyleOptions(pushNumberedProjectile());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabProjectileStyleOptions(pushNumberedProjectile());
 
     auto pushNumberedMoveClick = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Clic tempete", kDemoPickerIcons[5]},
             {"Clic royal", kDemoPickerIcons[8]},
             {"Clic aurore", kDemoPickerIcons[6]}};
@@ -235,10 +248,10 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setMoveClickStyleOptions(pushNumberedMoveClick());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabMoveClickStyleOptions(pushNumberedMoveClick());
 
     auto pushNumberedEmotes = [&]() {
-        std::vector<OptionEntry> v{
+        std::vector<AppearanceTabOptionEntry> v{
             {"Hello", kDemoPickerIcons[8]},
             {"Attack", kDemoPickerIcons[7]},
             {"Laugh", kDemoPickerIcons[6]},
@@ -253,23 +266,30 @@ void GameScene::populateAccountManagementDemoData(void)
         }
         return v;
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setEmoteOptions(pushNumberedEmotes());
+    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabEmoteOptions(pushNumberedEmotes());
 
     auto pushNumberedStorage = [&]() {
-        std::vector<OptionEntry> v{
-            {"Cannons", kDemoPickerIcons[7]},
-            {"Harponneuse", kDemoPickerIcons[5]},
-            {"Voiles", kDemoVfxSpeedIcons[1]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Equipement demo ") + std::to_string(i),
-                 i % 2 == 0 ? kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]
-                            : kDemoVfxSpeedIcons[static_cast<std::size_t>(i) % 6U]});
-        }
-        return v;
+        return std::vector<StorageTabEquipmentOptionEntry>{
+            {StorageTabEquipmentCategory::CANNONS, "Cannons", kDemoCannonIcons[0], 24},
+            {StorageTabEquipmentCategory::SAILS, "Voiles", kDemoVfxSpeedIcons[1], 1}};
     };
-    GetIngameHudOverlay().getAccountManagementWidget().setStorageEquipmentOptions(pushNumberedStorage());
+    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquipmentCategoryOptions(pushNumberedStorage());
+    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabWarehouseItems(
+        std::vector<StorageTabItemEntry>{
+            {StorageTabEquipmentCategory::CANNONS, "Canons 10 livres", kDemoCannonIcons[0], 32, StorageTabCannonStatsDisplay{"+10%", "+2%", "+1%", "+4", "2,4/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 24, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 30 livres", kDemoCannonIcons[2], 16, StorageTabCannonStatsDisplay{"+30%", "+7%", "+3%", "+6", "1,8/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 40 livres", kDemoCannonIcons[3], 8, StorageTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"}},
+            {StorageTabEquipmentCategory::SAILS, "Voiles tempete", kDemoVfxSpeedIcons[1], 2, StorageTabCannonStatsDisplay{}}});
+    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquippedItems(
+        std::vector<StorageTabItemEntry>{
+            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 12, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
+            {StorageTabEquipmentCategory::SAILS, "Voiles standards", kDemoVfxSpeedIcons[2], 1, StorageTabCannonStatsDisplay{}}});
+    GetIngameHudOverlay().getAccountManagementWidget().setBoardingLootManagementTabCurrencies(
+        std::vector<BoardingLootCurrencyEntry>{
+            {BoardingLootCurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000, 0, 0, true},
+            {BoardingLootCurrencyType::PERLES, "assets/images/ui-scene-game/money_pearls.png", 820, 4500, 50, false},
+            {BoardingLootCurrencyType::CRISTAUX, "assets/images/ui-scene-game/money_crystals.png", 40, 320, 50, false}});
 }
 
 void GameScene::syncHudStatusWidgets(const Player& player)
@@ -341,7 +361,7 @@ void GameScene::load(void)
 
     // Charge les ressources HUD (interface utilisateur).
     GetIngameHudOverlay().load();
-    GetIngameHudOverlay().publishCaptchaChallenge("A7K9"); // texte serveur
+    GetIngameHudOverlay().getCaptchaWidget().publishCaptchaChallenge("A7K9"); // texte serveur
     this->syncHudStatusWidgets(player);
     this->populateMoneyDemoData();
     this->populateAccountManagementDemoData();

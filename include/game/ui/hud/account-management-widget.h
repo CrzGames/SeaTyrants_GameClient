@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,30 +20,113 @@
  */
 class AccountManagementWidget {
 public:
-    /**
-     * @brief Donnees d'une carte de navire affichee dans un onglet de navires acquis.
-     */
-    struct ShipEntry {
-        std::string name;              /**< Nom affiche dans l'entete de la carte. */
-        std::string previewAssetPath;  /**< Chemin d'image direct ou dossier de navire; un dossier charge automatiquement "1.png". */
-    };
-
-    /**
-     * @brief Donnees reutilisables par les listes d'options des onglets gestion, apparence et entrepot.
-     */
-    struct OptionEntry {
-        std::string name;              /**< Nom affiche dans le picker et dans le panneau. */
-        std::string previewAssetPath;  /**< Chemin d'image direct ou dossier de navire; un dossier charge automatiquement "1.png". */
-    };
-
-    /**
-     * @brief Instantane de progression elite affiche par l'onglet elite.
-     */
-    struct EliteProgressData {
+    struct AccountTabEliteProgressData {
         int currentPoints;           /**< Nombre actuel de points d'elite du joueur. */
         int nextShipPointsRequired;  /**< Objectif de points pour le prochain navire elite. */
         bool hasNextShip;            /**< True si un autre navire elite reste a obtenir. */
     };
+
+    struct ShipManagementTabOptionEntry {
+        std::string name;             /**< Nom affiche dans le picker et dans le panneau. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier; un dossier charge automatiquement "1.png". */
+    };
+
+    struct AppearanceTabOptionEntry {
+        std::string name;             /**< Nom affiche dans le picker et dans le panneau. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier; un dossier charge automatiquement "1.png". */
+    };
+
+    struct EliteShipsTabShipEntry {
+        std::string name;             /**< Nom affiche dans l'entete de la carte. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier de navire; un dossier charge automatiquement "1.png". */
+    };
+
+    struct SpecialShipsTabShipEntry {
+        std::string name;             /**< Nom affiche dans l'entete de la carte. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier de navire; un dossier charge automatiquement "1.png". */
+    };
+
+    enum class StorageTabTransferLocation : int {
+        WAREHOUSE = 0, /**< Colonne "Entrepot". */
+        SHIP = 1       /**< Colonne "Equipe" / navire. */
+    };
+
+    enum class StorageTabEquipmentCategory : int {
+        CANNONS = 0, /**< Canons. */
+        SAILS = 1    /**< Voiles. */
+    };
+
+    struct StorageTabEquipmentOptionEntry {
+        StorageTabEquipmentCategory category = StorageTabEquipmentCategory::CANNONS; /**< Categorie associee a l'option. */
+        std::string name;             /**< Nom affiche dans les listes. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier; un dossier charge automatiquement "1.png". */
+        int maxEquippedOnShip = 0;    /**< Quantite maximale equipable sur le navire pour cette categorie; <= 0 = illimite. */
+    };
+
+    struct StorageTabCannonStatsDisplay {
+        std::string damageDisplay;     /**< Degats des canons. */
+        std::string critDamageDisplay; /**< Degats critiques des canons. */
+        std::string critChanceDisplay; /**< Chance de coup critique des canons. */
+        std::string rangeDisplay;      /**< Portee des canons. */
+        std::string reloadDisplay;     /**< Temps de recharge des canons. */
+    };
+
+    struct StorageTabItemEntry {
+        StorageTabEquipmentCategory category = StorageTabEquipmentCategory::CANNONS; /**< Categorie enum de l'objet. */
+        std::string name;             /**< Nom affiche dans la ligne. */
+        std::string previewAssetPath; /**< Chemin image direct; un dossier charge automatiquement "1.png". */
+        int quantity = 0;             /**< Quantite disponible dans l'emplacement. */
+        StorageTabCannonStatsDisplay cannonStats; /**< Stats tooltip si @ref category vaut CANNONS. */
+    };
+
+    struct StorageTabTransferRequest {
+        StorageTabTransferLocation source; /**< Emplacement de depart. */
+        StorageTabTransferLocation target; /**< Emplacement d'arrivee. */
+        StorageTabItemEntry item;          /**< Copie de l'objet transfere. */
+        int quantity;                      /**< Quantite confirmee par l'utilisateur. */
+    };
+
+    using StorageTabTransferCallback = std::function<void(const StorageTabTransferRequest&)>;
+
+    // Onglet Gestion de butin d'abordage.
+    /**
+     * @brief Types de monnaies affichables dans la gestion du butin d'abordage.
+     */
+    enum class BoardingLootCurrencyType : int {
+        GOLD = 0,     /**< Or gagne ou transporte pendant l'abordage. */
+        PERLES = 1,   /**< Perles gagnees ou transportees pendant l'abordage. */
+        CRISTAUX = 2  /**< Cristaux gagnes ou transportes pendant l'abordage. */
+    };
+
+    /**
+     * @brief Ligne de monnaie affichee dans les colonnes "Sur le navire" et "Reserve securisee".
+     */
+    struct BoardingLootCurrencyEntry {
+        BoardingLootCurrencyType type = BoardingLootCurrencyType::GOLD; /**< Type enum de la monnaie. */
+        std::string previewAssetPath;   /**< Chemin de l'image affichee pour representer la monnaie. */
+        int shipQuantity = 0;           /**< Quantite actuellement stockee sur le navire, donc exposable au pillage. */
+        int secureReserveQuantity = 0;  /**< Quantite actuellement stockee dans la reserve securisee, non pillable. */
+        int minQuantityToSecureReserve = 0; /**< Quantite minimale sur le navire requise pour transferer vers la reserve securisee. */
+        bool forceStoreOnShip = false;  /**< True si cette monnaie doit rester sur le navire et ne peut pas etre securisee. */
+    };
+
+    /**
+     * @brief Monnaie effectivement deplacee par l'action "Tout vers reserve securisee".
+     */
+    struct BoardingLootTransferEntry {
+        BoardingLootCurrencyType type = BoardingLootCurrencyType::GOLD; /**< Type enum de la monnaie transferee. */
+        int quantity = 0; /**< Quantite deplacee du navire vers la reserve securisee. */
+    };
+
+    /**
+     * @brief Payload envoye au gameplay apres le transfert global du butin eligible.
+     */
+    struct BoardingLootTransferAllToSecureReserveRequest {
+        std::vector<BoardingLootTransferEntry> currencies; /**< Monnaies effectivement deplacees par l'action globale. */
+    };
+
+    using BoardingLootTransferAllCallback =
+        std::function<void(const BoardingLootTransferAllToSecureReserveRequest&)>;
 
     /**
      * @brief Construit le widget dans un etat vide, pret a etre alimente par le gameplay.
@@ -54,272 +138,95 @@ public:
      */
     ~AccountManagementWidget(void);
 
+    // Onglet Compte.
+    void setAccountTabPlayerIdentifier(const std::string& playerIdentifier);
+    void setAccountTabPirateSince(const std::string& pirateSince);
+    void setAccountTabPlayerLevel(int level);
+    void setAccountTabExperiencePointsCurrent(int points);
+    void setAccountTabEliteProgressData(const AccountTabEliteProgressData& progressData);
+    void setAccountTabElitePointsCurrent(int points);
+    void setAccountTabCombatPointsCurrent(int points);
+    void setAccountTabPremiumSince(const std::string& premiumSince);
+    void setAccountTabProfileName(const std::string& profileName);
+    AccountTabEliteProgressData getAccountTabEliteProgress(void) const;
+
+    // Onglet Gestion du navire.
+    void setShipManagementTabBonusOptions(const std::vector<ShipManagementTabOptionEntry>& options);
+    void addShipManagementTabBonusOption(const ShipManagementTabOptionEntry& option);
+    void clearShipManagementTabBonusOptions(void);
+
+    // Onglet Apparence.
+    void setAppearanceTabShipStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabShipStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabShipStyleOptions(void);
+    void setAppearanceTabRepairStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabRepairStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabRepairStyleOptions(void);
+    void setAppearanceTabSpeedStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabSpeedStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabSpeedStyleOptions(void);
+    void setAppearanceTabProjectileImpactStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabProjectileImpactStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabProjectileImpactStyleOptions(void);
+    void setAppearanceTabRocketStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabRocketStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabRocketStyleOptions(void);
+    void setAppearanceTabProjectileStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabProjectileStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabProjectileStyleOptions(void);
+    void setAppearanceTabMoveClickStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabMoveClickStyleOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabMoveClickStyleOptions(void);
+    void setAppearanceTabEmoteOptions(const std::vector<AppearanceTabOptionEntry>& options);
+    void addAppearanceTabEmoteOption(const AppearanceTabOptionEntry& option);
+    void clearAppearanceTabEmoteOptions(void);
+
+    // Onglet Navires elite acquis.
+    void setEliteShipsTabAcquiredShips(const std::vector<EliteShipsTabShipEntry>& ships);
+    void addEliteShipsTabAcquiredShip(const EliteShipsTabShipEntry& ship);
+    void clearEliteShipsTabAcquiredShips(void);
+
+    // Onglet Navires speciaux acquis.
+    void setSpecialShipsTabAcquiredShips(const std::vector<SpecialShipsTabShipEntry>& ships);
+    void addSpecialShipsTabAcquiredShip(const SpecialShipsTabShipEntry& ship);
+    void clearSpecialShipsTabAcquiredShips(void);
+
+    // Onglet Entrepot / Equipe.
+    void clearStorageTabEquipmentOptions(void);
+    void setStorageTabEquipmentCategoryOptions(const std::vector<StorageTabEquipmentOptionEntry>& options);
+    void addStorageTabEquipmentCategoryOption(const StorageTabEquipmentOptionEntry& option);
+    void setStorageTabWarehouseItems(const std::vector<StorageTabItemEntry>& items);
+    void addStorageTabWarehouseItem(const StorageTabItemEntry& item);
+    void clearStorageTabWarehouseItems(void);
+    void setStorageTabEquippedItems(const std::vector<StorageTabItemEntry>& items);
+    void addStorageTabEquippedItem(const StorageTabItemEntry& item);
+    void clearStorageTabEquippedItems(void);
+    void setStorageTabOnTransferRequested(StorageTabTransferCallback callback);
+
+    // Onglet Gestion de butin d'abordage.
     /**
-     * @brief Remplace entierement les cartes de l'onglet "navires elite acquis".
-     * @param ships Nouvelle liste de navires elites acquis.
+     * @brief Remplace toutes les monnaies affichees dans l'onglet de butin d'abordage.
+     * @param currencies Liste complete des monnaies et quantites a afficher.
      */
-    void setEliteAcquiredShips(const std::vector<ShipEntry>& ships);
+    void setBoardingLootManagementTabCurrencies(const std::vector<BoardingLootCurrencyEntry>& currencies);
 
     /**
-     * @brief Ajoute une carte a l'onglet "navires elite acquis".
-     * @param ship Navire elite a ajouter.
+     * @brief Ajoute une monnaie a l'onglet de butin d'abordage.
+     * @param currency Monnaie et quantites a ajouter.
      */
-    void addEliteAcquiredShip(const ShipEntry& ship);
+    void addBoardingLootManagementTabCurrency(const BoardingLootCurrencyEntry& currency);
 
     /**
-     * @brief Vide l'onglet "navires elite acquis".
+     * @brief Vide toutes les monnaies affichees dans l'onglet de butin d'abordage.
      */
-    void clearEliteAcquiredShips(void);
+    void clearBoardingLootManagementTabCurrencies(void);
 
     /**
-     * @brief Remplace entierement les cartes de l'onglet "navires speciaux acquis".
-     * @param ships Nouvelle liste de navires speciaux acquis.
+     * @brief Definit la callback appelee apres "Tout vers reserve securisee".
+     * @param callback Fonction appelee avec les monnaies effectivement transferees.
      */
-    void setSpecialAcquiredShips(const std::vector<ShipEntry>& ships);
-
-    /**
-     * @brief Ajoute une carte a l'onglet "navires speciaux acquis".
-     * @param ship Navire special a ajouter.
-     */
-    void addSpecialAcquiredShip(const ShipEntry& ship);
-
-    /**
-     * @brief Vide l'onglet "navires speciaux acquis".
-     */
-    void clearSpecialAcquiredShips(void);
-
-    /**
-     * @brief Remplace entierement les options de bonus du navire dans l'onglet "gestion du navire".
-     * @param options Nouvelle liste d'options de bonus du navire.
-     */
-    void setShipBonusOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de bonus du navire dans l'onglet "gestion du navire".
-     * @param option Option de bonus a ajouter.
-     */
-    void addShipBonusOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de bonus du navire dans l'onglet "gestion du navire".
-     */
-    void clearShipBonusOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de style du navire dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles du navire.
-     */
-    void setShipStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de style du navire dans l'onglet "apparence".
-     * @param option Style du navire a ajouter.
-     */
-    void addShipStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de style du navire dans l'onglet "apparence".
-     */
-    void clearShipStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de style de reparation dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles de reparation.
-     */
-    void setRepairStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de style de reparation dans l'onglet "apparence".
-     * @param option Style de reparation a ajouter.
-     */
-    void addRepairStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de style de reparation dans l'onglet "apparence".
-     */
-    void clearRepairStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de style de vitesse dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles de vitesse.
-     */
-    void setSpeedStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de style de vitesse dans l'onglet "apparence".
-     * @param option Style de vitesse a ajouter.
-     */
-    void addSpeedStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de style de vitesse dans l'onglet "apparence".
-     */
-    void clearSpeedStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options d'impact des boulets dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles d'impact des boulets.
-     */
-    void setProjectileImpactStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option d'impact des boulets dans l'onglet "apparence".
-     * @param option Style d'impact des boulets a ajouter.
-     */
-    void addProjectileImpactStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options d'impact des boulets dans l'onglet "apparence".
-     */
-    void clearProjectileImpactStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de style de fusee dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles de fusee.
-     */
-    void setRocketStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de style de fusee dans l'onglet "apparence".
-     * @param option Style de fusee a ajouter.
-     */
-    void addRocketStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de style de fusee dans l'onglet "apparence".
-     */
-    void clearRocketStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de style de projectile en vol dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles de projectile en vol.
-     */
-    void setProjectileStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de style de projectile en vol dans l'onglet "apparence".
-     * @param option Style de projectile a ajouter.
-     */
-    void addProjectileStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de style de projectile en vol dans l'onglet "apparence".
-     */
-    void clearProjectileStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de clic de deplacement dans l'onglet "apparence".
-     * @param options Nouvelle liste de styles de clic de deplacement.
-     */
-    void setMoveClickStyleOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option de clic de deplacement dans l'onglet "apparence".
-     * @param option Style de clic a ajouter.
-     */
-    void addMoveClickStyleOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de clic de deplacement dans l'onglet "apparence".
-     */
-    void clearMoveClickStyleOptions(void);
-
-    /**
-     * @brief Remplace entierement les emotes de l'onglet "apparence".
-     * @param options Nouvelle liste d'emotes.
-     */
-    void setEmoteOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une emote dans l'onglet "apparence".
-     * @param option Emote a ajouter.
-     */
-    void addEmoteOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les emotes de l'onglet "apparence".
-     */
-    void clearEmoteOptions(void);
-
-    /**
-     * @brief Remplace entierement les options de l'onglet "entrepot / equipe".
-     * @param options Nouvelle liste d'equipements proposes.
-     */
-    void setStorageEquipmentOptions(const std::vector<OptionEntry>& options);
-
-    /**
-     * @brief Ajoute une option dans l'onglet "entrepot / equipe".
-     * @param option Equipement a ajouter.
-     */
-    void addStorageEquipmentOption(const OptionEntry& option);
-
-    /**
-     * @brief Vide les options de l'onglet "entrepot / equipe".
-     */
-    void clearStorageEquipmentOptions(void);
-
-    /**
-     * @brief Remplace entierement l'instantane de progression elite affiche dans l'onglet elite.
-     * @param progressData Nouvel etat de progression elite a afficher. Le libelle du prochain
-     *                     navire elite est genere automatiquement a partir du nombre de cartes
-     *                     elite deja acquises.
-     */
-    void setEliteProgressData(const EliteProgressData& progressData);
-
-    /**
-     * @brief Met a jour les points d'elite actuellement affiches dans les onglets compte et elite.
-     * @param points Nombre actuel de points d'elite du joueur. Les valeurs negatives sont ramenees a zero.
-     *               Les autres champs de progression elite deja configures sont conserves.
-     */
-    void setElitePointsCurrent(int points);
-
-    /**
-     * @brief Met a jour l'identifiant joueur affiche dans l'onglet compte.
-     * @param playerIdentifier Identifiant texte affiche a droite de "IDJoueur".
-     */
-    void setPlayerIdentifier(const std::string& playerIdentifier);
-
-    /**
-     * @brief Met a jour la date "Pirate since" affichee dans l'onglet compte.
-     * @param pirateSince Texte libre affiche a droite de "Pirate since".
-     */
-    void setPirateSince(const std::string& pirateSince);
-
-    /**
-     * @brief Met a jour le niveau actuellement affiche dans l'onglet compte.
-     * @param level Niveau du joueur. Les valeurs negatives sont ramenees a zero.
-     */
-    void setPlayerLevel(int level);
-
-    /**
-     * @brief Met a jour les points d'experience affiches dans l'onglet compte.
-     * @param points Total de points d'experience du joueur. Les valeurs negatives sont ramenees a zero.
-     */
-    void setExperiencePointsCurrent(int points);
-
-    /**
-     * @brief Met a jour les points de combat affiches dans l'onglet compte.
-     * @param points Total de points de combat du joueur. Les valeurs negatives sont ramenees a zero.
-     */
-    void setCombatPointsCurrent(int points);
-
-    /**
-     * @brief Met a jour la date "Premium depuis" affichee dans l'onglet compte.
-     * @param premiumSince Texte libre affiche dans le panneau premium.
-     */
-    void setPremiumSince(const std::string& premiumSince);
-
-    /**
-     * @brief Met a jour le nom de profil editable affiche dans l'onglet compte.
-     * @param profileName Nouveau nom de profil. Le texte est tronque a la taille maximale du champ.
-     */
-    void setProfileName(const std::string& profileName);
-
-    /**
-     * @brief Retourne l'instantane de progression elite utilise par l'onglet elite.
-     * @return Un instantane contenant les points actuels et l'objectif du prochain navire elite.
-     */
-    EliteProgressData getEliteProgress(void) const;
+    void setBoardingLootManagementTabOnTransferAllToSecureReserveRequested(
+        BoardingLootTransferAllCallback callback);
 
     /**
      * @brief Charge les polices, les icones et l'etat runtime du widget.
@@ -440,11 +347,12 @@ private:
      */
     enum class ActiveTab : int {
         ACCOUNT = 0,           /**< Onglet des informations de compte. */
-        APPEARANCE = 1,        /**< Onglet de personnalisation d'apparence. */
-        SHIP_MANAGEMENT = 2,   /**< Onglet de gestion du navire. */
-        ELITE_SHIPS = 3,       /**< Onglet des navires elite acquis. */
-        SPECIAL_SHIPS = 4,     /**< Onglet des navires speciaux acquis. */
-        STORAGE_EQUIPPED = 5   /**< Onglet entrepot / equipe. */
+        STORAGE_EQUIPPED = 1,  /**< Onglet entrepot / equipe. */
+        BOARDING_LOOT = 2,     /**< Onglet de gestion du butin d'abordage. */
+        SHIP_MANAGEMENT = 3,   /**< Onglet de gestion du navire. */
+        APPEARANCE = 4,        /**< Onglet de personnalisation d'apparence. */
+        ELITE_SHIPS = 5,       /**< Onglet des navires elite acquis. */
+        SPECIAL_SHIPS = 6      /**< Onglet des navires speciaux acquis. */
     };
 
     /**
@@ -489,7 +397,47 @@ private:
         STORAGE_EQUIPMENT = 9        /**< Options de l'onglet entrepot / equipe. */
     };
 
-    using AppearanceOption = OptionEntry; /**< Alias interne des options de liste. */
+    struct InternalShipEntry {
+        std::string name;
+        std::string previewAssetPath;
+    };
+
+    struct InternalOptionEntry {
+        std::string name;
+        std::string previewAssetPath;
+    };
+
+    using AppearanceOption = InternalOptionEntry; /**< Alias interne des options de liste. */
+
+    /**
+     * @brief Etat de glisser-deposer d'un objet de stockage.
+     */
+    struct StorageDragState {
+        bool active;
+        StorageTabTransferLocation source;
+        int sourceIndex;
+        int maxQuantity;
+        StorageTabEquipmentCategory category;
+        std::string itemName;
+        std::string previewAssetPath;
+        float pressX;
+        float pressY;
+    };
+
+    /**
+     * @brief Etat du popup de confirmation de transfert.
+     */
+    struct StorageTransferPopupState {
+        bool open;
+        StorageTabTransferLocation source;
+        StorageTabTransferLocation target;
+        int sourceIndex;
+        int maxQuantity;
+        int quantity;
+        StorageTabEquipmentCategory category;
+        std::string itemName;
+        std::string previewAssetPath;
+    };
 
     RC2D_Font titleFont;   /**< Police de titre utilisee par les entetes de section. */
     RC2D_Font bodyFont;    /**< Police principale utilisee pour les libelles et valeurs. */
@@ -500,6 +448,7 @@ private:
     bool cursorEnabled;    /**< True si le widget peut demander un changement de curseur. */
     bool resourcesLoaded;  /**< True apres load() quand les polices et les icones sont ouvertes. */
     WindowControlIcons controlIcons; /**< Helper partage pour le rendu des icones de controle. */
+    RC2D_Image storageDropdownArrowImage; /**< Fleche listes deroulantes entrepot / equipe (icon-arrowdown). */
 
     ActiveTab activeTab;   /**< Onglet superieur actuellement selectionne. */
 
@@ -509,15 +458,15 @@ private:
     float widgetOffsetX;   /**< Decalage X applique par l'utilisateur depuis la position centree de base. */
     float widgetOffsetY;   /**< Decalage Y applique par l'utilisateur depuis la position centree de base. */
 
-    std::vector<ShipEntry> eliteShips;    /**< Cartes dynamiques des navires elite. */
-    std::vector<ShipEntry> specialShips;  /**< Cartes dynamiques des navires speciaux. */
+    std::vector<InternalShipEntry> eliteShips;    /**< Cartes dynamiques des navires elite. */
+    std::vector<InternalShipEntry> specialShips;  /**< Cartes dynamiques des navires speciaux. */
     std::vector<RC2D_Image> eliteShipIcons;   /**< Textures d'apercu en cache des navires elite. */
     std::vector<RC2D_Image> specialShipIcons; /**< Textures d'apercu en cache des navires speciaux. */
     std::string playerIdentifier;         /**< Identifiant joueur affiche dans l'onglet compte. */
     std::string pirateSinceText;          /**< Date "Pirate since" affichee dans l'onglet compte. */
     int playerLevel;                      /**< Niveau actuellement affiche dans l'onglet compte. */
     int experiencePointsCurrent;          /**< Points d'experience actuellement affiches dans l'onglet compte. */
-    EliteProgressData eliteProgressData;  /**< Instantane courant de progression elite reutilise dans l'onglet compte et l'onglet elite. */
+    AccountTabEliteProgressData eliteProgressData;  /**< Instantane courant de progression elite reutilise dans l'onglet compte et l'onglet elite. */
     int combatPointsCurrent;              /**< Points de combat actuellement affiches dans l'onglet compte. */
     std::string premiumSinceText;         /**< Date "Premium depuis" affichee dans l'onglet compte. */
 
@@ -540,6 +489,11 @@ private:
     std::vector<AppearanceOption> moveClickStyleOptions;   /**< Options d'effet du clic de deplacement. */
     std::vector<AppearanceOption> emoteOptions;            /**< Options d'emotes. */
     std::vector<AppearanceOption> storageEquipmentOptions; /**< Options des listes de stockage. */
+    std::vector<StorageTabEquipmentCategory> storageEquipmentOptionCategories; /**< Categories enum paralleles aux options de stockage. */
+    std::vector<int> storageEquipmentOptionMaxEquipped; /**< Capacites max equipables sur le navire par categorie de stockage. */
+    std::vector<StorageTabItemEntry> storageWarehouseItems;   /**< Items affiches dans la colonne Entrepot. */
+    std::vector<StorageTabItemEntry> storageEquippedItems;    /**< Items affiches dans la colonne Equipe. */
+    std::vector<BoardingLootCurrencyEntry> boardingLootCurrencies; /**< Monnaies affichees dans l'onglet de butin d'abordage. */
 
     std::vector<RC2D_Image> shipOptionIcons;             /**< Textures d'apercu en cache des bonus / configurations de navire. */
     std::vector<RC2D_Image> coatingOptionIcons;          /**< Textures d'apercu en cache des styles visuels du navire. */
@@ -551,6 +505,9 @@ private:
     std::vector<RC2D_Image> moveClickStyleOptionIcons;   /**< Textures d'apercu en cache des effets de clic de deplacement. */
     std::vector<RC2D_Image> emoteOptionIcons;            /**< Textures d'apercu en cache des emotes. */
     std::vector<RC2D_Image> storageEquipmentOptionIcons; /**< Textures d'apercu en cache des options de stockage. */
+    std::vector<RC2D_Image> storageWarehouseItemIcons;   /**< Textures d'apercu en cache des items entrepot. */
+    std::vector<RC2D_Image> storageEquippedItemIcons;    /**< Textures d'apercu en cache des items equipes. */
+    std::vector<RC2D_Image> boardingLootCurrencyIcons;   /**< Textures d'apercu en cache des monnaies de butin. */
 
     int selectedShipOption;             /**< Index du bonus / de la configuration de navire selectionne. */
     int selectedCoatingOption;          /**< Index du style visuel du navire selectionne. */
@@ -562,6 +519,15 @@ private:
     int selectedMoveClickStyleOption;   /**< Index de l'effet de clic de deplacement selectionne. */
     int selectedEmoteOption;            /**< Index de l'emote selectionnee. */
     int selectedStorageEquipmentOption; /**< Index de l'option de stockage selectionnee. */
+
+    StorageDragState storageDrag;                  /**< Etat courant de drag entre entrepot et equipe. */
+    StorageTransferPopupState storageTransferPopup; /**< Popup de quantite pour le transfert courant. */
+    StorageTabTransferCallback storageTabOnTransferRequested; /**< Callback optionnelle apres confirmation de transfert. */
+    BoardingLootTransferAllCallback boardingLootOnTransferAllToSecureReserveRequested; /**< Callback optionnelle apres transfert global du butin. */
+    int boardingLootFirstRow;                     /**< Premiere monnaie visible dans l'onglet de butin. */
+    bool boardingLootScrollDragging;              /**< True pendant le drag du thumb de scrollbar de butin. */
+    float boardingLootScrollDragOffsetY;          /**< Offset souris a l'interieur du thumb de scrollbar de butin. */
+    float boardingLootScrollWheelHighlightSec;    /**< Surlignage du pouce butin apres scroll molette. */
 
     AppearancePickerType openPicker; /**< Picker actuellement ouvert, si present. */
     SDL_FRect openPickerAnchorRect;  /**< Rectangle d'ancrage utilise pour placer le popup du picker. */
@@ -598,18 +564,28 @@ private:
     void loadAppearanceIcons(void);
 
     /**
+     * @brief Recharge les textures des objets de l'onglet entrepot / equipe.
+     */
+    void loadStorageItemIcons(void);
+
+    /**
+     * @brief Recharge les textures des monnaies de butin d'abordage.
+     */
+    void loadBoardingLootCurrencyIcons(void);
+
+    /**
      * @brief Retourne le vecteur de flotte correspondant a une collection interne.
      * @param collection Collection interne de flotte cible.
      * @return Vecteur mutable de flotte, ou nullptr si indisponible.
      */
-    std::vector<ShipEntry>* getShipsForCollection(ShipCollectionType collection);
+    std::vector<InternalShipEntry>* getShipsForCollection(ShipCollectionType collection);
 
     /**
      * @brief Retourne le vecteur de flotte correspondant a une collection interne.
      * @param collection Collection interne de flotte cible.
      * @return Vecteur immutable de flotte, ou nullptr si indisponible.
      */
-    const std::vector<ShipEntry>* getShipsForCollection(ShipCollectionType collection) const;
+    const std::vector<InternalShipEntry>* getShipsForCollection(ShipCollectionType collection) const;
 
     /**
      * @brief Retourne le vecteur d'options correspondant a une collection interne.
@@ -645,6 +621,91 @@ private:
     void syncOptionCollectionState(OptionCollectionType collection);
 
     /**
+     * @brief Retourne le nom de la categorie de stockage selectionnee.
+     */
+    StorageTabEquipmentCategory getSelectedStorageTabEquipmentCategory(void) const;
+
+    /**
+     * @brief Retourne la quantite deja equipee pour une categorie.
+     */
+    int getStorageEquippedQuantityForCategory(StorageTabEquipmentCategory category) const;
+
+    /**
+     * @brief Retourne le maximum equipable sur le navire pour une categorie, ou 0 si illimite.
+     */
+    int getStorageMaxEquippedForCategory(StorageTabEquipmentCategory category) const;
+
+    /**
+     * @brief Retourne la capacite restante equipable pour une categorie.
+     */
+    int getStorageRemainingEquipCapacityForCategory(StorageTabEquipmentCategory category) const;
+
+    /**
+     * @brief True si un item du depot ne peut plus etre glisse vers le navire.
+     */
+    bool isStorageWarehouseItemDisabledForEquip(const StorageTabItemEntry& item) const;
+
+    /**
+     * @brief Teste si un item correspond a la categorie de stockage selectionnee.
+     */
+    bool isStorageItemVisibleForSelectedCategory(const StorageTabItemEntry& item) const;
+
+    /**
+     * @brief Retourne le vecteur d'items correspondant a un emplacement.
+     */
+    std::vector<StorageTabItemEntry>* getStorageItemsForLocation(StorageTabTransferLocation location);
+
+    /**
+     * @brief Retourne le vecteur d'items correspondant a un emplacement.
+     */
+    const std::vector<StorageTabItemEntry>* getStorageItemsForLocation(StorageTabTransferLocation location) const;
+
+    /**
+     * @brief Retourne le cache d'icones correspondant a un emplacement.
+     */
+    std::vector<RC2D_Image>* getStorageItemIconsForLocation(StorageTabTransferLocation location);
+
+    /**
+     * @brief Retourne le cache d'icones correspondant a un emplacement.
+     */
+    const std::vector<RC2D_Image>* getStorageItemIconsForLocation(StorageTabTransferLocation location) const;
+
+    /**
+     * @brief Retourne l'index source d'un item touche dans une liste filtree.
+     */
+    int hitTestStorageItem(
+        StorageTabTransferLocation location,
+        const SDL_FRect& contentRect,
+        float x,
+        float y,
+        bool requireDraggable = false) const;
+
+    /**
+     * @brief Ouvre le popup de transfert depuis le drag courant.
+     */
+    void openStorageTransferPopupFromDrag(StorageTabTransferLocation target);
+
+    /**
+     * @brief Ferme le popup de transfert.
+     */
+    void closeStorageTransferPopup(void);
+
+    /**
+     * @brief Annule le drag de stockage courant.
+     */
+    void cancelStorageDrag(void);
+
+    /**
+     * @brief Applique le transfert confirme dans les donnees UI et notifie la callback.
+     */
+    void applyStorageTransferPopup(void);
+
+    /**
+     * @brief Deplace toutes les monnaies eligibles du navire vers la reserve securisee.
+     */
+    void transferAllBoardingLootToSecureReserve(void);
+
+    /**
      * @brief Convertit le picker actuellement ouvert vers une collection interne d'options.
      * @param picker Identifiant interne du picker.
      * @return Collection interne correspondante.
@@ -656,14 +717,14 @@ private:
      * @param collection Collection interne cible.
      * @param ships Nouvelle liste de navires a stocker.
      */
-    void setShipsForCollection(ShipCollectionType collection, const std::vector<ShipEntry>& ships);
+    void setShipsForCollection(ShipCollectionType collection, const std::vector<InternalShipEntry>& ships);
 
     /**
      * @brief Ajoute un navire a une collection interne de navires acquis.
      * @param collection Collection interne cible.
      * @param ship Navire a ajouter.
      */
-    void addShipToCollection(ShipCollectionType collection, const ShipEntry& ship);
+    void addShipToCollection(ShipCollectionType collection, const InternalShipEntry& ship);
 
     /**
      * @brief Vide une collection interne de navires acquis.
@@ -676,14 +737,14 @@ private:
      * @param collection Collection interne cible.
      * @param options Nouvelle liste d'options a stocker.
      */
-    void setOptionsForCollection(OptionCollectionType collection, const std::vector<OptionEntry>& options);
+    void setOptionsForCollection(OptionCollectionType collection, const std::vector<InternalOptionEntry>& options);
 
     /**
      * @brief Ajoute une option a une collection interne.
      * @param collection Collection interne cible.
      * @param option Option a ajouter.
      */
-    void addOptionToCollection(OptionCollectionType collection, const OptionEntry& option);
+    void addOptionToCollection(OptionCollectionType collection, const InternalOptionEntry& option);
 
     /**
      * @brief Vide une collection interne d'options.
@@ -711,14 +772,14 @@ private:
      * @param tab Identifiant interne de l'onglet.
      * @return Vecteur mutable de flotte, ou nullptr si l'onglet n'utilise pas de donnees de flotte.
      */
-    std::vector<ShipEntry>* getShipsForTab(ActiveTab tab);
+    std::vector<InternalShipEntry>* getShipsForTab(ActiveTab tab);
 
     /**
      * @brief Retourne le vecteur de flotte correspondant a un onglet interne visible.
      * @param tab Identifiant interne de l'onglet.
      * @return Vecteur immutable de flotte, ou nullptr si l'onglet n'utilise pas de donnees de flotte.
      */
-    const std::vector<ShipEntry>* getShipsForTab(ActiveTab tab) const;
+    const std::vector<InternalShipEntry>* getShipsForTab(ActiveTab tab) const;
 
     /**
      * @brief Retourne le cache d'icones de navire correspondant a un onglet interne visible.
