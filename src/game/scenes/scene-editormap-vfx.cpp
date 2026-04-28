@@ -5911,7 +5911,8 @@ void EditorMapVfxScene::updateToolbarLayout(void)
 
     // Reference = game screen (zone logique). Marges map = bandes GUI hors ocean.
     const float topMargin = Map::MAP_TOP_UI_MARGIN_PX;
-    const float bottomMargin = Map::MAP_BOTTOM_UI_MARGIN_PX;
+    const MapPlayfieldFrameMarginsPercent frame = MapGetPlayfieldFrameMarginsPercent();
+    const float bottomMargin = gs.h * (static_cast<float>(frame.bottom) / 100.0f);
     const float topToolbarY = gs.y + std::floor((std::max)(0.0f, topMargin - h) * 0.5f);
 
     const float bottomStripTop = gs.y + gs.h - bottomMargin;

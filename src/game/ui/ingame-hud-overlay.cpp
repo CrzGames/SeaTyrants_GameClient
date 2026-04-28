@@ -1316,8 +1316,15 @@ void IngameHudOverlay::saveUserSettingsToDisk(void)
     addHudKey(GameSettingsWidget::HudScaleTarget::CENTER_SHIP, "CENTER_SHIP");
     addHudKey(GameSettingsWidget::HudScaleTarget::ACTION_BAR, "ACTION_BAR");
 
+    const MapPlayfieldFrameMarginsPercent mapFrameMargins = this->gameSettingsWidget.getMapPlayfieldFrameMarginsPercent();
+    cJSON* mapFrameJson = cJSON_AddObjectToObject(hud, "mapPlayfieldFrameMarginsPercent");
+    cJSON_AddNumberToObject(mapFrameJson, "left", mapFrameMargins.left);
+    cJSON_AddNumberToObject(mapFrameJson, "right", mapFrameMargins.right);
+    cJSON_AddNumberToObject(mapFrameJson, "bottom", mapFrameMargins.bottom);
+
     cJSON* controls = cJSON_AddObjectToObject(root, "controls");
     cJSON_AddNumberToObject(controls, "cameraScrollSpeedSectors", this->gameSettingsWidget.getCameraScrollSpeedSectors());
+    cJSON_AddNumberToObject(controls, "mapWorldZoomFactor", GetCamera().getZoomFactor());
     cJSON* bindings = cJSON_AddObjectToObject(controls, "bindings");
 
     auto addBind = [&](GameSettingsWidget::ControlAction action, const char* key)
@@ -1527,6 +1534,22 @@ void IngameHudOverlay::loadUserSettingsFromDisk(void)
                     static_cast<float>(py->valuedouble)};
             }
         }
+
+        const cJSON* mapFrameJson = cJSON_GetObjectItemCaseSensitive(hud, "mapPlayfieldFrameMarginsPercent");
+        if (cJSON_IsObject(mapFrameJson))
+        {
+            const cJSON* jl = cJSON_GetObjectItemCaseSensitive(mapFrameJson, "left");
+            const cJSON* jr = cJSON_GetObjectItemCaseSensitive(mapFrameJson, "right");
+            const cJSON* jb = cJSON_GetObjectItemCaseSensitive(mapFrameJson, "bottom");
+            if (cJSON_IsNumber(jl) && cJSON_IsNumber(jr) && cJSON_IsNumber(jb))
+            {
+                MapPlayfieldFrameMarginsPercent margins{};
+                margins.left = static_cast<int>(jl->valuedouble);
+                margins.right = static_cast<int>(jr->valuedouble);
+                margins.bottom = static_cast<int>(jb->valuedouble);
+                this->gameSettingsWidget.setMapPlayfieldFrameMarginsPercent(margins, false);
+            }
+        }
     }
 
     const cJSON* controls = cJSON_GetObjectItemCaseSensitive(root, "controls");
@@ -1536,6 +1559,14 @@ void IngameHudOverlay::loadUserSettingsFromDisk(void)
         if (cJSON_IsNumber(cam))
         {
             this->gameSettingsWidget.setCameraScrollSpeedSectors(static_cast<float>(cam->valuedouble));
+        }
+
+        const cJSON* mapZoom = cJSON_GetObjectItemCaseSensitive(controls, "mapWorldZoomFactor");
+        if (cJSON_IsNumber(mapZoom))
+        {
+            Camera& gameCam = GetCamera();
+            gameCam.setZoomFactor(static_cast<float>(mapZoom->valuedouble));
+            this->zoomWidget.syncSliderToCamera(gameCam);
         }
 
         const cJSON* binds = cJSON_GetObjectItemCaseSensitive(controls, "bindings");
@@ -1696,6 +1727,14 @@ void IngameHudOverlay::load(void)
     this->barreActionWidget.load();
     this->centerShipButtonWidget.load();
     this->zoomWidget.load();
+    this->zoomWidget.setOnMapWorldZoomCommit(
+        [this]()
+        {
+            if (!this->suppressUserSettingsSave)
+            {
+                this->saveUserSettingsToDisk();
+            }
+        });
     this->hpBarWidget.load();
     this->experienceBarWidget.load();
     this->sectorCoordinateOverlay.load();

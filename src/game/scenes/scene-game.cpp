@@ -509,6 +509,7 @@ void GameScene::keypressed(
         cameraChanged = true;
     }
 
+    // Affiche/masque la minimap selon la touche configuree.
     if (!isrepeat &&
         scancode == GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::TOGGLE_MINIMAP))
     {

@@ -1,6 +1,7 @@
 #include "game/ui/hud/game-settings-widget.h"
 
 #include "game/assets/title-asset-cache.h"
+#include "game/map/map.h"
 
 #include "core/context.h"
 
@@ -13,7 +14,7 @@
 #include <vector>
 
 static constexpr float kRefW = 860.0f;
-static constexpr float kRefH = 700.0f;
+static constexpr float kRefH = 828.0f;
 
 static constexpr float kTopBarHeight = 34.0f;
 static constexpr float kSectionGap = 8.0f;
@@ -32,6 +33,11 @@ static constexpr float kHudScaleToggleButtonHeight = 24.0f;
 static constexpr float kHudScaleValueLabelWidth = 48.0f;
 static constexpr float kHudScaleTrackLeftOffset = 232.0f;
 static constexpr float kHudScaleRowsTopOffset = 70.0f;
+static constexpr float kMapFramePanelHeight = 170.0f;
+static constexpr float kMapFrameRowsTopOffset = 78.0f;
+static constexpr float kMapFrameRowHeight = 26.0f;
+static constexpr float kMapFrameRowGap = 6.0f;
+static constexpr int kMapFrameMarginMaxPct = 20;
 static constexpr float kHudScaleMinValue = 0.75f;
 static constexpr float kHudScaleMaxValue = 1.0f;
 static constexpr float kHudScaleStepValue = 0.05f;
@@ -116,6 +122,10 @@ struct GameSettingsLayout {
     std::array<SDL_FRect, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudScaleRows;
     std::array<SDL_FRect, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudScaleTracks;
     std::array<SDL_FRect, static_cast<std::size_t>(GameSettingsWidget::HudScaleTarget::COUNT)> hudScaleVisibilityButtons;
+
+    SDL_FRect mapFramePanel;
+    std::array<SDL_FRect, 3> mapFrameRows;
+    std::array<SDL_FRect, 3> mapFrameTracks;
 
     SDL_FRect languageRow;
     SDL_FRect languageButton;
@@ -205,6 +215,12 @@ static constexpr std::array<const char*, static_cast<std::size_t>(GameSettingsWi
     "Zoom map",
     "Centrer navire",
     "Barre d'action"
+}};
+
+static constexpr std::array<const char*, 3> kMapFrameMarginRowLabels = {{
+    "Marge gauche",
+    "Marge droite",
+    "Marge bas"
 }};
 
 enum class ControlsEntryType : int {
@@ -442,6 +458,37 @@ static float normalizedToCameraScrollSpeed(float normalized)
     return snapCameraScrollSpeed(
         kCameraScrollSpeedMinSectors +
         (clampf(normalized, 0.0f, 1.0f) * (kCameraScrollSpeedMaxSectors - kCameraScrollSpeedMinSectors)));
+}
+
+static int snapMapFrameMarginPercentUi(int value)
+{
+    return (std::clamp)(value, 0, kMapFrameMarginMaxPct);
+}
+
+static float mapFrameMarginPctToNormalized(int pct)
+{
+    return clampf(
+        static_cast<float>(snapMapFrameMarginPercentUi(pct)) / static_cast<float>(kMapFrameMarginMaxPct),
+        0.0f,
+        1.0f);
+}
+
+static int normalizedToMapFrameMarginPct(float normalized)
+{
+    const float pct = clampf(normalized, 0.0f, 1.0f) * static_cast<float>(kMapFrameMarginMaxPct);
+    return snapMapFrameMarginPercentUi(static_cast<int>(std::lround(pct)));
+}
+
+static SDL_FRect getMapFrameMarginThumbRect(const SDL_FRect& trackRect, int marginPercent)
+{
+    const float n = mapFrameMarginPctToNormalized(marginPercent);
+    const float thumbCenterX = trackRect.x + (trackRect.w * n);
+    return SDL_FRect{
+        thumbCenterX - (kHudScaleThumbWidth * 0.5f),
+        trackRect.y + ((trackRect.h - kHudScaleThumbHeight) * 0.5f),
+        kHudScaleThumbWidth,
+        kHudScaleThumbHeight
+    };
 }
 
 static SDL_FRect getHudScaleThumbRect(const SDL_FRect& trackRect, float scaleValue)
@@ -1063,11 +1110,37 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
         };
     }
 
-    layout.languageRow = SDL_FRect{
+    layout.mapFramePanel = SDL_FRect{
         layout.content.x,
         layout.hudScalePanel.y + layout.hudScalePanel.h + kSectionGap,
         layout.content.w,
-        (layout.content.y + layout.content.h) - (layout.hudScalePanel.y + layout.hudScalePanel.h + kSectionGap)
+        kMapFramePanelHeight
+    };
+    const float mapFrameRowStartY = layout.mapFramePanel.y + kMapFrameRowsTopOffset;
+    for (std::size_t mapFrameIndex = 0; mapFrameIndex < layout.mapFrameRows.size(); ++mapFrameIndex)
+    {
+        layout.mapFrameRows[mapFrameIndex] = SDL_FRect{
+            layout.mapFramePanel.x + 18.0f,
+            mapFrameRowStartY + (static_cast<float>(mapFrameIndex) * (kMapFrameRowHeight + kMapFrameRowGap)),
+            layout.mapFramePanel.w - 36.0f,
+            kMapFrameRowHeight
+        };
+        const float valueRight = layout.mapFrameRows[mapFrameIndex].x + layout.mapFrameRows[mapFrameIndex].w - kHudScaleValueLabelWidth;
+        layout.mapFrameTracks[mapFrameIndex] = SDL_FRect{
+            layout.mapFrameRows[mapFrameIndex].x + kHudScaleTrackLeftOffset,
+            layout.mapFrameRows[mapFrameIndex].y + ((layout.mapFrameRows[mapFrameIndex].h - kHudScaleTrackHeight) * 0.5f),
+            (std::max)(
+                1.0f,
+                valueRight - 12.0f - (layout.mapFrameRows[mapFrameIndex].x + kHudScaleTrackLeftOffset)),
+            kHudScaleTrackHeight
+        };
+    }
+
+    layout.languageRow = SDL_FRect{
+        layout.content.x,
+        layout.mapFramePanel.y + layout.mapFramePanel.h + kSectionGap,
+        layout.content.w,
+        (layout.content.y + layout.content.h) - (layout.mapFramePanel.y + layout.mapFramePanel.h + kSectionGap)
     };
     layout.languageButton = SDL_FRect{
         layout.languageRow.x + layout.languageRow.w - 340.0f,
@@ -1417,11 +1490,17 @@ GameSettingsWidget::GameSettingsWidget(void)
       onStartUiConfiguratorRequested{},
       onLanguageChanged{},
       onHudScaleChanged{},
-      onHudVisibilityChanged{}
+      onHudVisibilityChanged{},
+      onUserSettingsChanged{},
+      mapPlayfieldFrameMarginPercent{0, 0, 0},
+      mapFrameMarginDragging(false),
+      mapFrameMarginDragRow(0U),
+      mapFrameMarginDragGrabOffsetX(0.0f)
 {
     this->hudScaleValues.fill(1.0f);
     this->hudVisibilityValues.fill(true);
     this->resetAllControlActionScancodes();
+    this->applyMapPlayfieldFrameMargins(false);
 }
 
 GameSettingsWidget::~GameSettingsWidget(void)
@@ -1453,6 +1532,7 @@ void GameSettingsWidget::load(void)
     this->redeemCursorVisible = false;
     this->redeemCursorBlinkElapsed = 0.0;
     this->hudScaleDragging = false;
+    this->mapFrameMarginDragging = false;
     this->draggedHudScaleTarget = HudScaleTarget::MINIMAP;
     this->hudScaleDragGrabOffsetX = 0.0f;
     this->controlsScrollOffsetY = 0.0f;
@@ -1624,6 +1704,7 @@ void GameSettingsWidget::update(double dt)
     if (!this->widgetDragging &&
         !this->languageScrollDragging &&
         !this->hudScaleDragging &&
+        !this->mapFrameMarginDragging &&
         !this->controlsScrollDragging &&
         !this->cameraScrollSpeedDragging &&
         !this->graphicsScrollDragging)
@@ -1634,13 +1715,19 @@ void GameSettingsWidget::update(double dt)
     if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
     {
         const bool endedCameraSpeedDrag = this->cameraScrollSpeedDragging;
+        const bool endedMapFrameMarginDrag = this->mapFrameMarginDragging;
         this->widgetDragging = false;
         this->languageScrollDragging = false;
         this->hudScaleDragging = false;
+        this->mapFrameMarginDragging = false;
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
         this->graphicsScrollDragging = false;
         if (endedCameraSpeedDrag && this->onUserSettingsChanged)
+        {
+            this->onUserSettingsChanged();
+        }
+        if (endedMapFrameMarginDrag && this->onUserSettingsChanged)
         {
             this->onUserSettingsChanged();
         }
@@ -1654,6 +1741,12 @@ void GameSettingsWidget::update(double dt)
     if (this->hudScaleDragging)
     {
         this->updateDraggedHudScaleFromMouse(mouseX);
+        return;
+    }
+
+    if (this->mapFrameMarginDragging)
+    {
+        this->updateDraggedMapFrameMarginFromMouse(mouseX);
         return;
     }
 
@@ -1775,6 +1868,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
 
                 this->languageScrollDragging = true;
                 this->hudScaleDragging = false;
+                this->mapFrameMarginDragging = false;
                 this->widgetDragging = false;
                 if (isPointInRect(x, y, thumbRect))
                 {
@@ -1834,6 +1928,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         if (isPointInRect(x, y, layout.redeemButton))
         {
             this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = false;
             this->triggerRedeemCodeRequest();
             return true;
         }
@@ -1844,6 +1939,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->redeemCursorVisible = true;
             this->redeemCursorBlinkElapsed = 0.0;
             this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = false;
             if (clicks >= 2)
             {
                 this->redeemSelectionAnchorIndex = 0U;
@@ -1862,6 +1958,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         if (isPointInRect(x, y, layout.configuratorButton))
         {
             this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = false;
             this->triggerUiConfiguratorRequest();
             return true;
         }
@@ -1880,6 +1977,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->languageScrollDragging = false;
             this->widgetDragging = false;
             this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = false;
             this->applyHudVisibilityValue(
                 static_cast<HudScaleTarget>(index),
                 !this->hudVisibilityValues[index],
@@ -1903,11 +2001,38 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->languageScrollDragging = false;
             this->widgetDragging = false;
             this->hudScaleDragging = true;
+            this->mapFrameMarginDragging = false;
             this->draggedHudScaleTarget = static_cast<HudScaleTarget>(index);
             this->hudScaleDragGrabOffsetX = isPointInRect(x, y, thumbRect)
                                                 ? (x - thumbRect.x)
                                                 : (kHudScaleThumbWidth * 0.5f);
             this->updateDraggedHudScaleFromMouse(x);
+            return true;
+        }
+
+        for (std::size_t index = 0; index < layout.mapFrameTracks.size(); ++index)
+        {
+            const SDL_FRect& trackRect = layout.mapFrameTracks[index];
+            const SDL_FRect thumbRect =
+                getMapFrameMarginThumbRect(trackRect, this->mapPlayfieldFrameMarginPercent[index]);
+            if (!isPointInRect(x, y, trackRect) && !isPointInRect(x, y, thumbRect))
+            {
+                continue;
+            }
+
+            this->redeemInputFocused = false;
+            this->redeemInputSelectingWithMouse = false;
+            this->clearRedeemSelection();
+            this->languageDropdownOpen = false;
+            this->languageScrollDragging = false;
+            this->widgetDragging = false;
+            this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = true;
+            this->mapFrameMarginDragRow = index;
+            this->mapFrameMarginDragGrabOffsetX = isPointInRect(x, y, thumbRect)
+                                                     ? (x - thumbRect.x)
+                                                     : (kHudScaleThumbWidth * 0.5f);
+            this->updateDraggedMapFrameMarginFromMouse(x);
             return true;
         }
 
@@ -1919,6 +2044,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->languageDropdownOpen = !this->languageDropdownOpen;
             this->languageScrollDragging = false;
             this->hudScaleDragging = false;
+            this->mapFrameMarginDragging = false;
             this->hoveredLanguageIndex = -1;
             this->scrollLanguageToSelection();
             return true;
@@ -1933,6 +2059,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->languageDropdownOpen = false;
         this->languageScrollDragging = false;
         this->hudScaleDragging = false;
+        this->mapFrameMarginDragging = false;
 
         if (this->controlConflictPending)
         {
@@ -2082,6 +2209,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->languageDropdownOpen = false;
         this->languageScrollDragging = false;
         this->hudScaleDragging = false;
+        this->mapFrameMarginDragging = false;
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
         this->controlCaptureActive = false;
@@ -2279,6 +2407,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->widgetDragging = true;
         this->languageScrollDragging = false;
         this->hudScaleDragging = false;
+        this->mapFrameMarginDragging = false;
         this->controlsScrollDragging = false;
         this->cameraScrollSpeedDragging = false;
         this->graphicsWindowModeDropdownOpen = false;
@@ -2297,6 +2426,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         this->clearRedeemSelection();
     }
     this->hudScaleDragging = false;
+    this->mapFrameMarginDragging = false;
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     return true;
@@ -2784,7 +2914,67 @@ void GameSettingsWidget::draw(void) const
                 &self->smallFont,
                 widgetVisible ? "Masquer" : "Afficher",
                 visibilityButtonRect,
-                visibilityButtonHovered ? kTextGold : (widgetVisible ? kTextGold : kTextBody));
+                visibilityButtonHovered ? kTextGold : (                widgetVisible ? kTextGold : kTextBody));
+        }
+
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &layout.mapFramePanel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &layout.mapFramePanel);
+        drawTextAt(
+            &self->titleFont,
+            "Mise en cadre de la zone map",
+            layout.mapFramePanel.x + 16.0f,
+            layout.mapFramePanel.y + 14.0f,
+            kTextGold);
+        drawWrappedText(
+            &self->bodyFont,
+            "Reservez des bandes hors carte (jusqu'a 20 %, reglage au pourcent pres). La marge au-dessus de la map reste fixe (25 px).",
+            SDL_FRect{layout.mapFramePanel.x + 16.0f, layout.mapFramePanel.y + 38.0f, layout.mapFramePanel.w - 32.0f, 34.0f},
+            kTextBody,
+            3.0f);
+
+        for (std::size_t index = 0; index < layout.mapFrameRows.size(); ++index)
+        {
+            const SDL_FRect& rowRect = layout.mapFrameRows[index];
+            const SDL_FRect& trackRect = layout.mapFrameTracks[index];
+            const int marginPct = self->mapPlayfieldFrameMarginPercent[index];
+            const SDL_FRect thumbRect = getMapFrameMarginThumbRect(trackRect, marginPct);
+            const float thumbCenterX = thumbRect.x + (thumbRect.w * 0.5f);
+            const SDL_FRect activeRect = SDL_FRect{
+                trackRect.x,
+                trackRect.y,
+                (std::max)(0.0f, thumbCenterX - trackRect.x),
+                trackRect.h
+            };
+
+            char pctLabel[16] = {};
+            SDL_snprintf(pctLabel, sizeof(pctLabel), "%d %%", marginPct);
+
+            drawLeftCenteredY(
+                &self->bodyFont,
+                kMapFrameMarginRowLabels[index],
+                rowRect,
+                rowRect.x,
+                kTextBody);
+
+            rc2d_graphics_setColor(kSliderTrackFill);
+            rc2d_graphics_rectangle("fill", &trackRect);
+            if (activeRect.w > 0.0f)
+            {
+                rc2d_graphics_setColor(kSliderActiveFill);
+                rc2d_graphics_rectangle("fill", &activeRect);
+            }
+            rc2d_graphics_setColor(kRowLine);
+            rc2d_graphics_rectangle("line", &trackRect);
+
+            rc2d_graphics_setColor(kSliderThumbFill);
+            rc2d_graphics_rectangle("fill", &thumbRect);
+            rc2d_graphics_setColor(kSliderThumbBorder);
+            rc2d_graphics_rectangle("line", &thumbRect);
+
+            const float valueX = rowRect.x + rowRect.w - kHudScaleValueLabelWidth;
+            drawLeftCenteredY(&self->smallFont, pctLabel, rowRect, valueX, kTextGold);
         }
 
         rc2d_graphics_setColor(kPanelFill);
@@ -3523,6 +3713,10 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
     {
         return HudCursorType::RESIZE_HORIZONTAL;
     }
+    if (this->mapFrameMarginDragging)
+    {
+        return HudCursorType::RESIZE_HORIZONTAL;
+    }
     if (this->cameraScrollSpeedDragging)
     {
         return HudCursorType::RESIZE_HORIZONTAL;
@@ -3613,6 +3807,16 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
         {
             const SDL_FRect& trackRect = layout.hudScaleTracks[index];
             const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, this->hudScaleValues[index]);
+            if (isPointInRect(x, y, trackRect) || isPointInRect(x, y, thumbRect))
+            {
+                return HudCursorType::RESIZE_HORIZONTAL;
+            }
+        }
+        for (std::size_t index = 0; index < layout.mapFrameTracks.size(); ++index)
+        {
+            const SDL_FRect& trackRect = layout.mapFrameTracks[index];
+            const SDL_FRect thumbRect =
+                getMapFrameMarginThumbRect(trackRect, this->mapPlayfieldFrameMarginPercent[index]);
             if (isPointInRect(x, y, trackRect) || isPointInRect(x, y, thumbRect))
             {
                 return HudCursorType::RESIZE_HORIZONTAL;
@@ -3786,6 +3990,7 @@ void GameSettingsWidget::clearFocus(void)
     this->languageScrollDragging = false;
     this->languageScrollWheelHighlightSec = 0.0f;
     this->hudScaleDragging = false;
+    this->mapFrameMarginDragging = false;
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     this->graphicsScrollDragging = false;
@@ -3803,6 +4008,7 @@ void GameSettingsWidget::show(void)
     this->widgetDragging = false;
     this->languageScrollDragging = false;
     this->hudScaleDragging = false;
+    this->mapFrameMarginDragging = false;
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     this->graphicsScrollDragging = false;
@@ -3822,6 +4028,7 @@ void GameSettingsWidget::hide(void)
     this->widgetDragging = false;
     this->languageScrollDragging = false;
     this->hudScaleDragging = false;
+    this->mapFrameMarginDragging = false;
     this->controlsScrollDragging = false;
     this->cameraScrollSpeedDragging = false;
     this->graphicsScrollDragging = false;
@@ -3972,6 +4179,72 @@ void GameSettingsWidget::setSalvoBulletPreset(SalvoBulletPreset preset)
     if (this->onUserSettingsChanged)
     {
         this->onUserSettingsChanged();
+    }
+}
+
+MapPlayfieldFrameMarginsPercent GameSettingsWidget::getMapPlayfieldFrameMarginsPercent(void) const
+{
+    MapPlayfieldFrameMarginsPercent margins{};
+    margins.left = this->mapPlayfieldFrameMarginPercent[0];
+    margins.right = this->mapPlayfieldFrameMarginPercent[1];
+    margins.bottom = this->mapPlayfieldFrameMarginPercent[2];
+    return margins;
+}
+
+void GameSettingsWidget::setMapPlayfieldFrameMarginsPercent(
+    const MapPlayfieldFrameMarginsPercent& margins,
+    bool notifyUserSettingsChanged)
+{
+    this->mapPlayfieldFrameMarginPercent[0] = margins.left;
+    this->mapPlayfieldFrameMarginPercent[1] = margins.right;
+    this->mapPlayfieldFrameMarginPercent[2] = margins.bottom;
+    this->applyMapPlayfieldFrameMargins(notifyUserSettingsChanged);
+}
+
+void GameSettingsWidget::applyMapPlayfieldFrameMargins(bool notifyUserSettingsChanged)
+{
+    MapPlayfieldFrameMarginsPercent request{};
+    request.left = this->mapPlayfieldFrameMarginPercent[0];
+    request.right = this->mapPlayfieldFrameMarginPercent[1];
+    request.bottom = this->mapPlayfieldFrameMarginPercent[2];
+    MapSetPlayfieldFrameMarginsPercent(request);
+    const MapPlayfieldFrameMarginsPercent applied = MapGetPlayfieldFrameMarginsPercent();
+    this->mapPlayfieldFrameMarginPercent[0] = applied.left;
+    this->mapPlayfieldFrameMarginPercent[1] = applied.right;
+    this->mapPlayfieldFrameMarginPercent[2] = applied.bottom;
+
+    if (notifyUserSettingsChanged && this->onUserSettingsChanged)
+    {
+        this->onUserSettingsChanged();
+    }
+}
+
+void GameSettingsWidget::updateDraggedMapFrameMarginFromMouse(float mouseX)
+{
+    const std::size_t index = this->mapFrameMarginDragRow;
+    if (index >= this->mapPlayfieldFrameMarginPercent.size())
+    {
+        return;
+    }
+
+    const GameSettingsLayout layout = buildLayout(this->widgetRect, static_cast<int>(this->languageOptions.size()));
+    const SDL_FRect& trackRect = layout.mapFrameTracks[index];
+    if (trackRect.w <= 0.0f)
+    {
+        return;
+    }
+
+    const float thumbLeft = clampf(
+        mouseX - this->mapFrameMarginDragGrabOffsetX,
+        trackRect.x - (kHudScaleThumbWidth * 0.5f),
+        trackRect.x + trackRect.w - (kHudScaleThumbWidth * 0.5f));
+    const float thumbCenterX = thumbLeft + (kHudScaleThumbWidth * 0.5f);
+    const float normalized = (thumbCenterX - trackRect.x) / trackRect.w;
+    const int pct = normalizedToMapFrameMarginPct(normalized);
+    if (this->mapPlayfieldFrameMarginPercent[index] != pct)
+    {
+        this->mapPlayfieldFrameMarginPercent[index] = pct;
+        this->applyMapPlayfieldFrameMargins(false);
     }
 }
 

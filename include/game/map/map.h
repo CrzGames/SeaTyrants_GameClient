@@ -5,6 +5,24 @@
 #include <RC2D/RC2D.h>
 
 /**
+ * @brief Pourcentages de retrait du rectangle map par rapport au game screen (zone jouable).
+ *
+ * Consomme par @ref Map::updateMapRect. Plage et pas: entiers 0 a 20 (pas de 1 %), voir
+ * @ref MapSetPlayfieldFrameMarginsPercent. La marge haute du cadre n'est pas reglable ici:
+ * elle reste @ref Map::MAP_TOP_UI_MARGIN_PX.
+ */
+struct MapPlayfieldFrameMarginsPercent {
+    int left = 0;   /**< Retrait gauche (% de la largeur du game screen). */
+    int right = 0;  /**< Retrait droite (% de la largeur du game screen). */
+    int bottom = 0; /**< Retrait bas (% de la hauteur du game screen). */
+};
+
+/** Applique les marges zone jouable (clamp et pas 1 % : voir implementation dans map.cpp). */
+void MapSetPlayfieldFrameMarginsPercent(const MapPlayfieldFrameMarginsPercent& margins);
+/** Retourne les marges actuellement utilisees par @ref Map::updateMapRect. */
+MapPlayfieldFrameMarginsPercent MapGetPlayfieldFrameMarginsPercent(void);
+
+/**
  * @brief Representation logique d'une map isometrique.
  *
  * Cette classe gere:
@@ -38,8 +56,8 @@ private:
 public:
     SDL_FRect rect; /**< Rectangle de rendu monde (map) en coordonnees logiques. */
 
-    static constexpr float MAP_TOP_UI_MARGIN_PX = 30.0f;     /**< Marge reservee en haut pour la GUI. */
-    static constexpr float MAP_BOTTOM_UI_MARGIN_PX = 65.00f; /**< Marge reservee en bas pour la GUI. */
+    /** Marge fixe au-dessus de la zone jouable (bandeau coordonnees / top bar). */
+    static constexpr float MAP_TOP_UI_MARGIN_PX = 25.0f;
 
     // -----------------------------------------------------------------------------
     // Grille de secteurs "metier" visible par le joueur

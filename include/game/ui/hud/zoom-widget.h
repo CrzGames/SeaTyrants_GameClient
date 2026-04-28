@@ -2,6 +2,8 @@
 
 #include <RC2D/RC2D.h>
 
+#include <functional>
+
 class Camera;
 
 /**
@@ -17,6 +19,14 @@ class Camera;
  */
 class ZoomWidget {
 public:
+    /**
+     * @brief Fonction appelee une fois le zoom monde stabilise apres interaction utilisateur.
+     *
+     * En pratique: fin de drag sur le slider (bouton gauche relache). Sert typiquement
+     * a declencher une sauvegarde settings sans spammer a chaque frame de drag.
+     */
+    using MapWorldZoomCommitCallback = std::function<void(void)>;
+
     /**
      * @brief Construit le widget avec un etat vide (pas de ressources chargees).
      */
@@ -151,6 +161,16 @@ public:
      */
     float getUiScale(void) const { return this->uiScale; }
 
+    /**
+     * @brief Enregistre @ref MapWorldZoomCommitCallback (typiquement sauvegarde settings).
+     */
+    void setOnMapWorldZoomCommit(MapWorldZoomCommitCallback callback);
+
+    /**
+     * @brief Realigne le slider HUD sur le zoom courant de la camera (apres chargement settings, etc.).
+     */
+    void syncSliderToCamera(const Camera& camera);
+
 private:
     RC2D_Image zoomBarImage;         /**< Texture de la barre de zoom. */
     RC2D_ImageData zoomBarImageData; /**< Metadonnees source de la barre. */
@@ -174,6 +194,11 @@ private:
     float zoomSliderHeightPx;     /**< Hauteur native du slider. */
     float uiScale;                /**< Facteur d'echelle applique au widget. */
     SDL_FPoint positionOffset;    /**< Decalage ecran applique au widget. */
+    /**
+     * Callback optionnel enregistre via @ref setOnMapWorldZoomCommit : invoque a la fin du drag
+     * sur le slider lorsque le zoom caméra (monde) est fixe.
+     */
+    MapWorldZoomCommitCallback onMapWorldZoomCommit;
 
     /**
      * @brief Teste si un point est inclus dans un rectangle SDL.

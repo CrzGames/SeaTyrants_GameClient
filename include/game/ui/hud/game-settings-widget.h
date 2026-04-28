@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "game/map/map.h"
 #include "game/ui/hud/hud-cursor.h"
 #include "game/ui/hud/window-control-icons.h"
 
@@ -365,6 +366,21 @@ public:
     void setSalvoBulletPreset(SalvoBulletPreset preset);
 
     /**
+     * @brief Retourne les marges % (gauche, droite, bas) reservees hors zone map / ocean.
+     */
+    MapPlayfieldFrameMarginsPercent getMapPlayfieldFrameMarginsPercent(void) const;
+
+    /**
+     * @brief Definit les marges % cadre autour de la zone jouable (0 a 20, pas de 1 %).
+     *
+     * @param margins Pourcentages entiers ; snap et clamp alignes sur @ref MapSetPlayfieldFrameMarginsPercent.
+     * @param notifyUserSettingsChanged Si true et callback enregistree, declenche une sauvegarde disque.
+     */
+    void setMapPlayfieldFrameMarginsPercent(
+        const MapPlayfieldFrameMarginsPercent& margins,
+        bool notifyUserSettingsChanged = true);
+
+    /**
      * @brief Active ou desactive le masquage du fond derriere l'affichage des coordonnees de secteur.
      *
      * @param value true pour masquer le fond decoratif, false pour l'afficher.
@@ -686,4 +702,19 @@ private:
      * @brief Applique le mode de presentation logique RC2D.
      */
     void applyGraphicsPresentationMode(RC2D_LogicalPresentationMode mode);
+
+    /**
+     * @brief Applique les marges cadre au runtime map et optionnellement notifie la persistance.
+     */
+    void applyMapPlayfieldFrameMargins(bool notifyUserSettingsChanged);
+
+    /**
+     * @brief Met a jour le slider marges cadre depuis la position souris.
+     */
+    void updateDraggedMapFrameMarginFromMouse(float mouseX);
+
+    std::array<int, 3> mapPlayfieldFrameMarginPercent; /**< Gauche, droite, bas (0..20, pas 1 %). */
+    bool mapFrameMarginDragging;                     /**< Drag d'un slider marges cadre. */
+    std::size_t mapFrameMarginDragRow;               /**< 0 gauche, 1 droite, 2 bas. */
+    float mapFrameMarginDragGrabOffsetX;             /**< Offset souris -> thumb marges cadre. */
 };

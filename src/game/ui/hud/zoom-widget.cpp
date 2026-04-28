@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "game/camera.h"
 
@@ -176,7 +177,8 @@ ZoomWidget::ZoomWidget(void)
       zoomSliderWidthPx(0.0f),
       zoomSliderHeightPx(0.0f),
       uiScale(1.0f),
-      positionOffset{0.0f, 0.0f}
+      positionOffset{0.0f, 0.0f},
+      onMapWorldZoomCommit{}
 {
 }
 
@@ -315,6 +317,17 @@ void ZoomWidget::syncSliderFromCameraZoom(const Camera& camera)
     this->sliderOffsetX = snappedNormalized * this->sliderTravelWidth;
 }
 
+void ZoomWidget::setOnMapWorldZoomCommit(MapWorldZoomCommitCallback callback)
+{
+    this->onMapWorldZoomCommit = std::move(callback);
+}
+
+void ZoomWidget::syncSliderToCamera(const Camera& camera)
+{
+    this->syncSliderFromCameraZoom(camera);
+    this->displayedZoomFactor = camera.getZoomFactor();
+}
+
 void ZoomWidget::applySliderToCameraZoom(Camera& camera) const
 {
     if (this->sliderTravelWidth <= 0.0f)
@@ -361,6 +374,10 @@ void ZoomWidget::update(Camera& camera)
         this->syncSliderFromCameraZoom(camera);
         this->sliderHovered = this->isSliderHovered(mouseX, mouseY);
         this->displayedZoomFactor = camera.getZoomFactor();
+        if (this->onMapWorldZoomCommit)
+        {
+            this->onMapWorldZoomCommit();
+        }
         return;
     }
 

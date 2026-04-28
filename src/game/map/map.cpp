@@ -5,6 +5,25 @@
 
 #include "core/context.h"
 
+static MapPlayfieldFrameMarginsPercent g_mapPlayfieldFrameMarginsPercent{};
+
+static int snapMapFrameMarginPercent(int value)
+{
+    return (std::clamp)(value, 0, 20);
+}
+
+void MapSetPlayfieldFrameMarginsPercent(const MapPlayfieldFrameMarginsPercent& margins)
+{
+    g_mapPlayfieldFrameMarginsPercent.left = snapMapFrameMarginPercent(margins.left);
+    g_mapPlayfieldFrameMarginsPercent.right = snapMapFrameMarginPercent(margins.right);
+    g_mapPlayfieldFrameMarginsPercent.bottom = snapMapFrameMarginPercent(margins.bottom);
+}
+
+MapPlayfieldFrameMarginsPercent MapGetPlayfieldFrameMarginsPercent(void)
+{
+    return g_mapPlayfieldFrameMarginsPercent;
+}
+
 // =============================================================================
 // Constructeur / Destructeur
 // =============================================================================
@@ -157,26 +176,19 @@ void Map::setOrigin(float x, float y)
 
 void Map::updateMapRect(const SDL_FRect& gameScreenRect)
 {
-    // Calcule le rectangle de rendu monde a partir du game screen logique.
-    // On travaille en coordonnees logiques (pas physiques) pour etre
-    // independant de la resolution reelle, du plein ecran et de l'overscan.
-
-    // Largeur et hauteur disponibles, min 1 pixel pour eviter un rect degenere.
     const float availableW = (std::max)(gameScreenRect.w, 1.0f);
     const float availableH = (std::max)(gameScreenRect.h, 1.0f);
+    const MapPlayfieldFrameMarginsPercent frame = MapGetPlayfieldFrameMarginsPercent();
 
-    // X : bord gauche du game screen.
-    this->rect.x = gameScreenRect.x;
+    const float leftPx = availableW * (static_cast<float>(frame.left) / 100.0f);
+    const float rightPx = availableW * (static_cast<float>(frame.right) / 100.0f);
+    const float bottomPx = availableH * (static_cast<float>(frame.bottom) / 100.0f);
 
-    // Y : on descend de MAP_TOP_UI_MARGIN_PX (35px) pour laisser place a la GUI haute.
+    this->rect.x = gameScreenRect.x + leftPx;
     this->rect.y = gameScreenRect.y + Map::MAP_TOP_UI_MARGIN_PX;
-
-    // W : toute la largeur disponible.
-    this->rect.w = availableW;
-
-    // H : hauteur restante apres retrait des marges haute (35px) et basse (70px).
+    this->rect.w = (std::max)(availableW - leftPx - rightPx, 1.0f);
     this->rect.h = (std::max)(
-        availableH - Map::MAP_TOP_UI_MARGIN_PX - Map::MAP_BOTTOM_UI_MARGIN_PX,
+        availableH - Map::MAP_TOP_UI_MARGIN_PX - bottomPx,
         1.0f);
 }
 
