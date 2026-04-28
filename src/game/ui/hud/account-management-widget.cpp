@@ -901,6 +901,16 @@ AccountManagementWidget::AccountManagementWidget(void)
       selectedMoveClickStyleOption(0),
       selectedEmoteOption(0),
       selectedStorageEquipmentOption(0),
+      storageEquippedCannonSummary{},
+      storageEquippedCannonDamage{},
+      storageEquippedCannonCritDamage{},
+      storageEquippedCannonCritChance{},
+      storageEquippedCannonRange{},
+      storageEquippedCannonReload{},
+      storageEquippedSailSpeedKnots{},
+      storageEquippedSailSinkCurrent(0),
+      storageEquippedSailSinkMax(0),
+      storageEquippedHarpoonSummary{},
       openPicker(AppearancePickerType::NONE),
       openPickerAnchorRect{0.0f, 0.0f, 0.0f, 0.0f},
       pickerFirstRow(0),
@@ -1098,6 +1108,37 @@ void AccountManagementWidget::addStorageEquipmentOption(const OptionEntry& optio
 void AccountManagementWidget::clearStorageEquipmentOptions(void)
 {
     this->clearOptionsForCollection(OptionCollectionType::STORAGE_EQUIPMENT);
+}
+
+void AccountManagementWidget::setStorageEquippedCannonStats(
+    const std::string& cannonsEquippedSummary,
+    const std::string& cannonDamageDisplay,
+    const std::string& cannonCritDamageDisplay,
+    const std::string& cannonCritChanceDisplay,
+    const std::string& cannonRangeDisplay,
+    const std::string& cannonReloadDisplay)
+{
+    this->storageEquippedCannonSummary = cannonsEquippedSummary;
+    this->storageEquippedCannonDamage = cannonDamageDisplay;
+    this->storageEquippedCannonCritDamage = cannonCritDamageDisplay;
+    this->storageEquippedCannonCritChance = cannonCritChanceDisplay;
+    this->storageEquippedCannonRange = cannonRangeDisplay;
+    this->storageEquippedCannonReload = cannonReloadDisplay;
+}
+
+void AccountManagementWidget::setStorageEquippedSailStats(
+    const std::string& speedKnotsDisplay,
+    int sailSinkCurrentPoints,
+    int sailSinkMaxPoints)
+{
+    this->storageEquippedSailSpeedKnots = speedKnotsDisplay;
+    this->storageEquippedSailSinkCurrent = sailSinkCurrentPoints;
+    this->storageEquippedSailSinkMax = sailSinkMaxPoints;
+}
+
+void AccountManagementWidget::setStorageEquippedHarpoonSummary(const std::string& summary)
+{
+    this->storageEquippedHarpoonSummary = summary;
 }
 
 void AccountManagementWidget::setShipsForCollection(
@@ -1342,6 +1383,16 @@ void AccountManagementWidget::clearAllData(void)
     this->selectedMoveClickStyleOption = 0;
     this->selectedEmoteOption = 0;
     this->selectedStorageEquipmentOption = 0;
+    this->storageEquippedCannonSummary.clear();
+    this->storageEquippedCannonDamage.clear();
+    this->storageEquippedCannonCritDamage.clear();
+    this->storageEquippedCannonCritChance.clear();
+    this->storageEquippedCannonRange.clear();
+    this->storageEquippedCannonReload.clear();
+    this->storageEquippedSailSpeedKnots.clear();
+    this->storageEquippedSailSinkCurrent = 0;
+    this->storageEquippedSailSinkMax = 0;
+    this->storageEquippedHarpoonSummary.clear();
     this->profileName.clear();
     this->profileCursorIndex = 0;
 }
@@ -3387,36 +3438,44 @@ void AccountManagementWidget::draw(void) const
         }
         else if (equipmentIndex == 1)
         {
+            const std::string harpoonValue =
+                self->storageEquippedHarpoonSummary.empty() ? std::string("-") : self->storageEquippedHarpoonSummary;
             valueRows = {
-                {"Harponneuse", "Aucun n'est equipe"},
-                {"Champ de tir de harpons", "+4,0"},
-                {"Temps de recharge du harpon", "+5,0/s"},
-                {"Degats critiques du harpon", "+0%"},
-                {"Probabilite critique du harpon", "+5,0%"},
-                {"Sante", "+0"},
-                {"Montant de la reparation", "+0"}
+                {"Harponneuse", harpoonValue}
             };
         }
         else if (equipmentIndex == 2)
         {
+            const std::string speedVal =
+                self->storageEquippedSailSpeedKnots.empty() ? std::string("-") : self->storageEquippedSailSpeedKnots;
+            std::string sinkLine;
+            if (self->storageEquippedSailSinkMax > 0)
+            {
+                sinkLine = std::to_string(self->storageEquippedSailSinkCurrent) + "/" +
+                    std::to_string(self->storageEquippedSailSinkMax) +
+                    " coulage du navire avant destruction des voiles";
+            }
+            else
+            {
+                sinkLine = "-";
+            }
             valueRows = {
-                {"Voiles", "Aucune n'est equipee"},
-                {"Points de voiles", "+0"},
-                {"Acceleration", "+0%"},
-                {"Vitesse max", "+0%"},
-                {"Maniabilite", "+0"},
-                {"Durabilite", "+0"}
+                {"Vitesse en noeud", speedVal},
+                {"Coulage", sinkLine}
             };
         }
         else
         {
+            auto valOrDash = [](const std::string& s) -> std::string {
+                return s.empty() ? std::string("-") : s;
+            };
             valueRows = {
-                {"Cannons", "Aucun n'est equipe"},
-                {"Canons correcteurs", "Aucun n'est equipe"},
-                {"Degats des cannons", "+0%"},
-                {"Portee des cannons", "+0"},
-                {"Precision des cannons", "+0%"},
-                {"Temps de recharge des cannons", "+0,0/s"}
+                {"Cannons", valOrDash(self->storageEquippedCannonSummary)},
+                {"Degats des cannons", valOrDash(self->storageEquippedCannonDamage)},
+                {"Degats critique des cannons", valOrDash(self->storageEquippedCannonCritDamage)},
+                {"Chance de coup critique des cannons", valOrDash(self->storageEquippedCannonCritChance)},
+                {"Portee des cannons", valOrDash(self->storageEquippedCannonRange)},
+                {"Temps de recharge des cannons", valOrDash(self->storageEquippedCannonReload)}
             };
         }
 

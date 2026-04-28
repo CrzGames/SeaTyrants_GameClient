@@ -178,6 +178,68 @@ public:
     AccountManagementWidget& getAccountManagementWidget(void) { return this->accountManagementWidget; }
 
     /**
+     * @brief Alimente les lignes de stats canons (panneau "Valeurs equipees", categorie Cannons).
+     *
+     * Delegue a @ref AccountManagementWidget::setStorageEquippedCannonStats. Les textes sont fournis
+     * par le gameplay deja formates ; la GUI ne fixe que les libelles de ligne (degats, critiques,
+     * portee, recharge).
+     *
+     * @param cannonsEquippedSummary Resume de l'equipement canons (ligne "Cannons").
+     * @param cannonDamageDisplay Valeur affichee pour les degats.
+     * @param cannonCritDamageDisplay Valeur affichee pour les degats critiques.
+     * @param cannonCritChanceDisplay Valeur affichee pour la chance de coup critique.
+     * @param cannonRangeDisplay Valeur affichee pour la portee.
+     * @param cannonReloadDisplay Valeur affichee pour le temps de rechargement.
+     */
+    void setAccountStorageEquippedCannonStats(
+        const std::string& cannonsEquippedSummary,
+        const std::string& cannonDamageDisplay,
+        const std::string& cannonCritDamageDisplay,
+        const std::string& cannonCritChanceDisplay,
+        const std::string& cannonRangeDisplay,
+        const std::string& cannonReloadDisplay)
+    {
+        this->accountManagementWidget.setStorageEquippedCannonStats(
+            cannonsEquippedSummary,
+            cannonDamageDisplay,
+            cannonCritDamageDisplay,
+            cannonCritChanceDisplay,
+            cannonRangeDisplay,
+            cannonReloadDisplay);
+    }
+
+    /**
+     * @brief Alimente les lignes voiles (vitesse en noeuds + phrase de coulage avec seuil configurable).
+     *
+     * Delegue a @ref AccountManagementWidget::setStorageEquippedSailStats. Le denominateur de coulage
+     * (@p sailSinkMaxPoints) depend du type de voiles / navire et est fourni par le gameplay.
+     *
+     * @param speedKnotsDisplay Vitesse, texte formate (ex. "12" ou "12,5 nds").
+     * @param sailSinkCurrentPoints Numerateur affiche dans la phrase de coulage.
+     * @param sailSinkMaxPoints Seuil avant destruction des voiles ; si <= 0, la ligne de coulage affiche "-".
+     */
+    void setAccountStorageEquippedSailStats(
+        const std::string& speedKnotsDisplay,
+        int sailSinkCurrentPoints,
+        int sailSinkMaxPoints)
+    {
+        this->accountManagementWidget.setStorageEquippedSailStats(
+            speedKnotsDisplay,
+            sailSinkCurrentPoints,
+            sailSinkMaxPoints);
+    }
+
+    /**
+     * @brief Alimente le resume harponneuse (une seule ligne de valeur dans le panneau equipe).
+     *
+     * @param summary Texte libre (equipement, indisponible, etc.).
+     */
+    void setAccountStorageEquippedHarpoonSummary(const std::string& summary)
+    {
+        this->accountManagementWidget.setStorageEquippedHarpoonSummary(summary);
+    }
+
+    /**
      * @brief Retourne la fenetre money pour l'alimenter depuis le gameplay.
      * @return Reference mutable vers le widget des monnaies.
      */

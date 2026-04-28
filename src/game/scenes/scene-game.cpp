@@ -270,6 +270,16 @@ void GameScene::populateAccountManagementDemoData(void)
         return v;
     };
     GetIngameHudOverlay().getAccountManagementWidget().setStorageEquipmentOptions(pushNumberedStorage());
+
+    GetIngameHudOverlay().setAccountStorageEquippedCannonStats(
+        "Aucun n'est equipe",
+        "+0%",
+        "+0%",
+        "+0%",
+        "+0",
+        "+0,0/s");
+    GetIngameHudOverlay().setAccountStorageEquippedSailStats("12 nds", 10, 150);
+    GetIngameHudOverlay().setAccountStorageEquippedHarpoonSummary("Aucun n'est equipe");
 }
 
 void GameScene::syncHudStatusWidgets(const Player& player)

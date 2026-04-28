@@ -259,6 +259,49 @@ public:
     void clearStorageEquipmentOptions(void);
 
     /**
+     * @brief Alimente les valeurs affichees pour la categorie cannons (panneau droit, onglet entrepot / equipe).
+     *
+     * Les chaines sont affichees telles quelles (texte deja formate cote gameplay). Aucun libelle n'est
+     * fige dans ces parametres hormis les titres de ligne dans la GUI.
+     *
+     * @param cannonsEquippedSummary Texte associe a la ligne equipement principal (ex. etat / aucun equipe).
+     * @param cannonDamageDisplay Valeur affichee pour les degats des canons.
+     * @param cannonCritDamageDisplay Valeur affichee pour les degats critiques des canons.
+     * @param cannonCritChanceDisplay Valeur affichee pour la chance de coup critique des canons.
+     * @param cannonRangeDisplay Valeur affichee pour la portee des canons.
+     * @param cannonReloadDisplay Valeur affichee pour le temps de rechargement des canons.
+     */
+    void setStorageEquippedCannonStats(
+        const std::string& cannonsEquippedSummary,
+        const std::string& cannonDamageDisplay,
+        const std::string& cannonCritDamageDisplay,
+        const std::string& cannonCritChanceDisplay,
+        const std::string& cannonRangeDisplay,
+        const std::string& cannonReloadDisplay);
+
+    /**
+     * @brief Alimente les valeurs affichees pour la categorie voiles (panneau droit, onglet entrepot / equipe).
+     *
+     * La phrase de coulage est composee dans le widget a partir de @p sailSinkCurrentPoints et
+     * @p sailSinkMaxPoints, afin que le denominateur depende du type de voiles sans code en dur dans la GUI.
+     *
+     * @param speedKnotsDisplay Vitesse en noeuds, texte deja formate (ex. "12" ou "12,5 nds").
+     * @param sailSinkCurrentPoints Numerateur (points de coulage / degradation actuels).
+     * @param sailSinkMaxPoints Denominateur (seuil avant destruction des voiles). Si <= 0, la ligne de coulage affiche "-".
+     */
+    void setStorageEquippedSailStats(
+        const std::string& speedKnotsDisplay,
+        int sailSinkCurrentPoints,
+        int sailSinkMaxPoints);
+
+    /**
+     * @brief Alimente la ligne resume harponneuse (plus de grille de stats : un seul libelle + cette valeur).
+     *
+     * @param summary Texte libre affiche a droite de "Harponneuse" (ex. equipement choisi, indisponible, etc.).
+     */
+    void setStorageEquippedHarpoonSummary(const std::string& summary);
+
+    /**
      * @brief Remplace entierement l'instantane de progression elite affiche dans l'onglet elite.
      * @param progressData Nouvel etat de progression elite a afficher. Le libelle du prochain
      *                     navire elite est genere automatiquement a partir du nombre de cartes
@@ -562,6 +605,17 @@ private:
     int selectedMoveClickStyleOption;   /**< Index de l'effet de clic de deplacement selectionne. */
     int selectedEmoteOption;            /**< Index de l'emote selectionnee. */
     int selectedStorageEquipmentOption; /**< Index de l'option de stockage selectionnee. */
+
+    std::string storageEquippedCannonSummary;    /**< Resume equipement canons (panneau entrepot / valeurs). */
+    std::string storageEquippedCannonDamage;     /**< Affichage degats canons. */
+    std::string storageEquippedCannonCritDamage; /**< Affichage degats critique canons. */
+    std::string storageEquippedCannonCritChance; /**< Affichage chance coup critique canons. */
+    std::string storageEquippedCannonRange;      /**< Affichage portee canons. */
+    std::string storageEquippedCannonReload;     /**< Affichage temps de recharge canons. */
+    std::string storageEquippedSailSpeedKnots;   /**< Affichage vitesse en noeuds. */
+    int storageEquippedSailSinkCurrent;            /**< Numerateur coulage voiles. */
+    int storageEquippedSailSinkMax;                /**< Denominateur coulage voiles (0 = non affichable). */
+    std::string storageEquippedHarpoonSummary;     /**< Resume harponneuse (une seule ligne de stats). */
 
     AppearancePickerType openPicker; /**< Picker actuellement ouvert, si present. */
     SDL_FRect openPickerAnchorRect;  /**< Rectangle d'ancrage utilise pour placer le popup du picker. */
