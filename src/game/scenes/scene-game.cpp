@@ -51,6 +51,31 @@ void GameScene::populateGuildMortarData(void)
     guildMortarWidget.setTreasuryCrystalsAmount(40320);
 }
 
+void GameScene::populateGuildTowerData(void)
+{
+    GuildTowerWidget& guildTowerWidget = GetIngameHudOverlay().getGuildTowerWidget();
+    guildTowerWidget.setTowerLevels(
+        std::vector<GuildTowerWidget::TowerLevelEntry>{
+            {"Aedan", 1, 1800, 2.8f, 11, 65000, 65000, 30, 1200, 15000, 85000, 120, 0, 0},
+            {"Cadoc", 2, 2400, 2.5f, 13, 82000, 54750, 75, 1750, 18000, 125000, 180, 45, 0},
+            {"Bran", 3, 3180, 2.2f, 15, 104000, 91000, 150, 2450, 22000, 190000, 250, 70, 18},
+            {"Dagonet", 1, 1760, 2.9f, 10, 62000, 45200, 25, 1100, 14200, 79000, 90, 0, 0},
+            {"Edern", 2, 2360, 2.5f, 13, 80000, 80000, 70, 1680, 17600, 118000, 170, 40, 0},
+            {"Fintan", 4, 4020, 1.9f, 18, 132000, 118500, 240, 3300, 28000, 0, 0, 0, 0},
+            {"Geraint", 1, 1820, 2.7f, 11, 66000, 52500, 30, 1250, 15400, 87000, 130, 0, 0},
+            {"Hoel", 2, 2480, 2.4f, 14, 84500, 84500, 90, 1820, 18600, 128000, 185, 42, 0},
+            {"Isolde", 3, 3260, 2.1f, 15, 108000, 73000, 160, 2520, 22800, 198000, 270, 75, 20},
+            {"Judicael", 2, 2420, 2.5f, 13, 82500, 60100, 75, 1760, 18100, 123000, 176, 44, 0},
+            {"Kael", 1, 1740, 3.0f, 10, 61000, 38900, 22, 1020, 13800, 76000, 85, 0, 0},
+            {"Maelor", 4, 4100, 1.8f, 18, 136000, 136000, 260, 3460, 29200, 0, 0, 0, 0}
+        });
+    guildTowerWidget.setSelectedTowerLevelIndex(1);
+    guildTowerWidget.setTreasuryGoldAmount(3147765460LL);
+    guildTowerWidget.setTreasuryRubiesAmount(396083);
+    guildTowerWidget.setTreasuryPearlsAmount(820450);
+    guildTowerWidget.setTreasuryCrystalsAmount(40320);
+}
+
 void GameScene::populateAccountManagementDemoData(void)
 {
     using EliteShipsTabShipEntry = AccountManagementWidget::EliteShipsTabShipEntry;
@@ -61,6 +86,9 @@ void GameScene::populateAccountManagementDemoData(void)
     using StorageTabEquipmentCategory = AccountManagementWidget::StorageTabEquipmentCategory;
     using StorageTabEquipmentOptionEntry = AccountManagementWidget::StorageTabEquipmentOptionEntry;
     using StorageTabCannonStatsDisplay = AccountManagementWidget::StorageTabCannonStatsDisplay;
+    using ForgeTabCannonEntry = AccountManagementWidget::ForgeTabCannonEntry;
+    using ForgeTabCannonStatsDisplay = AccountManagementWidget::ForgeTabCannonStatsDisplay;
+    using ForgeTabCannonUpgradeEntry = AccountManagementWidget::ForgeTabCannonUpgradeEntry;
     using AccountTabEliteProgressData = AccountManagementWidget::AccountTabEliteProgressData;
     using BoardingLootCurrencyEntry = AccountManagementWidget::BoardingLootCurrencyEntry;
     using BoardingLootCurrencyType = AccountManagementWidget::BoardingLootCurrencyType;
@@ -294,15 +322,55 @@ void GameScene::populateAccountManagementDemoData(void)
     GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquipmentCategoryOptions(pushNumberedStorage());
     GetIngameHudOverlay().getAccountManagementWidget().setStorageTabWarehouseItems(
         std::vector<StorageTabItemEntry>{
-            {StorageTabEquipmentCategory::CANNONS, "Canons 10 livres", kDemoCannonIcons[0], 32, StorageTabCannonStatsDisplay{"+10%", "+2%", "+1%", "+4", "2,4/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 24, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 30 livres", kDemoCannonIcons[2], 16, StorageTabCannonStatsDisplay{"+30%", "+7%", "+3%", "+6", "1,8/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 40 livres", kDemoCannonIcons[3], 8, StorageTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"}},
-            {StorageTabEquipmentCategory::SAILS, "Voiles tempete", kDemoVfxSpeedIcons[1], 2, StorageTabCannonStatsDisplay{}}});
+            {StorageTabEquipmentCategory::CANNONS, "Canons 10 livres", kDemoCannonIcons[0], 32, 0, StorageTabCannonStatsDisplay{"+10%", "+2%", "+1%", "+4", "2,4/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 24, 1, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 30 livres", kDemoCannonIcons[2], 16, 2, StorageTabCannonStatsDisplay{"+30%", "+7%", "+3%", "+6", "1,8/s"}},
+            {StorageTabEquipmentCategory::CANNONS, "Canons 40 livres", kDemoCannonIcons[3], 8, 3, StorageTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"}},
+            {StorageTabEquipmentCategory::SAILS, "Voiles tempete", kDemoVfxSpeedIcons[1], 2, 0, StorageTabCannonStatsDisplay{}}});
     GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquippedItems(
         std::vector<StorageTabItemEntry>{
-            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 12, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
-            {StorageTabEquipmentCategory::SAILS, "Voiles standards", kDemoVfxSpeedIcons[2], 1, StorageTabCannonStatsDisplay{}}});
+            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 12, 1, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
+            {StorageTabEquipmentCategory::SAILS, "Voiles standards", kDemoVfxSpeedIcons[2], 1, 0, StorageTabCannonStatsDisplay{}}});
+    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabCannons(
+        std::vector<ForgeTabCannonEntry>{
+            {
+                "Canons 40 livres",
+                kDemoCannonIcons[3],
+                18,
+                0,
+                ForgeTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"},
+                std::vector<ForgeTabCannonUpgradeEntry>{
+                    {1, 4, 12, 2, ForgeTabCannonStatsDisplay{"+44%", "+12%", "+5%", "+8", "1,4/s"}},
+                    {2, 8, 20, 4, ForgeTabCannonStatsDisplay{"+49%", "+14%", "+6%", "+8", "1,3/s"}},
+                    {3, 14, 34, 7, ForgeTabCannonStatsDisplay{"+55%", "+18%", "+8%", "+9", "1,2/s"}}
+                }
+            },
+            {
+                "Canons 50 livres",
+                kDemoCannonIcons[2],
+                10,
+                1,
+                ForgeTabCannonStatsDisplay{"+52%", "+13%", "+5%", "+8", "1,4/s"},
+                std::vector<ForgeTabCannonUpgradeEntry>{
+                    {2, 10, 24, 5, ForgeTabCannonStatsDisplay{"+58%", "+16%", "+7%", "+9", "1,3/s"}},
+                    {3, 16, 38, 8, ForgeTabCannonStatsDisplay{"+64%", "+20%", "+9%", "+10", "1,2/s"}}
+                }
+            },
+            {
+                "Canons 60 livres",
+                kDemoCannonIcons[1],
+                6,
+                2,
+                ForgeTabCannonStatsDisplay{"+65%", "+18%", "+8%", "+10", "1,2/s"},
+                std::vector<ForgeTabCannonUpgradeEntry>{
+                    {3, 18, 42, 9, ForgeTabCannonStatsDisplay{"+72%", "+22%", "+10%", "+11", "1,1/s"}},
+                    {4, 26, 58, 14, ForgeTabCannonStatsDisplay{"+80%", "+27%", "+12%", "+12", "1,0/s"}}
+                }
+            }
+        });
+    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryRubiesAmount(3500);
+    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryPearlsAmount(820);
+    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryCrystalsAmount(40);
     GetIngameHudOverlay().getAccountManagementWidget().setBoardingLootManagementTabCurrencies(
         std::vector<BoardingLootCurrencyEntry>{
             {BoardingLootCurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000, 0, 0, true},
@@ -384,6 +452,7 @@ void GameScene::load(void)
     this->populateMoneyDemoData();
     this->populateAccountManagementDemoData();
     this->populateGuildMortarData();
+    this->populateGuildTowerData();
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.update();

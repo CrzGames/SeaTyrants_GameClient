@@ -482,6 +482,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       marketsAndBazarWidget{},
       accountManagementWidget{},
       guildMortarWidget{},
+      guildTowerWidget{},
       captchaWidget{},
       leaderboardWidget{},
       tooltipFont{},
@@ -512,6 +513,7 @@ IngameHudOverlay::IngameHudOverlay(void)
           WindowLayer::MARKETS_AND_BAZAR,
           WindowLayer::ACCOUNT_MANAGEMENT,
           WindowLayer::GUILD_MORTAR,
+          WindowLayer::GUILD_TOWER,
           WindowLayer::CAPTCHA,
           WindowLayer::LEADERBOARD},
       hoveredMinimapTooltip(MinimapWidget::Tooltip::NONE),
@@ -527,6 +529,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       prevMarketsAndBazarVisible(false),
       prevAccountManagementVisible(false),
       prevGuildMortarVisible(false),
+      prevGuildTowerVisible(false),
       prevCaptchaVisible(false),
       prevLeaderboardVisible(false),
       keepDefaultCursorAfterClose(false),
@@ -576,6 +579,8 @@ bool IngameHudOverlay::isWindowLayerVisible(WindowLayer layer) const
             return this->accountManagementWidget.isVisible();
         case WindowLayer::GUILD_MORTAR:
             return this->guildMortarWidget.isVisible();
+        case WindowLayer::GUILD_TOWER:
+            return this->guildTowerWidget.isVisible();
         case WindowLayer::CAPTCHA:
             return this->captchaWidget.isVisible();
         case WindowLayer::LEADERBOARD:
@@ -1173,6 +1178,8 @@ HudCursorType IngameHudOverlay::getWindowLayerDesiredCursor(WindowLayer layer, f
             return this->accountManagementWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::GUILD_MORTAR:
             return this->guildMortarWidget.getDesiredCursor(mouseX, mouseY);
+        case WindowLayer::GUILD_TOWER:
+            return this->guildTowerWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::CAPTCHA:
             return this->captchaWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::LEADERBOARD:
@@ -1220,6 +1227,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     const bool marketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     const bool accountManagementVisible = this->accountManagementWidget.isVisible();
     const bool guildMortarVisible = this->guildMortarWidget.isVisible();
+    const bool guildTowerVisible = this->guildTowerWidget.isVisible();
     const bool captchaVisible = this->captchaWidget.isVisible();
     const bool leaderboardVisible = this->leaderboardWidget.isVisible();
 
@@ -1263,6 +1271,10 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     {
         this->bringWindowToFront(WindowLayer::GUILD_MORTAR);
     }
+    if (guildTowerVisible && !this->prevGuildTowerVisible)
+    {
+        this->bringWindowToFront(WindowLayer::GUILD_TOWER);
+    }
     if (captchaVisible && !this->prevCaptchaVisible)
     {
         this->bringWindowToFront(WindowLayer::CAPTCHA);
@@ -1282,6 +1294,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     this->prevMarketsAndBazarVisible = marketsAndBazarVisible;
     this->prevAccountManagementVisible = accountManagementVisible;
     this->prevGuildMortarVisible = guildMortarVisible;
+    this->prevGuildTowerVisible = guildTowerVisible;
     this->prevCaptchaVisible = captchaVisible;
     this->prevLeaderboardVisible = leaderboardVisible;
 }
@@ -1728,6 +1741,7 @@ void IngameHudOverlay::load(void)
         WindowLayer::MARKETS_AND_BAZAR,
         WindowLayer::ACCOUNT_MANAGEMENT,
         WindowLayer::GUILD_MORTAR,
+        WindowLayer::GUILD_TOWER,
         WindowLayer::CAPTCHA,
         WindowLayer::LEADERBOARD};
 
@@ -1763,6 +1777,7 @@ void IngameHudOverlay::load(void)
     this->marketsAndBazarWidget.load();
     this->accountManagementWidget.load();
     this->guildMortarWidget.load();
+    this->guildTowerWidget.load();
     this->captchaWidget.load();
     this->captchaWidget.show();
     this->leaderboardWidget.load();
@@ -1860,6 +1875,7 @@ void IngameHudOverlay::load(void)
     this->prevMarketsAndBazarVisible = this->marketsAndBazarWidget.isVisible();
     this->prevAccountManagementVisible = this->accountManagementWidget.isVisible();
     this->prevGuildMortarVisible = this->guildMortarWidget.isVisible();
+    this->prevGuildTowerVisible = this->guildTowerWidget.isVisible();
     this->prevCaptchaVisible = this->captchaWidget.isVisible();
     this->prevLeaderboardVisible = this->leaderboardWidget.isVisible();
     this->hoveredMinimapTooltip = MinimapWidget::Tooltip::NONE;
@@ -1877,6 +1893,7 @@ void IngameHudOverlay::unload(void)
     ResetStorageFontRef(&this->tooltipFont);
     this->captchaWidget.unload();
     this->leaderboardWidget.unload();
+    this->guildTowerWidget.unload();
     this->guildMortarWidget.unload();
     this->accountManagementWidget.unload();
     this->marketsAndBazarWidget.unload();
@@ -1949,6 +1966,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
                 break;
             case WindowLayer::GUILD_MORTAR:
                 this->guildMortarWidget.update(dt);
+                break;
+            case WindowLayer::GUILD_TOWER:
+                this->guildTowerWidget.update(dt);
                 break;
             case WindowLayer::CAPTCHA:
                 this->captchaWidget.update(dt);
@@ -2174,6 +2194,9 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
             case WindowLayer::GUILD_MORTAR:
                 this->guildMortarWidget.draw();
                 break;
+            case WindowLayer::GUILD_TOWER:
+                this->guildTowerWidget.draw();
+                break;
             case WindowLayer::CAPTCHA:
                 this->captchaWidget.draw();
                 break;
@@ -2292,6 +2315,9 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
                 break;
             case WindowLayer::GUILD_MORTAR:
                 consumed = this->guildMortarWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
+            case WindowLayer::GUILD_TOWER:
+                consumed = this->guildTowerWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
             case WindowLayer::CAPTCHA:
                 consumed = this->captchaWidget.mousepressed(x, y, button, clicks, mouseID);
@@ -2518,6 +2544,12 @@ bool IngameHudOverlay::mousewheelmoved(
                     return true;
                 }
                 break;
+            case WindowLayer::GUILD_TOWER:
+                if (this->guildTowerWidget.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::CHAT:
                 if (this->chatWidget.mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
                 {
@@ -2614,6 +2646,12 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
                     return true;
                 }
                 break;
+            case WindowLayer::GUILD_TOWER:
+                if (this->guildTowerWidget.keypressed(key, scancode, keycode, mod, isrepeat))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::CAPTCHA:
                 if (this->captchaWidget.keypressed(key, scancode, keycode, mod, isrepeat))
                 {
@@ -2656,6 +2694,10 @@ bool IngameHudOverlay::isBlockingGameplayKeyboardInput(void) const
         return true;
     }
     if (this->guildMortarWidget.hasBlockingTransferInputFocus())
+    {
+        return true;
+    }
+    if (this->guildTowerWidget.hasBlockingInputFocus())
     {
         return true;
     }

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -76,6 +77,7 @@ public:
         std::string name;             /**< Nom affiche dans la ligne. */
         std::string previewAssetPath; /**< Chemin image direct; un dossier charge automatiquement "1.png". */
         int quantity = 0;             /**< Quantite disponible dans l'emplacement. */
+        int cannonLevel = 0;          /**< Niveau du canon si @ref category vaut CANNONS; ignore pour les autres categories. */
         StorageTabCannonStatsDisplay cannonStats; /**< Stats tooltip si @ref category vaut CANNONS. */
     };
 
@@ -87,6 +89,57 @@ public:
     };
 
     using StorageTabTransferCallback = std::function<void(const StorageTabTransferRequest&)>;
+
+    /**
+     * @brief Affichage des statistiques d'un type de canon dans l'onglet Forge.
+     */
+    struct ForgeTabCannonStatsDisplay {
+        std::string damageDisplay;     /**< Degats des canons. */
+        std::string critDamageDisplay; /**< Degats critiques des canons. */
+        std::string critChanceDisplay; /**< Chance de coup critique des canons. */
+        std::string rangeDisplay;      /**< Portee des canons. */
+        std::string reloadDisplay;     /**< Temps de recharge des canons. */
+    };
+
+    /**
+     * @brief Proposition d'amelioration d'un canon vers un niveau cible.
+     */
+    struct ForgeTabCannonUpgradeEntry {
+        int targetLevel = 0; /**< Niveau cible atteint apres amelioration. */
+        std::int64_t rubiesCostPerCannon = 0;   /**< Cout unitaire en rubies pour un canon. */
+        std::int64_t pearlsCostPerCannon = 0;   /**< Cout unitaire en perles pour un canon. */
+        std::int64_t crystalsCostPerCannon = 0; /**< Cout unitaire en cristaux pour un canon. */
+        ForgeTabCannonStatsDisplay targetStats; /**< Stats du canon au niveau cible. */
+    };
+
+    /**
+     * @brief Entree affichable dans l'onglet Forge.
+     */
+    struct ForgeTabCannonEntry {
+        std::string name;             /**< Nom du type de canon. */
+        std::string previewAssetPath; /**< Chemin image direct ou dossier; un dossier charge automatiquement "1.png". */
+        int quantity = 0;             /**< Quantite actuellement disponible pour ce type de canon. */
+        int currentLevel = 0;         /**< Niveau actuel du type de canon. */
+        ForgeTabCannonStatsDisplay currentStats; /**< Stats actuellement actives au niveau courant. */
+        std::vector<ForgeTabCannonUpgradeEntry> upgrades; /**< Niveaux cibles ameliorables depuis l'UI. */
+    };
+
+    /**
+     * @brief Payload envoye au gameplay quand une amelioration de canons est confirmee.
+     */
+    struct ForgeTabUpgradeRequest {
+        ForgeTabCannonEntry cannon; /**< Copie de l'entree source selectionnee. */
+        int quantity = 0;           /**< Quantite de canons a ameliorer. */
+        int targetLevel = 0;        /**< Niveau cible demande par l'utilisateur. */
+        std::int64_t unitRubiesCost = 0;   /**< Cout unitaire en rubies pour un canon. */
+        std::int64_t unitPearlsCost = 0;   /**< Cout unitaire en perles pour un canon. */
+        std::int64_t unitCrystalsCost = 0; /**< Cout unitaire en cristaux pour un canon. */
+        std::int64_t totalRubiesCost = 0;   /**< Cout total en rubies pour la quantite choisie. */
+        std::int64_t totalPearlsCost = 0;   /**< Cout total en perles pour la quantite choisie. */
+        std::int64_t totalCrystalsCost = 0; /**< Cout total en cristaux pour la quantite choisie. */
+    };
+
+    using ForgeTabUpgradeRequestedCallback = std::function<void(const ForgeTabUpgradeRequest&)>;
 
     // Onglet Gestion de butin d'abordage.
     /**
@@ -139,69 +192,356 @@ public:
     ~AccountManagementWidget(void);
 
     // Onglet Compte.
+    /**
+     * @brief Definit l'identifiant de joueur affiche dans l'onglet compte.
+     * @param playerIdentifier Identifiant texte a afficher.
+     */
     void setAccountTabPlayerIdentifier(const std::string& playerIdentifier);
+
+    /**
+     * @brief Definit la date "Pirate since" affichee dans l'onglet compte.
+     * @param pirateSince Texte de date a afficher.
+     */
     void setAccountTabPirateSince(const std::string& pirateSince);
+
+    /**
+     * @brief Definit le niveau du joueur affiche dans l'onglet compte.
+     * @param level Niveau courant a afficher.
+     */
     void setAccountTabPlayerLevel(int level);
+
+    /**
+     * @brief Definit les points d'experience du joueur affiches dans l'onglet compte.
+     * @param points Points d'experience courants a afficher.
+     */
     void setAccountTabExperiencePointsCurrent(int points);
+
+    /**
+     * @brief Definit la progression elite reutilisee dans l'onglet compte.
+     * @param progressData Donnees de progression elite a afficher.
+     */
     void setAccountTabEliteProgressData(const AccountTabEliteProgressData& progressData);
+
+    /**
+     * @brief Definit le nombre de points d'elite du joueur.
+     * @param points Total de points d'elite a afficher.
+     */
     void setAccountTabElitePointsCurrent(int points);
+
+    /**
+     * @brief Definit le nombre de points de combat du joueur.
+     * @param points Total de points de combat a afficher.
+     */
     void setAccountTabCombatPointsCurrent(int points);
+
+    /**
+     * @brief Definit la date "Premium depuis" affichee dans l'onglet compte.
+     * @param premiumSince Texte de date a afficher.
+     */
     void setAccountTabPremiumSince(const std::string& premiumSince);
+
+    /**
+     * @brief Definit le nom de profil editable du joueur.
+     * @param profileName Nom de profil a afficher dans le champ.
+     */
     void setAccountTabProfileName(const std::string& profileName);
+
+    /**
+     * @brief Retourne l'instantane courant de progression elite.
+     * @return Donnees de progression elite actuellement memorisees.
+     */
     AccountTabEliteProgressData getAccountTabEliteProgress(void) const;
 
     // Onglet Gestion du navire.
+    /**
+     * @brief Remplace les options de bonus / configuration du navire.
+     * @param options Liste complete des options a afficher.
+     */
     void setShipManagementTabBonusOptions(const std::vector<ShipManagementTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute une option de bonus / configuration du navire.
+     * @param option Option supplementaire a afficher.
+     */
     void addShipManagementTabBonusOption(const ShipManagementTabOptionEntry& option);
+
+    /**
+     * @brief Vide toutes les options de bonus / configuration du navire.
+     */
     void clearShipManagementTabBonusOptions(void);
 
     // Onglet Apparence.
+    /**
+     * @brief Remplace les styles de navire affiches dans l'onglet apparence.
+     * @param options Liste complete des styles a afficher.
+     */
     void setAppearanceTabShipStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style de navire dans l'onglet apparence.
+     * @param option Style supplementaire a afficher.
+     */
     void addAppearanceTabShipStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles de navire affiches dans l'onglet apparence.
+     */
     void clearAppearanceTabShipStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles d'effet de reparation affiches.
+     * @param options Liste complete des effets a afficher.
+     */
     void setAppearanceTabRepairStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style d'effet de reparation.
+     * @param option Effet supplementaire a afficher.
+     */
     void addAppearanceTabRepairStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles d'effet de reparation.
+     */
     void clearAppearanceTabRepairStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles d'effet de vitesse affiches.
+     * @param options Liste complete des effets a afficher.
+     */
     void setAppearanceTabSpeedStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style d'effet de vitesse.
+     * @param option Effet supplementaire a afficher.
+     */
     void addAppearanceTabSpeedStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles d'effet de vitesse.
+     */
     void clearAppearanceTabSpeedStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles d'impact visuel de projectile affiches.
+     * @param options Liste complete des impacts a afficher.
+     */
     void setAppearanceTabProjectileImpactStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style d'impact visuel de projectile.
+     * @param option Impact supplementaire a afficher.
+     */
     void addAppearanceTabProjectileImpactStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles d'impact visuel de projectile.
+     */
     void clearAppearanceTabProjectileImpactStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles de fusee affiches.
+     * @param options Liste complete des effets a afficher.
+     */
     void setAppearanceTabRocketStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style de fusee.
+     * @param option Effet supplementaire a afficher.
+     */
     void addAppearanceTabRocketStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles de fusee.
+     */
     void clearAppearanceTabRocketStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles de projectile en vol affiches.
+     * @param options Liste complete des styles a afficher.
+     */
     void setAppearanceTabProjectileStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style de projectile en vol.
+     * @param option Style supplementaire a afficher.
+     */
     void addAppearanceTabProjectileStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles de projectile en vol.
+     */
     void clearAppearanceTabProjectileStyleOptions(void);
+
+    /**
+     * @brief Remplace les styles d'effet de clic de deplacement affiches.
+     * @param options Liste complete des effets a afficher.
+     */
     void setAppearanceTabMoveClickStyleOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute un style d'effet de clic de deplacement.
+     * @param option Effet supplementaire a afficher.
+     */
     void addAppearanceTabMoveClickStyleOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les styles d'effet de clic de deplacement.
+     */
     void clearAppearanceTabMoveClickStyleOptions(void);
+
+    /**
+     * @brief Remplace les emotes affichables dans l'onglet apparence.
+     * @param options Liste complete des emotes a afficher.
+     */
     void setAppearanceTabEmoteOptions(const std::vector<AppearanceTabOptionEntry>& options);
+
+    /**
+     * @brief Ajoute une emote affichable dans l'onglet apparence.
+     * @param option Emote supplementaire a afficher.
+     */
     void addAppearanceTabEmoteOption(const AppearanceTabOptionEntry& option);
+
+    /**
+     * @brief Vide les emotes affichables dans l'onglet apparence.
+     */
     void clearAppearanceTabEmoteOptions(void);
 
     // Onglet Navires elite acquis.
+    /**
+     * @brief Remplace la liste des navires elite acquis.
+     * @param ships Liste complete des navires a afficher.
+     */
     void setEliteShipsTabAcquiredShips(const std::vector<EliteShipsTabShipEntry>& ships);
+
+    /**
+     * @brief Ajoute un navire elite acquis.
+     * @param ship Navire supplementaire a afficher.
+     */
     void addEliteShipsTabAcquiredShip(const EliteShipsTabShipEntry& ship);
+
+    /**
+     * @brief Vide la liste des navires elite acquis.
+     */
     void clearEliteShipsTabAcquiredShips(void);
 
     // Onglet Navires speciaux acquis.
+    /**
+     * @brief Remplace la liste des navires speciaux acquis.
+     * @param ships Liste complete des navires a afficher.
+     */
     void setSpecialShipsTabAcquiredShips(const std::vector<SpecialShipsTabShipEntry>& ships);
+
+    /**
+     * @brief Ajoute un navire special acquis.
+     * @param ship Navire supplementaire a afficher.
+     */
     void addSpecialShipsTabAcquiredShip(const SpecialShipsTabShipEntry& ship);
+
+    /**
+     * @brief Vide la liste des navires speciaux acquis.
+     */
     void clearSpecialShipsTabAcquiredShips(void);
 
     // Onglet Entrepot / Equipe.
+    /**
+     * @brief Vide les options de categories de l'onglet entrepot / equipe.
+     */
     void clearStorageTabEquipmentOptions(void);
+
+    /**
+     * @brief Remplace les options de categories de l'onglet entrepot / equipe.
+     * @param options Liste complete des categories configurables.
+     */
     void setStorageTabEquipmentCategoryOptions(const std::vector<StorageTabEquipmentOptionEntry>& options);
+
+    /**
+     * @brief Ajoute une option de categorie de stockage.
+     * @param option Option supplementaire a afficher.
+     */
     void addStorageTabEquipmentCategoryOption(const StorageTabEquipmentOptionEntry& option);
+
+    /**
+     * @brief Remplace les objets affiches dans la colonne entrepot.
+     * @param items Liste complete des objets de l'entrepot.
+     */
     void setStorageTabWarehouseItems(const std::vector<StorageTabItemEntry>& items);
+
+    /**
+     * @brief Ajoute un objet dans la colonne entrepot.
+     * @param item Objet supplementaire a afficher.
+     */
     void addStorageTabWarehouseItem(const StorageTabItemEntry& item);
+
+    /**
+     * @brief Vide tous les objets affiches dans la colonne entrepot.
+     */
     void clearStorageTabWarehouseItems(void);
+
+    /**
+     * @brief Remplace les objets affiches dans la colonne equipe.
+     * @param items Liste complete des objets equipes.
+     */
     void setStorageTabEquippedItems(const std::vector<StorageTabItemEntry>& items);
+
+    /**
+     * @brief Ajoute un objet dans la colonne equipe.
+     * @param item Objet supplementaire a afficher.
+     */
     void addStorageTabEquippedItem(const StorageTabItemEntry& item);
+
+    /**
+     * @brief Vide tous les objets affiches dans la colonne equipe.
+     */
     void clearStorageTabEquippedItems(void);
+
+    /**
+     * @brief Definit la callback appelee apres confirmation d'un transfert.
+     * @param callback Fonction appelee avec la demande de transfert confirmee.
+     */
     void setStorageTabOnTransferRequested(StorageTabTransferCallback callback);
+
+    // Onglet Forge.
+    /**
+     * @brief Remplace tous les types de canons affiches dans l'onglet Forge.
+     * @param cannons Liste complete des canons, de leurs niveaux, stats et paliers d'amelioration.
+     */
+    void setForgeTabCannons(const std::vector<ForgeTabCannonEntry>& cannons);
+
+    /**
+     * @brief Ajoute un type de canon supplementaire dans l'onglet Forge.
+     * @param cannon Entree complete du canon a afficher avec son stock et ses niveaux cibles.
+     */
+    void addForgeTabCannon(const ForgeTabCannonEntry& cannon);
+
+    /**
+     * @brief Vide toutes les entrees de canons de l'onglet Forge.
+     */
+    void clearForgeTabCannons(void);
+
+    /**
+     * @brief Definit la quantite de rubies disponible affichee dans la forge.
+     * @param amount Montant de rubies affiche. Les valeurs negatives sont ramenees a zero.
+     */
+    void setForgeTabTreasuryRubiesAmount(std::int64_t amount);
+
+    /**
+     * @brief Definit la quantite de perles disponible affichee dans la forge.
+     * @param amount Montant de perles affiche. Les valeurs negatives sont ramenees a zero.
+     */
+    void setForgeTabTreasuryPearlsAmount(std::int64_t amount);
+
+    /**
+     * @brief Definit la quantite de cristaux disponible affichee dans la forge.
+     * @param amount Montant de cristaux affiche. Les valeurs negatives sont ramenees a zero.
+     */
+    void setForgeTabTreasuryCrystalsAmount(std::int64_t amount);
+
+    /**
+     * @brief Definit la callback appelee apres confirmation d'une amelioration de canons.
+     * @param callback Fonction recevant le type de canon, la quantite, le niveau cible et les couts calcules.
+     */
+    void setForgeTabOnUpgradeRequested(ForgeTabUpgradeRequestedCallback callback);
 
     // Onglet Gestion de butin d'abordage.
     /**
@@ -348,11 +688,12 @@ private:
     enum class ActiveTab : int {
         ACCOUNT = 0,           /**< Onglet des informations de compte. */
         STORAGE_EQUIPPED = 1,  /**< Onglet entrepot / equipe. */
-        BOARDING_LOOT = 2,     /**< Onglet de gestion du butin d'abordage. */
-        SHIP_MANAGEMENT = 3,   /**< Onglet de gestion du navire. */
-        APPEARANCE = 4,        /**< Onglet de personnalisation d'apparence. */
-        ELITE_SHIPS = 5,       /**< Onglet des navires elite acquis. */
-        SPECIAL_SHIPS = 6      /**< Onglet des navires speciaux acquis. */
+        FORGE = 2,             /**< Onglet de forge des canons. */
+        BOARDING_LOOT = 3,     /**< Onglet de gestion du butin d'abordage. */
+        SHIP_MANAGEMENT = 4,   /**< Onglet de gestion du navire. */
+        APPEARANCE = 5,        /**< Onglet de personnalisation d'apparence. */
+        ELITE_SHIPS = 6,       /**< Onglet des navires elite acquis. */
+        SPECIAL_SHIPS = 7      /**< Onglet des navires speciaux acquis. */
     };
 
     /**
@@ -398,13 +739,13 @@ private:
     };
 
     struct InternalShipEntry {
-        std::string name;
-        std::string previewAssetPath;
+        std::string name;             /**< Nom interne de l'entree de navire affichee. */
+        std::string previewAssetPath; /**< Chemin d'apercu associe a l'entree de navire. */
     };
 
     struct InternalOptionEntry {
-        std::string name;
-        std::string previewAssetPath;
+        std::string name;             /**< Nom interne de l'option affichee dans un picker. */
+        std::string previewAssetPath; /**< Chemin d'apercu associe a l'option interne. */
     };
 
     using AppearanceOption = InternalOptionEntry; /**< Alias interne des options de liste. */
@@ -413,30 +754,41 @@ private:
      * @brief Etat de glisser-deposer d'un objet de stockage.
      */
     struct StorageDragState {
-        bool active;
-        StorageTabTransferLocation source;
-        int sourceIndex;
-        int maxQuantity;
-        StorageTabEquipmentCategory category;
-        std::string itemName;
-        std::string previewAssetPath;
-        float pressX;
-        float pressY;
+        bool active;                         /**< True si un drag de stockage est en cours. */
+        StorageTabTransferLocation source;  /**< Emplacement source du drag courant. */
+        int sourceIndex;                    /**< Index source dans la liste d'origine. */
+        int maxQuantity;                    /**< Quantite maximale de transfert autorisee. */
+        StorageTabEquipmentCategory category; /**< Categorie de l'objet en cours de drag. */
+        std::string itemName;               /**< Nom affiche de l'objet en cours de drag. */
+        std::string previewAssetPath;       /**< Chemin d'apercu de l'objet en cours de drag. */
+        float pressX;                       /**< Position X de souris au debut du drag. */
+        float pressY;                       /**< Position Y de souris au debut du drag. */
     };
 
     /**
      * @brief Etat du popup de confirmation de transfert.
      */
     struct StorageTransferPopupState {
-        bool open;
-        StorageTabTransferLocation source;
-        StorageTabTransferLocation target;
-        int sourceIndex;
-        int maxQuantity;
-        int quantity;
-        StorageTabEquipmentCategory category;
-        std::string itemName;
-        std::string previewAssetPath;
+        bool open;                          /**< True si le popup de transfert est ouvert. */
+        StorageTabTransferLocation source; /**< Emplacement de depart du transfert. */
+        StorageTabTransferLocation target; /**< Emplacement d'arrivee du transfert. */
+        int sourceIndex;                   /**< Index de l'objet source dans sa liste. */
+        int maxQuantity;                   /**< Quantite maximale selectable dans le popup. */
+        int quantity;                      /**< Quantite actuellement choisie dans le popup. */
+        StorageTabEquipmentCategory category; /**< Categorie de l'objet transfere. */
+        std::string itemName;              /**< Nom affiche de l'objet transfere. */
+        std::string previewAssetPath;      /**< Chemin d'apercu de l'objet transfere. */
+    };
+
+    /**
+     * @brief Etat du popup d'amelioration de canons de la forge.
+     */
+    struct ForgeUpgradePopupState {
+        bool open;              /**< True si le popup de forge est actuellement ouvert. */
+        int cannonIndex;        /**< Index du canon cible dans la liste forge. */
+        int quantity;           /**< Quantite de canons demandee dans le popup. */
+        int maxQuantity;        /**< Quantite maximale ameliorable pour ce canon. */
+        int upgradeOptionIndex; /**< Index du palier cible selectionne dans les upgrades. */
     };
 
     RC2D_Font titleFont;   /**< Police de titre utilisee par les entetes de section. */
@@ -449,6 +801,9 @@ private:
     bool resourcesLoaded;  /**< True apres load() quand les polices et les icones sont ouvertes. */
     WindowControlIcons controlIcons; /**< Helper partage pour le rendu des icones de controle. */
     RC2D_Image storageDropdownArrowImage; /**< Fleche listes deroulantes entrepot / equipe (icon-arrowdown). */
+    RC2D_Image forgeRubiesIcon; /**< Icone rubies reutilisee dans l'onglet Forge. */
+    RC2D_Image forgePearlsIcon; /**< Icone perles reutilisee dans l'onglet Forge. */
+    RC2D_Image forgeCrystalsIcon; /**< Icone cristaux reutilisee dans l'onglet Forge. */
 
     ActiveTab activeTab;   /**< Onglet superieur actuellement selectionne. */
 
@@ -493,6 +848,7 @@ private:
     std::vector<int> storageEquipmentOptionMaxEquipped; /**< Capacites max equipables sur le navire par categorie de stockage. */
     std::vector<StorageTabItemEntry> storageWarehouseItems;   /**< Items affiches dans la colonne Entrepot. */
     std::vector<StorageTabItemEntry> storageEquippedItems;    /**< Items affiches dans la colonne Equipe. */
+    std::vector<ForgeTabCannonEntry> forgeCannons;            /**< Types de canons affiches dans l'onglet Forge. */
     std::vector<BoardingLootCurrencyEntry> boardingLootCurrencies; /**< Monnaies affichees dans l'onglet de butin d'abordage. */
 
     std::vector<RC2D_Image> shipOptionIcons;             /**< Textures d'apercu en cache des bonus / configurations de navire. */
@@ -507,6 +863,7 @@ private:
     std::vector<RC2D_Image> storageEquipmentOptionIcons; /**< Textures d'apercu en cache des options de stockage. */
     std::vector<RC2D_Image> storageWarehouseItemIcons;   /**< Textures d'apercu en cache des items entrepot. */
     std::vector<RC2D_Image> storageEquippedItemIcons;    /**< Textures d'apercu en cache des items equipes. */
+    std::vector<RC2D_Image> forgeCannonIcons;            /**< Textures d'apercu en cache des canons de la forge. */
     std::vector<RC2D_Image> boardingLootCurrencyIcons;   /**< Textures d'apercu en cache des monnaies de butin. */
 
     int selectedShipOption;             /**< Index du bonus / de la configuration de navire selectionne. */
@@ -519,10 +876,21 @@ private:
     int selectedMoveClickStyleOption;   /**< Index de l'effet de clic de deplacement selectionne. */
     int selectedEmoteOption;            /**< Index de l'emote selectionnee. */
     int selectedStorageEquipmentOption; /**< Index de l'option de stockage selectionnee. */
+    int selectedForgeCannonIndex;       /**< Index du canon selectionne dans l'onglet Forge. */
+    int selectedForgeUpgradeOptionIndex; /**< Index du niveau cible selectionne dans les upgrades du canon courant. */
 
     StorageDragState storageDrag;                  /**< Etat courant de drag entre entrepot et equipe. */
     StorageTransferPopupState storageTransferPopup; /**< Popup de quantite pour le transfert courant. */
+    ForgeUpgradePopupState forgeUpgradePopup;      /**< Popup de quantite / niveau pour la forge. */
     StorageTabTransferCallback storageTabOnTransferRequested; /**< Callback optionnelle apres confirmation de transfert. */
+    ForgeTabUpgradeRequestedCallback forgeTabOnUpgradeRequested; /**< Callback optionnelle apres confirmation d'upgrade forge. */
+    std::int64_t forgeTreasuryRubiesAmount;        /**< Tresorerie rubies affichee dans l'onglet Forge. */
+    std::int64_t forgeTreasuryPearlsAmount;        /**< Tresorerie perles affichee dans l'onglet Forge. */
+    std::int64_t forgeTreasuryCrystalsAmount;      /**< Tresorerie cristaux affichee dans l'onglet Forge. */
+    int forgeFirstRow;                             /**< Premiere ligne visible dans la liste de canons forge. */
+    bool forgeScrollDragging;                      /**< True pendant le drag du thumb de scrollbar forge. */
+    float forgeScrollDragOffsetY;                  /**< Offset souris a l'interieur du thumb de scrollbar forge. */
+    float forgeScrollWheelHighlightSec;            /**< Surlignage du pouce forge apres scroll molette. */
     BoardingLootTransferAllCallback boardingLootOnTransferAllToSecureReserveRequested; /**< Callback optionnelle apres transfert global du butin. */
     int boardingLootFirstRow;                     /**< Premiere monnaie visible dans l'onglet de butin. */
     bool boardingLootScrollDragging;              /**< True pendant le drag du thumb de scrollbar de butin. */
@@ -569,9 +937,29 @@ private:
     void loadStorageItemIcons(void);
 
     /**
+     * @brief Recharge les textures des canons de l'onglet Forge.
+     */
+    void loadForgeCannonIcons(void);
+
+    /**
      * @brief Recharge les textures des monnaies de butin d'abordage.
      */
     void loadBoardingLootCurrencyIcons(void);
+
+    /**
+     * @brief Recale les selections et popup de l'onglet Forge sur les donnees courantes.
+     */
+    void syncForgeSelectionState(void);
+
+    /**
+     * @brief Ferme le popup de confirmation d'amelioration de la forge.
+     */
+    void closeForgeUpgradePopup(void);
+
+    /**
+     * @brief Applique la demande d'amelioration courante de la forge.
+     */
+    void applyForgeUpgradePopup(void);
 
     /**
      * @brief Retourne le vecteur de flotte correspondant a une collection interne.

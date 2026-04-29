@@ -31,6 +31,9 @@ static constexpr float kStorageItemRowHeight = 72.0f;
 static constexpr float kStorageItemRowGap = 6.0f;
 static constexpr float kStorageItemSidePad = 8.0f;
 static constexpr float kStorageDragIconSize = 60.0f;
+static constexpr float kForgeRowHeight = 72.0f;
+static constexpr float kForgeRowGap = 6.0f;
+static constexpr float kForgeSidePad = 8.0f;
 static constexpr float kBoardingLootRowHeight = 56.0f;
 static constexpr float kBoardingLootRowGap = 6.0f;
 static constexpr float kBoardingLootSidePad = 10.0f;
@@ -69,6 +72,7 @@ struct WidgetLayout {
     SDL_FRect tabElite;
     SDL_FRect tabSpecial;
     SDL_FRect tabStorageEquipped;
+    SDL_FRect tabForge;
     SDL_FRect tabBoardingLoot;
     SDL_FRect headerDragRect;
     SDL_FRect content;
@@ -109,6 +113,13 @@ struct WidgetLayout {
     SDL_FRect storageMiddlePanel;
     SDL_FRect storageMiddleDropdown;
     SDL_FRect storageMiddleContent;
+    SDL_FRect forgeListPanel;
+    SDL_FRect forgeListContent;
+    SDL_FRect forgeDetailsPanel;
+    SDL_FRect forgeTargetMinusButton;
+    SDL_FRect forgeTargetValue;
+    SDL_FRect forgeTargetPlusButton;
+    SDL_FRect forgeUpgradeButton;
     SDL_FRect boardingLootLeftPanel;
     SDL_FRect boardingLootRightPanel;
     SDL_FRect boardingLootTransferAllButton;
@@ -148,6 +159,29 @@ struct StorageTransferPopupLayout {
     SDL_FRect quantityPlusButton;
     SDL_FRect cancelButton;
     SDL_FRect transferButton;
+};
+
+struct ForgeListMetrics {
+    int totalRows;
+    int visibleRows;
+    int maxFirstRow;
+    SDL_FRect body;
+    SDL_FRect scrollTrack;
+};
+
+struct ForgeUpgradePopupLayout {
+    SDL_FRect overlay;
+    SDL_FRect panel;
+    SDL_FRect titleBar;
+    SDL_FRect icon;
+    SDL_FRect targetLevelMinusButton;
+    SDL_FRect targetLevelValue;
+    SDL_FRect targetLevelPlusButton;
+    SDL_FRect quantityMinusButton;
+    SDL_FRect quantityValue;
+    SDL_FRect quantityPlusButton;
+    SDL_FRect cancelButton;
+    SDL_FRect upgradeButton;
 };
 
 struct BoardingLootMetrics {
@@ -364,6 +398,51 @@ static int getStorageVisibleRowCapacity(const SDL_FRect& contentRect)
     return (std::max)(0, static_cast<int>(std::floor((availableH + kStorageItemRowGap) / (kStorageItemRowHeight + kStorageItemRowGap))));
 }
 
+static ForgeListMetrics buildForgeListMetrics(const SDL_FRect& panelRect, int totalRows)
+{
+    ForgeListMetrics metrics{};
+    metrics.totalRows = (std::max)(0, totalRows);
+    metrics.body = SDL_FRect{
+        panelRect.x + kForgeSidePad,
+        panelRect.y + kForgeSidePad,
+        panelRect.w - (kForgeSidePad * 2.0f),
+        panelRect.h - (kForgeSidePad * 2.0f)
+    };
+
+    const bool needsScrollProbe =
+        metrics.totalRows * static_cast<int>(kForgeRowHeight + kForgeRowGap) >
+        static_cast<int>((std::max)(metrics.body.h, 0.0f) + kForgeRowGap);
+    if (needsScrollProbe)
+    {
+        const float scrollReserve = kScrollBarWidth + kScrollBarPadding;
+        metrics.body.w = (std::max)(0.0f, metrics.body.w - scrollReserve);
+    }
+
+    const float availableH = (std::max)(0.0f, metrics.body.h);
+    metrics.visibleRows = (std::max)(
+        1,
+        static_cast<int>(std::floor((availableH + kForgeRowGap) / (kForgeRowHeight + kForgeRowGap))));
+    metrics.visibleRows = (std::min)(metrics.visibleRows, (std::max)(1, metrics.totalRows));
+    metrics.maxFirstRow = (std::max)(0, metrics.totalRows - metrics.visibleRows);
+    metrics.scrollTrack = SDL_FRect{
+        panelRect.x + panelRect.w - (kScrollBarWidth + kScrollBarPadding),
+        panelRect.y + kForgeSidePad,
+        kScrollBarWidth,
+        panelRect.h - (kForgeSidePad * 2.0f)
+    };
+    return metrics;
+}
+
+static SDL_FRect getForgeRowRect(const SDL_FRect& bodyRect, int visibleRow)
+{
+    return SDL_FRect{
+        bodyRect.x,
+        bodyRect.y + (static_cast<float>((std::max)(0, visibleRow)) * (kForgeRowHeight + kForgeRowGap)),
+        bodyRect.w,
+        kForgeRowHeight
+    };
+}
+
 static BoardingLootMetrics buildBoardingLootMetrics(
     const SDL_FRect& leftPanel,
     const SDL_FRect& rightPanel,
@@ -461,6 +540,39 @@ static StorageTransferPopupLayout buildStorageTransferPopupLayout(const SDL_FRec
     return layout;
 }
 
+static ForgeUpgradePopupLayout buildForgeUpgradePopupLayout(const SDL_FRect& widgetRect)
+{
+    ForgeUpgradePopupLayout layout{};
+    layout.overlay = widgetRect;
+
+    const float panelW = 430.0f;
+    const float panelH = 366.0f;
+    layout.panel = SDL_FRect{
+        widgetRect.x + ((widgetRect.w - panelW) * 0.5f),
+        widgetRect.y + ((widgetRect.h - panelH) * 0.5f),
+        panelW,
+        panelH
+    };
+    layout.titleBar = SDL_FRect{layout.panel.x, layout.panel.y, layout.panel.w, 34.0f};
+    layout.icon = SDL_FRect{layout.panel.x + 18.0f, layout.titleBar.y + layout.titleBar.h + 18.0f, 64.0f, 64.0f};
+
+    const float controlsStartX = layout.icon.x + layout.icon.w + 28.0f;
+    const float targetY = layout.icon.y + 68.0f;
+    layout.targetLevelMinusButton = SDL_FRect{controlsStartX, targetY, 30.0f, 30.0f};
+    layout.targetLevelValue = SDL_FRect{layout.targetLevelMinusButton.x + 46.0f, targetY, 108.0f, 30.0f};
+    layout.targetLevelPlusButton = SDL_FRect{layout.targetLevelValue.x + layout.targetLevelValue.w + 12.0f, targetY, 30.0f, 30.0f};
+
+    const float quantityY = targetY + 60.0f;
+    layout.quantityMinusButton = SDL_FRect{controlsStartX, quantityY, 30.0f, 30.0f};
+    layout.quantityValue = SDL_FRect{layout.quantityMinusButton.x + 46.0f, quantityY, 108.0f, 30.0f};
+    layout.quantityPlusButton = SDL_FRect{layout.quantityValue.x + layout.quantityValue.w + 12.0f, quantityY, 30.0f, 30.0f};
+
+    const float buttonY = layout.panel.y + layout.panel.h - 50.0f;
+    layout.cancelButton = SDL_FRect{layout.panel.x + 18.0f, buttonY, 156.0f, 34.0f};
+    layout.upgradeButton = SDL_FRect{layout.panel.x + layout.panel.w - 174.0f, buttonY, 156.0f, 34.0f};
+    return layout;
+}
+
 static const char* storageLocationLabel(AccountManagementWidget::StorageTabTransferLocation location)
 {
     return location == AccountManagementWidget::StorageTabTransferLocation::WAREHOUSE
@@ -478,6 +590,32 @@ static bool storageItemIdentityMatches(
 }
 
 static std::string formatWithDots(int value)
+{
+    if (value <= 0)
+    {
+        return "0";
+    }
+
+    std::string digits = std::to_string(value);
+    std::string output;
+    output.reserve(digits.size() + (digits.size() / 3));
+
+    int count = 0;
+    for (int i = static_cast<int>(digits.size()) - 1; i >= 0; --i)
+    {
+        output.push_back(digits[static_cast<std::size_t>(i)]);
+        ++count;
+        if (count == 3 && i > 0)
+        {
+            output.push_back('.');
+            count = 0;
+        }
+    }
+    std::reverse(output.begin(), output.end());
+    return output;
+}
+
+static std::string formatWithDots(std::int64_t value)
 {
     if (value <= 0)
     {
@@ -530,13 +668,14 @@ static WidgetLayout buildLayout(const SDL_FRect& outer)
     const float tabY = layout.topBar.y + 3.0f;
     const float tabH = layout.topBar.h - 6.0f;
     const float tabGap = 2.0f;
-    layout.tabAccount = SDL_FRect{outer.x + 10.0f, tabY, 76.0f, tabH};
-    layout.tabStorageEquipped = SDL_FRect{layout.tabAccount.x + layout.tabAccount.w + tabGap, tabY, 128.0f, tabH};
-    layout.tabBoardingLoot = SDL_FRect{layout.tabStorageEquipped.x + layout.tabStorageEquipped.w + tabGap, tabY, 190.0f, tabH};
-    layout.tabShipManagement = SDL_FRect{layout.tabBoardingLoot.x + layout.tabBoardingLoot.w + tabGap, tabY, 126.0f, tabH};
-    layout.tabAppearance = SDL_FRect{layout.tabShipManagement.x + layout.tabShipManagement.w + tabGap, tabY, 92.0f, tabH};
-    layout.tabElite = SDL_FRect{layout.tabAppearance.x + layout.tabAppearance.w + tabGap, tabY, 144.0f, tabH};
-    layout.tabSpecial = SDL_FRect{layout.tabElite.x + layout.tabElite.w + tabGap, tabY, 162.0f, tabH};
+    layout.tabAccount = SDL_FRect{outer.x + 10.0f, tabY, 70.0f, tabH};
+    layout.tabStorageEquipped = SDL_FRect{layout.tabAccount.x + layout.tabAccount.w + tabGap, tabY, 116.0f, tabH};
+    layout.tabForge = SDL_FRect{layout.tabStorageEquipped.x + layout.tabStorageEquipped.w + tabGap, tabY, 74.0f, tabH};
+    layout.tabBoardingLoot = SDL_FRect{layout.tabForge.x + layout.tabForge.w + tabGap, tabY, 172.0f, tabH};
+    layout.tabShipManagement = SDL_FRect{layout.tabBoardingLoot.x + layout.tabBoardingLoot.w + tabGap, tabY, 118.0f, tabH};
+    layout.tabAppearance = SDL_FRect{layout.tabShipManagement.x + layout.tabShipManagement.w + tabGap, tabY, 88.0f, tabH};
+    layout.tabElite = SDL_FRect{layout.tabAppearance.x + layout.tabAppearance.w + tabGap, tabY, 136.0f, tabH};
+    layout.tabSpecial = SDL_FRect{layout.tabElite.x + layout.tabElite.w + tabGap, tabY, 152.0f, tabH};
 
     const float dragLeft = layout.tabSpecial.x + layout.tabSpecial.w + 4.0f;
     const float dragRight = layout.closeButton.x - 4.0f;
@@ -702,6 +841,34 @@ static WidgetLayout buildLayout(const SDL_FRect& outer)
         layout.storageMiddleDropdown.y + layout.storageMiddleDropdown.h + 1.0f,
         layout.storageMiddlePanel.w - 2.0f,
         layout.storageMiddlePanel.h - layout.storageMiddleDropdown.h - 2.0f
+    };
+
+    layout.forgeListPanel = SDL_FRect{
+        layout.content.x,
+        layout.content.y + 14.0f,
+        322.0f,
+        layout.content.h - 28.0f
+    };
+    layout.forgeListContent = SDL_FRect{
+        layout.forgeListPanel.x + 1.0f,
+        layout.forgeListPanel.y + 38.0f,
+        layout.forgeListPanel.w - 2.0f,
+        layout.forgeListPanel.h - 39.0f
+    };
+    layout.forgeDetailsPanel = SDL_FRect{
+        layout.forgeListPanel.x + layout.forgeListPanel.w + 12.0f,
+        layout.forgeListPanel.y,
+        layout.content.w - layout.forgeListPanel.w - 12.0f,
+        layout.forgeListPanel.h
+    };
+    layout.forgeTargetMinusButton = SDL_FRect{layout.forgeDetailsPanel.x + 168.0f, layout.forgeDetailsPanel.y + 146.0f, 28.0f, 28.0f};
+    layout.forgeTargetValue = SDL_FRect{layout.forgeTargetMinusButton.x + 44.0f, layout.forgeTargetMinusButton.y, 120.0f, 28.0f};
+    layout.forgeTargetPlusButton = SDL_FRect{layout.forgeTargetValue.x + layout.forgeTargetValue.w + 12.0f, layout.forgeTargetMinusButton.y, 28.0f, 28.0f};
+    layout.forgeUpgradeButton = SDL_FRect{
+        layout.forgeDetailsPanel.x + layout.forgeDetailsPanel.w - 214.0f,
+        layout.forgeDetailsPanel.y + 456.0f,
+        194.0f,
+        30.0f
     };
 
     const float boardingLootTopInset = 58.0f;
@@ -1039,6 +1206,9 @@ AccountManagementWidget::AccountManagementWidget(void)
       resourcesLoaded(false),
       controlIcons{},
       storageDropdownArrowImage{},
+      forgeRubiesIcon{},
+      forgePearlsIcon{},
+      forgeCrystalsIcon{},
       activeTab(ActiveTab::ACCOUNT),
       widgetDragging(false),
       widgetDragOffsetX(0.0f),
@@ -1077,6 +1247,7 @@ AccountManagementWidget::AccountManagementWidget(void)
       storageEquipmentOptionMaxEquipped{},
       storageWarehouseItems{},
       storageEquippedItems{},
+      forgeCannons{},
       boardingLootCurrencies{},
       shipOptionIcons{},
       coatingOptionIcons{},
@@ -1090,6 +1261,7 @@ AccountManagementWidget::AccountManagementWidget(void)
       storageEquipmentOptionIcons{},
       storageWarehouseItemIcons{},
       storageEquippedItemIcons{},
+      forgeCannonIcons{},
       boardingLootCurrencyIcons{},
       selectedShipOption(0),
       selectedCoatingOption(0),
@@ -1101,6 +1273,8 @@ AccountManagementWidget::AccountManagementWidget(void)
       selectedMoveClickStyleOption(0),
       selectedEmoteOption(0),
       selectedStorageEquipmentOption(0),
+      selectedForgeCannonIndex(0),
+      selectedForgeUpgradeOptionIndex(0),
       storageDrag{
           false,
           StorageTabTransferLocation::WAREHOUSE,
@@ -1121,7 +1295,21 @@ AccountManagementWidget::AccountManagementWidget(void)
           StorageTabEquipmentCategory::CANNONS,
           {},
           {}},
+      forgeUpgradePopup{
+          false,
+          -1,
+          1,
+          0,
+          0},
       storageTabOnTransferRequested{},
+      forgeTabOnUpgradeRequested{},
+      forgeTreasuryRubiesAmount(0),
+      forgeTreasuryPearlsAmount(0),
+      forgeTreasuryCrystalsAmount(0),
+      forgeFirstRow(0),
+      forgeScrollDragging(false),
+      forgeScrollDragOffsetY(0.0f),
+      forgeScrollWheelHighlightSec(0.0f),
       boardingLootOnTransferAllToSecureReserveRequested{},
       boardingLootFirstRow(0),
       boardingLootScrollDragging(false),
@@ -1439,6 +1627,7 @@ void AccountManagementWidget::setStorageTabWarehouseItems(const std::vector<Stor
     for (StorageTabItemEntry& item : this->storageWarehouseItems)
     {
         item.quantity = (std::max)(0, item.quantity);
+        item.cannonLevel = (std::max)(0, item.cannonLevel);
     }
     this->cancelStorageDrag();
     this->closeStorageTransferPopup();
@@ -1453,6 +1642,7 @@ void AccountManagementWidget::addStorageTabWarehouseItem(const StorageTabItemEnt
 {
     StorageTabItemEntry sanitized = item;
     sanitized.quantity = (std::max)(0, sanitized.quantity);
+    sanitized.cannonLevel = (std::max)(0, sanitized.cannonLevel);
     this->storageWarehouseItems.push_back(sanitized);
 
     if (this->resourcesLoaded)
@@ -1479,6 +1669,7 @@ void AccountManagementWidget::setStorageTabEquippedItems(const std::vector<Stora
     for (StorageTabItemEntry& item : this->storageEquippedItems)
     {
         item.quantity = (std::max)(0, item.quantity);
+        item.cannonLevel = (std::max)(0, item.cannonLevel);
     }
     this->cancelStorageDrag();
     this->closeStorageTransferPopup();
@@ -1493,6 +1684,7 @@ void AccountManagementWidget::addStorageTabEquippedItem(const StorageTabItemEntr
 {
     StorageTabItemEntry sanitized = item;
     sanitized.quantity = (std::max)(0, sanitized.quantity);
+    sanitized.cannonLevel = (std::max)(0, sanitized.cannonLevel);
     this->storageEquippedItems.push_back(sanitized);
 
     if (this->resourcesLoaded)
@@ -1516,6 +1708,92 @@ void AccountManagementWidget::clearStorageTabEquippedItems(void)
 void AccountManagementWidget::setStorageTabOnTransferRequested(StorageTabTransferCallback callback)
 {
     this->storageTabOnTransferRequested = std::move(callback);
+}
+
+void AccountManagementWidget::setForgeTabCannons(const std::vector<ForgeTabCannonEntry>& cannons)
+{
+    this->forgeCannons = cannons;
+    for (ForgeTabCannonEntry& cannon : this->forgeCannons)
+    {
+        cannon.quantity = (std::max)(0, cannon.quantity);
+        cannon.currentLevel = (std::max)(0, cannon.currentLevel);
+        for (ForgeTabCannonUpgradeEntry& upgrade : cannon.upgrades)
+        {
+            upgrade.targetLevel = (std::max)(0, upgrade.targetLevel);
+            upgrade.rubiesCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.rubiesCostPerCannon);
+            upgrade.pearlsCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.pearlsCostPerCannon);
+            upgrade.crystalsCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.crystalsCostPerCannon);
+        }
+        std::sort(
+            cannon.upgrades.begin(),
+            cannon.upgrades.end(),
+            [](const ForgeTabCannonUpgradeEntry& lhs, const ForgeTabCannonUpgradeEntry& rhs) {
+                return lhs.targetLevel < rhs.targetLevel;
+            });
+    }
+
+    this->syncForgeSelectionState();
+    if (this->resourcesLoaded)
+    {
+        this->loadForgeCannonIcons();
+    }
+}
+
+void AccountManagementWidget::addForgeTabCannon(const ForgeTabCannonEntry& cannon)
+{
+    ForgeTabCannonEntry sanitized = cannon;
+    sanitized.quantity = (std::max)(0, sanitized.quantity);
+    sanitized.currentLevel = (std::max)(0, sanitized.currentLevel);
+    for (ForgeTabCannonUpgradeEntry& upgrade : sanitized.upgrades)
+    {
+        upgrade.targetLevel = (std::max)(0, upgrade.targetLevel);
+        upgrade.rubiesCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.rubiesCostPerCannon);
+        upgrade.pearlsCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.pearlsCostPerCannon);
+        upgrade.crystalsCostPerCannon = (std::max)(static_cast<std::int64_t>(0), upgrade.crystalsCostPerCannon);
+    }
+    std::sort(
+        sanitized.upgrades.begin(),
+        sanitized.upgrades.end(),
+        [](const ForgeTabCannonUpgradeEntry& lhs, const ForgeTabCannonUpgradeEntry& rhs) {
+            return lhs.targetLevel < rhs.targetLevel;
+        });
+
+    this->forgeCannons.push_back(std::move(sanitized));
+    this->syncForgeSelectionState();
+    if (this->resourcesLoaded)
+    {
+        this->loadForgeCannonIcons();
+    }
+}
+
+void AccountManagementWidget::clearForgeTabCannons(void)
+{
+    this->forgeCannons.clear();
+    this->syncForgeSelectionState();
+    if (this->resourcesLoaded)
+    {
+        this->loadForgeCannonIcons();
+    }
+}
+
+void AccountManagementWidget::setForgeTabTreasuryRubiesAmount(std::int64_t amount)
+{
+    this->forgeTreasuryRubiesAmount = (std::max)(static_cast<std::int64_t>(0), amount);
+}
+
+void AccountManagementWidget::setForgeTabTreasuryPearlsAmount(std::int64_t amount)
+{
+    this->forgeTreasuryPearlsAmount = (std::max)(static_cast<std::int64_t>(0), amount);
+}
+
+void AccountManagementWidget::setForgeTabTreasuryCrystalsAmount(std::int64_t amount)
+{
+    this->forgeTreasuryCrystalsAmount = (std::max)(static_cast<std::int64_t>(0), amount);
+}
+
+void AccountManagementWidget::setForgeTabOnUpgradeRequested(ForgeTabUpgradeRequestedCallback callback)
+{
+    this->forgeTabOnUpgradeRequested = std::move(callback);
 }
 
 void AccountManagementWidget::setBoardingLootManagementTabCurrencies(
@@ -1771,6 +2049,7 @@ void AccountManagementWidget::clearAllData(void)
     this->clearIcons(this->storageEquipmentOptionIcons);
     this->clearIcons(this->storageWarehouseItemIcons);
     this->clearIcons(this->storageEquippedItemIcons);
+    this->clearIcons(this->forgeCannonIcons);
     this->clearIcons(this->boardingLootCurrencyIcons);
 
     this->eliteShips.clear();
@@ -1789,6 +2068,7 @@ void AccountManagementWidget::clearAllData(void)
     this->storageEquipmentOptionMaxEquipped.clear();
     this->storageWarehouseItems.clear();
     this->storageEquippedItems.clear();
+    this->forgeCannons.clear();
     this->boardingLootCurrencies.clear();
 
     this->playerIdentifier.clear();
@@ -1812,9 +2092,20 @@ void AccountManagementWidget::clearAllData(void)
     this->selectedMoveClickStyleOption = 0;
     this->selectedEmoteOption = 0;
     this->selectedStorageEquipmentOption = 0;
+    this->selectedForgeCannonIndex = 0;
+    this->selectedForgeUpgradeOptionIndex = 0;
     this->cancelStorageDrag();
     this->closeStorageTransferPopup();
+    this->closeForgeUpgradePopup();
     this->storageTabOnTransferRequested = nullptr;
+    this->forgeTabOnUpgradeRequested = nullptr;
+    this->forgeTreasuryRubiesAmount = 0;
+    this->forgeTreasuryPearlsAmount = 0;
+    this->forgeTreasuryCrystalsAmount = 0;
+    this->forgeFirstRow = 0;
+    this->forgeScrollDragging = false;
+    this->forgeScrollDragOffsetY = 0.0f;
+    this->forgeScrollWheelHighlightSec = 0.0f;
     this->boardingLootOnTransferAllToSecureReserveRequested = nullptr;
     this->boardingLootFirstRow = 0;
     this->boardingLootScrollDragging = false;
@@ -2199,6 +2490,74 @@ void AccountManagementWidget::closeStorageTransferPopup(void)
     };
 }
 
+void AccountManagementWidget::syncForgeSelectionState(void)
+{
+    if (this->forgeCannons.empty())
+    {
+        this->selectedForgeCannonIndex = 0;
+        this->selectedForgeUpgradeOptionIndex = 0;
+        this->forgeFirstRow = 0;
+        this->closeForgeUpgradePopup();
+        return;
+    }
+
+    this->selectedForgeCannonIndex = (std::max)(
+        0,
+        (std::min)(this->selectedForgeCannonIndex, static_cast<int>(this->forgeCannons.size()) - 1));
+
+    const ForgeTabCannonEntry& selectedCannon =
+        this->forgeCannons[static_cast<std::size_t>(this->selectedForgeCannonIndex)];
+    if (selectedCannon.upgrades.empty())
+    {
+        this->selectedForgeUpgradeOptionIndex = 0;
+    }
+    else
+    {
+        this->selectedForgeUpgradeOptionIndex = (std::max)(
+            0,
+            (std::min)(this->selectedForgeUpgradeOptionIndex, static_cast<int>(selectedCannon.upgrades.size()) - 1));
+    }
+
+    if (this->forgeUpgradePopup.open)
+    {
+        if (this->forgeUpgradePopup.cannonIndex < 0 ||
+            this->forgeUpgradePopup.cannonIndex >= static_cast<int>(this->forgeCannons.size()))
+        {
+            this->closeForgeUpgradePopup();
+        }
+        else
+        {
+            const ForgeTabCannonEntry& popupCannon =
+                this->forgeCannons[static_cast<std::size_t>(this->forgeUpgradePopup.cannonIndex)];
+            this->forgeUpgradePopup.maxQuantity = (std::max)(0, popupCannon.quantity);
+            if (popupCannon.upgrades.empty() || this->forgeUpgradePopup.maxQuantity <= 0)
+            {
+                this->closeForgeUpgradePopup();
+            }
+            else
+            {
+                this->forgeUpgradePopup.quantity = (std::max)(
+                    1,
+                    (std::min)(this->forgeUpgradePopup.quantity, this->forgeUpgradePopup.maxQuantity));
+                this->forgeUpgradePopup.upgradeOptionIndex = (std::max)(
+                    0,
+                    (std::min)(this->forgeUpgradePopup.upgradeOptionIndex, static_cast<int>(popupCannon.upgrades.size()) - 1));
+            }
+        }
+    }
+}
+
+void AccountManagementWidget::closeForgeUpgradePopup(void)
+{
+    this->forgeUpgradePopup = ForgeUpgradePopupState{
+        false,
+        -1,
+        1,
+        0,
+        0
+    };
+}
+
 void AccountManagementWidget::cancelStorageDrag(void)
 {
     this->storageDrag = StorageDragState{
@@ -2212,6 +2571,56 @@ void AccountManagementWidget::cancelStorageDrag(void)
         0.0f,
         0.0f
     };
+}
+
+void AccountManagementWidget::applyForgeUpgradePopup(void)
+{
+    if (!this->forgeUpgradePopup.open)
+    {
+        return;
+    }
+
+    if (this->forgeUpgradePopup.cannonIndex < 0 ||
+        this->forgeUpgradePopup.cannonIndex >= static_cast<int>(this->forgeCannons.size()))
+    {
+        this->closeForgeUpgradePopup();
+        return;
+    }
+
+    const ForgeTabCannonEntry& cannon = this->forgeCannons[static_cast<std::size_t>(this->forgeUpgradePopup.cannonIndex)];
+    if (cannon.quantity <= 0)
+    {
+        this->closeForgeUpgradePopup();
+        return;
+    }
+    if (cannon.upgrades.empty() ||
+        this->forgeUpgradePopup.upgradeOptionIndex < 0 ||
+        this->forgeUpgradePopup.upgradeOptionIndex >= static_cast<int>(cannon.upgrades.size()))
+    {
+        this->closeForgeUpgradePopup();
+        return;
+    }
+
+    const ForgeTabCannonUpgradeEntry& upgrade =
+        cannon.upgrades[static_cast<std::size_t>(this->forgeUpgradePopup.upgradeOptionIndex)];
+    const int quantity = (std::max)(1, (std::min)(this->forgeUpgradePopup.quantity, cannon.quantity));
+
+    ForgeTabUpgradeRequest request{};
+    request.cannon = cannon;
+    request.quantity = quantity;
+    request.targetLevel = upgrade.targetLevel;
+    request.unitRubiesCost = upgrade.rubiesCostPerCannon;
+    request.unitPearlsCost = upgrade.pearlsCostPerCannon;
+    request.unitCrystalsCost = upgrade.crystalsCostPerCannon;
+    request.totalRubiesCost = upgrade.rubiesCostPerCannon * static_cast<std::int64_t>(quantity);
+    request.totalPearlsCost = upgrade.pearlsCostPerCannon * static_cast<std::int64_t>(quantity);
+    request.totalCrystalsCost = upgrade.crystalsCostPerCannon * static_cast<std::int64_t>(quantity);
+
+    this->closeForgeUpgradePopup();
+    if (this->forgeTabOnUpgradeRequested)
+    {
+        this->forgeTabOnUpgradeRequested(request);
+    }
 }
 
 void AccountManagementWidget::applyStorageTransferPopup(void)
@@ -2489,6 +2898,17 @@ void AccountManagementWidget::loadStorageItemIcons(void)
     for (const StorageTabItemEntry& item : this->storageEquippedItems)
     {
         this->storageEquippedItemIcons.push_back(loadImageFromTitleOrEmpty(item.previewAssetPath));
+    }
+}
+
+void AccountManagementWidget::loadForgeCannonIcons(void)
+{
+    this->clearIcons(this->forgeCannonIcons);
+
+    this->forgeCannonIcons.reserve(this->forgeCannons.size());
+    for (const ForgeTabCannonEntry& cannon : this->forgeCannons)
+    {
+        this->forgeCannonIcons.push_back(loadImageFromTitleOrEmpty(cannon.previewAssetPath));
     }
 }
 
@@ -2802,6 +3222,7 @@ void AccountManagementWidget::clearAllFocus(void)
 {
     this->clearProfileInputFocus();
     this->closeAppearancePicker();
+    this->closeForgeUpgradePopup();
 }
 
 void AccountManagementWidget::load(void)
@@ -2812,6 +3233,9 @@ void AccountManagementWidget::load(void)
     this->controlIcons.load();
     this->storageDropdownArrowImage =
         LoadStorageImage("assets/images/ui-scene-game/icon-arrowdown.png", RC2D_STORAGE_TITLE);
+    this->forgeRubiesIcon = LoadStorageImage("assets/images/ui-scene-game/money-rubies.png", RC2D_STORAGE_TITLE);
+    this->forgePearlsIcon = LoadStorageImage("assets/images/ui-scene-game/money_pearls.png", RC2D_STORAGE_TITLE);
+    this->forgeCrystalsIcon = LoadStorageImage("assets/images/ui-scene-game/money_crystals.png", RC2D_STORAGE_TITLE);
     if (this->storageDropdownArrowImage.sdl_texture == nullptr)
     {
         RC2D_log(RC2D_LOG_WARN, "AccountManagementWidget: echec chargement icon-arrowdown.png");
@@ -2833,6 +3257,9 @@ void AccountManagementWidget::load(void)
     this->fleetScrollDragging = false;
     this->fleetScrollDragOffsetY = 0.0f;
     this->fleetScrollWheelHighlightSec = 0.0f;
+    this->forgeScrollDragging = false;
+    this->forgeScrollDragOffsetY = 0.0f;
+    this->forgeScrollWheelHighlightSec = 0.0f;
 
     this->profileInputFocused = false;
     this->profileCursorIndex = this->profileName.size();
@@ -2841,11 +3268,13 @@ void AccountManagementWidget::load(void)
     this->loadShipIcons();
     this->loadAppearanceIcons();
     this->loadStorageItemIcons();
+    this->loadForgeCannonIcons();
     this->loadBoardingLootCurrencyIcons();
 
     this->closeAppearancePicker();
     this->cancelStorageDrag();
     this->closeStorageTransferPopup();
+    this->closeForgeUpgradePopup();
 }
 
 void AccountManagementWidget::unload(void)
@@ -2864,7 +3293,11 @@ void AccountManagementWidget::unload(void)
     this->clearIcons(this->storageEquipmentOptionIcons);
     this->clearIcons(this->storageWarehouseItemIcons);
     this->clearIcons(this->storageEquippedItemIcons);
+    this->clearIcons(this->forgeCannonIcons);
     this->clearIcons(this->boardingLootCurrencyIcons);
+    ResetStorageImageRef(&this->forgeCrystalsIcon);
+    ResetStorageImageRef(&this->forgePearlsIcon);
+    ResetStorageImageRef(&this->forgeRubiesIcon);
     ResetStorageImageRef(&this->storageDropdownArrowImage);
     this->controlIcons.unload();
     this->resourcesLoaded = false;
@@ -2892,7 +3325,7 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         return HudCursorType::NONE;
     }
 
-    if (this->pickerScrollDragging || this->fleetScrollDragging || this->boardingLootScrollDragging)
+    if (this->pickerScrollDragging || this->fleetScrollDragging || this->forgeScrollDragging || this->boardingLootScrollDragging)
     {
         return HudCursorType::RESIZE_VERTICAL;
     }
@@ -2927,6 +3360,21 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         return isPointInRect(x, y, popupLayout.panel)
             ? HudCursorType::DEFAULT
             : HudCursorType::DEFAULT;
+    }
+
+    if (this->forgeUpgradePopup.open)
+    {
+        const ForgeUpgradePopupLayout popupLayout = buildForgeUpgradePopupLayout(currentRect);
+        if (isPointInRect(x, y, popupLayout.cancelButton) ||
+            isPointInRect(x, y, popupLayout.upgradeButton) ||
+            isPointInRect(x, y, popupLayout.targetLevelMinusButton) ||
+            isPointInRect(x, y, popupLayout.targetLevelPlusButton) ||
+            isPointInRect(x, y, popupLayout.quantityMinusButton) ||
+            isPointInRect(x, y, popupLayout.quantityPlusButton))
+        {
+            return HudCursorType::POINTER;
+        }
+        return HudCursorType::DEFAULT;
     }
 
     if (this->openPicker != AppearancePickerType::NONE)
@@ -2978,6 +3426,7 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
         isPointInRect(x, y, layout.tabElite) ||
         isPointInRect(x, y, layout.tabSpecial) ||
         isPointInRect(x, y, layout.tabStorageEquipped) ||
+        isPointInRect(x, y, layout.tabForge) ||
         isPointInRect(x, y, layout.tabBoardingLoot))
     {
         return HudCursorType::POINTER;
@@ -3026,6 +3475,38 @@ HudCursorType AccountManagementWidget::getDesiredCursor(float x, float y) const
             this->hitTestStorageItem(StorageTabTransferLocation::SHIP, layout.storageMiddleContent, x, y) >= 0)
         {
             return HudCursorType::POINTER;
+        }
+    }
+    else if (this->activeTab == ActiveTab::FORGE)
+    {
+        const ForgeListMetrics metrics = buildForgeListMetrics(
+            layout.forgeListContent,
+            static_cast<int>(this->forgeCannons.size()));
+        if (metrics.maxFirstRow > 0 && isPointInRect(x, y, metrics.scrollTrack))
+        {
+            return HudCursorType::RESIZE_VERTICAL;
+        }
+        if (isPointInRect(x, y, layout.forgeTargetMinusButton) ||
+            isPointInRect(x, y, layout.forgeTargetPlusButton) ||
+            isPointInRect(x, y, layout.forgeUpgradeButton))
+        {
+            return HudCursorType::POINTER;
+        }
+
+        int visibleRow = 0;
+        const int firstRow = (std::max)(0, (std::min)(this->forgeFirstRow, metrics.maxFirstRow));
+        for (int sourceIndex = firstRow; sourceIndex < static_cast<int>(this->forgeCannons.size()); ++sourceIndex)
+        {
+            if (visibleRow >= metrics.visibleRows)
+            {
+                break;
+            }
+            const SDL_FRect rowRect = getForgeRowRect(metrics.body, visibleRow);
+            if (isPointInRect(x, y, rowRect))
+            {
+                return HudCursorType::POINTER;
+            }
+            ++visibleRow;
         }
     }
     else if (this->activeTab == ActiveTab::BOARDING_LOOT)
@@ -3080,11 +3561,13 @@ void AccountManagementWidget::openShipManagement(void)
     this->activeTab = ActiveTab::SHIP_MANAGEMENT;
     this->widgetDragging = false;
     this->fleetScrollDragging = false;
+    this->forgeScrollDragging = false;
     this->pickerScrollDragging = false;
     this->boardingLootScrollDragging = false;
     this->clearFocus();
     this->closeAppearancePicker();
     this->cancelStorageDrag();
+    this->closeForgeUpgradePopup();
 }
 
 void AccountManagementWidget::hide(void)
@@ -3092,14 +3575,17 @@ void AccountManagementWidget::hide(void)
     this->visible = false;
     this->widgetDragging = false;
     this->fleetScrollDragging = false;
+    this->forgeScrollDragging = false;
     this->pickerScrollDragging = false;
     this->boardingLootScrollDragging = false;
     this->fleetScrollWheelHighlightSec = 0.0f;
+    this->forgeScrollWheelHighlightSec = 0.0f;
     this->boardingLootScrollWheelHighlightSec = 0.0f;
     this->clearFocus();
     this->closeAppearancePicker();
     this->cancelStorageDrag();
     this->closeStorageTransferPopup();
+    this->closeForgeUpgradePopup();
 }
 
 void AccountManagementWidget::update(double dt)
@@ -3111,6 +3597,14 @@ void AccountManagementWidget::update(double dt)
         if (this->fleetScrollWheelHighlightSec < 0.0f)
         {
             this->fleetScrollWheelHighlightSec = 0.0f;
+        }
+    }
+    if (this->forgeScrollWheelHighlightSec > 0.0f)
+    {
+        this->forgeScrollWheelHighlightSec -= dtF;
+        if (this->forgeScrollWheelHighlightSec < 0.0f)
+        {
+            this->forgeScrollWheelHighlightSec = 0.0f;
         }
     }
     if (this->pickerScrollWheelHighlightSec > 0.0f)
@@ -3194,6 +3688,7 @@ void AccountManagementWidget::update(double dt)
 
     if (!this->widgetDragging &&
         !this->fleetScrollDragging &&
+        !this->forgeScrollDragging &&
         !this->pickerScrollDragging &&
         !this->boardingLootScrollDragging)
     {
@@ -3204,6 +3699,7 @@ void AccountManagementWidget::update(double dt)
     {
         this->widgetDragging = false;
         this->fleetScrollDragging = false;
+        this->forgeScrollDragging = false;
         this->pickerScrollDragging = false;
         this->boardingLootScrollDragging = false;
         return;
@@ -3292,6 +3788,39 @@ void AccountManagementWidget::update(double dt)
         const float t = (thumbTop - metrics.scrollTrack.y) / thumbTravel;
         this->boardingLootFirstRow = static_cast<int>(t * static_cast<float>(metrics.maxFirstRow) + 0.5f);
         this->boardingLootFirstRow = (std::max)(0, (std::min)(this->boardingLootFirstRow, metrics.maxFirstRow));
+        return;
+    }
+
+    if (this->forgeScrollDragging)
+    {
+        const ForgeListMetrics metrics = buildForgeListMetrics(
+            layout.forgeListContent,
+            static_cast<int>(this->forgeCannons.size()));
+        if (this->activeTab != ActiveTab::FORGE || metrics.maxFirstRow <= 0)
+        {
+            this->forgeFirstRow = 0;
+            this->forgeScrollDragging = false;
+            return;
+        }
+
+        const float thumbHeight = (std::max)(
+            kMinThumbHeight,
+            (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                static_cast<float>((std::max)(1, metrics.totalRows))));
+        const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+
+        float mx = 0.0f;
+        float my = 0.0f;
+        getMouseRenderPosition(&mx, &my);
+        (void)mx;
+
+        const float thumbTop = clampf(
+            my - this->forgeScrollDragOffsetY,
+            metrics.scrollTrack.y,
+            metrics.scrollTrack.y + thumbTravel);
+        const float t = (thumbTop - metrics.scrollTrack.y) / thumbTravel;
+        this->forgeFirstRow = static_cast<int>(t * static_cast<float>(metrics.maxFirstRow) + 0.5f);
+        this->forgeFirstRow = (std::max)(0, (std::min)(this->forgeFirstRow, metrics.maxFirstRow));
         return;
     }
 
@@ -3396,11 +3925,72 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
         return true;
     }
 
+    if (this->forgeUpgradePopup.open)
+    {
+        const ForgeUpgradePopupLayout popupLayout = buildForgeUpgradePopupLayout(this->widgetRect);
+        if (isPointInRect(x, y, popupLayout.cancelButton))
+        {
+            this->closeForgeUpgradePopup();
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.upgradeButton))
+        {
+            this->applyForgeUpgradePopup();
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.targetLevelMinusButton))
+        {
+            if (this->forgeUpgradePopup.cannonIndex >= 0 &&
+                this->forgeUpgradePopup.cannonIndex < static_cast<int>(this->forgeCannons.size()))
+            {
+                const ForgeTabCannonEntry& cannon =
+                    this->forgeCannons[static_cast<std::size_t>(this->forgeUpgradePopup.cannonIndex)];
+                if (!cannon.upgrades.empty())
+                {
+                    this->forgeUpgradePopup.upgradeOptionIndex = (std::max)(0, this->forgeUpgradePopup.upgradeOptionIndex - 1);
+                    this->selectedForgeUpgradeOptionIndex = this->forgeUpgradePopup.upgradeOptionIndex;
+                }
+            }
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.targetLevelPlusButton))
+        {
+            if (this->forgeUpgradePopup.cannonIndex >= 0 &&
+                this->forgeUpgradePopup.cannonIndex < static_cast<int>(this->forgeCannons.size()))
+            {
+                const ForgeTabCannonEntry& cannon =
+                    this->forgeCannons[static_cast<std::size_t>(this->forgeUpgradePopup.cannonIndex)];
+                if (!cannon.upgrades.empty())
+                {
+                    this->forgeUpgradePopup.upgradeOptionIndex = (std::min)(
+                        static_cast<int>(cannon.upgrades.size()) - 1,
+                        this->forgeUpgradePopup.upgradeOptionIndex + 1);
+                    this->selectedForgeUpgradeOptionIndex = this->forgeUpgradePopup.upgradeOptionIndex;
+                }
+            }
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.quantityMinusButton))
+        {
+            this->forgeUpgradePopup.quantity = (std::max)(1, this->forgeUpgradePopup.quantity - 1);
+            return true;
+        }
+        if (isPointInRect(x, y, popupLayout.quantityPlusButton))
+        {
+            this->forgeUpgradePopup.quantity = (std::min)(
+                (std::max)(1, this->forgeUpgradePopup.maxQuantity),
+                this->forgeUpgradePopup.quantity + 1);
+            return true;
+        }
+        return true;
+    }
+
     if (isPointInRect(x, y, layout.closeButton))
     {
         this->visible = false;
         this->widgetDragging = false;
         this->fleetScrollDragging = false;
+        this->forgeScrollDragging = false;
         this->pickerScrollDragging = false;
         this->cancelStorageDrag();
         this->closeStorageTransferPopup();
@@ -3418,6 +4008,13 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
     if (isPointInRect(x, y, layout.tabStorageEquipped))
     {
         this->activeTab = ActiveTab::STORAGE_EQUIPPED;
+        this->clearAllFocus();
+        return true;
+    }
+
+    if (isPointInRect(x, y, layout.tabForge))
+    {
+        this->activeTab = ActiveTab::FORGE;
         this->clearAllFocus();
         return true;
     }
@@ -3461,6 +4058,7 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
     {
         this->widgetDragging = true;
         this->fleetScrollDragging = false;
+        this->forgeScrollDragging = false;
         this->pickerScrollDragging = false;
         this->widgetDragOffsetX = x - this->widgetRect.x;
         this->widgetDragOffsetY = y - this->widgetRect.y;
@@ -3820,6 +4418,114 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
         return true;
     }
 
+    if (this->activeTab == ActiveTab::FORGE)
+    {
+        const ForgeListMetrics metrics = buildForgeListMetrics(
+            layout.forgeListContent,
+            static_cast<int>(this->forgeCannons.size()));
+        this->forgeFirstRow = (std::max)(0, (std::min)(this->forgeFirstRow, metrics.maxFirstRow));
+
+        if (metrics.maxFirstRow > 0 && isPointInRect(x, y, metrics.scrollTrack))
+        {
+            const float thumbHeight = (std::max)(
+                kMinThumbHeight,
+                (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                    static_cast<float>((std::max)(1, metrics.totalRows))));
+            const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+            const float ratio =
+                static_cast<float>(this->forgeFirstRow) /
+                static_cast<float>((std::max)(1, metrics.maxFirstRow));
+            const float thumbY = metrics.scrollTrack.y + (thumbTravel * ratio);
+            const SDL_FRect thumb = SDL_FRect{metrics.scrollTrack.x, thumbY, metrics.scrollTrack.w, thumbHeight};
+
+            this->forgeScrollDragging = true;
+            this->fleetScrollDragging = false;
+            this->pickerScrollDragging = false;
+            this->widgetDragging = false;
+
+            if (isPointInRect(x, y, thumb))
+            {
+                this->forgeScrollDragOffsetY = y - thumb.y;
+            }
+            else
+            {
+                this->forgeScrollDragOffsetY = thumbHeight * 0.5f;
+                const float thumbTop = clampf(
+                    y - this->forgeScrollDragOffsetY,
+                    metrics.scrollTrack.y,
+                    metrics.scrollTrack.y + thumbTravel);
+                const float t = (thumbTop - metrics.scrollTrack.y) / thumbTravel;
+                this->forgeFirstRow = static_cast<int>(t * static_cast<float>(metrics.maxFirstRow) + 0.5f);
+                this->forgeFirstRow = (std::max)(0, (std::min)(this->forgeFirstRow, metrics.maxFirstRow));
+            }
+            return true;
+        }
+
+        int visibleRow = 0;
+        for (int sourceIndex = this->forgeFirstRow; sourceIndex < static_cast<int>(this->forgeCannons.size()); ++sourceIndex)
+        {
+            if (visibleRow >= metrics.visibleRows)
+            {
+                break;
+            }
+
+            const SDL_FRect rowRect = getForgeRowRect(metrics.body, visibleRow);
+            if (isPointInRect(x, y, rowRect))
+            {
+                this->selectedForgeCannonIndex = sourceIndex;
+                this->selectedForgeUpgradeOptionIndex = 0;
+                this->syncForgeSelectionState();
+                return true;
+            }
+            ++visibleRow;
+        }
+
+        const ForgeTabCannonEntry* selectedCannon =
+            (!this->forgeCannons.empty() &&
+             this->selectedForgeCannonIndex >= 0 &&
+             this->selectedForgeCannonIndex < static_cast<int>(this->forgeCannons.size()))
+                ? &this->forgeCannons[static_cast<std::size_t>(this->selectedForgeCannonIndex)]
+                : nullptr;
+
+        if (isPointInRect(x, y, layout.forgeTargetMinusButton))
+        {
+            if (selectedCannon != nullptr && !selectedCannon->upgrades.empty())
+            {
+                this->selectedForgeUpgradeOptionIndex = (std::max)(0, this->selectedForgeUpgradeOptionIndex - 1);
+                this->syncForgeSelectionState();
+            }
+            return true;
+        }
+        if (isPointInRect(x, y, layout.forgeTargetPlusButton))
+        {
+            if (selectedCannon != nullptr && !selectedCannon->upgrades.empty())
+            {
+                this->selectedForgeUpgradeOptionIndex = (std::min)(
+                    static_cast<int>(selectedCannon->upgrades.size()) - 1,
+                    this->selectedForgeUpgradeOptionIndex + 1);
+                this->syncForgeSelectionState();
+            }
+            return true;
+        }
+        if (isPointInRect(x, y, layout.forgeUpgradeButton))
+        {
+            if (selectedCannon != nullptr &&
+                selectedCannon->quantity > 0 &&
+                !selectedCannon->upgrades.empty())
+            {
+                this->forgeUpgradePopup.open = true;
+                this->forgeUpgradePopup.cannonIndex = this->selectedForgeCannonIndex;
+                this->forgeUpgradePopup.maxQuantity = selectedCannon->quantity;
+                this->forgeUpgradePopup.quantity = selectedCannon->quantity;
+                this->forgeUpgradePopup.upgradeOptionIndex = this->selectedForgeUpgradeOptionIndex;
+            }
+            return true;
+        }
+
+        this->closeAppearancePicker();
+        return true;
+    }
+
     if (this->activeTab == ActiveTab::BOARDING_LOOT)
     {
         const BoardingLootMetrics metrics = buildBoardingLootMetrics(
@@ -4041,6 +4747,30 @@ bool AccountManagementWidget::mousewheelmoved(
         return true;
     }
 
+    if (this->activeTab == ActiveTab::FORGE)
+    {
+        const WidgetLayout layout = buildLayout(this->widgetRect);
+        if (!isPointInRect(mouse_x, mouse_y, layout.forgeListPanel))
+        {
+            return true;
+        }
+
+        const ForgeListMetrics metrics = buildForgeListMetrics(
+            layout.forgeListContent,
+            static_cast<int>(this->forgeCannons.size()));
+        if (metrics.maxFirstRow > 0)
+        {
+            const int rowBefore = this->forgeFirstRow;
+            this->forgeFirstRow -= delta;
+            this->forgeFirstRow = (std::max)(0, (std::min)(this->forgeFirstRow, metrics.maxFirstRow));
+            if (this->forgeFirstRow != rowBefore)
+            {
+                this->forgeScrollWheelHighlightSec = kScrollThumbWheelHighlightSec;
+            }
+        }
+        return true;
+    }
+
     if (this->activeTab == ActiveTab::ELITE_SHIPS || this->activeTab == ActiveTab::SPECIAL_SHIPS)
     {
         std::vector<InternalShipEntry>* ships = this->getShipsForTab(this->activeTab);
@@ -4203,6 +4933,7 @@ void AccountManagementWidget::draw(void) const
 
     drawTab(layout.tabAccount, "Compte", self->activeTab == ActiveTab::ACCOUNT);
     drawTab(layout.tabStorageEquipped, "Depot / Equipe", self->activeTab == ActiveTab::STORAGE_EQUIPPED);
+    drawTab(layout.tabForge, "Forge", self->activeTab == ActiveTab::FORGE);
     drawTab(layout.tabBoardingLoot, "Gestion de butin d'abordage", self->activeTab == ActiveTab::BOARDING_LOOT);
     drawTab(layout.tabShipManagement, "Gestion du navire", self->activeTab == ActiveTab::SHIP_MANAGEMENT);
     drawTab(layout.tabAppearance, "Apparence", self->activeTab == ActiveTab::APPEARANCE);
@@ -4603,7 +5334,11 @@ void AccountManagementWidget::draw(void) const
                     disabledForEquip ? kTextMuted : kTextGold);
                 drawTextAt(
                     &self->smallFont,
-                    disabledForEquip ? std::string("Maximum equipe") : ("Quantite : " + std::to_string(item.quantity)),
+                    disabledForEquip
+                        ? std::string("Maximum equipe")
+                        : (item.category == StorageTabEquipmentCategory::CANNONS
+                            ? ("Quantite : " + std::to_string(item.quantity) + "   Lvl " + std::to_string(item.cannonLevel))
+                            : ("Quantite : " + std::to_string(item.quantity))),
                     textX,
                     rowRect.y + 42.0f,
                     disabledForEquip ? kTextMuted : kTextBody);
@@ -4704,6 +5439,253 @@ void AccountManagementWidget::draw(void) const
         };
 
         drawHoveredCannonTooltip();
+    }
+    else if (self->activeTab == ActiveTab::FORGE)
+    {
+        auto drawForgePanel = [&](const SDL_FRect& r, const char* title) {
+            rc2d_graphics_setColor(kPanelFill);
+            rc2d_graphics_rectangle("fill", &r);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &r);
+            const SDL_FRect headerRect = SDL_FRect{r.x, r.y, r.w, 30.0f};
+            rc2d_graphics_setColor(kHeaderFill);
+            rc2d_graphics_rectangle("fill", &headerRect);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &headerRect);
+            drawTextAt(&self->bodyFont, title, headerRect.x + 10.0f, headerRect.y + 6.0f, kTextGold);
+        };
+
+        auto valOrDash = [](const std::string& value) {
+            return value.empty() ? std::string("-") : value;
+        };
+
+        auto drawCurrencyLine = [&](const RC2D_Image* icon, std::int64_t amount, float x, float y, float w, const char* label) {
+            drawTextAt(&self->smallFont, label, x, y, kTextMuted);
+            const SDL_FRect iconRect = SDL_FRect{x, y + 18.0f, 20.0f, 20.0f};
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &iconRect);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &iconRect);
+            drawImageFit(icon, iconRect);
+            drawTextAt(&self->bodyFont, formatWithDots(amount), x + 28.0f, y + 17.0f, kTextBody);
+            (void)w;
+        };
+
+        drawForgePanel(layout.forgeListPanel, "Forge des canons");
+        drawForgePanel(layout.forgeDetailsPanel, "Details de l'amelioration");
+
+        const ForgeListMetrics metrics = buildForgeListMetrics(
+            layout.forgeListContent,
+            static_cast<int>(self->forgeCannons.size()));
+        const int firstRow = (std::max)(0, (std::min)(self->forgeFirstRow, metrics.maxFirstRow));
+
+        if (self->forgeCannons.empty())
+        {
+            drawCentered(&self->bodyFont, "Aucun canon alimente", layout.forgeListContent, kTextMuted);
+            drawCentered(&self->bodyFont, "Selectionnez un canon a forger", layout.forgeDetailsPanel, kTextMuted);
+        }
+        else
+        {
+            self->selectedForgeCannonIndex = (std::max)(
+                0,
+                (std::min)(self->selectedForgeCannonIndex, static_cast<int>(self->forgeCannons.size()) - 1));
+            const ForgeTabCannonEntry& selectedCannon =
+                self->forgeCannons[static_cast<std::size_t>(self->selectedForgeCannonIndex)];
+            const bool hasUpgrades = !selectedCannon.upgrades.empty();
+            const int upgradeIndex = hasUpgrades
+                ? (std::max)(
+                    0,
+                    (std::min)(self->selectedForgeUpgradeOptionIndex, static_cast<int>(selectedCannon.upgrades.size()) - 1))
+                : -1;
+            const ForgeTabCannonUpgradeEntry* selectedUpgrade =
+                upgradeIndex >= 0
+                    ? &selectedCannon.upgrades[static_cast<std::size_t>(upgradeIndex)]
+                    : nullptr;
+            const ForgeTabCannonStatsDisplay& displayedStats =
+                selectedUpgrade != nullptr
+                    ? selectedUpgrade->targetStats
+                    : selectedCannon.currentStats;
+
+            int visibleRow = 0;
+            for (int sourceIndex = firstRow; sourceIndex < static_cast<int>(self->forgeCannons.size()); ++sourceIndex)
+            {
+                if (visibleRow >= metrics.visibleRows)
+                {
+                    break;
+                }
+
+                const ForgeTabCannonEntry& entry = self->forgeCannons[static_cast<std::size_t>(sourceIndex)];
+                const SDL_FRect rowRect = getForgeRowRect(metrics.body, visibleRow);
+                const bool selected = sourceIndex == self->selectedForgeCannonIndex;
+                rc2d_graphics_setColor(selected ? kSelectionFill : kFieldFill);
+                rc2d_graphics_rectangle("fill", &rowRect);
+                rc2d_graphics_setColor(kRowLine);
+                rc2d_graphics_rectangle("line", &rowRect);
+
+                const SDL_FRect iconRect = SDL_FRect{rowRect.x + 8.0f, rowRect.y + 8.0f, 56.0f, 56.0f};
+                rc2d_graphics_setColor(kPanelFill);
+                rc2d_graphics_rectangle("fill", &iconRect);
+                rc2d_graphics_setColor(kGold);
+                rc2d_graphics_rectangle("line", &iconRect);
+                if (sourceIndex >= 0 && sourceIndex < static_cast<int>(self->forgeCannonIcons.size()))
+                {
+                    drawImageFit(&self->forgeCannonIcons[static_cast<std::size_t>(sourceIndex)], iconRect);
+                }
+
+                drawTextAt(&self->bodyFont, entry.name.empty() ? std::string("-") : entry.name, iconRect.x + iconRect.w + 10.0f, rowRect.y + 12.0f, kTextGold);
+                drawTextAt(
+                    &self->smallFont,
+                    "Quantite : " + formatWithDots(entry.quantity) + "   Lvl " + formatWithDots(entry.currentLevel),
+                    iconRect.x + iconRect.w + 10.0f,
+                    rowRect.y + 40.0f,
+                    kTextBody);
+
+                ++visibleRow;
+            }
+
+            if (metrics.maxFirstRow > 0)
+            {
+                rc2d_graphics_setColor(kScrollTrack);
+                rc2d_graphics_rectangle("fill", &metrics.scrollTrack);
+
+                const float thumbHeight = (std::max)(
+                    kMinThumbHeight,
+                    (metrics.scrollTrack.h * static_cast<float>(metrics.visibleRows) /
+                        static_cast<float>((std::max)(1, metrics.totalRows))));
+                const float thumbTravel = (std::max)(1.0f, metrics.scrollTrack.h - thumbHeight);
+                const float ratio =
+                    static_cast<float>(firstRow) /
+                    static_cast<float>((std::max)(1, metrics.maxFirstRow));
+                const SDL_FRect thumb = SDL_FRect{
+                    metrics.scrollTrack.x,
+                    metrics.scrollTrack.y + (thumbTravel * ratio),
+                    metrics.scrollTrack.w,
+                    thumbHeight
+                };
+                rc2d_graphics_setColor(
+                    self->forgeScrollDragging || (self->forgeScrollWheelHighlightSec > 0.0f)
+                        ? kScrollThumbDragFill
+                        : kScrollThumb);
+                rc2d_graphics_rectangle("fill", &thumb);
+            }
+
+            const SDL_FRect previewRect = SDL_FRect{
+                layout.forgeDetailsPanel.x + 18.0f,
+                layout.forgeDetailsPanel.y + 48.0f,
+                132.0f,
+                132.0f
+            };
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &previewRect);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &previewRect);
+            if (self->selectedForgeCannonIndex >= 0 &&
+                self->selectedForgeCannonIndex < static_cast<int>(self->forgeCannonIcons.size()))
+            {
+                drawImageFit(&self->forgeCannonIcons[static_cast<std::size_t>(self->selectedForgeCannonIndex)], previewRect);
+            }
+
+            drawTextAt(&self->bodyFont, selectedCannon.name.empty() ? std::string("-") : selectedCannon.name, previewRect.x + previewRect.w + 18.0f, previewRect.y + 2.0f, kTextGold);
+            drawTextAt(
+                &self->smallFont,
+                "Quantite disponible : " + formatWithDots(selectedCannon.quantity),
+                previewRect.x + previewRect.w + 18.0f,
+                previewRect.y + 32.0f,
+                kTextBody);
+            drawTextAt(
+                &self->smallFont,
+                "Niveau actuel : " + formatWithDots(selectedCannon.currentLevel),
+                previewRect.x + previewRect.w + 18.0f,
+                previewRect.y + 54.0f,
+                kTextBody);
+            drawTextAt(
+                &self->smallFont,
+                "Niveau cible",
+                layout.forgeTargetMinusButton.x,
+                layout.forgeTargetMinusButton.y - 18.0f,
+                kTextMuted);
+
+            auto drawMiniButton = [&](const SDL_FRect& rect, const char* label, bool enabled) {
+                rc2d_graphics_setColor(enabled ? kButtonFill : kFieldFill);
+                rc2d_graphics_rectangle("fill", &rect);
+                rc2d_graphics_setColor(enabled ? kGold : kRowLine);
+                rc2d_graphics_rectangle("line", &rect);
+                drawCentered(&self->smallFont, label, rect, enabled ? kTextGold : kTextMuted);
+            };
+
+            drawMiniButton(layout.forgeTargetMinusButton, "-", hasUpgrades && upgradeIndex > 0);
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &layout.forgeTargetValue);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &layout.forgeTargetValue);
+            const std::string targetLevelLabel = selectedUpgrade != nullptr
+                ? ("Lvl " + formatWithDots(selectedUpgrade->targetLevel))
+                : std::string("-");
+            drawCentered(&self->smallFont, targetLevelLabel.c_str(), layout.forgeTargetValue, kTextGold);
+            drawMiniButton(
+                layout.forgeTargetPlusButton,
+                "+",
+                hasUpgrades && upgradeIndex < (static_cast<int>(selectedCannon.upgrades.size()) - 1));
+
+            const SDL_FRect statsPanel = SDL_FRect{
+                layout.forgeDetailsPanel.x + 18.0f,
+                layout.forgeDetailsPanel.y + 204.0f,
+                layout.forgeDetailsPanel.w - 36.0f,
+                178.0f
+            };
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &statsPanel);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &statsPanel);
+            drawTextAt(
+                &self->smallFont,
+                selectedUpgrade != nullptr ? "Stats du niveau cible" : "Stats actuelles",
+                statsPanel.x + 10.0f,
+                statsPanel.y + 8.0f,
+                kTextGold);
+
+            const std::array<std::pair<std::string, std::string>, 5> cannonRows = {{
+                {"Degats des cannons", valOrDash(displayedStats.damageDisplay)},
+                {"Degats critique des cannons", valOrDash(displayedStats.critDamageDisplay)},
+                {"Chance de coup critique des cannons", valOrDash(displayedStats.critChanceDisplay)},
+                {"Portee des cannons", valOrDash(displayedStats.rangeDisplay)},
+                {"Temps de recharge des cannons", valOrDash(displayedStats.reloadDisplay)}
+            }};
+            for (int row = 0; row < static_cast<int>(cannonRows.size()); ++row)
+            {
+                const SDL_FRect rowRect = SDL_FRect{
+                    statsPanel.x + 8.0f,
+                    statsPanel.y + 32.0f + (static_cast<float>(row) * 27.0f),
+                    statsPanel.w - 16.0f,
+                    24.0f
+                };
+                rc2d_graphics_setColor(kPanelFill);
+                rc2d_graphics_rectangle("fill", &rowRect);
+                rc2d_graphics_setColor(kRowLine);
+                rc2d_graphics_rectangle("line", &rowRect);
+                drawTextAt(&self->smallFont, cannonRows[static_cast<std::size_t>(row)].first, rowRect.x + 7.0f, rowRect.y + 5.0f, kTextGold);
+                const std::string& value = cannonRows[static_cast<std::size_t>(row)].second;
+                const float valueW = measureTextWidth(&self->smallFont, value);
+                drawTextAt(&self->smallFont, value, rowRect.x + rowRect.w - valueW - 7.0f, rowRect.y + 5.0f, kTextBody);
+            }
+
+            drawTextAt(&self->smallFont, "Cout par canon pour le niveau cible", layout.forgeDetailsPanel.x + 18.0f, layout.forgeDetailsPanel.y + 402.0f, kTextMuted);
+            const float costY = layout.forgeDetailsPanel.y + 422.0f;
+            drawCurrencyLine(&self->forgeRubiesIcon, selectedUpgrade != nullptr ? selectedUpgrade->rubiesCostPerCannon : 0, layout.forgeDetailsPanel.x + 18.0f, costY, 140.0f, "Rubies");
+            drawCurrencyLine(&self->forgePearlsIcon, selectedUpgrade != nullptr ? selectedUpgrade->pearlsCostPerCannon : 0, layout.forgeDetailsPanel.x + 188.0f, costY, 140.0f, "Perles");
+            drawCurrencyLine(&self->forgeCrystalsIcon, selectedUpgrade != nullptr ? selectedUpgrade->crystalsCostPerCannon : 0, layout.forgeDetailsPanel.x + 358.0f, costY, 140.0f, "Cristaux");
+
+            const bool canUpgrade = selectedCannon.quantity > 0 && hasUpgrades;
+            rc2d_graphics_setColor(canUpgrade ? kButtonFill : kFieldFill);
+            rc2d_graphics_rectangle("fill", &layout.forgeUpgradeButton);
+            rc2d_graphics_setColor(canUpgrade ? kStorageDropReadyLine : kRowLine);
+            rc2d_graphics_rectangle("line", &layout.forgeUpgradeButton);
+            drawCentered(
+                &self->smallFont,
+                canUpgrade ? "Ameliorer..." : "Aucune amelioration",
+                layout.forgeUpgradeButton,
+                canUpgrade ? kTextGold : kTextMuted);
+        }
     }
     else if (self->activeTab == ActiveTab::BOARDING_LOOT)
     {
@@ -5204,6 +6186,132 @@ void AccountManagementWidget::draw(void) const
         drawPopupButton(popupLayout.quantityPlusButton, "+", false);
         drawPopupButton(popupLayout.cancelButton, "ANNULER", false);
         drawPopupButton(popupLayout.transferButton, "TRANSFERT", true);
+    }
+
+    if (self->forgeUpgradePopup.open)
+    {
+        const ForgeUpgradePopupLayout popupLayout = buildForgeUpgradePopupLayout(self->widgetRect);
+        const ForgeTabCannonEntry* cannon =
+            (self->forgeUpgradePopup.cannonIndex >= 0 &&
+             self->forgeUpgradePopup.cannonIndex < static_cast<int>(self->forgeCannons.size()))
+                ? &self->forgeCannons[static_cast<std::size_t>(self->forgeUpgradePopup.cannonIndex)]
+                : nullptr;
+        const ForgeTabCannonUpgradeEntry* upgrade = nullptr;
+        RC2D_Image* popupIcon = nullptr;
+        if (cannon != nullptr &&
+            self->forgeUpgradePopup.upgradeOptionIndex >= 0 &&
+            self->forgeUpgradePopup.upgradeOptionIndex < static_cast<int>(cannon->upgrades.size()))
+        {
+            upgrade = &cannon->upgrades[static_cast<std::size_t>(self->forgeUpgradePopup.upgradeOptionIndex)];
+        }
+        if (self->forgeUpgradePopup.cannonIndex >= 0 &&
+            self->forgeUpgradePopup.cannonIndex < static_cast<int>(self->forgeCannonIcons.size()))
+        {
+            popupIcon = &self->forgeCannonIcons[static_cast<std::size_t>(self->forgeUpgradePopup.cannonIndex)];
+        }
+
+        rc2d_graphics_setColor(kPopupOverlayFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.overlay);
+        rc2d_graphics_setColor(kPanelFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.panel);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.panel);
+
+        rc2d_graphics_setColor(kHeaderFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.titleBar);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.titleBar);
+        drawCentered(&self->bodyFont, "Amelioration Forge", popupLayout.titleBar, kTextGold);
+
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.icon);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.icon);
+        drawImageFit(popupIcon, popupLayout.icon);
+
+        drawTextAt(
+            &self->bodyFont,
+            cannon != nullptr ? (cannon->name.empty() ? std::string("-") : cannon->name) : std::string("-"),
+            popupLayout.icon.x + popupLayout.icon.w + 24.0f,
+            popupLayout.icon.y - 2.0f,
+            kTextGold);
+        drawTextAt(
+            &self->smallFont,
+            cannon != nullptr ? ("Niveau actuel : " + formatWithDots(cannon->currentLevel)) : std::string("-"),
+            popupLayout.icon.x + popupLayout.icon.w + 24.0f,
+            popupLayout.icon.y + 20.0f,
+            kTextBody);
+
+        auto drawPopupButton = [&](const SDL_FRect& r, const char* label, bool primary, bool enabled) {
+            rc2d_graphics_setColor((primary && enabled) ? kButtonFill : kFieldFill);
+            rc2d_graphics_rectangle("fill", &r);
+            rc2d_graphics_setColor((primary && enabled) ? kStorageDropReadyLine : kGold);
+            rc2d_graphics_rectangle("line", &r);
+            drawCentered(&self->smallFont, label, r, enabled ? (primary ? kTextGold : kTextBody) : kTextMuted);
+        };
+
+        drawTextAt(&self->smallFont, "Niveau cible", popupLayout.targetLevelMinusButton.x, popupLayout.targetLevelMinusButton.y - 18.0f, kTextMuted);
+        drawPopupButton(
+            popupLayout.targetLevelMinusButton,
+            "-",
+            false,
+            cannon != nullptr && self->forgeUpgradePopup.upgradeOptionIndex > 0);
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.targetLevelValue);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.targetLevelValue);
+        const std::string popupTargetLabel = upgrade != nullptr ? ("Lvl " + formatWithDots(upgrade->targetLevel)) : std::string("-");
+        drawCentered(&self->bodyFont, popupTargetLabel.c_str(), popupLayout.targetLevelValue, kTextGold);
+        drawPopupButton(
+            popupLayout.targetLevelPlusButton,
+            "+",
+            false,
+            cannon != nullptr && upgrade != nullptr && self->forgeUpgradePopup.upgradeOptionIndex < (static_cast<int>(cannon->upgrades.size()) - 1));
+
+        drawTextAt(&self->smallFont, "Quantite a ameliorer", popupLayout.quantityMinusButton.x, popupLayout.quantityMinusButton.y - 18.0f, kTextMuted);
+        drawPopupButton(popupLayout.quantityMinusButton, "-", false, self->forgeUpgradePopup.quantity > 1);
+        rc2d_graphics_setColor(kFieldFill);
+        rc2d_graphics_rectangle("fill", &popupLayout.quantityValue);
+        rc2d_graphics_setColor(kGold);
+        rc2d_graphics_rectangle("line", &popupLayout.quantityValue);
+        const std::string popupQuantityLabel =
+            std::to_string(self->forgeUpgradePopup.quantity) +
+            " / " +
+            std::to_string((std::max)(1, self->forgeUpgradePopup.maxQuantity));
+        drawCentered(&self->bodyFont, popupQuantityLabel.c_str(), popupLayout.quantityValue, kTextGold);
+        drawPopupButton(
+            popupLayout.quantityPlusButton,
+            "+",
+            false,
+            self->forgeUpgradePopup.quantity < (std::max)(1, self->forgeUpgradePopup.maxQuantity));
+
+        const std::int64_t totalRubies =
+            upgrade != nullptr ? (upgrade->rubiesCostPerCannon * static_cast<std::int64_t>(self->forgeUpgradePopup.quantity)) : 0;
+        const std::int64_t totalPearls =
+            upgrade != nullptr ? (upgrade->pearlsCostPerCannon * static_cast<std::int64_t>(self->forgeUpgradePopup.quantity)) : 0;
+        const std::int64_t totalCrystals =
+            upgrade != nullptr ? (upgrade->crystalsCostPerCannon * static_cast<std::int64_t>(self->forgeUpgradePopup.quantity)) : 0;
+        drawTextAt(&self->smallFont, "Cout total", popupLayout.panel.x + 20.0f, popupLayout.panel.y + 234.0f, kTextMuted);
+
+        auto drawTotalCost = [&](const RC2D_Image* icon, std::int64_t amount, float x) {
+            const SDL_FRect iconRect = SDL_FRect{x, popupLayout.panel.y + 254.0f, 20.0f, 20.0f};
+            rc2d_graphics_setColor(kFieldFill);
+            rc2d_graphics_rectangle("fill", &iconRect);
+            rc2d_graphics_setColor(kGold);
+            rc2d_graphics_rectangle("line", &iconRect);
+            drawImageFit(icon, iconRect);
+            drawTextAt(&self->bodyFont, formatWithDots(amount), x + 28.0f, iconRect.y - 1.0f, kTextBody);
+        };
+        drawTotalCost(&self->forgeRubiesIcon, totalRubies, popupLayout.panel.x + 20.0f);
+        drawTotalCost(&self->forgePearlsIcon, totalPearls, popupLayout.panel.x + 150.0f);
+        drawTotalCost(&self->forgeCrystalsIcon, totalCrystals, popupLayout.panel.x + 280.0f);
+
+        drawPopupButton(popupLayout.cancelButton, "ANNULER", false, true);
+        drawPopupButton(
+            popupLayout.upgradeButton,
+            "AMELIORER",
+            true,
+            cannon != nullptr && upgrade != nullptr && self->forgeUpgradePopup.maxQuantity > 0);
     }
 
     if (self->storageDrag.active)

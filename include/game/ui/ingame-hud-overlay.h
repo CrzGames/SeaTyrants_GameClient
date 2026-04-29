@@ -20,6 +20,7 @@
 #include "game/ui/hud/experience-bar-widget.h"
 #include "game/ui/hud/game-settings-widget.h"
 #include "game/ui/hud/guild-mortar-widget.h"
+#include "game/ui/hud/guild-tower-widget.h"
 #include "game/ui/hud/hp-bar-widget.h"
 #include "game/ui/hud/leaderboard-widget.h"
 #include "game/ui/hud/log-book-widget.h"
@@ -247,6 +248,11 @@ public:
     GuildMortarWidget& getGuildMortarWidget(void) { return this->guildMortarWidget; }
 
     /**
+     * @brief Retourne la fenetre de Tower de guilde.
+     */
+    GuildTowerWidget& getGuildTowerWidget(void) { return this->guildTowerWidget; }
+
+    /**
      * @brief Acces au widget captcha (callbacks @ref CaptchaWidget::setOnValidateRequested, etc.).
      */
     CaptchaWidget& getCaptchaWidget(void) { return this->captchaWidget; }
@@ -281,8 +287,9 @@ private:
         MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
         ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
         GUILD_MORTAR = 9,       /**< Fenetre de mortier de guilde. */
-        CAPTCHA = 10,           /**< Verification captcha (reseau). */
-        LEADERBOARD = 11        /**< Fenetre classements (lien site). */
+        GUILD_TOWER = 10,       /**< Fenetre de Tower de guilde. */
+        CAPTCHA = 11,           /**< Verification captcha (reseau). */
+        LEADERBOARD = 12        /**< Fenetre classements (lien site). */
     };
 
     /**
@@ -320,6 +327,7 @@ private:
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
     GuildMortarWidget guildMortarWidget;                   /**< Fenetre "Guild Mortier". */
+    GuildTowerWidget guildTowerWidget;                     /**< Fenetre "Guild Tower". */
     CaptchaWidget captchaWidget;                           /**< Fenetre de verification captcha serveur. */
     LeaderboardWidget leaderboardWidget;                   /**< Fenetre classements (URL selon environnement). */
 
@@ -386,6 +394,7 @@ private:
     bool prevMarketsAndBazarVisible;    /**< Etat visible precedent de la fenetre marches + bazar. */
     bool prevAccountManagementVisible;  /**< Etat visible precedent de la fenetre compte/apparence/navires. */
     bool prevGuildMortarVisible;        /**< Etat visible precedent de la fenetre mortier de guilde. */
+    bool prevGuildTowerVisible;         /**< Etat visible precedent de la fenetre Tower de guilde. */
     bool prevCaptchaVisible;            /**< Etat visible precedent de la fenetre captcha. */
     bool prevLeaderboardVisible;        /**< Etat visible precedent de la fenetre classements. */
 
