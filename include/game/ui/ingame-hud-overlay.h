@@ -19,6 +19,7 @@
 #include "game/ui/hud/espion-search-player-widget.h"
 #include "game/ui/hud/experience-bar-widget.h"
 #include "game/ui/hud/game-settings-widget.h"
+#include "game/ui/hud/guild-mortar-widget.h"
 #include "game/ui/hud/hp-bar-widget.h"
 #include "game/ui/hud/leaderboard-widget.h"
 #include "game/ui/hud/log-book-widget.h"
@@ -241,6 +242,11 @@ public:
     AccountManagementWidget& getAccountManagementWidget(void) { return this->accountManagementWidget; }
 
     /**
+     * @brief Retourne la fenetre de mortier de guilde.
+     */
+    GuildMortarWidget& getGuildMortarWidget(void) { return this->guildMortarWidget; }
+
+    /**
      * @brief Acces au widget captcha (callbacks @ref CaptchaWidget::setOnValidateRequested, etc.).
      */
     CaptchaWidget& getCaptchaWidget(void) { return this->captchaWidget; }
@@ -274,8 +280,9 @@ private:
         LOG_BOOK = 6,           /**< Fenetre journal de bord. */
         MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
         ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
-        CAPTCHA = 9,            /**< Verification captcha (reseau). */
-        LEADERBOARD = 10        /**< Fenetre classements (lien site). */
+        GUILD_MORTAR = 9,       /**< Fenetre de mortier de guilde. */
+        CAPTCHA = 10,           /**< Verification captcha (reseau). */
+        LEADERBOARD = 11        /**< Fenetre classements (lien site). */
     };
 
     /**
@@ -312,6 +319,7 @@ private:
     LogBookWidget logBookWidget;                           /**< Fenetre "Journal de bord". */
     MarketsAndBazarWidget marketsAndBazarWidget;           /**< Fenetre "Marches / Bazar". */
     AccountManagementWidget accountManagementWidget;       /**< Fenetre "Compte / Apparence / Navires". */
+    GuildMortarWidget guildMortarWidget;                   /**< Fenetre "Guild Mortier". */
     CaptchaWidget captchaWidget;                           /**< Fenetre de verification captcha serveur. */
     LeaderboardWidget leaderboardWidget;                   /**< Fenetre classements (URL selon environnement). */
 
@@ -377,6 +385,7 @@ private:
     bool prevLogBookVisible;            /**< Etat visible precedent de la fenetre journal de bord. */
     bool prevMarketsAndBazarVisible;    /**< Etat visible precedent de la fenetre marches + bazar. */
     bool prevAccountManagementVisible;  /**< Etat visible precedent de la fenetre compte/apparence/navires. */
+    bool prevGuildMortarVisible;        /**< Etat visible precedent de la fenetre mortier de guilde. */
     bool prevCaptchaVisible;            /**< Etat visible precedent de la fenetre captcha. */
     bool prevLeaderboardVisible;        /**< Etat visible precedent de la fenetre classements. */
 

@@ -33,6 +33,22 @@ void GameScene::populateMoneyDemoData(void)
         });
 }
 
+void GameScene::populateGuildMortarData(void)
+{
+    GuildMortarWidget& guildMortarWidget = GetIngameHudOverlay().getGuildMortarWidget();
+    guildMortarWidget.setMortarLevels(
+        std::vector<GuildMortarWidget::MortarLevelEntry>{
+            {"Mortier I", 2500, 5.0f, 12, 50000, 0},
+            {"Mortier II", 4200, 4.5f, 14, 85000, 0},
+            {"Mortier III", 6100, 4.0f, 16, 120000, 0},
+            {"Mortier IV", 7500, 4.0f, 18, 150000, 0}
+        });
+    guildMortarWidget.setSelectedMortarLevelIndex(2);
+    guildMortarWidget.setMortarEnabled(false);
+    guildMortarWidget.setTreasuryGoldAmount(3147765460LL);
+    guildMortarWidget.setTreasuryRubiesAmount(396083);
+}
+
 void GameScene::populateAccountManagementDemoData(void)
 {
     using EliteShipsTabShipEntry = AccountManagementWidget::EliteShipsTabShipEntry;
@@ -365,6 +381,7 @@ void GameScene::load(void)
     this->syncHudStatusWidgets(player);
     this->populateMoneyDemoData();
     this->populateAccountManagementDemoData();
+    this->populateGuildMortarData();
 
     // Met a jour le rectangle map (zone monde) a partir du game screen.
     map.update();

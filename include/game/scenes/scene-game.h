@@ -20,6 +20,7 @@ private:
     void populateMarketDemoData(void);
     void populateMoneyDemoData(void);
     void populateAccountManagementDemoData(void);
+    void populateGuildMortarData(void);
     void syncHudStatusWidgets(const Player& player);
 
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
