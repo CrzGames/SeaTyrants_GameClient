@@ -23,6 +23,7 @@
 
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
+#include "game/scenes/editormap-scene-layout.h"
 #include "game/render/world-render-clip.h"
 
 // ---------------------------------------------------------------------------
@@ -7022,6 +7023,8 @@ void EditorMapShipDownscaleScene::onExportMapDialogResult(void* userdata, const 
 
 void EditorMapShipDownscaleScene::unload(void)
 {
+    EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
+
     if (EditorMapShipDownscaleScene::activeInstance == this)
     {
         EditorMapShipDownscaleScene::activeInstance = nullptr;
@@ -7058,6 +7061,7 @@ void EditorMapShipDownscaleScene::unload(void)
 void EditorMapShipDownscaleScene::load(void)
 {
     EditorMapShipDownscaleScene::activeInstance = this;
+    EditorMapSceneLayout::pushBottomToolbarPlayfieldMargins();
     this->resetEditorState();
     this->unloadImportedShips();
     this->unloadImportedAssets();

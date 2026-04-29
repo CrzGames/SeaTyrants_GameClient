@@ -18,6 +18,7 @@
 
 #include "core/context.h"
 #include "game/render/world-render-clip.h"
+#include "game/scenes/editormap-scene-layout.h"
 
 struct OceanColorEntry
 {
@@ -1614,6 +1615,8 @@ void EditorMapAnchorShipScene::onOpenShipFolderDialogResult(void* userdata, cons
 
 void EditorMapAnchorShipScene::unload(void)
 {
+    EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
+
     if (EditorMapAnchorShipScene::activeInstance == this)
     {
         EditorMapAnchorShipScene::activeInstance = nullptr;
@@ -1632,6 +1635,7 @@ void EditorMapAnchorShipScene::unload(void)
 void EditorMapAnchorShipScene::load(void)
 {
     EditorMapAnchorShipScene::activeInstance = this;
+    EditorMapSceneLayout::pushBottomToolbarPlayfieldMargins();
     this->unloadShipFrames();
     this->resetEditorState();
     this->ensureUserStorageFolders();

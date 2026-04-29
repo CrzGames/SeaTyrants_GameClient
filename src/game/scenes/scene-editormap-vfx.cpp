@@ -26,6 +26,7 @@
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
 #include "game/map/map.h"
+#include "game/scenes/editormap-scene-layout.h"
 #include "game/render/world-render-clip.h"
 
 namespace
@@ -18647,6 +18648,8 @@ void EditorMapVfxScene::onExportFolderDialogResult(void* userdata, const char* c
 
 void EditorMapVfxScene::unload(void)
 {
+    EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
+
     if (EditorMapVfxScene::activeInstance == this)
     {
         EditorMapVfxScene::activeInstance = nullptr;
@@ -18722,6 +18725,7 @@ void EditorMapVfxScene::unload(void)
 void EditorMapVfxScene::load(void)
 {
     EditorMapVfxScene::activeInstance = this;
+    EditorMapSceneLayout::pushBottomToolbarPlayfieldMargins();
     this->resetEditorState();
     this->ensureUserStorageFolders();
 

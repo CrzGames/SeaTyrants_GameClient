@@ -22,6 +22,7 @@
 
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
+#include "game/scenes/editormap-scene-layout.h"
 #include "game/render/world-render-clip.h"
 
 // ---------------------------------------------------------------------------
@@ -5286,6 +5287,8 @@ void EditorMapCreateMapScene::onExportMapDialogResult(void* userdata, const char
 
 void EditorMapCreateMapScene::unload(void)
 {
+    EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
+
     if (EditorMapCreateMapScene::activeInstance == this)
     {
         EditorMapCreateMapScene::activeInstance = nullptr;
@@ -5321,6 +5324,7 @@ void EditorMapCreateMapScene::unload(void)
 void EditorMapCreateMapScene::load(void)
 {
     EditorMapCreateMapScene::activeInstance = this;
+    EditorMapSceneLayout::pushBottomToolbarPlayfieldMargins();
     this->resetEditorState();
     this->unloadImportedAssets();
     this->ensureUserStorageFolders();

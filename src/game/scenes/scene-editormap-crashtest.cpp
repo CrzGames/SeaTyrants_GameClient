@@ -16,6 +16,7 @@
 
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
+#include "game/scenes/editormap-scene-layout.h"
 #include "game/render/world-render-clip.h"
 
 struct OceanColorEntry
@@ -1160,6 +1161,8 @@ bool EditorMapCrashTestScene::getMouseRenderPosition(float* outX, float* outY) c
 
 void EditorMapCrashTestScene::unload(void)
 {
+    EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
+
     GetOceanShader().unload();
     this->scrollBarOverlay.unload();
     this->renderShipPrototype.unloadSprites();
@@ -1170,6 +1173,7 @@ void EditorMapCrashTestScene::unload(void)
 
 void EditorMapCrashTestScene::load(void)
 {
+    EditorMapSceneLayout::pushBottomToolbarPlayfieldMargins();
     this->resetSceneState();
 
     this->backgroundWidget.load();
