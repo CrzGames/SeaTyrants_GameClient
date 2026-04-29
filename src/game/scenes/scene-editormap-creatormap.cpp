@@ -17,6 +17,7 @@
 
 #include <RC2D/RC2D_filedialog.h>
 #include <RC2D/RC2D_storage.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_surface.h>
 #include <cJSON.h>
 
@@ -391,9 +392,12 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonToolUnblockRect{},
       buttonToolPlaceRect{},
       buttonToolRemoveRect{},
+      buttonToolInteractRect{},
       buttonToolShipRect{},
       buttonToolShipControlRect{},
       buttonToolHotspotRect{},
+      buttonTowerVariantsPickerRect{},
+      buttonTowerDisplayModeRect{},
       buttonAssetPrevRect{},
       buttonAssetNextRect{},
       buttonOceanPrevRect{},
@@ -421,6 +425,14 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       assetListRect{},
       shipListRect{},
       miniMapRect{},
+      towerVariantPickerRect{},
+      towerVariantLevelTabRects{},
+      towerVariantConfirmRect{},
+      towerVariantPickerVisible(false),
+      towerDisplayPickerRect{},
+      towerDisplayLevelTabRects{},
+      towerDisplayConfirmRect{},
+      towerDisplayPickerVisible(false),
       miniMapDragActive(false),
       miniMapDragOffsetX(0.0f),
       miniMapDragOffsetY(0.0f)
@@ -453,13 +465,28 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedBlockedColorIndex = 0;
     this->selectedHotspotColorIndex = 0;
     this->shipScalePercent = 100;
+    this->selectedTowerHotspotNumber = 1;
+    this->selectedTowerVariantLevel = 1;
+    this->towerPreviewDisplayLevel = 1;
+    this->towerPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS;
+    this->towerVariantPickerVisible = false;
+    this->towerDisplayPickerVisible = false;
+    this->selectedAssetClickGuiTarget = EditorMapAssetClickGuiTarget::NONE;
+    this->selectedAssetClickDistanceTiles = kEditorMapDefaultAssetClickDistanceTiles;
+    this->selectedPlacedAssetIndex = -1;
+    this->assetInteractionListScrollOffset = 0;
+    this->assetInteractionEditMode = AssetInteractionEditMode::SELECT;
     this->hoveredTileValid = false;
     this->dragPaintActive = false;
     this->dragPaintBlockedValue = true;
     this->lastDragPaintTileValid = false;
+    this->assetInteractionPaintActive = false;
+    this->assetInteractionPaintValue = true;
+    this->lastAssetInteractionPaintTileValid = false;
     this->historyActions.clear();
     this->historyCursor = 0;
     this->towerHotspots.clear();
+    this->towerVisualSets.clear();
     this->importedShips.clear();
     this->importedAssetCounter = 0U;
     this->statusMessage = "Editor map pret.";
@@ -480,6 +507,9 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->assetListScrollDragGrabOffsetY = 0.0f;
     this->shipListScrollDragActive = false;
     this->shipListScrollDragGrabOffsetY = 0.0f;
+    this->assetInteractionPaintActive = false;
+    this->assetInteractionPaintValue = true;
+    this->lastAssetInteractionPaintTileValid = false;
     this->clickMarker.hide();
     this->clickMarker.setDurationSeconds(0.85);
     this->testShip.unloadSprites();
@@ -515,9 +545,12 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonToolUnblockRect = SDL_FRect{};
     this->buttonToolPlaceRect = SDL_FRect{};
     this->buttonToolRemoveRect = SDL_FRect{};
+    this->buttonToolInteractRect = SDL_FRect{};
     this->buttonToolShipRect = SDL_FRect{};
     this->buttonToolShipControlRect = SDL_FRect{};
     this->buttonToolHotspotRect = SDL_FRect{};
+    this->buttonTowerVariantsPickerRect = SDL_FRect{};
+    this->buttonTowerDisplayModeRect = SDL_FRect{};
     this->buttonAssetPrevRect = SDL_FRect{};
     this->buttonAssetNextRect = SDL_FRect{};
     this->buttonOceanPrevRect = SDL_FRect{};
@@ -545,6 +578,12 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->assetListRect = SDL_FRect{};
     this->shipListRect = SDL_FRect{};
     this->miniMapRect = SDL_FRect{};
+    this->towerVariantPickerRect = SDL_FRect{};
+    this->towerVariantLevelTabRects = {};
+    this->towerVariantConfirmRect = SDL_FRect{};
+    this->towerDisplayPickerRect = SDL_FRect{};
+    this->towerDisplayLevelTabRects = {};
+    this->towerDisplayConfirmRect = SDL_FRect{};
     this->miniMapDragActive = false;
     this->miniMapDragOffsetX = 0.0f;
     this->miniMapDragOffsetY = 0.0f;
@@ -568,6 +607,7 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
 
     this->importedAssets.clear();
     this->placedAssets.clear();
+    this->towerVisualSets.clear();
     this->historyActions.clear();
     this->historyCursor = 0;
     this->selectedAssetIndex = -1;
@@ -583,6 +623,9 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
     this->importBatchNextIndex = 0;
     this->importBatchImportedCount = 0;
     this->importBatchFailedCount = 0;
+    this->selectedPlacedAssetIndex = -1;
+    this->assetInteractionListScrollOffset = 0;
+    this->assetInteractionEditMode = AssetInteractionEditMode::SELECT;
     this->assetListScrollDragActive = false;
     this->assetListScrollDragGrabOffsetY = 0.0f;
 }
@@ -784,6 +827,62 @@ bool EditorMapCreateMapScene::getPlacedAssetAtTile(int tileX, int tileY, PlacedA
     return true;
 }
 
+bool EditorMapCreateMapScene::isPlacedAssetIndexValid(int index) const
+{
+    return (
+        index >= 0 &&
+        index < static_cast<int>(this->placedAssets.size()));
+}
+
+void EditorMapCreateMapScene::clearSelectedPlacedAsset(void)
+{
+    this->selectedPlacedAssetIndex = -1;
+    this->assetInteractionListScrollOffset = 0;
+    this->assetInteractionEditMode = AssetInteractionEditMode::SELECT;
+}
+
+bool EditorMapCreateMapScene::selectPlacedAssetAtScreenPoint(float x, float y)
+{
+    const int assetIndex = this->findPlacedAssetIndexAtScreenPoint(x, y);
+    if (assetIndex < 0 || !this->isPlacedAssetIndexValid(assetIndex))
+    {
+        return false;
+    }
+
+    if (this->selectedPlacedAssetIndex == assetIndex)
+    {
+        return false;
+    }
+
+    this->selectedPlacedAssetIndex = assetIndex;
+    const PlacedAsset& selectedPlacedAsset = this->placedAssets[static_cast<size_t>(assetIndex)];
+    this->selectedAssetClickGuiTarget = selectedPlacedAsset.clickGuiTarget;
+    this->selectedAssetClickDistanceTiles = ClampEditorMapAssetClickDistanceTiles(
+        selectedPlacedAsset.clickGuiDistanceTiles);
+    for (int i = 0; i < static_cast<int>(kEditorMapAssetClickGuiTargets.size()); ++i)
+    {
+        if (kEditorMapAssetClickGuiTargets[static_cast<size_t>(i)].target !=
+            selectedPlacedAsset.clickGuiTarget)
+        {
+            continue;
+        }
+
+        this->assetInteractionListScrollOffset =
+            std::clamp(i - (kAssetListVisibleRows / 2), 0, this->getAssetListMaxScrollOffset());
+        break;
+    }
+
+    const EditorMapAssetClickGuiTargetInfo& guiInfo =
+        GetEditorMapAssetClickGuiTargetInfo(selectedPlacedAsset.clickGuiTarget);
+    this->statusMessage =
+        "Asset selectionne pour interaction: GUI="
+        + std::string(guiInfo.label) + " | Tiles="
+        + std::to_string(static_cast<int>(
+            this->computePlacedAssetClickInteractionTiles(selectedPlacedAsset).size()))
+        + " tiles.";
+    return true;
+}
+
 void EditorMapCreateMapScene::setPlacedAssetStateAtTile(int tileX, int tileY, bool hasAsset, const PlacedAsset* assetState)
 {
     const int existingIndex = this->findPlacedAssetIndexAtTile(tileX, tileY);
@@ -814,6 +913,14 @@ void EditorMapCreateMapScene::setPlacedAssetStateAtTile(int tileX, int tileY, bo
                 }
 
                 this->placedAssets.erase(this->placedAssets.begin() + i);
+                if (this->selectedPlacedAssetIndex == i)
+                {
+                    this->clearSelectedPlacedAsset();
+                }
+                else if (this->selectedPlacedAssetIndex > i)
+                {
+                    this->selectedPlacedAssetIndex -= 1;
+                }
                 return;
             }
         }
@@ -822,6 +929,14 @@ void EditorMapCreateMapScene::setPlacedAssetStateAtTile(int tileX, int tileY, bo
         if (existingIndex >= 0)
         {
             this->placedAssets.erase(this->placedAssets.begin() + existingIndex);
+            if (this->selectedPlacedAssetIndex == existingIndex)
+            {
+                this->clearSelectedPlacedAsset();
+            }
+            else if (this->selectedPlacedAssetIndex > existingIndex)
+            {
+                this->selectedPlacedAssetIndex -= 1;
+            }
         }
         return;
     }
@@ -845,6 +960,12 @@ void EditorMapCreateMapScene::setPlacedAssetStateAtTile(int tileX, int tileY, bo
     if (existingIndex >= 0)
     {
         this->placedAssets[static_cast<size_t>(existingIndex)] = nextAsset;
+        if (this->selectedPlacedAssetIndex == existingIndex)
+        {
+            this->selectedAssetClickGuiTarget = nextAsset.clickGuiTarget;
+            this->selectedAssetClickDistanceTiles = ClampEditorMapAssetClickDistanceTiles(
+                nextAsset.clickGuiDistanceTiles);
+        }
         return;
     }
 
@@ -919,6 +1040,10 @@ void EditorMapCreateMapScene::applyHistoryAction(const HistoryAction& action, bo
 
     const PlacedAsset& assetState = applyAfter ? action.afterAsset : action.beforeAsset;
     this->setPlacedAssetStateAtTile(action.tileX, action.tileY, true, &assetState);
+    if (!this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+    {
+        this->clearSelectedPlacedAsset();
+    }
 }
 
 void EditorMapCreateMapScene::undoHistoryAction(void)
@@ -1143,6 +1268,10 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
             placedAsset.anchorTileX = snappedAnchorTileX;
             placedAsset.anchorTileY = snappedAnchorTileY;
             placedAsset.scale = 1.0f;
+            placedAsset.clickGuiTarget = this->selectedAssetClickGuiTarget;
+            placedAsset.clickGuiDistanceTiles = this->selectedAssetClickDistanceTiles;
+            placedAsset.clickGuiUsesLegacyRadius = false;
+            placedAsset.clickGuiTiles.clear();
 
             HistoryAction action{};
             action.type = HistoryAction::Type::ASSET_AT_TILE;
@@ -1154,7 +1283,18 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
             action.afterAsset = placedAsset;
             this->pushHistoryAction(action);
 
-            this->statusMessage = "Asset remplace.";
+            const EditorMapAssetClickGuiTargetInfo& guiInfo =
+                GetEditorMapAssetClickGuiTargetInfo(placedAsset.clickGuiTarget);
+            if (placedAsset.clickGuiTarget == EditorMapAssetClickGuiTarget::NONE)
+            {
+                this->statusMessage = "Asset remplace (sans GUI au clic).";
+            }
+            else
+            {
+                this->statusMessage =
+                    "Asset remplace + GUI " + std::string(guiInfo.label) +
+                    " (0 tile).";
+            }
             return;
         }
     }
@@ -1166,6 +1306,10 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
     placedAsset.anchorTileX = snappedAnchorTileX;
     placedAsset.anchorTileY = snappedAnchorTileY;
     placedAsset.scale = 1.0f;
+    placedAsset.clickGuiTarget = this->selectedAssetClickGuiTarget;
+    placedAsset.clickGuiDistanceTiles = this->selectedAssetClickDistanceTiles;
+    placedAsset.clickGuiUsesLegacyRadius = false;
+    placedAsset.clickGuiTiles.clear();
     this->placedAssets.push_back(placedAsset);
 
     HistoryAction action{};
@@ -1177,7 +1321,18 @@ void EditorMapCreateMapScene::placeSelectedAssetAtMouseTile(void)
     action.afterAsset = placedAsset;
     this->pushHistoryAction(action);
 
-    this->statusMessage = "Asset pose.";
+    const EditorMapAssetClickGuiTargetInfo& guiInfo =
+        GetEditorMapAssetClickGuiTargetInfo(placedAsset.clickGuiTarget);
+    if (placedAsset.clickGuiTarget == EditorMapAssetClickGuiTarget::NONE)
+    {
+        this->statusMessage = "Asset pose (sans GUI au clic).";
+    }
+    else
+    {
+        this->statusMessage =
+            "Asset pose + GUI " + std::string(guiInfo.label) +
+            " (0 tile).";
+    }
 }
 
 void EditorMapCreateMapScene::removeAssetAtMouseTile(void)
@@ -1254,6 +1409,14 @@ void EditorMapCreateMapScene::removeAssetAtMouseTile(void)
                 action.beforeAsset = placedAsset;
 
                 this->placedAssets.erase(this->placedAssets.begin() + i);
+                if (this->selectedPlacedAssetIndex == i)
+                {
+                    this->clearSelectedPlacedAsset();
+                }
+                else if (this->selectedPlacedAssetIndex > i)
+                {
+                    this->selectedPlacedAssetIndex -= 1;
+                }
                 this->pushHistoryAction(action);
                 this->statusMessage = "Asset supprime.";
                 return;
@@ -1275,7 +1438,11 @@ void EditorMapCreateMapScene::removeAssetAtMouseTile(void)
             {
                 return depthA < depthB;
             }
-            return assetA.tileY < assetB.tileY;
+            if (assetA.tileY != assetB.tileY)
+            {
+                return assetA.tileY < assetB.tileY;
+            }
+            return a < b;
         });
 
     const size_t targetIndex = candidates.back();
@@ -1294,6 +1461,14 @@ void EditorMapCreateMapScene::removeAssetAtMouseTile(void)
     action.beforeAsset = removedAsset;
 
     this->placedAssets.erase(this->placedAssets.begin() + static_cast<std::ptrdiff_t>(targetIndex));
+    if (this->selectedPlacedAssetIndex == static_cast<int>(targetIndex))
+    {
+        this->clearSelectedPlacedAsset();
+    }
+    else if (this->selectedPlacedAssetIndex > static_cast<int>(targetIndex))
+    {
+        this->selectedPlacedAssetIndex -= 1;
+    }
     this->pushHistoryAction(action);
     this->statusMessage = "Asset supprime.";
 }
@@ -1548,20 +1723,277 @@ SDL_Point EditorMapCreateMapScene::computePlacedAssetCenterTile(const PlacedAsse
     return map.screenToTileNearest(centerScreenX, centerScreenY);
 }
 
-void EditorMapCreateMapScene::toggleTowerHotspotAtTile(int tileX, int tileY)
+std::vector<SDL_Point> EditorMapCreateMapScene::computePlacedAssetClickInteractionTiles(
+    const PlacedAsset& asset) const
 {
-    for (size_t i = 0; i < this->towerHotspots.size(); ++i)
+    if (!asset.clickGuiTiles.empty())
     {
-        if (this->towerHotspots[i].tileX == tileX && this->towerHotspots[i].tileY == tileY)
+        return asset.clickGuiTiles;
+    }
+
+    if (!asset.clickGuiUsesLegacyRadius)
+    {
+        return {};
+    }
+
+    std::vector<SDL_Point> coveredTiles;
+
+    const Map& map = GetCurrentMap();
+    if (map.getWidthTiles() <= 0 || map.getHeightTiles() <= 0)
+    {
+        return coveredTiles;
+    }
+
+    const SDL_Point centerTile = this->computePlacedAssetCenterTile(asset);
+    const int radiusTiles = ClampEditorMapAssetClickDistanceTiles(asset.clickGuiDistanceTiles);
+
+    for (int offsetY = -radiusTiles; offsetY <= radiusTiles; ++offsetY)
+    {
+        for (int offsetX = -radiusTiles; offsetX <= radiusTiles; ++offsetX)
         {
-            this->towerHotspots.erase(this->towerHotspots.begin() + static_cast<std::ptrdiff_t>(i));
-            this->statusMessage = "Hotspot tour retire.";
-            return;
+            if ((offsetX * offsetX) + (offsetY * offsetY) > (radiusTiles * radiusTiles))
+            {
+                continue;
+            }
+
+            const int tileX = centerTile.x + offsetX;
+            const int tileY = centerTile.y + offsetY;
+            if (!map.isInside(tileX, tileY))
+            {
+                continue;
+            }
+
+            coveredTiles.push_back(SDL_Point{tileX, tileY});
         }
     }
 
-    this->towerHotspots.push_back(TowerHotspot{tileX, tileY});
-    this->statusMessage = "Hotspot tour ajoute.";
+    return coveredTiles;
+}
+
+bool EditorMapCreateMapScene::placedAssetHasClickInteractionTile(
+    const PlacedAsset& asset,
+    int tileX,
+    int tileY) const
+{
+    for (const SDL_Point& tile : asset.clickGuiTiles)
+    {
+        if (tile.x == tileX && tile.y == tileY)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool EditorMapCreateMapScene::setPlacedAssetClickInteractionTile(
+    int placedAssetIndex,
+    int tileX,
+    int tileY,
+    bool enabled)
+{
+    if (!this->isPlacedAssetIndexValid(placedAssetIndex))
+    {
+        return false;
+    }
+
+    const Map& map = GetCurrentMap();
+    if (!map.isInside(tileX, tileY))
+    {
+        return false;
+    }
+
+    PlacedAsset& asset = this->placedAssets[static_cast<size_t>(placedAssetIndex)];
+    if (asset.clickGuiUsesLegacyRadius && asset.clickGuiTiles.empty())
+    {
+        asset.clickGuiTiles = this->computePlacedAssetClickInteractionTiles(asset);
+    }
+    asset.clickGuiUsesLegacyRadius = false;
+
+    auto it = std::find_if(
+        asset.clickGuiTiles.begin(),
+        asset.clickGuiTiles.end(),
+        [tileX, tileY](const SDL_Point& tile) {
+            return tile.x == tileX && tile.y == tileY;
+        });
+
+    if (enabled)
+    {
+        if (it != asset.clickGuiTiles.end())
+        {
+            return false;
+        }
+
+        asset.clickGuiTiles.push_back(SDL_Point{tileX, tileY});
+        return true;
+    }
+
+    if (it == asset.clickGuiTiles.end())
+    {
+        return false;
+    }
+
+    asset.clickGuiTiles.erase(it);
+    return true;
+}
+
+void EditorMapCreateMapScene::paintSelectedPlacedAssetInteractionAtMouse(bool enabled)
+{
+    if (!this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+    {
+        return;
+    }
+
+    SDL_Point tile{};
+    if (!this->tryGetMouseTile(&tile))
+    {
+        return;
+    }
+
+    if (!this->setPlacedAssetClickInteractionTile(
+            this->selectedPlacedAssetIndex,
+            tile.x,
+            tile.y,
+            enabled))
+    {
+        return;
+    }
+
+    this->lastAssetInteractionPaintTileValid = true;
+    this->lastAssetInteractionPaintTile = tile;
+
+    const PlacedAsset& asset =
+        this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)];
+    const EditorMapAssetClickGuiTargetInfo& guiInfo =
+        GetEditorMapAssetClickGuiTargetInfo(asset.clickGuiTarget);
+    this->statusMessage =
+        std::string(enabled ? "Tile interaction ajoutee: " : "Tile interaction retiree: ")
+        + std::to_string(tile.x) + "," + std::to_string(tile.y)
+        + " | GUI=" + std::string(guiInfo.label)
+        + " | Tiles=" + std::to_string(static_cast<int>(asset.clickGuiTiles.size()));
+}
+
+int EditorMapCreateMapScene::findTowerHotspotIndexAtTile(int tileX, int tileY) const
+{
+    for (int i = 0; i < static_cast<int>(this->towerHotspots.size()); ++i)
+    {
+        const TowerHotspot& hotspot = this->towerHotspots[static_cast<size_t>(i)];
+        if (hotspot.tileX == tileX && hotspot.tileY == tileY)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int EditorMapCreateMapScene::findTowerHotspotIndexByNumber(int towerNumber) const
+{
+    const int clampedTowerNumber = ClampEditorMapTowerHotspotNumber(towerNumber);
+    for (int i = 0; i < static_cast<int>(this->towerHotspots.size()); ++i)
+    {
+        if (this->towerHotspots[static_cast<size_t>(i)].towerNumber == clampedTowerNumber)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int EditorMapCreateMapScene::findTowerVisualSetIndexByNumber(int towerNumber) const
+{
+    const int clampedTowerNumber = ClampEditorMapTowerHotspotNumber(towerNumber);
+    for (int i = 0; i < static_cast<int>(this->towerVisualSets.size()); ++i)
+    {
+        if (this->towerVisualSets[static_cast<size_t>(i)].towerNumber == clampedTowerNumber)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+EditorMapCreateMapScene::TowerVisualSet& EditorMapCreateMapScene::ensureTowerVisualSet(int towerNumber)
+{
+    const int clampedTowerNumber = ClampEditorMapTowerHotspotNumber(towerNumber);
+    const int existingIndex = this->findTowerVisualSetIndexByNumber(clampedTowerNumber);
+    if (existingIndex >= 0)
+    {
+        return this->towerVisualSets[static_cast<size_t>(existingIndex)];
+    }
+
+    TowerVisualSet visualSet{};
+    visualSet.towerNumber = clampedTowerNumber;
+    if (!this->towerVisualSets.empty())
+    {
+        visualSet.importedAssetIndices = this->towerVisualSets.front().importedAssetIndices;
+    }
+    this->towerVisualSets.push_back(visualSet);
+    return this->towerVisualSets.back();
+}
+
+int EditorMapCreateMapScene::findFirstFreeTowerHotspotNumber(void) const
+{
+    for (int towerNumber = 1; towerNumber <= kEditorMapMaxTowerHotspots; ++towerNumber)
+    {
+        if (this->findTowerHotspotIndexByNumber(towerNumber) < 0)
+        {
+            return towerNumber;
+        }
+    }
+
+    return 0;
+}
+
+void EditorMapCreateMapScene::toggleTowerHotspotAtTile(int tileX, int tileY)
+{
+    const int towerNumber = ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber);
+    const int hotspotAtTileIndex = this->findTowerHotspotIndexAtTile(tileX, tileY);
+    if (hotspotAtTileIndex >= 0 &&
+        this->towerHotspots[static_cast<size_t>(hotspotAtTileIndex)].towerNumber == towerNumber)
+    {
+        this->towerHotspots.erase(
+            this->towerHotspots.begin() + static_cast<std::ptrdiff_t>(hotspotAtTileIndex));
+        this->statusMessage = "Hotspot tour " + std::to_string(towerNumber) + " retire.";
+        return;
+    }
+
+    const int hotspotForTowerIndex = this->findTowerHotspotIndexByNumber(towerNumber);
+    if (hotspotForTowerIndex >= 0)
+    {
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].tileX = tileX;
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].tileY = tileY;
+        (void)this->ensureTowerVisualSet(towerNumber);
+
+        if (hotspotAtTileIndex >= 0 && hotspotAtTileIndex != hotspotForTowerIndex)
+        {
+            this->towerHotspots.erase(
+                this->towerHotspots.begin() + static_cast<std::ptrdiff_t>(hotspotAtTileIndex));
+        }
+
+        this->statusMessage = "Hotspot tour " + std::to_string(towerNumber) + " deplace.";
+        return;
+    }
+
+    if (hotspotAtTileIndex >= 0)
+    {
+        this->towerHotspots[static_cast<size_t>(hotspotAtTileIndex)].towerNumber = towerNumber;
+        (void)this->ensureTowerVisualSet(towerNumber);
+        this->statusMessage = "Hotspot tour " + std::to_string(towerNumber) + " affecte.";
+        return;
+    }
+
+    if (this->towerHotspots.size() >= static_cast<size_t>(kEditorMapMaxTowerHotspots))
+    {
+        this->statusMessage = "Limite atteinte: 12 hotspots tour max.";
+        return;
+    }
+
+    this->towerHotspots.push_back(TowerHotspot{tileX, tileY, towerNumber});
+    (void)this->ensureTowerVisualSet(towerNumber);
+    this->statusMessage = "Hotspot tour " + std::to_string(towerNumber) + " ajoute.";
 }
 
 void EditorMapCreateMapScene::setAssetOpacityPercent(int value)
@@ -1618,7 +2050,11 @@ int EditorMapCreateMapScene::findPlacedAssetIndexAtScreenPoint(float x, float y)
         {
             return a.second < b.second;
         }
-        return assetA.tileY < assetB.tileY;
+        if (assetA.tileY != assetB.tileY)
+        {
+            return assetA.tileY < assetB.tileY;
+        }
+        return a.first < b.first;
     });
     return static_cast<int>(candidates.back().first);
 }
@@ -1776,7 +2212,11 @@ bool EditorMapCreateMapScene::renderStyledMiniMapToSurface(SDL_Surface* targetSu
             {
                 return depthA < depthB;
             }
-            return assetA.tileY < assetB.tileY;
+            if (assetA.tileY != assetB.tileY)
+            {
+                return assetA.tileY < assetB.tileY;
+            }
+            return a < b;
         });
 
     for (size_t drawIndex : drawOrder)
@@ -2272,15 +2712,76 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
         cJSON_AddStringToObject(placedItem, "storagePath", runtimeStoragePath.c_str());
         cJSON_AddNumberToObject(placedItem, "tileX", placedAsset.tileX);
         cJSON_AddNumberToObject(placedItem, "tileY", placedAsset.tileY);
+        if (placedAsset.clickGuiTarget != EditorMapAssetClickGuiTarget::NONE)
+        {
+            const EditorMapAssetClickGuiTargetInfo& guiInfo =
+                GetEditorMapAssetClickGuiTargetInfo(placedAsset.clickGuiTarget);
+            cJSON* clickGuiItem = cJSON_CreateObject();
+            cJSON_AddStringToObject(clickGuiItem, "window", guiInfo.jsonId);
+            cJSON* coveredTilesArray = cJSON_CreateArray();
+            const std::vector<SDL_Point> coveredTiles =
+                this->computePlacedAssetClickInteractionTiles(placedAsset);
+            for (const SDL_Point& coveredTile : coveredTiles)
+            {
+                cJSON* coveredTileItem = cJSON_CreateObject();
+                cJSON_AddNumberToObject(coveredTileItem, "tileX", coveredTile.x);
+                cJSON_AddNumberToObject(coveredTileItem, "tileY", coveredTile.y);
+                cJSON_AddItemToArray(coveredTilesArray, coveredTileItem);
+            }
+            cJSON_AddItemToObject(clickGuiItem, "tiles", coveredTilesArray);
+            cJSON_AddItemToObject(placedItem, "clickGui", clickGuiItem);
+        }
         cJSON_AddItemToArray(placedAssetsArray, placedItem);
     }
     cJSON* towerHotspotsArray = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "towerHotspots", towerHotspotsArray);
+    cJSON_AddItemToObject(root, "placedTowers", towerHotspotsArray);
     for (const TowerHotspot& hotspot : this->towerHotspots)
     {
         cJSON* hotspotItem = cJSON_CreateObject();
         cJSON_AddNumberToObject(hotspotItem, "tileX", hotspot.tileX);
         cJSON_AddNumberToObject(hotspotItem, "tileY", hotspot.tileY);
+        cJSON_AddNumberToObject(
+            hotspotItem,
+            "towerNumber",
+            ClampEditorMapTowerHotspotNumber(hotspot.towerNumber));
+        const int visualSetIndex = this->findTowerVisualSetIndexByNumber(hotspot.towerNumber);
+        if (visualSetIndex >= 0)
+        {
+            const TowerVisualSet& visualSet =
+                this->towerVisualSets[static_cast<size_t>(visualSetIndex)];
+            cJSON* assetVariantsItem = cJSON_CreateObject();
+            bool hasAnyVariant = false;
+            for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
+            {
+                const int importedAssetIndex =
+                    visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)];
+                if (importedAssetIndex < 0 ||
+                    importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+                {
+                    continue;
+                }
+
+                const ImportedAsset& importedAsset =
+                    this->importedAssets[static_cast<size_t>(importedAssetIndex)];
+                const std::string runtimeStoragePath =
+                    buildRuntimeAssetPathFromSource(importedAsset.sourcePath, importedAsset.displayName);
+                const std::string variantKey = "lvl" + std::to_string(levelIndex + 1);
+                cJSON_AddStringToObject(
+                    assetVariantsItem,
+                    variantKey.c_str(),
+                    runtimeStoragePath.c_str());
+                hasAnyVariant = true;
+            }
+
+            if (hasAnyVariant)
+            {
+                cJSON_AddItemToObject(hotspotItem, "assetVariants", assetVariantsItem);
+            }
+            else
+            {
+                cJSON_Delete(assetVariantsItem);
+            }
+        }
         cJSON_AddItemToArray(towerHotspotsArray, hotspotItem);
     }
 
@@ -2362,6 +2863,17 @@ void EditorMapCreateMapScene::openImportMapDialog(void)
 
 void EditorMapCreateMapScene::openExportMapDialog(void)
 {
+    if (trimAscii(this->mapNameInput).empty())
+    {
+        this->statusMessage = "Export impossible: ajoute d'abord un nom de map.";
+        SDL_ShowSimpleMessageBox(
+            SDL_MESSAGEBOX_WARNING,
+            "Export map impossible",
+            "Ajoute d'abord un nom dans l'input Map Name avant d'exporter la map.",
+            rc2d_window_getWindow());
+        return;
+    }
+
     RC2D_FileDialogOptions options{};
     options.window = rc2d_window_getWindow();
     options.filters = kShipFolderFilters;
@@ -2684,6 +3196,7 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     map.clearBlockedTiles();
     this->placedAssets.clear();
     this->towerHotspots.clear();
+    this->towerVisualSets.clear();
     this->historyActions.clear();
     this->historyCursor = 0;
 
@@ -2694,6 +3207,9 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     }
 
     std::string importStatusSuffix;
+    bool normalizedTowerHotspots = false;
+    bool skippedTowerHotspots = false;
+    bool normalizedAssetClickGui = false;
     bool shouldApplyOceanColor = false;
     const cJSON* oceanColor = cJSON_GetObjectItemCaseSensitive(root, "oceanColor");
     if (cJSON_IsString(oceanColor) && oceanColor->valuestring != nullptr)
@@ -2791,31 +3307,172 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
             placed.anchorTileX = static_cast<float>(placed.tileX);
             placed.anchorTileY = static_cast<float>(placed.tileY);
             placed.scale = 1.0f;
-            const cJSON* scale = cJSON_GetObjectItemCaseSensitive(item, "scale");
-            if (cJSON_IsNumber(scale) && std::isfinite(scale->valuedouble) && scale->valuedouble > 0.01)
+            const cJSON* clickGui = cJSON_GetObjectItemCaseSensitive(item, "clickGui");
+            if (cJSON_IsObject(clickGui))
             {
-                placed.scale = static_cast<float>(scale->valuedouble);
+                const cJSON* window = cJSON_GetObjectItemCaseSensitive(clickGui, "window");
+                const cJSON* maxShipDistanceTiles =
+                    cJSON_GetObjectItemCaseSensitive(clickGui, "maxShipDistanceTiles");
+                const cJSON* tiles = cJSON_GetObjectItemCaseSensitive(clickGui, "tiles");
+                if (cJSON_IsString(window) && window->valuestring != nullptr)
+                {
+                    EditorMapAssetClickGuiTarget clickGuiTarget = EditorMapAssetClickGuiTarget::NONE;
+                    if (TryParseEditorMapAssetClickGuiTarget(window->valuestring, &clickGuiTarget))
+                    {
+                        placed.clickGuiTarget = clickGuiTarget;
+                    }
+                    else
+                    {
+                        normalizedAssetClickGui = true;
+                    }
+                }
+                if (cJSON_IsNumber(maxShipDistanceTiles))
+                {
+                    placed.clickGuiDistanceTiles = ClampEditorMapAssetClickDistanceTiles(
+                        static_cast<int>(std::lround(maxShipDistanceTiles->valuedouble)));
+                    placed.clickGuiUsesLegacyRadius = true;
+                }
+                else if (cJSON_IsArray(tiles))
+                {
+                    cJSON* tileItem = nullptr;
+                    cJSON_ArrayForEach(tileItem, tiles)
+                    {
+                        const cJSON* allowedTileX =
+                            cJSON_GetObjectItemCaseSensitive(tileItem, "tileX");
+                        const cJSON* allowedTileY =
+                            cJSON_GetObjectItemCaseSensitive(tileItem, "tileY");
+                        if (!cJSON_IsNumber(allowedTileX) || !cJSON_IsNumber(allowedTileY))
+                        {
+                            normalizedAssetClickGui = true;
+                            continue;
+                        }
+
+                        const int parsedTileX =
+                            static_cast<int>(std::lround(allowedTileX->valuedouble));
+                        const int parsedTileY =
+                            static_cast<int>(std::lround(allowedTileY->valuedouble));
+                        if (std::find_if(
+                                placed.clickGuiTiles.begin(),
+                                placed.clickGuiTiles.end(),
+                                [parsedTileX, parsedTileY](const SDL_Point& tile) {
+                                    return tile.x == parsedTileX && tile.y == parsedTileY;
+                                }) != placed.clickGuiTiles.end())
+                        {
+                            continue;
+                        }
+
+                        placed.clickGuiTiles.push_back(SDL_Point{parsedTileX, parsedTileY});
+                    }
+                    placed.clickGuiUsesLegacyRadius = false;
+                }
             }
             this->placedAssets.push_back(placed);
         }
     }
 
-    const cJSON* towerHotspotsJson = cJSON_GetObjectItemCaseSensitive(root, "towerHotspots");
+    const cJSON* towerHotspotsJson = cJSON_GetObjectItemCaseSensitive(root, "placedTowers");
     if (cJSON_IsArray(towerHotspotsJson))
     {
+        std::array<bool, static_cast<size_t>(kEditorMapMaxTowerHotspots + 1)> usedTowerNumbers{};
         cJSON* item = nullptr;
         cJSON_ArrayForEach(item, towerHotspotsJson)
         {
             const cJSON* tileX = cJSON_GetObjectItemCaseSensitive(item, "tileX");
             const cJSON* tileY = cJSON_GetObjectItemCaseSensitive(item, "tileY");
+            const cJSON* assetVariantsJson =
+                cJSON_GetObjectItemCaseSensitive(item, "assetVariants");
             if (!cJSON_IsNumber(tileX) || !cJSON_IsNumber(tileY))
             {
                 continue;
             }
+
+            const int hotspotTileX = static_cast<int>(std::lround(tileX->valuedouble));
+            const int hotspotTileY = static_cast<int>(std::lround(tileY->valuedouble));
+            if (this->findTowerHotspotIndexAtTile(hotspotTileX, hotspotTileY) >= 0)
+            {
+                skippedTowerHotspots = true;
+                continue;
+            }
+
+            int towerNumber = 0;
+            const cJSON* towerNumberJson = cJSON_GetObjectItemCaseSensitive(item, "towerNumber");
+            if (cJSON_IsNumber(towerNumberJson))
+            {
+                const int parsedTowerNumber =
+                    static_cast<int>(std::lround(towerNumberJson->valuedouble));
+                if (parsedTowerNumber >= 1 && parsedTowerNumber <= kEditorMapMaxTowerHotspots)
+                {
+                    towerNumber = parsedTowerNumber;
+                }
+                else
+                {
+                    normalizedTowerHotspots = true;
+                }
+            }
+            else
+            {
+                normalizedTowerHotspots = true;
+            }
+
+            if (towerNumber <= 0 ||
+                usedTowerNumbers[static_cast<size_t>(towerNumber)])
+            {
+                towerNumber = 0;
+                for (int candidate = 1; candidate <= kEditorMapMaxTowerHotspots; ++candidate)
+                {
+                    if (!usedTowerNumbers[static_cast<size_t>(candidate)])
+                    {
+                        towerNumber = candidate;
+                        break;
+                    }
+                }
+                normalizedTowerHotspots = true;
+            }
+
+            if (towerNumber <= 0)
+            {
+                skippedTowerHotspots = true;
+                continue;
+            }
+
+            usedTowerNumbers[static_cast<size_t>(towerNumber)] = true;
             this->towerHotspots.push_back(
                 TowerHotspot{
-                    static_cast<int>(std::lround(tileX->valuedouble)),
-                    static_cast<int>(std::lround(tileY->valuedouble))});
+                    hotspotTileX,
+                    hotspotTileY,
+                    towerNumber});
+
+            if (cJSON_IsObject(assetVariantsJson))
+            {
+                TowerVisualSet& visualSet = this->ensureTowerVisualSet(towerNumber);
+                for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
+                {
+                    const std::string variantKey = "lvl" + std::to_string(levelIndex + 1);
+                    const cJSON* storagePathJson =
+                        cJSON_GetObjectItemCaseSensitive(assetVariantsJson, variantKey.c_str());
+                    if (!cJSON_IsString(storagePathJson) || storagePathJson->valuestring == nullptr)
+                    {
+                        continue;
+                    }
+
+                    const int importedIndex =
+                        this->importAssetFromRuntimeStoragePath(storagePathJson->valuestring);
+                    if (importedIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)] = importedIndex;
+                }
+            }
+        }
+
+        if (!this->towerVisualSets.empty())
+        {
+            for (const TowerHotspot& hotspot : this->towerHotspots)
+            {
+                (void)this->ensureTowerVisualSet(hotspot.towerNumber);
+            }
         }
     }
 
@@ -2826,6 +3483,18 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
         const OceanColorEntry& entry = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)];
         this->applySelectedOceanColor();
         importStatusSuffix = " Ocean: " + std::string(entry.label) + ".";
+    }
+    if (normalizedTowerHotspots)
+    {
+        importStatusSuffix += " Hotspots tours renumerotes.";
+    }
+    if (skippedTowerHotspots)
+    {
+        importStatusSuffix += " Hotspots tours en trop/dupliques ignores.";
+    }
+    if (normalizedAssetClickGui)
+    {
+        importStatusSuffix += " Certaines GUI de clic sont inconnues et ignorees.";
     }
 
     this->statusMessage = "Map importee depuis JSON." + importStatusSuffix;
@@ -3484,6 +4153,10 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
     }
 
     const RC2D_Color hotspotColor = kHotspotPalette[static_cast<size_t>(this->selectedHotspotColorIndex)];
+    const bool previewHotspots =
+        this->towerVariantPickerVisible ||
+        (this->towerPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+    const int previewTowerLevel = std::clamp(this->towerPreviewDisplayLevel, 1, 4) - 1;
     for (const TowerHotspot& hotspot : this->towerHotspots)
     {
         if (!map.isInside(hotspot.tileX, hotspot.tileY))
@@ -3491,15 +4164,22 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
             continue;
         }
         const SDL_FPoint center = map.tileToScreenCenter(hotspot.tileX, hotspot.tileY);
-        rc2d_graphics_setColor(hotspotColor);
-        rc2d_graphics_drawTileIsometric("fill", center.x, center.y, tileWidth, tileHeight);
-        rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 240});
-        rc2d_graphics_drawTileIsometric("line", center.x, center.y, tileWidth, tileHeight);
+        if (previewHotspots)
+        {
+            rc2d_graphics_setColor(hotspotColor);
+            rc2d_graphics_drawTileIsometric("fill", center.x, center.y, tileWidth, tileHeight);
+            rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 240});
+            rc2d_graphics_drawTileIsometric("line", center.x, center.y, tileWidth, tileHeight);
+        }
 
         if (this->overlayFont.sdl_font != nullptr)
         {
+            const std::string towerNumberText =
+                std::to_string(ClampEditorMapTowerHotspotNumber(hotspot.towerNumber));
             RC2D_Text hotspotText =
-                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "H");
+                rc2d_graphics_createText(
+                    const_cast<RC2D_Font*>(&this->overlayFont),
+                    towerNumberText.c_str());
             hotspotText.color = RC2D_Color{255, 255, 255, 250};
             rc2d_graphics_setTextColor(&hotspotText);
 
@@ -3507,9 +4187,75 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
             int textH = 0;
             rc2d_graphics_getTextSize(&hotspotText, &textW, &textH);
             const float textX = center.x - (static_cast<float>(textW) * 0.5f);
-            const float textY = center.y - (static_cast<float>(textH) * 0.5f);
+            const float textY = previewHotspots
+                ? (center.y - (static_cast<float>(textH) * 0.5f))
+                : (center.y - 28.0f - static_cast<float>(textH));
             rc2d_graphics_drawText(&hotspotText, textX, textY);
             rc2d_graphics_destroyText(&hotspotText);
+        }
+
+        int visualSetIndex = this->findTowerVisualSetIndexByNumber(hotspot.towerNumber);
+        if (visualSetIndex < 0 && !this->towerVisualSets.empty())
+        {
+            visualSetIndex = 0;
+        }
+        if (visualSetIndex < 0)
+        {
+            continue;
+        }
+
+        const TowerVisualSet& visualSet = this->towerVisualSets[static_cast<size_t>(visualSetIndex)];
+        if (previewHotspots)
+        {
+            continue;
+        }
+
+        const int importedAssetIndex =
+            visualSet.importedAssetIndices[static_cast<size_t>(previewTowerLevel)];
+        if (importedAssetIndex < 0 ||
+            importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            continue;
+        }
+
+        const ImportedAsset& importedAsset =
+            this->importedAssets[static_cast<size_t>(importedAssetIndex)];
+        if (importedAsset.image.sdl_texture == nullptr)
+        {
+            continue;
+        }
+
+        const float previewScale = 0.55f * (std::max)(GetCamera().getZoomFactor(), 0.01f);
+        const float drawX = center.x - ((importedAsset.widthPx * previewScale) * 0.5f);
+        const float drawY = center.y - ((importedAsset.heightPx * previewScale) * 0.7f);
+        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+            const_cast<RC2D_Image*>(&importedAsset.image),
+            0.0f,
+            0.0f,
+            importedAsset.widthPx,
+            importedAsset.heightPx);
+        rc2d_graphics_drawQuad(
+            const_cast<RC2D_Image*>(&importedAsset.image),
+            &sourceQuad,
+            drawX,
+            drawY,
+            0.0,
+            previewScale,
+            previewScale,
+            0.0f,
+            0.0f,
+            false,
+            false);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const std::string levelLabel = "Niv " + std::to_string(previewTowerLevel + 1);
+            RC2D_Text levelText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), levelLabel.c_str());
+            levelText.color = RC2D_Color{255, 240, 170, 250};
+            rc2d_graphics_setTextColor(&levelText);
+            rc2d_graphics_drawText(&levelText, drawX, drawY - 12.0f);
+            rc2d_graphics_destroyText(&levelText);
         }
     }
 
@@ -3573,7 +4319,11 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
             {
                 return depthA < depthB;
             }
-            return assetA.tileY < assetB.tileY;
+            if (assetA.tileY != assetB.tileY)
+            {
+                return assetA.tileY < assetB.tileY;
+            }
+            return a < b;
         });
 
     for (size_t drawIndex : drawOrder)
@@ -3624,6 +4374,45 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
         SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, oldAlpha);
     }
 
+    if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        const PlacedAsset& selectedPlacedAsset =
+            this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)];
+        const std::vector<SDL_Point> coveredTiles =
+            this->computePlacedAssetClickInteractionTiles(selectedPlacedAsset);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        for (const SDL_Point& coveredTile : coveredTiles)
+        {
+            const SDL_FPoint tileCenter = map.tileToScreenCenter(coveredTile.x, coveredTile.y);
+            rc2d_graphics_setColor(RC2D_Color{96, 190, 255, 36});
+            rc2d_graphics_drawTileIsometric(
+                "fill",
+                tileCenter.x,
+                tileCenter.y,
+                map.getTileWidth(),
+                map.getTileHeight());
+            rc2d_graphics_setColor(RC2D_Color{140, 220, 255, 88});
+            rc2d_graphics_drawTileIsometric(
+                "line",
+                tileCenter.x,
+                tileCenter.y,
+                map.getTileWidth(),
+                map.getTileHeight());
+        }
+
+        const SDL_Point centerTile = this->computePlacedAssetCenterTile(selectedPlacedAsset);
+        const SDL_FPoint centerScreen = map.tileToScreenCenter(centerTile.x, centerTile.y);
+        rc2d_graphics_setColor(RC2D_Color{255, 240, 145, 235});
+        rc2d_graphics_drawTileIsometric(
+            "line",
+            centerScreen.x,
+            centerScreen.y,
+            map.getTileWidth(),
+            map.getTileHeight());
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    }
+
     if (this->editorTool == EditorTool::PLACE_ASSETS &&
         this->selectedAssetIndex >= 0 &&
         this->selectedAssetIndex < static_cast<int>(this->importedAssets.size()))
@@ -3669,7 +4458,11 @@ void EditorMapCreateMapScene::drawPlacedAssets(void) const
 void EditorMapCreateMapScene::updateToolbarLayout(void)
 {
     // Barre d'actions dans la bande UI basse (70 px reserves).
+    // Si certains boutons sortent du cadre (surtout sur petits ecrans),
+    // on les replace a gauche du bouton LISTES ON, mais sous la zone deja
+    // occupee en haut pour eviter qu'ils soient caches.
     const Map& map = GetCurrentMap();
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
     const float startX = 12.0f;
     const float row1Y = map.rect.y + map.rect.h + 4.0f;
     const float row2Y = row1Y + 30.0f;
@@ -3692,7 +4485,6 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     float x = startX;
     setNextButton(&this->buttonImportRect, &x, row1Y, 160.0f);
     setNextButton(&this->buttonImportMapRect, &x, row1Y, 150.0f);
-    setNextButton(&this->buttonImportShipRect, &x, row1Y, 190.0f);
     setNextButton(&this->buttonExportRect, &x, row1Y, 138.0f);
     setNextButton(&this->buttonUndoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonRedoRect, &x, row1Y, 92.0f);
@@ -3700,14 +4492,17 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     setNextButton(&this->buttonToolUnblockRect, &x, row1Y, 156.0f);
     setNextButton(&this->buttonToolPlaceRect, &x, row1Y, 100.0f);
     setNextButton(&this->buttonToolRemoveRect, &x, row1Y, 156.0f);
+    setNextButton(&this->buttonToolInteractRect, &x, row1Y, 170.0f);
     setNextButton(&this->buttonToolShipRect, &x, row1Y, 135.0f);
     setNextButton(&this->buttonToolShipControlRect, &x, row1Y, 155.0f);
-    setNextButton(&this->buttonToolHotspotRect, &x, row1Y, 122.0f);
     setNextButton(&this->buttonGridRect, &x, row1Y, 74.0f);
     setNextButton(&this->buttonCenterRect, &x, row1Y, 126.0f);
 
-    // Ligne 2: centrage navire, selection d'asset, ocean, collisions/opacite/ship scale.
+    // Ligne 2: outils towers, centrage navire, selection d'asset, ocean, collisions/opacite.
     x = startX;
+    setNextButton(&this->buttonToolHotspotRect, &x, row2Y, 122.0f);
+    setNextButton(&this->buttonTowerVariantsPickerRect, &x, row2Y, 256.0f);
+    setNextButton(&this->buttonTowerDisplayModeRect, &x, row2Y, 238.0f);
     setNextButton(&this->buttonCenterShipRect, &x, row2Y, 150.0f);
     setNextButton(&this->buttonAssetPrevRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonAssetNextRect, &x, row2Y, 124.0f);
@@ -3722,9 +4517,6 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     setNextButton(&this->buttonAssetOpacityToggleRect, &x, row2Y, 126.0f);
     setNextButton(&this->buttonAssetOpacityMinusRect, &x, row2Y, 60.0f);
     setNextButton(&this->buttonAssetOpacityPlusRect, &x, row2Y, 60.0f);
-    setNextButton(&this->buttonShipScaleMinusRect, &x, row2Y, 60.0f);
-    setNextButton(&this->buttonShipScalePlusRect, &x, row2Y, 60.0f);
-    setNextButton(&this->buttonShipReexportRect, &x, row2Y, 136.0f);
     setNextButton(&this->buttonZoomOutRect, &x, row2Y, 64.0f);
     setNextButton(&this->buttonZoomInRect, &x, row2Y, 64.0f);
     setNextButton(&this->buttonBlockedTilesRect, &x, row2Y, 140.0f);
@@ -3748,6 +4540,99 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         this->buttonListsVisibilityRect.x = map.rect.x + 12.0f;
     }
 
+    const float screenRight = gameScreenRect.x + gameScreenRect.w;
+    const float screenBottom = gameScreenRect.y + gameScreenRect.h;
+    const float overflowStartX = map.rect.x + 12.0f;
+    const float overflowMaxRight = (std::max)(
+        this->buttonListsVisibilityRect.x - gap,
+        overflowStartX + 120.0f);
+    float overflowX = overflowStartX;
+    float overflowY = this->buttonListsVisibilityRect.y + this->buttonListsVisibilityRect.h + 8.0f;
+
+    auto moveOverflowButton = [&](SDL_FRect* rect) {
+        if (rect == nullptr)
+        {
+            return;
+        }
+
+        const bool overflowsHorizontally = (rect->x + rect->w) > (screenRight - 12.0f);
+        const bool overflowsVertically = (rect->y + rect->h) > (screenBottom - 6.0f);
+        if (!overflowsHorizontally && !overflowsVertically)
+        {
+            return;
+        }
+
+        if ((overflowX + rect->w) > overflowMaxRight && overflowX > overflowStartX)
+        {
+            overflowX = overflowStartX;
+            overflowY += (h + 4.0f);
+        }
+
+        rect->x = overflowX;
+        rect->y = overflowY;
+        overflowX += rect->w + gap;
+    };
+
+    const std::array<SDL_FRect*, 28> buttonsToClamp = {{
+        &this->buttonImportRect,
+        &this->buttonImportMapRect,
+        &this->buttonExportRect,
+        &this->buttonUndoRect,
+        &this->buttonRedoRect,
+        &this->buttonToolBlockRect,
+        &this->buttonToolUnblockRect,
+        &this->buttonToolPlaceRect,
+        &this->buttonToolRemoveRect,
+        &this->buttonToolInteractRect,
+        &this->buttonToolShipRect,
+        &this->buttonToolShipControlRect,
+        &this->buttonToolHotspotRect,
+        &this->buttonTowerVariantsPickerRect,
+        &this->buttonTowerDisplayModeRect,
+        &this->buttonGridRect,
+        &this->buttonCenterShipRect,
+        &this->buttonAssetPrevRect,
+        &this->buttonAssetNextRect,
+        &this->buttonOceanPrevRect,
+        &this->buttonOceanNextRect,
+        &this->buttonBlockedBrushMinusRect,
+        &this->buttonBlockedBrushPlusRect,
+        &this->buttonBlockedColorPrevRect,
+        &this->buttonBlockedColorNextRect,
+        &this->buttonHotspotColorPrevRect,
+        &this->buttonHotspotColorNextRect,
+        &this->buttonAssetOpacityToggleRect,
+    }};
+
+    for (SDL_FRect* rect : buttonsToClamp)
+    {
+        moveOverflowButton(rect);
+    }
+
+    const float utilityGap = 6.0f;
+    const float utilityRow1Y = this->buttonListsVisibilityRect.y + this->buttonListsVisibilityRect.h + 8.0f;
+    const float utilityRow2Y = utilityRow1Y + h + 4.0f;
+    float utilityX = this->buttonListsVisibilityRect.x;
+
+    auto placeUtilityFromLeft = [utilityGap](SDL_FRect* rect, float* leftX, float y) {
+        if (rect == nullptr || leftX == nullptr)
+        {
+            return;
+        }
+        rect->x = *leftX;
+        rect->y = y;
+        *leftX += rect->w + utilityGap;
+    };
+
+    placeUtilityFromLeft(&this->buttonCenterRect, &utilityX, utilityRow1Y);
+    placeUtilityFromLeft(&this->buttonBlockedTilesRect, &utilityX, utilityRow1Y);
+
+    utilityX = this->buttonListsVisibilityRect.x;
+    placeUtilityFromLeft(&this->buttonAssetOpacityMinusRect, &utilityX, utilityRow2Y);
+    placeUtilityFromLeft(&this->buttonAssetOpacityPlusRect, &utilityX, utilityRow2Y);
+    placeUtilityFromLeft(&this->buttonZoomOutRect, &utilityX, utilityRow2Y);
+    placeUtilityFromLeft(&this->buttonZoomInRect, &utilityX, utilityRow2Y);
+
     // Mini-liste d'assets en bas a droite, dans la zone map.
     this->assetListRect.w = 250.0f;
     this->assetListRect.h = 276.0f;
@@ -3767,6 +4652,54 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     this->miniMapRect.h = miniMapSize;
     this->miniMapRect.x = map.rect.x + map.rect.w - this->miniMapRect.w - 40.0f;
     this->miniMapRect.y = map.rect.y + 40.0f;
+
+    this->towerVariantPickerRect = SDL_FRect{
+        map.rect.x + (map.rect.w * 0.5f) - 350.0f,
+        map.rect.y + 36.0f,
+        700.0f,
+        452.0f
+    };
+    const float tabY = this->towerVariantPickerRect.y + 28.0f;
+    const float tabX = this->towerVariantPickerRect.x + 10.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        this->towerVariantLevelTabRects[static_cast<size_t>(i)] = SDL_FRect{
+            tabX + (static_cast<float>(i) * 100.0f),
+            tabY,
+            92.0f,
+            22.0f
+        };
+    }
+    this->towerVariantConfirmRect = SDL_FRect{
+        this->towerVariantPickerRect.x + this->towerVariantPickerRect.w - 130.0f,
+        this->towerVariantPickerRect.y + this->towerVariantPickerRect.h - 34.0f,
+        116.0f,
+        24.0f
+    };
+
+    this->towerDisplayPickerRect = SDL_FRect{
+        map.rect.x + (map.rect.w * 0.5f) - 224.0f,
+        map.rect.y + 54.0f,
+        448.0f,
+        138.0f
+    };
+    const float displayTabY = this->towerDisplayPickerRect.y + 46.0f;
+    const float displayTabX = this->towerDisplayPickerRect.x + 10.0f;
+    for (int i = 0; i < 5; ++i)
+    {
+        this->towerDisplayLevelTabRects[static_cast<size_t>(i)] = SDL_FRect{
+            displayTabX + (static_cast<float>(i) * 84.0f),
+            displayTabY,
+            78.0f,
+            22.0f
+        };
+    }
+    this->towerDisplayConfirmRect = SDL_FRect{
+        this->towerDisplayPickerRect.x + this->towerDisplayPickerRect.w - 126.0f,
+        this->towerDisplayPickerRect.y + this->towerDisplayPickerRect.h - 32.0f,
+        112.0f,
+        24.0f
+    };
 }
 
 void EditorMapCreateMapScene::drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const
@@ -3803,13 +4736,33 @@ void EditorMapCreateMapScene::drawToolbarButton(const SDL_FRect& rect, const cha
 
 int EditorMapCreateMapScene::getAssetListMaxScrollOffset(void) const
 {
+    if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        const int guiCount = static_cast<int>(kEditorMapAssetClickGuiTargets.size());
+        return (std::max)(guiCount - kAssetListVisibleRows, 0);
+    }
+
     const int assetCount = static_cast<int>(this->importedAssets.size());
     return (std::max)(assetCount - kAssetListVisibleRows, 0);
 }
 
 void EditorMapCreateMapScene::clampAssetListScrollOffset(void)
 {
-    this->assetListScrollOffset = std::clamp(this->assetListScrollOffset, 0, this->getAssetListMaxScrollOffset());
+    if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        this->assetInteractionListScrollOffset = std::clamp(
+            this->assetInteractionListScrollOffset,
+            0,
+            this->getAssetListMaxScrollOffset());
+        return;
+    }
+
+    this->assetListScrollOffset = std::clamp(
+        this->assetListScrollOffset,
+        0,
+        this->getAssetListMaxScrollOffset());
 }
 
 void EditorMapCreateMapScene::ensureSelectedAssetVisible(void)
@@ -3839,6 +4792,12 @@ void EditorMapCreateMapScene::ensureSelectedAssetVisible(void)
 int EditorMapCreateMapScene::computeAssetListStartIndex(void) const
 {
     const int maxOffset = this->getAssetListMaxScrollOffset();
+    if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        return std::clamp(this->assetInteractionListScrollOffset, 0, maxOffset);
+    }
+
     return std::clamp(this->assetListScrollOffset, 0, maxOffset);
 }
 
@@ -3865,10 +4824,17 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
     scrollTrackRect.w = kAssetListScrollBarWidth;
     scrollTrackRect.h = rowsHeight;
 
+    const bool editingPlacedAssetInteraction =
+        this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS;
+    const bool editingTowerVariants = false;
+    const int rowCount = editingPlacedAssetInteraction
+        ? static_cast<int>(kEditorMapAssetClickGuiTargets.size())
+        : static_cast<int>(this->importedAssets.size());
+
     if (this->pointInRect(x, y, scrollTrackRect))
     {
-        const int assetCount = static_cast<int>(this->importedAssets.size());
-        const int maxOffset = (std::max)(assetCount - kAssetListVisibleRows, 0);
+        const int maxOffset = (std::max)(rowCount - kAssetListVisibleRows, 0);
         if (maxOffset <= 0)
         {
             this->assetListScrollDragActive = false;
@@ -3877,7 +4843,7 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
 
         float thumbHeight = scrollTrackRect.h;
         float thumbY = scrollTrackRect.y;
-        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(assetCount));
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(rowCount));
         const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
         const float ratio = static_cast<float>(this->computeAssetListStartIndex()) / static_cast<float>(maxOffset);
         thumbY += ratio * thumbTravel;
@@ -3904,7 +4870,16 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
             const float clickRatio = (thumbTravel > 0.0f)
                 ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
                 : 0.0f;
-            this->assetListScrollOffset = static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+            if (editingPlacedAssetInteraction)
+            {
+                this->assetInteractionListScrollOffset =
+                    static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+            }
+            else
+            {
+                this->assetListScrollOffset =
+                    static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+            }
             this->clampAssetListScrollOffset();
 
             this->assetListScrollDragActive = true;
@@ -3916,7 +4891,7 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
     // Clic dans la liste hors scrollbar: stop drag scrollbar.
     this->assetListScrollDragActive = false;
 
-    if (this->importedAssets.empty())
+    if (!editingPlacedAssetInteraction && this->importedAssets.empty())
     {
         this->statusMessage = "Aucun asset importe.";
         return true;
@@ -3925,8 +4900,8 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
     const int startIndex = this->computeAssetListStartIndex();
     for (int i = 0; i < kAssetListVisibleRows; ++i)
     {
-        const int assetIndex = startIndex + i;
-        if (assetIndex >= static_cast<int>(this->importedAssets.size()))
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= rowCount)
         {
             break;
         }
@@ -3942,14 +4917,174 @@ bool EditorMapCreateMapScene::handleAssetListClick(float x, float y)
             continue;
         }
 
-        this->selectedAssetIndex = assetIndex;
+        if (editingPlacedAssetInteraction)
+        {
+            if (!this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+            {
+                this->clearSelectedPlacedAsset();
+                return true;
+            }
+
+            PlacedAsset& selectedPlacedAsset =
+                this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)];
+            selectedPlacedAsset.clickGuiTarget =
+                kEditorMapAssetClickGuiTargets[static_cast<size_t>(rowIndex)].target;
+            this->selectedAssetClickGuiTarget = selectedPlacedAsset.clickGuiTarget;
+
+            const EditorMapAssetClickGuiTargetInfo& guiInfo =
+                GetEditorMapAssetClickGuiTargetInfo(selectedPlacedAsset.clickGuiTarget);
+            this->statusMessage =
+                "GUI liee a l'asset: " + std::string(guiInfo.label) +
+                " | Tiles=" + std::to_string(static_cast<int>(
+                    this->computePlacedAssetClickInteractionTiles(selectedPlacedAsset).size()));
+            return true;
+        }
+
+        this->selectedAssetIndex = rowIndex;
         this->ensureSelectedAssetVisible();
-        const ImportedAsset& selectedAsset = this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
+        const ImportedAsset& selectedAsset =
+            this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
         this->statusMessage = "Asset selectionne: " + selectedAsset.displayName;
         return true;
     }
 
     // Consomme quand meme le clic dans le panneau pour eviter un paint tile.
+    return true;
+}
+
+bool EditorMapCreateMapScene::handleTowerVariantPickerClick(float x, float y)
+{
+    if (!this->towerVariantPickerVisible)
+    {
+        return false;
+    }
+
+    if (!this->pointInRect(x, y, this->towerVariantPickerRect))
+    {
+        this->towerVariantPickerVisible = false;
+        this->statusMessage = "Popup variantes tower fermee.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->towerVariantConfirmRect))
+    {
+        this->towerVariantPickerVisible = false;
+        this->statusMessage = "Variantes tower confirmees.";
+        return true;
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!this->pointInRect(x, y, this->towerVariantLevelTabRects[static_cast<size_t>(i)]))
+        {
+            continue;
+        }
+
+        this->selectedTowerVariantLevel = i + 1;
+        this->statusMessage =
+            "Edition variantes tower: niv " + std::to_string(this->selectedTowerVariantLevel);
+        return true;
+    }
+
+    const float panelPadding = 6.0f;
+    const float rowsTopY = this->towerVariantPickerRect.y + 58.0f;
+    const float rowsLeftX = this->towerVariantPickerRect.x + panelPadding;
+    const float rowsWidth =
+        this->towerVariantPickerRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+    const float rowsHeight = this->towerVariantPickerRect.h - 154.0f;
+    const float rowGap = 3.0f;
+    const float rowHeight =
+        (rowsHeight - ((kAssetListVisibleRows - 1) * rowGap)) / static_cast<float>(kAssetListVisibleRows);
+    const int startIndex = std::clamp(this->assetListScrollOffset, 0, this->getAssetListMaxScrollOffset());
+
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{
+            rowsLeftX,
+            rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap)),
+            rowsWidth,
+            rowHeight
+        };
+        if (!this->pointInRect(x, y, rowRect))
+        {
+            continue;
+        }
+
+        this->selectedAssetIndex = rowIndex;
+        this->ensureSelectedAssetVisible();
+        if (this->towerVisualSets.empty())
+        {
+            (void)this->ensureTowerVisualSet(this->selectedTowerHotspotNumber);
+        }
+        for (const TowerHotspot& hotspot : this->towerHotspots)
+        {
+            (void)this->ensureTowerVisualSet(hotspot.towerNumber);
+        }
+        for (TowerVisualSet& visualSet : this->towerVisualSets)
+        {
+            visualSet.importedAssetIndices[static_cast<size_t>(this->selectedTowerVariantLevel - 1)] =
+                this->selectedAssetIndex;
+        }
+        const ImportedAsset& selectedAsset =
+            this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
+        this->statusMessage =
+            "Toutes les towers: niv " + std::to_string(this->selectedTowerVariantLevel)
+            + " assigne a " + selectedAsset.displayName;
+        return true;
+    }
+
+    return true;
+}
+
+bool EditorMapCreateMapScene::handleTowerDisplayPickerClick(float x, float y)
+{
+    if (!this->towerDisplayPickerVisible)
+    {
+        return false;
+    }
+
+    if (!this->pointInRect(x, y, this->towerDisplayPickerRect))
+    {
+        this->towerDisplayPickerVisible = false;
+        this->statusMessage = "Popup affichage towers fermee.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->towerDisplayConfirmRect))
+    {
+        this->towerDisplayPickerVisible = false;
+        this->statusMessage =
+            "Affichage towers confirme: niv " + std::to_string(this->towerPreviewDisplayLevel) + ".";
+        return true;
+    }
+
+    for (int i = 0; i < 5; ++i)
+    {
+        if (!this->pointInRect(x, y, this->towerDisplayLevelTabRects[static_cast<size_t>(i)]))
+        {
+            continue;
+        }
+
+        if (i == 0)
+        {
+            this->towerPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS;
+            this->statusMessage = "Preview hotspots: tuile active.";
+            return true;
+        }
+
+        this->towerPreviewDisplayMode = TowerPreviewDisplayMode::TOWERS;
+        this->towerPreviewDisplayLevel = i;
+        this->statusMessage =
+            "Preview towers globale: niv " + std::to_string(this->towerPreviewDisplayLevel);
+        return true;
+    }
+
     return true;
 }
 
@@ -3991,8 +5126,13 @@ void EditorMapCreateMapScene::handleAssetListScrollDragFromMouse(void)
     scrollTrackRect.w = kAssetListScrollBarWidth;
     scrollTrackRect.h = rowsHeight;
 
-    const int assetCount = static_cast<int>(this->importedAssets.size());
-    const int maxOffset = (std::max)(assetCount - kAssetListVisibleRows, 0);
+    const bool editingPlacedAssetInteraction =
+        this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS;
+    const int rowCount = editingPlacedAssetInteraction
+        ? static_cast<int>(kEditorMapAssetClickGuiTargets.size())
+        : static_cast<int>(this->importedAssets.size());
+    const int maxOffset = (std::max)(rowCount - kAssetListVisibleRows, 0);
     if (maxOffset <= 0)
     {
         this->assetListScrollDragActive = false;
@@ -4000,7 +5140,9 @@ void EditorMapCreateMapScene::handleAssetListScrollDragFromMouse(void)
         return;
     }
 
-    float thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(assetCount));
+    float thumbHeight = (std::max)(
+        14.0f,
+        (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(rowCount));
     const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
     const float targetThumbY = std::clamp(
         mouseY - this->assetListScrollDragGrabOffsetY,
@@ -4010,7 +5152,16 @@ void EditorMapCreateMapScene::handleAssetListScrollDragFromMouse(void)
         ? ((targetThumbY - scrollTrackRect.y) / thumbTravel)
         : 0.0f;
 
-    this->assetListScrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+    if (editingPlacedAssetInteraction)
+    {
+        this->assetInteractionListScrollOffset =
+            static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+    }
+    else
+    {
+        this->assetListScrollOffset =
+            static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+    }
     this->clampAssetListScrollOffset();
 }
 
@@ -4031,11 +5182,27 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
     const float rowHeight = rowsHeight / static_cast<float>(kAssetListVisibleRows);
     const float rowsLeftX = this->assetListRect.x + panelPadding;
     const float rowsWidth = this->assetListRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+    const bool editingPlacedAssetInteraction =
+        this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+        this->editorTool == EditorTool::INTERACT_ASSETS;
+    const bool editingTowerVariants = false;
+    const int rowCount = editingPlacedAssetInteraction
+        ? static_cast<int>(kEditorMapAssetClickGuiTargets.size())
+        : static_cast<int>(this->importedAssets.size());
 
     if (this->overlayFont.sdl_font != nullptr)
     {
+        const char* headerLabel = "Assets charges";
+        if (editingPlacedAssetInteraction)
+        {
+            headerLabel = "GUI de l'asset";
+        }
+        else if (editingTowerVariants)
+        {
+            headerLabel = "Variants tower";
+        }
         RC2D_Text headerText =
-            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Assets charges");
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), headerLabel);
         headerText.color = kHudTextColor;
         rc2d_graphics_setTextColor(&headerText);
         rc2d_graphics_drawText(&headerText, this->assetListRect.x + panelPadding, this->assetListRect.y + 1.0f);
@@ -4053,12 +5220,21 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
     rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
     rc2d_graphics_rectangle("line", &scrollTrackRect);
 
-    if (this->importedAssets.empty())
+    if (rowCount <= 0)
     {
         if (this->overlayFont.sdl_font != nullptr)
         {
+            const char* emptyLabel = "Aucun asset";
+            if (editingPlacedAssetInteraction)
+            {
+                emptyLabel = "Aucune GUI";
+            }
+            else if (editingTowerVariants)
+            {
+                emptyLabel = "Aucun asset tower";
+            }
             RC2D_Text emptyText =
-                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), "Aucun asset");
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), emptyLabel);
             emptyText.color = kHudStatusColor;
             rc2d_graphics_setTextColor(&emptyText);
             rc2d_graphics_drawText(&emptyText, this->assetListRect.x + panelPadding, rowsTopY + 2.0f);
@@ -4069,14 +5245,13 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
         return;
     }
 
-    const int assetCount = static_cast<int>(this->importedAssets.size());
     const int startIndex = this->computeAssetListStartIndex();
-    const int maxOffset = (std::max)(assetCount - kAssetListVisibleRows, 0);
+    const int maxOffset = (std::max)(rowCount - kAssetListVisibleRows, 0);
     float thumbHeight = scrollTrackRect.h;
     float thumbY = scrollTrackRect.y;
     if (maxOffset > 0)
     {
-        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(assetCount));
+        thumbHeight = (std::max)(14.0f, (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(rowCount));
         const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
         const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
         thumbY += ratio * thumbTravel;
@@ -4094,13 +5269,44 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
 
     for (int i = 0; i < kAssetListVisibleRows; ++i)
     {
-        const int assetIndex = startIndex + i;
-        if (assetIndex >= assetCount)
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= rowCount)
         {
             break;
         }
 
-        const bool isSelected = (assetIndex == this->selectedAssetIndex);
+        bool isSelected = false;
+        if (editingPlacedAssetInteraction)
+        {
+            if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+            {
+                const PlacedAsset& selectedPlacedAsset =
+                    this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)];
+                isSelected =
+                    (kEditorMapAssetClickGuiTargets[static_cast<size_t>(rowIndex)].target ==
+                     selectedPlacedAsset.clickGuiTarget);
+            }
+        }
+        else if (editingTowerVariants)
+        {
+            const int visualSetIndex = this->findTowerVisualSetIndexByNumber(this->selectedTowerHotspotNumber);
+            if (visualSetIndex >= 0)
+            {
+                const TowerVisualSet& visualSet =
+                    this->towerVisualSets[static_cast<size_t>(visualSetIndex)];
+                isSelected =
+                    visualSet.importedAssetIndices[static_cast<size_t>(this->selectedTowerVariantLevel - 1)] ==
+                    rowIndex;
+            }
+            else
+            {
+                isSelected = (rowIndex == this->selectedAssetIndex);
+            }
+        }
+        else
+        {
+            isSelected = (rowIndex == this->selectedAssetIndex);
+        }
         SDL_FRect rowRect{};
         rowRect.x = rowsLeftX;
         rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
@@ -4117,9 +5323,20 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
             continue;
         }
 
-        std::string rowLabel = makeAssetLabel(this->importedAssets[static_cast<size_t>(assetIndex)].displayName, 24);
         char textBuffer[256] = {};
-        SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", assetIndex + 1, rowLabel.c_str());
+        if (editingPlacedAssetInteraction)
+        {
+            const EditorMapAssetClickGuiTargetInfo& guiInfo =
+                kEditorMapAssetClickGuiTargets[static_cast<size_t>(rowIndex)];
+            SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", rowIndex + 1, guiInfo.label);
+        }
+        else
+        {
+            std::string rowLabel = makeAssetLabel(
+                this->importedAssets[static_cast<size_t>(rowIndex)].displayName,
+                24);
+            SDL_snprintf(textBuffer, sizeof(textBuffer), "%d. %s", rowIndex + 1, rowLabel.c_str());
+        }
 
         RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
         rowText.color = RC2D_Color{235, 242, 250, 248};
@@ -4128,6 +5345,229 @@ void EditorMapCreateMapScene::drawAssetListPanel(void) const
         rc2d_graphics_destroyText(&rowText);
     }
 
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawTowerVariantPickerPopup(void) const
+{
+    if (!this->towerVariantPickerVisible)
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{8, 12, 18, 180});
+    rc2d_graphics_rectangle("fill", &GetGameScreen().rect);
+    rc2d_graphics_setColor(kAssetPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->towerVariantPickerRect);
+    rc2d_graphics_setColor(kAssetPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->towerVariantPickerRect);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string title =
+            "VARIANTES TOWERS - LIER NIVEAUX ET ASSETS";
+        RC2D_Text titleText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title.c_str());
+        titleText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&titleText);
+        rc2d_graphics_drawText(
+            &titleText,
+            this->towerVariantPickerRect.x + 10.0f,
+            this->towerVariantPickerRect.y + 6.0f);
+        rc2d_graphics_destroyText(&titleText);
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const bool active = (this->selectedTowerVariantLevel == (i + 1));
+        const std::string label = "Niv " + std::to_string(i + 1);
+        this->drawToolbarButton(
+            this->towerVariantLevelTabRects[static_cast<size_t>(i)],
+            label.c_str(),
+            active);
+    }
+
+    const float panelPadding = 6.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->towerVariantPickerRect.y + 58.0f;
+    const float rowsLeftX = this->towerVariantPickerRect.x + panelPadding;
+    const float rowsWidth =
+        this->towerVariantPickerRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+    const float rowsHeight = this->towerVariantPickerRect.h - 154.0f;
+    const float rowHeight =
+        (rowsHeight - ((kAssetListVisibleRows - 1) * rowGap)) / static_cast<float>(kAssetListVisibleRows);
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAssetListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+    const int startIndex = std::clamp(this->assetListScrollOffset, 0, this->getAssetListMaxScrollOffset());
+    const int visualSetIndex = this->findTowerVisualSetIndexByNumber(this->selectedTowerHotspotNumber);
+    int selectedVariantAssetIndex = -1;
+    if (visualSetIndex >= 0)
+    {
+        selectedVariantAssetIndex =
+            this->towerVisualSets[static_cast<size_t>(visualSetIndex)]
+                .importedAssetIndices[static_cast<size_t>(this->selectedTowerVariantLevel - 1)];
+    }
+    const int rowCount = static_cast<int>(this->importedAssets.size());
+    const int maxOffset = (std::max)(rowCount - kAssetListVisibleRows, 0);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(
+            14.0f,
+            (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(rowCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{
+            rowsLeftX,
+            rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap)),
+            rowsWidth,
+            rowHeight
+        };
+        const bool isSelected = (selectedVariantAssetIndex == rowIndex);
+        rc2d_graphics_setColor(isSelected ? kAssetRowSelectedFillColor : kAssetRowFillColor);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(kAssetRowBorderColor);
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const ImportedAsset& importedAsset = this->importedAssets[static_cast<size_t>(rowIndex)];
+            const std::string rowLabel = std::to_string(rowIndex + 1) + ". " +
+                makeAssetLabel(importedAsset.displayName, 26);
+            RC2D_Text rowText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), rowLabel.c_str());
+            rowText.color = RC2D_Color{235, 242, 250, 248};
+            rc2d_graphics_setTextColor(&rowText);
+            rc2d_graphics_drawText(&rowText, rowRect.x + 6.0f, rowRect.y + 3.0f);
+            rc2d_graphics_destroyText(&rowText);
+        }
+
+        for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
+        {
+            if (visualSetIndex < 0)
+            {
+                break;
+            }
+            if (this->towerVisualSets[static_cast<size_t>(visualSetIndex)]
+                    .importedAssetIndices[static_cast<size_t>(levelIndex)] != rowIndex)
+            {
+                continue;
+            }
+
+            SDL_FRect badgeRect{
+                rowRect.x + rowRect.w - 44.0f - (static_cast<float>(3 - levelIndex) * 40.0f),
+                rowRect.y + 3.0f,
+                34.0f,
+                rowRect.h - 6.0f
+            };
+            this->drawToolbarButton(
+                badgeRect,
+                ("N" + std::to_string(levelIndex + 1)).c_str(),
+                levelIndex + 1 == this->selectedTowerVariantLevel);
+        }
+    }
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string helpText =
+            "Choisis un niveau puis clique l'asset a lier.";
+        RC2D_Text help =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), helpText.c_str());
+        help.color = kHudStatusColor;
+        rc2d_graphics_setTextColor(&help);
+        rc2d_graphics_drawText(
+            &help,
+            this->towerVariantPickerRect.x + 10.0f,
+            this->towerVariantConfirmRect.y - 20.0f);
+        rc2d_graphics_destroyText(&help);
+    }
+
+    this->drawToolbarButton(this->towerVariantConfirmRect, "CONFIRMER", false);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawTowerDisplayPickerPopup(void) const
+{
+    if (!this->towerDisplayPickerVisible)
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{8, 12, 18, 180});
+    rc2d_graphics_rectangle("fill", &GetGameScreen().rect);
+    rc2d_graphics_setColor(kAssetPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->towerDisplayPickerRect);
+    rc2d_graphics_setColor(kAssetPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->towerDisplayPickerRect);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string title = "CHOISIR AFFICHAGE HOTSPOT / TOWER";
+        RC2D_Text titleText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title.c_str());
+        titleText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&titleText);
+        rc2d_graphics_drawText(
+            &titleText,
+            this->towerDisplayPickerRect.x + 10.0f,
+            this->towerDisplayPickerRect.y + 8.0f);
+        rc2d_graphics_destroyText(&titleText);
+    }
+
+    for (int i = 0; i < 5; ++i)
+    {
+        std::string label = "Niv " + std::to_string(i);
+        bool active = false;
+        if (i == 0)
+        {
+            label = "Tuile";
+            active = (this->towerPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+        }
+        else
+        {
+            active =
+                this->towerPreviewDisplayMode == TowerPreviewDisplayMode::TOWERS &&
+                this->towerPreviewDisplayLevel == i;
+        }
+        this->drawToolbarButton(
+            this->towerDisplayLevelTabRects[static_cast<size_t>(i)],
+            label.c_str(),
+            active);
+    }
+
+    this->drawToolbarButton(this->towerDisplayConfirmRect, "CONFIRMER", false);
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
@@ -4335,6 +5775,50 @@ void EditorMapCreateMapScene::handleShipListScrollDragFromMouse(void)
 
     this->shipListScrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
     this->clampShipListScrollOffset();
+}
+
+void EditorMapCreateMapScene::handleSelectedPlacedAssetInteractionPaintFromMouse(void)
+{
+    if (!this->assetInteractionPaintActive)
+    {
+        return;
+    }
+
+    if (this->editorTool != EditorTool::INTERACT_ASSETS)
+    {
+        this->assetInteractionPaintActive = false;
+        this->lastAssetInteractionPaintTileValid = false;
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->assetInteractionPaintActive = false;
+        this->lastAssetInteractionPaintTileValid = false;
+        return;
+    }
+
+    if (!this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+    {
+        this->assetInteractionPaintActive = false;
+        this->lastAssetInteractionPaintTileValid = false;
+        return;
+    }
+
+    SDL_Point tile{};
+    if (!this->tryGetMouseTile(&tile))
+    {
+        return;
+    }
+
+    if (this->lastAssetInteractionPaintTileValid &&
+        this->lastAssetInteractionPaintTile.x == tile.x &&
+        this->lastAssetInteractionPaintTile.y == tile.y)
+    {
+        return;
+    }
+
+    this->paintSelectedPlacedAssetInteractionAtMouse(this->assetInteractionPaintValue);
 }
 
 void EditorMapCreateMapScene::drawShipListPanel(void) const
@@ -4717,11 +6201,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         this->openImportMapDialog();
         return true;
     }
-    if (this->pointInRect(x, y, this->buttonImportShipRect))
-    {
-        this->openImportShipFolderDialog();
-        return true;
-    }
     if (this->pointInRect(x, y, this->buttonExportRect))
     {
         this->openExportMapDialog();
@@ -4739,6 +6218,12 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     }
     if (this->pointInRect(x, y, this->buttonToolBlockRect))
     {
+        if (this->editorTool == EditorTool::INTERACT_ASSETS)
+        {
+            this->assetInteractionEditMode = AssetInteractionEditMode::PAINT_ADD;
+            this->statusMessage = "Mode Interaction asset: ajout de tiles au clic gauche.";
+            return true;
+        }
         this->editorTool = EditorTool::BLOCK_TILES;
         this->collisionPaintBlocks = true;
         this->statusMessage = "Mode Collision: clic gauche bloque (brush actif).";
@@ -4746,6 +6231,12 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     }
     if (this->pointInRect(x, y, this->buttonToolUnblockRect))
     {
+        if (this->editorTool == EditorTool::INTERACT_ASSETS)
+        {
+            this->assetInteractionEditMode = AssetInteractionEditMode::PAINT_REMOVE;
+            this->statusMessage = "Mode Interaction asset: suppression de tiles au clic gauche.";
+            return true;
+        }
         this->editorTool = EditorTool::BLOCK_TILES;
         this->collisionPaintBlocks = false;
         this->statusMessage = "Mode Suppression collision: clic gauche debloque (brush actif).";
@@ -4754,13 +6245,22 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonToolPlaceRect))
     {
         this->editorTool = EditorTool::PLACE_ASSETS;
-        this->statusMessage = "Mode Pose visuel: clic gauche pose asset, clic droit supprime.";
+        this->statusMessage =
+            "Mode Pose visuel: clic gauche vide=pose, clic gauche asset=selection interaction, clic droit=supprime.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonToolRemoveRect))
     {
         this->editorTool = EditorTool::REMOVE_ASSETS;
         this->statusMessage = "Mode Suppression visuel: clic gauche supprime asset.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonToolInteractRect))
+    {
+        this->editorTool = EditorTool::INTERACT_ASSETS;
+        this->assetInteractionEditMode = AssetInteractionEditMode::SELECT;
+        this->statusMessage =
+            "Mode Interaction asset: clique un asset pour le selectionner puis choisis AJOUT TILE ou SUPPR TILE.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonToolShipRect))
@@ -4796,7 +6296,29 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonToolHotspotRect))
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
-        this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue pour toggle.";
+        this->statusMessage =
+            "Mode HOTSPOT TOUR: clique sur la tuile voulue pour la tower "
+            + std::to_string(ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber))
+            + ".";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonTowerVariantsPickerRect))
+    {
+        this->editorTool = EditorTool::HOTSPOT_TOWERS;
+        this->towerDisplayPickerVisible = false;
+        this->towerVariantPickerVisible = !this->towerVariantPickerVisible;
+        this->statusMessage = this->towerVariantPickerVisible
+            ? "Popup variantes towers ouverte."
+            : "Popup variantes tower fermee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonTowerDisplayModeRect))
+    {
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = !this->towerDisplayPickerVisible;
+        this->statusMessage = this->towerDisplayPickerVisible
+            ? "Choisis TUILE HOTSPOT ou un niveau global puis confirme."
+            : "Popup affichage fermee.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonAssetPrevRect))
@@ -4845,12 +6367,30 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     }
     if (this->pointInRect(x, y, this->buttonBlockedBrushMinusRect))
     {
+        if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
+        {
+            this->selectedTowerHotspotNumber =
+                ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber - 1);
+            this->statusMessage =
+                "Tower hotspot selectionnee: "
+                + std::to_string(this->selectedTowerHotspotNumber) + "/12";
+            return true;
+        }
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
         this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonBlockedBrushPlusRect))
     {
+        if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
+        {
+            this->selectedTowerHotspotNumber =
+                ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber + 1);
+            this->statusMessage =
+                "Tower hotspot selectionnee: "
+                + std::to_string(this->selectedTowerHotspotNumber) + "/12";
+            return true;
+        }
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
         this->statusMessage = "Rayon collision: " + std::to_string((this->blockedBrushRadiusTiles * 2) + 1) + "x";
         return true;
@@ -4895,34 +6435,6 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     {
         this->setAssetOpacityPercent(this->assetOpacityPercent + 10);
         this->statusMessage = "Opacite assets: " + std::to_string(this->assetOpacityPercent) + "%";
-        return true;
-    }
-    if (this->pointInRect(x, y, this->buttonShipScaleMinusRect))
-    {
-        this->setShipScalePercent(this->shipScalePercent - 10);
-        this->statusMessage = "Echelle navire: " + std::to_string(this->shipScalePercent) + "%";
-        return true;
-    }
-    if (this->pointInRect(x, y, this->buttonShipScalePlusRect))
-    {
-        this->setShipScalePercent(this->shipScalePercent + 10);
-        this->statusMessage = "Echelle navire: " + std::to_string(this->shipScalePercent) + "%";
-        return true;
-    }
-    if (this->pointInRect(x, y, this->buttonShipReexportRect))
-    {
-        if (!this->testShipLoaded)
-        {
-            this->statusMessage = "Aucun navire charge a reexporter.";
-            return true;
-        }
-        if (!this->reexportLoadedShipScaled(this->shipScalePercent))
-        {
-            return true;
-        }
-        this->statusMessage =
-            "Sprites navire reexportes avec echelle " +
-            std::to_string(this->shipScalePercent) + "%";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonGridRect))
@@ -5010,6 +6522,10 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         toolLabel = "Suppression visuel";
     }
+    else if (this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        toolLabel = "Interaction asset";
+    }
     else if (this->editorTool == EditorTool::SPAWN_SHIP)
     {
         toolLabel = "Spawn navire";
@@ -5023,35 +6539,84 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         toolLabel = "Hotspot tours";
     }
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
+    const bool assetInteractionToolActive =
+        (this->editorTool == EditorTool::INTERACT_ASSETS);
+    const bool selectedPlacedAssetActive =
+        assetInteractionToolActive &&
+        this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex);
+    const bool assetInteractionSelectModeActive =
+        assetInteractionToolActive &&
+        this->assetInteractionEditMode == AssetInteractionEditMode::SELECT;
+    const bool assetInteractionPaintAddModeActive =
+        assetInteractionToolActive &&
+        this->assetInteractionEditMode == AssetInteractionEditMode::PAINT_ADD;
+    const bool assetInteractionPaintRemoveModeActive =
+        assetInteractionToolActive &&
+        this->assetInteractionEditMode == AssetInteractionEditMode::PAINT_REMOVE;
+    const bool hotspotToolActive = (this->editorTool == EditorTool::HOTSPOT_TOWERS);
+    const bool towerPreviewShowsHotspots =
+        (this->towerPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+    const std::string towerViewSummary = towerPreviewShowsHotspots
+        ? std::string("TUILE HOTSPOT")
+        : ("NIV " + std::to_string(std::clamp(this->towerPreviewDisplayLevel, 1, 4)));
+    const char* blockedBrushMinusLabel =
+        hotspotToolActive ? "Tour# -" : "Block -";
+    const char* blockedBrushPlusLabel =
+        hotspotToolActive ? "Tour# +" : "Block +";
+    const char* oceanPrevLabel = "Ocean -";
+    const char* oceanNextLabel = "Ocean +";
+    const std::string towerDisplayModeLabel = towerPreviewShowsHotspots
+        ? std::string("AFFICHAGE TOWERS : TUILE")
+        : ("AFFICHAGE TOWERS : NIV " + std::to_string(std::clamp(this->towerPreviewDisplayLevel, 1, 4)));
+    const char* toolBlockLabel = assetInteractionToolActive ? "TILE GUI" : "Collision";
+    const char* toolUnblockLabel = assetInteractionToolActive ? "SUPPR TILE GUI" : "Suppr Collision";
+    const EditorMapAssetClickGuiTargetInfo& selectedClickGuiInfo = selectedPlacedAssetActive
+        ? GetEditorMapAssetClickGuiTargetInfo(
+            this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)].clickGuiTarget)
+        : GetEditorMapAssetClickGuiTargetInfo(this->selectedAssetClickGuiTarget);
+    const int selectedClickTileCount = selectedPlacedAssetActive
+        ? static_cast<int>(this->computePlacedAssetClickInteractionTiles(
+              this->placedAssets[static_cast<size_t>(this->selectedPlacedAssetIndex)]).size())
+        : 0;
     this->drawToolbarButton(this->buttonImportRect, "IMPORTER ASSETS", false);
     this->drawToolbarButton(
         this->buttonListsVisibilityRect,
         this->showBottomRightLists ? "LISTES ON" : "LISTES OFF",
         this->showBottomRightLists);
     this->drawToolbarButton(this->buttonImportMapRect, "IMPORTER MAP", false);
-    this->drawToolbarButton(this->buttonImportShipRect, "IMPORTER NAVIRES", false);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER MAP", false);
     this->drawToolbarButton(this->buttonUndoRect, "Annuler", this->canUndoHistory());
     this->drawToolbarButton(this->buttonRedoRect, "Refaire", this->canRedoHistory());
     this->drawToolbarButton(
         this->buttonToolBlockRect,
-        "Collision",
-        this->editorTool == EditorTool::BLOCK_TILES && this->collisionPaintBlocks);
+        toolBlockLabel,
+        (this->editorTool == EditorTool::BLOCK_TILES && this->collisionPaintBlocks) ||
+            assetInteractionPaintAddModeActive);
     this->drawToolbarButton(
         this->buttonToolUnblockRect,
-        "Suppr Collision",
-        this->editorTool == EditorTool::BLOCK_TILES && !this->collisionPaintBlocks);
+        toolUnblockLabel,
+        (this->editorTool == EditorTool::BLOCK_TILES && !this->collisionPaintBlocks) ||
+            assetInteractionPaintRemoveModeActive);
     this->drawToolbarButton(this->buttonToolPlaceRect, "Pose Asset", this->editorTool == EditorTool::PLACE_ASSETS);
     this->drawToolbarButton(this->buttonToolRemoveRect, "Supprimer asset", this->editorTool == EditorTool::REMOVE_ASSETS);
+    this->drawToolbarButton(this->buttonToolInteractRect, "INTERACTION ASSET", assetInteractionSelectModeActive);
     this->drawToolbarButton(this->buttonToolShipRect, "SPAWN NAVIRE", this->editorTool == EditorTool::SPAWN_SHIP);
     this->drawToolbarButton(this->buttonToolShipControlRect, "CONTROL NAVIRE", this->editorTool == EditorTool::CONTROL_SHIP);
     this->drawToolbarButton(this->buttonToolHotspotRect, "HOTSPOT TOUR", this->editorTool == EditorTool::HOTSPOT_TOWERS);
+    this->drawToolbarButton(
+        this->buttonTowerVariantsPickerRect,
+        "CHOISIR VARIANTE TOWERS",
+        this->editorTool == EditorTool::HOTSPOT_TOWERS && this->towerVariantPickerVisible);
+    this->drawToolbarButton(
+        this->buttonTowerDisplayModeRect,
+        towerDisplayModeLabel.c_str(),
+        this->towerDisplayPickerVisible);
     this->drawToolbarButton(this->buttonAssetPrevRect, "Asset precedent", false);
     this->drawToolbarButton(this->buttonAssetNextRect, "Asset suivant", false);
-    this->drawToolbarButton(this->buttonOceanPrevRect, "Ocean -", false);
-    this->drawToolbarButton(this->buttonOceanNextRect, "Ocean +", false);
-    this->drawToolbarButton(this->buttonBlockedBrushMinusRect, "Block -", false);
-    this->drawToolbarButton(this->buttonBlockedBrushPlusRect, "Block +", false);
+    this->drawToolbarButton(this->buttonOceanPrevRect, oceanPrevLabel, false);
+    this->drawToolbarButton(this->buttonOceanNextRect, oceanNextLabel, false);
+    this->drawToolbarButton(this->buttonBlockedBrushMinusRect, blockedBrushMinusLabel, false);
+    this->drawToolbarButton(this->buttonBlockedBrushPlusRect, blockedBrushPlusLabel, false);
     this->drawToolbarButton(this->buttonBlockedColorPrevRect, "BCol -", false);
     this->drawToolbarButton(this->buttonBlockedColorNextRect, "BCol +", false);
     this->drawToolbarButton(this->buttonHotspotColorPrevRect, "HCol -", false);
@@ -5059,9 +6624,6 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     this->drawToolbarButton(this->buttonAssetOpacityToggleRect, "Opacity", this->assetTransparencyEnabled);
     this->drawToolbarButton(this->buttonAssetOpacityMinusRect, "Op -", false);
     this->drawToolbarButton(this->buttonAssetOpacityPlusRect, "Op +", false);
-    this->drawToolbarButton(this->buttonShipScaleMinusRect, "Ship -", false);
-    this->drawToolbarButton(this->buttonShipScalePlusRect, "Ship +", false);
-    this->drawToolbarButton(this->buttonShipReexportRect, "REEXPORT SHIP", false);
     this->drawToolbarButton(this->buttonGridRect, "Lignes", this->showGrid);
     this->drawToolbarButton(this->buttonCenterRect, "CENTRER MAP", false);
     this->drawToolbarButton(this->buttonCenterShipRect, "CENTRER NAVIRE", this->testShipCameraFollowEnabled);
@@ -5142,16 +6704,22 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
             this->testShip.isMoving() ? "ON" : "OFF",
             this->testShipCameraFollowEnabled ? "ON" : "OFF");
     }
-    char line4[512] = {};
+    char line4[1024] = {};
     SDL_snprintf(
         line4,
         sizeof(line4),
-        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%%",
+        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%% | TowerSel:%d/12 | TowerVar:Niv%d | TowerView:%s | AssetEdit:%s | ClickGui:%s | ClickTiles:%d",
         this->mapNameInput.empty() ? "<vide>" : this->mapNameInput.c_str(),
         (this->blockedBrushRadiusTiles * 2) + 1,
         this->assetOpacityPercent,
         this->assetTransparencyEnabled ? "ON" : "OFF",
-        this->shipScalePercent);
+        this->shipScalePercent,
+        ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber),
+        std::clamp(this->selectedTowerVariantLevel, 1, 4),
+        towerViewSummary.c_str(),
+        selectedPlacedAssetActive ? "ON" : "OFF",
+        selectedClickGuiInfo.label,
+        selectedClickTileCount);
     const Map& map = GetCurrentMap();
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
     drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
@@ -5186,6 +6754,14 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         this->drawShipListPanel();
         this->drawAssetListPanel();
+    }
+    if (this->towerVariantPickerVisible)
+    {
+        this->drawTowerVariantPickerPopup();
+    }
+    if (this->towerDisplayPickerVisible)
+    {
+        this->drawTowerDisplayPickerPopup();
     }
 }
 void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index)
@@ -5420,6 +6996,7 @@ void EditorMapCreateMapScene::update(double dt)
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
     }
+    this->handleSelectedPlacedAssetInteractionPaintFromMouse();
     this->updateTestShip(dt);
     camera.update(map, map.rect);
 
@@ -5561,6 +7138,14 @@ void EditorMapCreateMapScene::keypressed(
         this->statusMessage = "Mode Pose visuel: clic gauche pose asset, clic droit supprime.";
         return;
     }
+    if (scancode == SDL_SCANCODE_I && !isrepeat)
+    {
+        this->editorTool = EditorTool::INTERACT_ASSETS;
+        this->assetInteractionEditMode = AssetInteractionEditMode::SELECT;
+        this->statusMessage =
+            "Mode Interaction asset: clique un asset pour le selectionner puis choisis AJOUT TILE ou SUPPR TILE.";
+        return;
+    }
     if (scancode == SDL_SCANCODE_N && !isrepeat)
     {
         this->editorTool = EditorTool::SPAWN_SHIP;
@@ -5695,6 +7280,16 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         this->assetListScrollDragGrabOffsetY = 0.0f;
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
+        this->assetInteractionPaintActive = false;
+        this->lastAssetInteractionPaintTileValid = false;
+    }
+    if (this->handleTowerVariantPickerClick(renderX, renderY))
+    {
+        return;
+    }
+    if (this->handleTowerDisplayPickerClick(renderX, renderY))
+    {
+        return;
     }
     if (this->handleToolbarClick(renderX, renderY))
     {
@@ -5747,6 +7342,54 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
         {
             this->removeAssetAtMouseTile();
         }
+        return;
+    }
+    if (this->editorTool == EditorTool::INTERACT_ASSETS)
+    {
+        if (this->assetInteractionEditMode == AssetInteractionEditMode::SELECT)
+        {
+            if (button == RC2D_MOUSE_BUTTON_RIGHT)
+            {
+                this->clearSelectedPlacedAsset();
+                this->statusMessage = "Selection interaction asset effacee.";
+                return;
+            }
+            if (button != RC2D_MOUSE_BUTTON_LEFT)
+            {
+                return;
+            }
+            if (this->selectPlacedAssetAtScreenPoint(renderX, renderY))
+            {
+                return;
+            }
+            this->statusMessage = "Clique un asset pose pour l'editer.";
+            return;
+        }
+
+        if (button != RC2D_MOUSE_BUTTON_LEFT)
+        {
+            return;
+        }
+
+        if (!this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex))
+        {
+            this->statusMessage = "Selectionne d'abord un asset a regler.";
+            return;
+        }
+
+        const SDL_Point targetTile = map.screenToTileNearest(renderX, renderY);
+        if (!map.isInside(targetTile.x, targetTile.y))
+        {
+            this->statusMessage = "Cible interaction hors map.";
+            return;
+        }
+
+        this->assetInteractionPaintValue =
+            (this->assetInteractionEditMode != AssetInteractionEditMode::PAINT_REMOVE);
+        this->assetInteractionPaintActive = true;
+        this->lastAssetInteractionPaintTileValid = false;
+        this->paintSelectedPlacedAssetInteractionAtMouse(this->assetInteractionPaintValue);
+        return;
     }
     if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
     {
@@ -5813,9 +7456,27 @@ void EditorMapCreateMapScene::mousewheelmoved(
         this->clampShipListScrollOffset();
         return;
     }
-    if (this->showBottomRightLists && this->pointInRect(renderX, renderY, this->assetListRect))
+    if (this->towerVariantPickerVisible && this->pointInRect(renderX, renderY, this->towerVariantPickerRect))
     {
         this->assetListScrollOffset += (delta > 0) ? -step : step;
+        this->clampAssetListScrollOffset();
+        return;
+    }
+    if (this->towerDisplayPickerVisible && this->pointInRect(renderX, renderY, this->towerDisplayPickerRect))
+    {
+        return;
+    }
+    if (this->showBottomRightLists && this->pointInRect(renderX, renderY, this->assetListRect))
+    {
+        if (this->isPlacedAssetIndexValid(this->selectedPlacedAssetIndex) &&
+            this->editorTool == EditorTool::INTERACT_ASSETS)
+        {
+            this->assetInteractionListScrollOffset += (delta > 0) ? -step : step;
+        }
+        else
+        {
+            this->assetListScrollOffset += (delta > 0) ? -step : step;
+        }
         this->clampAssetListScrollOffset();
         return;
     }

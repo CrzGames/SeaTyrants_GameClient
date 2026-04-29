@@ -533,7 +533,6 @@ void GameScene::draw(void)
     Map& map = GetCurrentMap();
     Player& player = GetGameState().player;
     OceanShader& oceanShader = GetOceanShader();
-    VisionCloudShader& visionCloudShader = GetVisionCloudShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     GameSettingsWidget& gameSettings = GetIngameHudOverlay().getGameSettingsWidget();
 
@@ -566,12 +565,6 @@ void GameScene::draw(void)
 
     // Dessine les VFX devant le ship.
     //this->shipVfx.draw(map, player.getShip(), false);
-
-    // Dessine les nuages par-dessus le joueur pour un rendu "au-dessus".
-    if (visionCloudShader.isReady())
-    {
-        visionCloudShader.draw(map.rect);
-    }
 
     // Dessine les barres de scroll par-dessus tout.
     GetIngameHudOverlay().drawScrollBarOverlay(map);

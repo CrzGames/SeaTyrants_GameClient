@@ -15,7 +15,6 @@ static WebSocketToSimulationQueue g_wsToSimQueue;
 static Map g_currentMap;
 static OceanShader g_oceanShader;
 static FogOfWarShader g_fogOfWarShader;
-static VisionCloudShader g_visionCloudShader;
 static TitleAssetCache g_titleAssetCache;
 static ClientLanguageState g_clientLanguageState;
 static IngameHudOverlay g_ingameHudOverlay;
@@ -83,11 +82,6 @@ OceanShader& GetOceanShader()
 FogOfWarShader& GetFogOfWarShader()
 {
     return g_fogOfWarShader;
-}
-
-VisionCloudShader& GetVisionCloudShader()
-{
-    return g_visionCloudShader;
 }
 
 TitleAssetCache& GetTitleAssetCache()

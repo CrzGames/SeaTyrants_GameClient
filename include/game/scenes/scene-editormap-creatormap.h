@@ -4,12 +4,14 @@
 
 #include <RC2D/RC2D.h>
 
+#include <array>
 #include <cstddef>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include "game/scenes/scene.h"
+#include "game/scenes/editormap-map-interaction.h"
 #include "game/ships/ship.h"
 #include "game/ui/hud/background-widget.h"
 #include "game/ui/overlay/tile-click-marker-overlay.h"
@@ -45,9 +47,19 @@ private:
         BLOCK_TILES = 0, /**< Peinture collision bloque/debloque. */
         PLACE_ASSETS = 1, /**< Pose/remplacement d'assets. */
         REMOVE_ASSETS = 2, /**< Suppression d'assets poses. */
-        SPAWN_SHIP = 3, /**< Spawn/repositionnement du navire de test via preview. */
-        CONTROL_SHIP = 4, /**< Controle du navire de test sur la map. */
-        HOTSPOT_TOWERS = 5 /**< Selection hotspots de tours via assets poses. */
+        INTERACT_ASSETS = 3, /**< Edition des GUI/rayons d'interaction des assets poses. */
+        SPAWN_SHIP = 4, /**< Spawn/repositionnement du navire de test via preview. */
+        CONTROL_SHIP = 5, /**< Controle du navire de test sur la map. */
+        HOTSPOT_TOWERS = 6 /**< Selection hotspots de tours via assets poses. */
+    };
+    enum class AssetInteractionEditMode {
+        SELECT = 0, /**< Selectionne l'asset et la GUI cible. */
+        PAINT_ADD = 1, /**< Ajoute des tuiles d'interaction. */
+        PAINT_REMOVE = 2 /**< Retire des tuiles d'interaction. */
+    };
+    enum class TowerPreviewDisplayMode {
+        HOTSPOTS = 0, /**< Affiche les tuiles hotspots. */
+        TOWERS = 1 /**< Affiche les tours d'un niveau choisi. */
     };
 
     /**
@@ -87,10 +99,19 @@ private:
         float anchorTileX; /**< Ancre sub-tile en X pour un pose precis. */
         float anchorTileY; /**< Ancre sub-tile en Y pour un pose precis. */
         float scale; /**< Echelle logique de pose. */
+        EditorMapAssetClickGuiTarget clickGuiTarget = EditorMapAssetClickGuiTarget::NONE; /**< GUI ouverte au clic sur l'asset. */
+        int clickGuiDistanceTiles = kEditorMapDefaultAssetClickDistanceTiles; /**< Rayon legacy importe depuis les anciens JSON. */
+        bool clickGuiUsesLegacyRadius = false; /**< true si l'asset n'a pas encore de tuiles explicites et repose sur l'ancien rayon. */
+        std::vector<SDL_Point> clickGuiTiles; /**< Tuiles autorisees pour ouvrir la GUI de cet asset. */
     };
     struct TowerHotspot {
         int tileX; /**< Tuile hotspot X. */
         int tileY; /**< Tuile hotspot Y. */
+        int towerNumber = 1; /**< Numero logique de la tower [1..12]. */
+    };
+    struct TowerVisualSet {
+        int towerNumber = 1; /**< Numero logique de la tower [1..12]. */
+        std::array<int, 4> importedAssetIndices = {{-1, -1, -1, -1}}; /**< Variantes lvl1..lvl4. */
     };
 
     /**
@@ -150,6 +171,15 @@ private:
     int selectedBlockedColorIndex; /**< Index couleur des tuiles bloquees. */
     int selectedHotspotColorIndex; /**< Index couleur des hotspots tours. */
     int shipScalePercent; /**< Echelle navire test en % [10..100]. */
+    int selectedTowerHotspotNumber = 1; /**< Numero de tower assigne au prochain hotspot [1..12]. */
+    int selectedTowerVariantLevel = 1; /**< Niveau de variante de tower en cours d'edition [1..4]. */
+    int towerPreviewDisplayLevel = 1; /**< Niveau actuellement previsualise pour tous les hotspots [1..4]. */
+    TowerPreviewDisplayMode towerPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS; /**< Mode d'affichage hotspot/towers. */
+    EditorMapAssetClickGuiTarget selectedAssetClickGuiTarget = EditorMapAssetClickGuiTarget::NONE; /**< GUI appliquee aux prochains assets poses. */
+    int selectedAssetClickDistanceTiles = kEditorMapDefaultAssetClickDistanceTiles; /**< Rayon legacy conserve pour compatibilite import. */
+    int selectedPlacedAssetIndex = -1; /**< Asset deja pose actuellement selectionne pour edition interaction. */
+    int assetInteractionListScrollOffset = 0; /**< Scroll de la liste des GUI d'interaction quand un asset pose est selectionne. */
+    AssetInteractionEditMode assetInteractionEditMode = AssetInteractionEditMode::SELECT; /**< Sous-mode de l'outil interaction asset. */
 
     bool hoveredTileValid; /**< true si la souris survole une tuile map. */
     SDL_Point hoveredTile; /**< Tuile actuellement survolee. */
@@ -157,11 +187,16 @@ private:
     bool dragPaintBlockedValue; /**< Valeur de paint collision du drag courant. */
     bool lastDragPaintTileValid; /**< true si la derniere tuile drag est valide. */
     SDL_Point lastDragPaintTile; /**< Derniere tuile peinte en drag. */
+    bool assetInteractionPaintActive = false; /**< true si un paint de tuiles d'interaction est en cours. */
+    bool assetInteractionPaintValue = true; /**< true=ajoute des tuiles, false=en retire. */
+    bool lastAssetInteractionPaintTileValid = false; /**< true si la derniere tuile peinte pour l'interaction est valide. */
+    SDL_Point lastAssetInteractionPaintTile; /**< Derniere tuile peinte pour l'interaction d'un asset. */
 
     std::vector<ImportedAsset> importedAssets; /**< Bibliotheque assets importes. */
     std::vector<ImportedShip> importedShips; /**< Bibliotheque navires importes depuis dossiers. */
     std::vector<PlacedAsset> placedAssets; /**< Assets poses sur la map. */
     std::vector<TowerHotspot> towerHotspots; /**< Hotspots tours poses sur la map. */
+    std::vector<TowerVisualSet> towerVisualSets; /**< Variantes d'assets configurees par towerNumber. */
     std::vector<HistoryAction> historyActions; /**< Pile d'historique undo/redo. */
     int historyCursor; /**< Curseur courant dans l'historique. */
     unsigned int importedAssetCounter; /**< Compteur auto pour ID d'import. */
@@ -205,9 +240,12 @@ private:
     SDL_FRect buttonToolUnblockRect; /**< Bouton outil suppression collision. */
     SDL_FRect buttonToolPlaceRect; /**< Bouton outil pose asset. */
     SDL_FRect buttonToolRemoveRect; /**< Bouton outil suppression asset. */
+    SDL_FRect buttonToolInteractRect; /**< Bouton outil edition interaction asset. */
     SDL_FRect buttonToolShipRect; /**< Bouton outil spawn navire. */
     SDL_FRect buttonToolShipControlRect; /**< Bouton outil controle navire. */
     SDL_FRect buttonToolHotspotRect; /**< Bouton outil hotspots tours. */
+    SDL_FRect buttonTowerVariantsPickerRect; /**< Bouton ouverture popup variantes towers. */
+    SDL_FRect buttonTowerDisplayModeRect; /**< Bouton affichage hotspots/towers. */
     SDL_FRect buttonAssetPrevRect; /**< Bouton asset precedent. */
     SDL_FRect buttonAssetNextRect; /**< Bouton asset suivant. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
@@ -235,6 +273,14 @@ private:
     SDL_FRect assetListRect; /**< Panneau liste assets (bas droite). */
     SDL_FRect shipListRect; /**< Panneau liste navires (meme format que assets). */
     SDL_FRect miniMapRect; /**< Minimap editeur (haut droite). */
+    SDL_FRect towerVariantPickerRect; /**< Popup de selection des variantes de towers. */
+    std::array<SDL_FRect, 4> towerVariantLevelTabRects; /**< Onglets lvl1..lvl4 de la popup towers. */
+    SDL_FRect towerVariantConfirmRect; /**< Bouton confirmer popup variantes tower. */
+    bool towerVariantPickerVisible; /**< true si la popup de variantes towers est ouverte. */
+    SDL_FRect towerDisplayPickerRect; /**< Popup de selection du niveau de preview tower. */
+    std::array<SDL_FRect, 5> towerDisplayLevelTabRects; /**< Onglets tuile hotspot + niveaux de preview tower. */
+    SDL_FRect towerDisplayConfirmRect; /**< Bouton confirmer popup affichage towers. */
+    bool towerDisplayPickerVisible; /**< true si la popup de preview tower est ouverte. */
     bool miniMapDragActive; /**< true si drag minimap en cours. */
     float miniMapDragOffsetX; /**< Offset drag minimap en X. */
     float miniMapDragOffsetY; /**< Offset drag minimap en Y. */
@@ -306,6 +352,12 @@ private:
      *  @return true si un asset est trouve.
      */
     bool getPlacedAssetAtTile(int tileX, int tileY, PlacedAsset* outAsset) const;
+    /** @brief Indique si un index d'asset pose est valide. */
+    bool isPlacedAssetIndexValid(int index) const;
+    /** @brief Deselectionne l'asset pose actuellement edite. */
+    void clearSelectedPlacedAsset(void);
+    /** @brief Selectionne l'asset pose sous un point ecran. */
+    bool selectPlacedAssetAtScreenPoint(float x, float y);
     /** @brief Ecrit l'etat asset sur une tuile.
      *  @param tileX Tuile X.
      *  @param tileY Tuile Y.
@@ -378,6 +430,24 @@ private:
     int findPlacedAssetIndexAtScreenPoint(float x, float y) const;
     /** @brief Calcule la tuile centre d'un asset pose. */
     SDL_Point computePlacedAssetCenterTile(const PlacedAsset& asset) const;
+    /** @brief Liste les tuiles autorisees pour l'interaction d'un asset. */
+    std::vector<SDL_Point> computePlacedAssetClickInteractionTiles(const PlacedAsset& asset) const;
+    /** @brief Indique si une tuile precise est deja autorisee pour l'asset. */
+    bool placedAssetHasClickInteractionTile(const PlacedAsset& asset, int tileX, int tileY) const;
+    /** @brief Ajoute ou retire une tuile d'interaction sur un asset pose. */
+    bool setPlacedAssetClickInteractionTile(int placedAssetIndex, int tileX, int tileY, bool enabled);
+    /** @brief Peint l'interaction de l'asset selectionne sous la souris. */
+    void paintSelectedPlacedAssetInteractionAtMouse(bool enabled);
+    /** @brief Trouve un hotspot a la tuile demandee. */
+    int findTowerHotspotIndexAtTile(int tileX, int tileY) const;
+    /** @brief Trouve un hotspot par numero de tower. */
+    int findTowerHotspotIndexByNumber(int towerNumber) const;
+    /** @brief Trouve une config visuelle de tower par numero. */
+    int findTowerVisualSetIndexByNumber(int towerNumber) const;
+    /** @brief Retourne la config visuelle de tower creee au besoin. */
+    TowerVisualSet& ensureTowerVisualSet(int towerNumber);
+    /** @brief Retourne le premier numero de tower libre, sinon 0. */
+    int findFirstFreeTowerHotspotNumber(void) const;
     /** @brief Toggle un hotspot tour. */
     void toggleTowerHotspotAtTile(int tileX, int tileY);
     /** @brief Ajuste l'opacite globale assets en %. */
@@ -447,6 +517,10 @@ private:
      *  @return true si le clic est consomme.
      */
     bool handleAssetListClick(float x, float y);
+    /** @brief Gere un clic dans la popup de variantes de towers. */
+    bool handleTowerVariantPickerClick(float x, float y);
+    /** @brief Gere un clic dans la popup d'affichage tower global. */
+    bool handleTowerDisplayPickerClick(float x, float y);
     /** @brief Gere un clic dans le panneau liste navires.
      *  @return true si le clic est consomme.
      */
@@ -455,8 +529,14 @@ private:
     void handleAssetListScrollDragFromMouse(void);
     /** @brief Gere le drag continu de la scrollbar liste navires. */
     void handleShipListScrollDragFromMouse(void);
+    /** @brief Gere le drag continu des tuiles d'interaction d'un asset pose selectionne. */
+    void handleSelectedPlacedAssetInteractionPaintFromMouse(void);
     /** @brief Dessine le panneau liste assets. */
     void drawAssetListPanel(void) const;
+    /** @brief Dessine la popup de variantes de towers. */
+    void drawTowerVariantPickerPopup(void) const;
+    /** @brief Dessine la popup d'affichage tower global. */
+    void drawTowerDisplayPickerPopup(void) const;
     /** @brief Dessine le panneau liste navires. */
     void drawShipListPanel(void) const;
     /** @brief Construit le rect de vue courante pour la minimap.

@@ -13,7 +13,6 @@
 #include "game/map/map.h"
 #include "game/shaders/fog-of-war-shader.h"
 #include "game/shaders/ocean-shader.h"
-#include "game/shaders/vision-cloud-shader.h"
 #include "game/state.h"
 #include "network/state.h"
 
@@ -96,12 +95,6 @@ OceanShader& GetOceanShader();
  * @return Reference mutable vers l'instance globale.
  */
 FogOfWarShader& GetFogOfWarShader();
-
-/**
- * @brief Acces global au shader de nuages visibles dans la portee.
- * @return Reference mutable vers l'instance globale.
- */
-VisionCloudShader& GetVisionCloudShader();
 
 /**
  * @brief Acces global au cache central des assets TITLE.
