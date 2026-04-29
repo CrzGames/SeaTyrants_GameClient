@@ -303,6 +303,8 @@ GuildMortarWidget::GuildMortarWidget(void)
       mortarEnabled(false),
       treasuryGoldAmount(0),
       treasuryRubiesAmount(0),
+      treasuryPearlsAmount(0),
+      treasuryCrystalsAmount(0),
       transferGoldInput{},
       transferGoldCursorIndex(0U),
       transferGoldSelectionAnchorIndex(0U),
@@ -315,6 +317,8 @@ GuildMortarWidget::GuildMortarWidget(void)
       valueFont{},
       goldIcon{},
       rubiesIcon{},
+      pearlsIcon{},
+      crystalsIcon{},
       arrowDownIcon{},
       controlIcons{},
       widgetRect{0.0f, 0.0f, kRefW, kRefH},
@@ -343,6 +347,8 @@ void GuildMortarWidget::load(void)
     this->valueFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 17.0f);
     this->goldIcon = LoadStorageImage("assets/images/ui-scene-game/money-gold.png", RC2D_STORAGE_TITLE);
     this->rubiesIcon = LoadStorageImage("assets/images/ui-scene-game/money-rubies.png", RC2D_STORAGE_TITLE);
+    this->pearlsIcon = LoadStorageImage("assets/images/ui-scene-game/money_pearls.png", RC2D_STORAGE_TITLE);
+    this->crystalsIcon = LoadStorageImage("assets/images/ui-scene-game/money_crystals.png", RC2D_STORAGE_TITLE);
     this->arrowDownIcon = LoadStorageImage("assets/images/ui-scene-game/icon-arrowdown.png", RC2D_STORAGE_TITLE);
     this->controlIcons.load();
 
@@ -369,6 +375,8 @@ void GuildMortarWidget::unload(void)
 {
     this->controlIcons.unload();
     ResetStorageImageRef(&this->arrowDownIcon);
+    ResetStorageImageRef(&this->crystalsIcon);
+    ResetStorageImageRef(&this->pearlsIcon);
     ResetStorageImageRef(&this->rubiesIcon);
     ResetStorageImageRef(&this->goldIcon);
     ResetStorageFontRef(&this->valueFont);
@@ -509,7 +517,7 @@ bool GuildMortarWidget::mousepressed(float x, float y, RC2D_MouseButton button, 
     const SDL_FRect headerRect = SDL_FRect{this->widgetRect.x + 5.0f, this->widgetRect.y + 5.0f, this->widgetRect.w - 10.0f, 30.0f};
     const SDL_FRect closeButtonRect = SDL_FRect{this->widgetRect.x + this->widgetRect.w - 28.0f, headerRect.y + 5.0f, 20.0f, 20.0f};
     const SDL_FRect toggleButtonRect = SDL_FRect{this->widgetRect.x + 34.0f, this->widgetRect.y + 122.0f, 320.0f, 34.0f};
-    const SDL_FRect upgradeButtonRect = SDL_FRect{this->widgetRect.x + 416.0f, this->widgetRect.y + 286.0f, 304.0f, 34.0f};
+    const SDL_FRect upgradeButtonRect = SDL_FRect{this->widgetRect.x + 416.0f, this->widgetRect.y + 388.0f, 304.0f, 34.0f};
     const SDL_FRect transferInputRect = SDL_FRect{this->widgetRect.x + 34.0f, this->widgetRect.y + 402.0f, 190.0f, 30.0f};
     const SDL_FRect transferButtonRect = SDL_FRect{this->widgetRect.x + 232.0f, this->widgetRect.y + 402.0f, 122.0f, 30.0f};
     const bool hasNextMortarLevel =
@@ -927,7 +935,39 @@ void GuildMortarWidget::draw(void) const
             formatWithDots(upgrade.attackRange),
             SDL_FRect{rightPanel.x + 194.0f, rightPanel.y + 170.0f, 140.0f, 48.0f});
 
-        const SDL_FRect upgradeButton = SDL_FRect{rightPanel.x + 28.0f, rightPanel.y + 240.0f, rightPanel.w - 56.0f, 34.0f};
+        auto drawUpgradeCurrencyCost = [&](const RC2D_Image& icon, std::int64_t amount, const SDL_FRect& area) {
+            const SDL_FRect iconRect = SDL_FRect{area.x, area.y + 2.0f, 22.0f, 22.0f};
+            const std::string amountText = formatWithDots(amount);
+            const float valueWidth = measureTextWidth(&self->valueFont, amountText);
+            const float contentWidth = 22.0f + 8.0f + valueWidth;
+            const float startX = area.x + (std::max)(0.0f, (area.w - contentWidth) * 0.5f);
+            const SDL_FRect centeredIconRect = SDL_FRect{startX, iconRect.y, iconRect.w, iconRect.h};
+            drawImageFit(icon, centeredIconRect, 1.0f);
+            drawText(&self->valueFont, amountText, startX + 30.0f, area.y + 1.0f, kTextGold);
+        };
+
+        drawText(&self->bodyFont, "Cout par tir de mortier", rightPanel.x + 28.0f, rightPanel.y + 228.0f, kTextMuted);
+        const SDL_FRect upgradeShotCostIcon = SDL_FRect{rightPanel.x + 28.0f, rightPanel.y + 252.0f, 24.0f, 24.0f};
+        drawImageFit(self->goldIcon, upgradeShotCostIcon, 1.0f);
+        drawText(
+            &self->valueFont,
+            formatWithDots(upgrade.shotCostGold),
+            upgradeShotCostIcon.x + 36.0f,
+            upgradeShotCostIcon.y + 1.0f,
+            kTextGold);
+
+        drawText(&self->bodyFont, "Cout pour ameliorer", rightPanel.x + 28.0f, rightPanel.y + 286.0f, kTextMuted);
+        drawText(&self->bodyFont, "Cout pour ameliorer", rightPanel.x + 194.0f, rightPanel.y + 286.0f, kTextMuted);
+        drawUpgradeCurrencyCost(
+            self->rubiesIcon,
+            upgrade.upgradeRubiesCost,
+            SDL_FRect{rightPanel.x + 28.0f, rightPanel.y + 310.0f, 140.0f, 26.0f});
+        drawUpgradeCurrencyCost(
+            self->pearlsIcon,
+            upgrade.upgradePearlsCost,
+            SDL_FRect{rightPanel.x + 194.0f, rightPanel.y + 310.0f, 140.0f, 26.0f});
+
+        const SDL_FRect upgradeButton = SDL_FRect{rightPanel.x + 28.0f, rightPanel.y + 342.0f, rightPanel.w - 56.0f, 34.0f};
         rc2d_graphics_setColor(isPointInRect(mouseX, mouseY, upgradeButton) ? kButtonHoverFill : kButtonFill);
         rc2d_graphics_rectangle("fill", &upgradeButton);
         rc2d_graphics_setColor(kGold);
@@ -940,12 +980,15 @@ void GuildMortarWidget::draw(void) const
     rc2d_graphics_setColor(kGold);
     rc2d_graphics_rectangle("line", &treasuryPanel);
     drawText(&self->titleFont, "Tresorerie de la guild", treasuryPanel.x + 14.0f, treasuryPanel.y + 10.0f, kTextGold);
-    const SDL_FRect treasuryGoldIcon = SDL_FRect{treasuryPanel.x + 292.0f, treasuryPanel.y + 9.0f, 26.0f, 26.0f};
-    const SDL_FRect treasuryRubiesIcon = SDL_FRect{treasuryPanel.x + 526.0f, treasuryPanel.y + 9.0f, 26.0f, 26.0f};
-    drawImageFit(self->goldIcon, treasuryGoldIcon, 1.0f);
-    drawText(&self->valueFont, formatWithDots(self->treasuryGoldAmount), treasuryGoldIcon.x + 36.0f, treasuryGoldIcon.y + 2.0f, kTextBody);
-    drawImageFit(self->rubiesIcon, treasuryRubiesIcon, 1.0f);
-    drawText(&self->valueFont, formatWithDots(self->treasuryRubiesAmount), treasuryRubiesIcon.x + 36.0f, treasuryRubiesIcon.y + 2.0f, kTextBody);
+    auto drawTreasuryCurrency = [&](const RC2D_Image& icon, std::int64_t amount, float x) {
+        const SDL_FRect iconRect = SDL_FRect{x, treasuryPanel.y + 9.0f, 26.0f, 26.0f};
+        drawImageFit(icon, iconRect, 1.0f);
+        drawText(&self->bodyFont, formatWithDots(amount), iconRect.x + 34.0f, iconRect.y + 4.0f, kTextBody);
+    };
+    drawTreasuryCurrency(self->goldIcon, self->treasuryGoldAmount, treasuryPanel.x + 200.0f);
+    drawTreasuryCurrency(self->rubiesIcon, self->treasuryRubiesAmount, treasuryPanel.x + 340.0f);
+    drawTreasuryCurrency(self->pearlsIcon, self->treasuryPearlsAmount, treasuryPanel.x + 480.0f);
+    drawTreasuryCurrency(self->crystalsIcon, self->treasuryCrystalsAmount, treasuryPanel.x + 620.0f);
 
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
@@ -1006,7 +1049,7 @@ HudCursorType GuildMortarWidget::getDesiredCursor(float x, float y) const
     const SDL_FRect headerRect = SDL_FRect{currentRect.x + 5.0f, currentRect.y + 5.0f, currentRect.w - 10.0f, 30.0f};
     const SDL_FRect closeButtonRect = SDL_FRect{currentRect.x + currentRect.w - 28.0f, headerRect.y + 5.0f, 20.0f, 20.0f};
     const SDL_FRect toggleButtonRect = SDL_FRect{currentRect.x + 34.0f, currentRect.y + 122.0f, 320.0f, 34.0f};
-    const SDL_FRect upgradeButtonRect = SDL_FRect{currentRect.x + 416.0f, currentRect.y + 286.0f, 304.0f, 34.0f};
+    const SDL_FRect upgradeButtonRect = SDL_FRect{currentRect.x + 416.0f, currentRect.y + 388.0f, 304.0f, 34.0f};
     const SDL_FRect transferInputRect = SDL_FRect{currentRect.x + 34.0f, currentRect.y + 402.0f, 190.0f, 30.0f};
     const SDL_FRect transferButtonRect = SDL_FRect{currentRect.x + 232.0f, currentRect.y + 402.0f, 122.0f, 30.0f};
     const bool hasNextMortarLevel =
@@ -1043,6 +1086,8 @@ void GuildMortarWidget::addMortarLevel(const MortarLevelEntry& entry)
     sanitized.attackRange = (std::max)(0, sanitized.attackRange);
     sanitized.shotCostGold = (std::max)(static_cast<std::int64_t>(0), sanitized.shotCostGold);
     sanitized.unitChestGoldAmount = (std::max)(static_cast<std::int64_t>(0), sanitized.unitChestGoldAmount);
+    sanitized.upgradeRubiesCost = (std::max)(static_cast<std::int64_t>(0), sanitized.upgradeRubiesCost);
+    sanitized.upgradePearlsCost = (std::max)(static_cast<std::int64_t>(0), sanitized.upgradePearlsCost);
     this->mortarLevels.push_back(sanitized);
     if (this->selectedMortarLevelIndex < 0)
     {
@@ -1113,6 +1158,16 @@ void GuildMortarWidget::setTreasuryGoldAmount(std::int64_t amount)
 void GuildMortarWidget::setTreasuryRubiesAmount(std::int64_t amount)
 {
     this->treasuryRubiesAmount = (std::max)(static_cast<std::int64_t>(0), amount);
+}
+
+void GuildMortarWidget::setTreasuryPearlsAmount(std::int64_t amount)
+{
+    this->treasuryPearlsAmount = (std::max)(static_cast<std::int64_t>(0), amount);
+}
+
+void GuildMortarWidget::setTreasuryCrystalsAmount(std::int64_t amount)
+{
+    this->treasuryCrystalsAmount = (std::max)(static_cast<std::int64_t>(0), amount);
 }
 
 GuildMortarWidget::MortarLevelEntry GuildMortarWidget::getSelectedDisplayEntry(void) const

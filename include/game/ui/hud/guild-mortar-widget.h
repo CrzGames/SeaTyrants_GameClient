@@ -28,6 +28,8 @@ public:
         int attackRange = 0;    /**< Portee d'attaque du mortier. */
         std::int64_t shotCostGold = 0; /**< Cout en gold consomme a chaque tir. */
         std::int64_t unitChestGoldAmount = 0; /**< Gold stocke dans le coffre de ce mortier. */
+        std::int64_t upgradeRubiesCost = 0; /**< Cout en rubies pour ameliorer vers ce niveau. */
+        std::int64_t upgradePearlsCost = 0; /**< Cout en perles pour ameliorer vers ce niveau. */
     };
 
     /**
@@ -169,6 +171,16 @@ public:
      */
     void setTreasuryRubiesAmount(std::int64_t amount);
 
+    /**
+     * @brief Change le montant de perles disponible dans la tresorerie de guilde.
+     */
+    void setTreasuryPearlsAmount(std::int64_t amount);
+
+    /**
+     * @brief Change le montant de cristaux disponible dans la tresorerie de guilde.
+     */
+    void setTreasuryCrystalsAmount(std::int64_t amount);
+
 private:
     /**
      * @brief Donnees des niveaux et de l'etat courant.
@@ -178,6 +190,8 @@ private:
     bool mortarEnabled;                         /**< True si le mortier est actif. */
     std::int64_t treasuryGoldAmount;            /**< Tresorerie gold de la guilde. */
     std::int64_t treasuryRubiesAmount;          /**< Tresorerie rubies de la guilde. */
+    std::int64_t treasuryPearlsAmount;          /**< Tresorerie perles de la guilde. */
+    std::int64_t treasuryCrystalsAmount;        /**< Tresorerie cristaux de la guilde. */
     std::string transferGoldInput;              /**< Montant saisi pour transferer de l'or. */
     std::size_t transferGoldCursorIndex;        /**< Position du curseur dans le montant saisi. */
     std::size_t transferGoldSelectionAnchorIndex; /**< Ancre de selection du montant saisi. */
@@ -194,6 +208,8 @@ private:
     RC2D_Font valueFont;        /**< Police des valeurs numeriques. */
     RC2D_Image goldIcon;        /**< Icone gold. */
     RC2D_Image rubiesIcon;      /**< Icone rubies. */
+    RC2D_Image pearlsIcon;      /**< Icone perles. */
+    RC2D_Image crystalsIcon;    /**< Icone cristaux. */
     RC2D_Image arrowDownIcon;   /**< Icone de liste deroulante des niveaux. */
     WindowControlIcons controlIcons; /**< Helper des boutons de fenetre. */
 
