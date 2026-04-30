@@ -8,6 +8,8 @@
 
 #include <RC2D/RC2D_system.h>
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -18,8 +20,24 @@
 #define APP_VERSION "dev"
 #endif
 
+#if GAME_ENV_DEV
+static constexpr const char* kMenuForgotPasswordUrl = "http://localhost:3556/forgot-password";
+#elif GAME_ENV_STAGING
+static constexpr const char* kMenuForgotPasswordUrl = "https://staging.crzgames.com/forgot-password";
+#elif GAME_ENV_PRODUCTION
+static constexpr const char* kMenuForgotPasswordUrl = "https://crzgames.com/forgot-password";
+#else
+#error "Configurer GAME_ENV via CMake (dev, staging ou production)."
+#endif
+
 namespace menu_scene
 {
+#if GAME_ENV_DEV || GAME_ENV_STAGING
+    static constexpr bool kAuthFeedbackShowInternalDiagnostics = true;
+#else
+    static constexpr bool kAuthFeedbackShowInternalDiagnostics = false;
+#endif
+
     static constexpr std::array<const char*, 24> kLanguageFlagNames = {
         "albania",
         "austria",
@@ -79,6 +97,8 @@ namespace menu_scene
     static constexpr RC2D_Color kFlagHoverBorder = RC2D_Color{218, 187, 96, 240};
     static constexpr RC2D_Color kFlagSelectedBorder = RC2D_Color{237, 210, 124, 255};
     static constexpr RC2D_Color kErrorText = RC2D_Color{255, 129, 113, 255};
+    /** Erreurs de validation directement sous les champs login (rouge plus marque). */
+    static constexpr RC2D_Color kLoginFieldValidationError = RC2D_Color{255, 32, 32, 255};
     static constexpr RC2D_Color kSuccessText = RC2D_Color{161, 220, 155, 255};
     static constexpr RC2D_Color kOverlayDim = RC2D_Color{0, 0, 0, 160};
     static constexpr RC2D_Color kServerRowFill = RC2D_Color{10, 20, 32, 214};
@@ -91,6 +111,8 @@ namespace menu_scene
     static constexpr RC2D_Color kPendingPanelFill = RC2D_Color{9, 19, 31, 234};
     static constexpr RC2D_Color kPendingPanelBorder = RC2D_Color{236, 201, 102, 255};
     static constexpr RC2D_Color kPendingLoaderColor = RC2D_Color{211, 223, 236, 255};
+    static constexpr RC2D_Color kForgotPasswordLink = RC2D_Color{130, 190, 255, 255};
+    static constexpr RC2D_Color kForgotPasswordLinkHover = RC2D_Color{200, 225, 255, 255};
 
     /**
      * @brief Applique un alpha global a une couleur RGBA existante.
@@ -723,9 +745,16 @@ namespace menu_scene
             return "Delai depasse";
         }
 
-        if (code == "E_BACKEND_UNAVAILABLE" ||
-            code == "E_BACKEND_SERVER" ||
-            code == "E_BACKEND_NETWORK")
+        if (code == "E_BACKEND_UNAVAILABLE")
+        {
+            if (kAuthFeedbackShowInternalDiagnostics)
+            {
+                return "Backend indisponible";
+            }
+            return "Echec de connexion";
+        }
+
+        if (code == "E_BACKEND_SERVER" || code == "E_BACKEND_NETWORK")
         {
             return "Backend indisponible";
         }
@@ -735,6 +764,11 @@ namespace menu_scene
 
     std::string buildAuthFeedbackDetailText(long httpStatusCode, const std::string& code)
     {
+        if (!kAuthFeedbackShowInternalDiagnostics && code == "E_BACKEND_UNAVAILABLE")
+        {
+            return "Le service d'authentification n'a pas pu etre joint. Reessayez plus tard.";
+        }
+
         std::string detailText{};
         if (!code.empty())
         {
@@ -777,6 +811,8 @@ namespace menu_scene
 
 #if GAME_ENV_DEV
         return "Mode DEV: verifiez que le backend local HTTP est demarre puis reessayez.";
+#elif GAME_ENV_STAGING
+        return "Mode STAGING: verifiez la connectivite vers le service d'authentification puis reessayez.";
 #else
         return "Verifiez la disponibilite du service puis reessayez.";
 #endif
@@ -830,6 +866,9 @@ MenuScene::MenuScene(void)
       languageScrollTrackRect{0.0f, 0.0f, 0.0f, 0.0f},
       languageScrollThumbRect{0.0f, 0.0f, 0.0f, 0.0f},
       loginCardRect{0.0f, 0.0f, 0.0f, 0.0f},
+      forgotPasswordLinkTextRect{0.0f, 0.0f, 0.0f, 0.0f},
+      forgotPasswordLinkHitRect{0.0f, 0.0f, 0.0f, 0.0f},
+      hoveredForgotPasswordLink(false),
       authFeedbackPopupRect{0.0f, 0.0f, 0.0f, 0.0f},
       authFeedbackPopupActionButtonRect{0.0f, 0.0f, 0.0f, 0.0f},
       serverSelectionOverlayRect{0.0f, 0.0f, 0.0f, 0.0f},
@@ -1069,6 +1108,8 @@ void MenuScene::syncAnimatedUiState(void)
         loginButtonBaseRect,
         pulseScale,
         pulseScale);
+
+    this->layoutForgotPasswordLink();
 }
 
 void MenuScene::refreshAuthUiSnapshotFromNetworkState(void)
@@ -1764,7 +1805,7 @@ void MenuScene::submitLoginRequest(void)
 
     if (trimmedEmail.empty())
     {
-        this->loginEmailFieldErrorMessage = "Identifiant / e-mail requis.";
+        this->loginEmailFieldErrorMessage = "E-mail requis.";
         this->focusedLoginField = MenuLoginFocusedField::EMAIL;
         this->menuLocalStatusMessage.clear();
         this->menuLocalStatusIsError = true;
@@ -1967,6 +2008,7 @@ void MenuScene::updateMenuInteractivity(void)
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     menu_scene::getMouseRenderPosition(&mouseX, &mouseY);
+    this->hoveredForgotPasswordLink = false;
 
     if (this->authFeedbackPopupVisible)
     {
@@ -2049,6 +2091,15 @@ void MenuScene::updateMenuInteractivity(void)
     const bool hoveringEmail = rc2d_collision_pointInUIImagePixelPerfect(&this->inputEmailUi, mouseX, mouseY);
     const bool hoveringPassword = rc2d_collision_pointInUIImagePixelPerfect(&this->inputPasswordUi, mouseX, mouseY);
     const bool hoveringLogin = menu_scene::pointInRect(this->buttonLoginUi.last_drawn_rect, mouseX, mouseY);
+
+    if (menu_scene::isValidRect(this->forgotPasswordLinkHitRect) &&
+        menu_scene::pointInRect(this->forgotPasswordLinkHitRect, mouseX, mouseY))
+    {
+        this->hoveredForgotPasswordLink = true;
+        menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_POINTER);
+        return;
+    }
+
     if (hoveringEmail || hoveringPassword)
     {
         menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_TEXT);
@@ -2194,6 +2245,9 @@ void MenuScene::unload(void)
     this->languageScrollTrackRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->languageScrollThumbRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->loginCardRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->forgotPasswordLinkTextRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->forgotPasswordLinkHitRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->hoveredForgotPasswordLink = false;
     this->serverSelectionOverlayRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->serverSelectionHeaderRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->serverSelectionRowRects.clear();
@@ -2299,6 +2353,9 @@ void MenuScene::load(void)
     this->languageScrollTrackRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->languageScrollThumbRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->loginCardRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->forgotPasswordLinkTextRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->forgotPasswordLinkHitRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->hoveredForgotPasswordLink = false;
     this->serverSelectionOverlayRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->serverSelectionHeaderRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->serverSelectionRowRects.clear();
@@ -2982,6 +3039,93 @@ void MenuScene::drawLoginStatusMessage(void)
     menu_scene::drawCenteredText(&this->menuBodyFont, messageToDraw, statusRect, messageColor);
 }
 
+void MenuScene::layoutForgotPasswordLink(void)
+{
+    this->forgotPasswordLinkTextRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->forgotPasswordLinkHitRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+
+    if (this->menuBodyFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    const SDL_FRect screenRect = GetGameScreen().rect;
+    if (!menu_scene::isValidRect(screenRect))
+    {
+        return;
+    }
+
+    static const char kForgotPasswordLabel[] = "Mot de passe oublié ?";
+    const std::string label(kForgotPasswordLabel);
+    const float textWidth = menu_scene::measureTextWidth(&this->menuBodyFont, label);
+    if (textWidth <= 0.0f)
+    {
+        return;
+    }
+
+    int textHeight = 0;
+    {
+        RC2D_Text measureText = rc2d_graphics_createText(&this->menuBodyFont, kForgotPasswordLabel);
+        int measuredWidth = 0;
+        rc2d_graphics_getTextSize(&measureText, &measuredWidth, &textHeight);
+        rc2d_graphics_destroyText(&measureText);
+        (void)measuredWidth;
+    }
+
+    constexpr float kMargin = 10.0f;
+    this->forgotPasswordLinkTextRect = SDL_FRect{
+        std::round(screenRect.x + kMargin),
+        std::round(screenRect.y + screenRect.h - kMargin - static_cast<float>(textHeight)),
+        textWidth,
+        static_cast<float>(textHeight)};
+    this->forgotPasswordLinkHitRect = menu_scene::expandRect(this->forgotPasswordLinkTextRect, 8.0f, 6.0f);
+}
+
+void MenuScene::drawForgotPasswordLink(void)
+{
+    if (this->menuBodyFont.sdl_font == nullptr || !menu_scene::isValidRect(this->forgotPasswordLinkTextRect))
+    {
+        return;
+    }
+
+    const float panelAlpha = static_cast<float>(this->clamp01(this->panelReveal.currentAlpha));
+    if (panelAlpha <= 0.0f)
+    {
+        return;
+    }
+
+    static const char kForgotPasswordLabel[] = "Mot de passe oublié ?";
+    const RC2D_Color baseColor =
+        this->hoveredForgotPasswordLink ? menu_scene::kForgotPasswordLinkHover : menu_scene::kForgotPasswordLink;
+    const RC2D_Color drawColor = menu_scene::applyAlpha(baseColor, panelAlpha);
+
+    RC2D_Text renderedText = rc2d_graphics_createText(&this->menuBodyFont, kForgotPasswordLabel);
+    renderedText.color = drawColor;
+    rc2d_graphics_setTextColor(&renderedText);
+
+    int measuredWidth = 0;
+    int measuredHeight = 0;
+    rc2d_graphics_getTextSize(&renderedText, &measuredWidth, &measuredHeight);
+
+    const float drawX = this->forgotPasswordLinkTextRect.x;
+    const float drawY = this->forgotPasswordLinkTextRect.y;
+    rc2d_graphics_drawText(&renderedText, drawX, drawY);
+    rc2d_graphics_destroyText(&renderedText);
+
+    if (this->hoveredForgotPasswordLink && measuredWidth > 0 && measuredHeight > 0)
+    {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(menu_scene::applyAlpha(menu_scene::kForgotPasswordLinkHover, panelAlpha));
+        const float underlineY = std::round(drawY + static_cast<float>(measuredHeight) + 1.0f);
+        rc2d_graphics_line(
+            std::round(drawX),
+            underlineY,
+            std::round(drawX + static_cast<float>(measuredWidth)),
+            underlineY);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    }
+}
+
 void MenuScene::drawLoginFieldErrors(void)
 {
     if (this->menuBodyFont.sdl_font == nullptr)
@@ -3001,7 +3145,7 @@ void MenuScene::drawLoginFieldErrors(void)
             this->loginEmailFieldErrorMessage,
             errorRect,
             errorRect.x,
-            menu_scene::kErrorText);
+            menu_scene::kLoginFieldValidationError);
     }
 
     if (!this->loginPasswordFieldErrorMessage.empty() && menu_scene::isValidRect(this->inputPasswordUi.last_drawn_rect))
@@ -3016,7 +3160,7 @@ void MenuScene::drawLoginFieldErrors(void)
             this->loginPasswordFieldErrorMessage,
             errorRect,
             errorRect.x,
-            menu_scene::kErrorText);
+            menu_scene::kLoginFieldValidationError);
     }
 }
 
@@ -3086,6 +3230,12 @@ void MenuScene::drawAuthFeedbackOverlay(void)
             "Mode DEV: connexion HTTP locale.",
             detailRect,
             menu_scene::kMutedText);
+#elif GAME_ENV_STAGING
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Mode STAGING: connexion au service d'authentification.",
+            detailRect,
+            menu_scene::kMutedText);
 #else
         menu_scene::drawCenteredText(
             &this->menuBodyFont,
@@ -3103,10 +3253,15 @@ void MenuScene::drawAuthFeedbackOverlay(void)
 
     const std::string titleText =
         menu_scene::buildAuthFeedbackFailureTitle(this->authUiSnapshot.lastHttpStatusCode, this->authUiSnapshot.lastCode);
-    const std::string bodyText =
+    std::string bodyText =
         !this->authUiSnapshot.lastMessage.empty()
             ? this->authUiSnapshot.lastMessage
             : std::string("La connexion au backend SeaTyrants a echoue.");
+    if (!menu_scene::kAuthFeedbackShowInternalDiagnostics &&
+        this->authUiSnapshot.lastCode == "E_BACKEND_UNAVAILABLE")
+    {
+        bodyText = "Impossible de vous connecter pour le moment. Veuillez reessayer plus tard.";
+    }
     const std::string detailText =
         menu_scene::buildAuthFeedbackDetailText(this->authUiSnapshot.lastHttpStatusCode, this->authUiSnapshot.lastCode);
     const std::string hintText =
@@ -3356,6 +3511,7 @@ void MenuScene::draw(void)
     this->drawLoginFieldContents();
     this->drawLoginFieldErrors();
     this->drawLoginStatusMessage();
+    this->drawForgotPasswordLink();
     this->drawServerSelectionOverlay();
     this->drawAuthFeedbackOverlay();
 
@@ -3475,6 +3631,13 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
 
     if (this->authUiSnapshot.signInRequestPending)
     {
+        return;
+    }
+
+    if (menu_scene::isValidRect(this->forgotPasswordLinkHitRect) &&
+        menu_scene::pointInRect(this->forgotPasswordLinkHitRect, x, y))
+    {
+        (void)SDL_OpenURL(kMenuForgotPasswordUrl);
         return;
     }
 

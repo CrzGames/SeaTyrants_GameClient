@@ -125,6 +125,9 @@ private:
     SDL_FRect languageScrollTrackRect;                 /**< Barre de scroll du panneau langue. */
     SDL_FRect languageScrollThumbRect;                 /**< Poignee de scroll du panneau langue. */
     SDL_FRect loginCardRect;                           /**< Rectangle de la carte de login stylisee. */
+    SDL_FRect forgotPasswordLinkTextRect;            /**< Zone de dessin du lien mot de passe oublie. */
+    SDL_FRect forgotPasswordLinkHitRect;             /**< Zone elargie pour survol / clic sur le lien. */
+    bool hoveredForgotPasswordLink;                  /**< True si le lien mot de passe oublie est survole. */
     SDL_FRect authFeedbackPopupRect;                   /**< Panneau principal de la popup auth. */
     SDL_FRect authFeedbackPopupActionButtonRect;       /**< Bouton principal de la popup auth. */
     SDL_FRect serverSelectionOverlayRect;              /**< Panneau principal de selection serveur. */
@@ -189,6 +192,16 @@ private:
      * @brief Dessine les messages de statut sous le formulaire de connexion.
      */
     void drawLoginStatusMessage(void);
+
+    /**
+     * @brief Recalcule la position du lien mot de passe oublie (bas gauche de l'aire jeu).
+     */
+    void layoutForgotPasswordLink(void);
+
+    /**
+     * @brief Dessine le lien web mot de passe oublie (bas gauche de l'aire jeu).
+     */
+    void drawForgotPasswordLink(void);
 
     /**
      * @brief Dessine les erreurs locales directement sous chaque champ.
