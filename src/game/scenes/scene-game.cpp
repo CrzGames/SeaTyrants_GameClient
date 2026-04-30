@@ -597,8 +597,11 @@ void GameScene::keypressed(
     // Priorite au chat HUD: si la touche est consommee par l'UI, on stop ici.
     if (GetIngameHudOverlay().keypressed(key, scancode, keycode, mod, isrepeat))
     {
+        GetIngameHudOverlay().syncPlatformTextInputState();
         return;
     }
+
+    GetIngameHudOverlay().syncPlatformTextInputState();
 
     // Champ texte HUD actif : ne pas declencher recentrage camera / raccourcis lies aux touches.
     if (GetIngameHudOverlay().isBlockingGameplayKeyboardInput())
@@ -647,7 +650,9 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     IngameHudOverlay& hudOverlay = GetIngameHudOverlay();
 
     // Priorite au chat HUD: clic consomme => pas de propagation gameplay.
-    if (hudOverlay.mousepressed(x, y, button, clicks, mouseID))
+    const bool hudConsumed = hudOverlay.mousepressed(x, y, button, clicks, mouseID);
+    hudOverlay.syncPlatformTextInputState();
+    if (hudConsumed)
     {
         return;
     }

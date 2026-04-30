@@ -2,8 +2,11 @@
 
 #include "game/assets/title-asset-cache.h"
 #include "game/map/map.h"
+#include "game/ui/text-input-shortcuts.h"
 
 #include "core/context.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include <algorithm>
 #include <array>
@@ -942,6 +945,7 @@ static SDL_Rect toClipRect(const SDL_FRect& rect)
     };
 }
 
+#if 0
 static char extractRedeemCharacter(const char* key)
 {
     if (key == nullptr || key[0] == '\0')
@@ -985,6 +989,8 @@ static char extractRedeemCharacter(const char* key)
 
     return '\0';
 }
+
+#endif
 
 static std::string sanitizeRedeemCodeValue(const std::string& rawValue)
 {
@@ -1528,6 +1534,7 @@ void GameSettingsWidget::load(void)
     this->redeemInputFocused = false;
     this->redeemCursorIndex = this->redeemCode.size();
     this->redeemSelectionAnchorIndex = this->redeemCursorIndex;
+    this->redeemEditHistory.clear();
     this->redeemInputSelectingWithMouse = false;
     this->redeemCursorVisible = false;
     this->redeemCursorBlinkElapsed = 0.0;
@@ -1578,6 +1585,7 @@ void GameSettingsWidget::unload(void)
     this->graphicsWindowModeDropdownOpen = false;
     this->graphicsPresentationModeDropdownOpen = false;
     this->controlIcons.unload();
+    this->redeemEditHistory.clear();
     ResetStorageImageRef(&this->checkboxValidIcon);
     ResetStorageImageRef(&this->arrowDownIcon);
     ResetStorageFontRef(&this->smallFont);
@@ -2535,8 +2543,6 @@ bool GameSettingsWidget::keypressed(
     SDL_Keymod mod,
     bool isrepeat)
 {
-    (void)mod;
-
     if (this->visible && this->activeTab == SettingsTab::CONTROLS && this->controlCaptureActive)
     {
         if (isrepeat)
@@ -2571,15 +2577,99 @@ bool GameSettingsWidget::keypressed(
         return false;
     }
 
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->redeemEditHistory.undo(
+                &this->redeemCode,
+                &this->redeemCursorIndex,
+                &this->redeemSelectionAnchorIndex))
+        {
+            this->redeemCursorVisible = true;
+            this->redeemCursorBlinkElapsed = 0.0;
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
+    {
+        this->redeemSelectionAnchorIndex = 0U;
+        this->redeemCursorIndex = this->redeemCode.size();
+        this->redeemCursorVisible = true;
+        this->redeemCursorBlinkElapsed = 0.0;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasRedeemSelection())
+        {
+            const std::size_t selectionStart = this->getRedeemSelectionStart();
+            const std::size_t selectionEnd = this->getRedeemSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->redeemCode.substr(selectionStart, selectionEnd - selectionStart).c_str());
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            std::string sanitized;
+            sanitized.reserve(kMaxRedeemCodeLength);
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                const unsigned char character = static_cast<unsigned char>(*cursor);
+                if (std::isalnum(character) != 0 || *cursor == '-' || *cursor == '_')
+                {
+                    sanitized.push_back(static_cast<char>(std::toupper(character)));
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                this->redeemEditHistory.rememberState(
+                    this->redeemCode,
+                    this->redeemCursorIndex,
+                    this->redeemSelectionAnchorIndex);
+                if (this->hasRedeemSelection())
+                {
+                    this->deleteSelectedRedeemText();
+                }
+
+                const std::size_t availableCount = kMaxRedeemCodeLength - this->redeemCode.size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->redeemCursorIndex = (std::min)(this->redeemCursorIndex, this->redeemCode.size());
+                this->redeemCode.insert(this->redeemCursorIndex, sanitized);
+                this->redeemCursorIndex += sanitized.size();
+                this->clearRedeemSelection();
+                this->redeemCursorVisible = true;
+                this->redeemCursorBlinkElapsed = 0.0;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
+        }
+        return true;
+    }
+
     switch (keycode)
     {
         case SDLK_BACKSPACE:
             if (this->hasRedeemSelection())
             {
+                this->redeemEditHistory.rememberState(
+                    this->redeemCode,
+                    this->redeemCursorIndex,
+                    this->redeemSelectionAnchorIndex);
                 this->deleteSelectedRedeemText();
             }
             else if (this->redeemCursorIndex > 0U && !this->redeemCode.empty())
             {
+                this->redeemEditHistory.rememberState(
+                    this->redeemCode,
+                    this->redeemCursorIndex,
+                    this->redeemSelectionAnchorIndex);
                 this->redeemCode.erase(this->redeemCursorIndex - 1U, 1U);
                 --this->redeemCursorIndex;
             }
@@ -2590,10 +2680,18 @@ bool GameSettingsWidget::keypressed(
         case SDLK_DELETE:
             if (this->hasRedeemSelection())
             {
+                this->redeemEditHistory.rememberState(
+                    this->redeemCode,
+                    this->redeemCursorIndex,
+                    this->redeemSelectionAnchorIndex);
                 this->deleteSelectedRedeemText();
             }
             else if (this->redeemCursorIndex < this->redeemCode.size())
             {
+                this->redeemEditHistory.rememberState(
+                    this->redeemCode,
+                    this->redeemCursorIndex,
+                    this->redeemSelectionAnchorIndex);
                 this->redeemCode.erase(this->redeemCursorIndex, 1U);
             }
             this->clearRedeemSelection();
@@ -2651,22 +2749,36 @@ bool GameSettingsWidget::keypressed(
             break;
     }
 
-    const char insertedCharacter = extractRedeemCharacter(key);
-    if (insertedCharacter == '\0')
+    return false;
+}
+
+bool GameSettingsWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->redeemInputFocused)
     {
         return false;
     }
 
+    const std::string sanitized = sanitizeRedeemCodeValue(text != nullptr ? text : "");
+    if (sanitized.empty())
+    {
+        return true;
+    }
+
+    this->redeemEditHistory.rememberState(
+        this->redeemCode,
+        this->redeemCursorIndex,
+        this->redeemSelectionAnchorIndex);
     if (this->hasRedeemSelection())
     {
         this->deleteSelectedRedeemText();
     }
-    if (this->redeemCode.size() >= kMaxRedeemCodeLength)
-    {
-        return true;
-    }
-    this->redeemCode.insert(this->redeemCode.begin() + static_cast<std::ptrdiff_t>(this->redeemCursorIndex), insertedCharacter);
-    ++this->redeemCursorIndex;
+
+    const std::size_t availableCount = kMaxRedeemCodeLength - this->redeemCode.size();
+    std::string clamped = sanitized.substr(0U, availableCount);
+    this->redeemCursorIndex = (std::min)(this->redeemCursorIndex, this->redeemCode.size());
+    this->redeemCode.insert(this->redeemCursorIndex, clamped);
+    this->redeemCursorIndex += clamped.size();
     this->clearRedeemSelection();
     this->redeemCursorVisible = true;
     this->redeemCursorBlinkElapsed = 0.0;
@@ -3986,6 +4098,7 @@ void GameSettingsWidget::clearFocus(void)
     this->redeemCursorVisible = false;
     this->redeemCursorBlinkElapsed = 0.0;
     this->clearRedeemSelection();
+    this->redeemEditHistory.clear();
     this->languageDropdownOpen = false;
     this->languageScrollDragging = false;
     this->languageScrollWheelHighlightSec = 0.0f;
@@ -4046,6 +4159,7 @@ void GameSettingsWidget::setRedeemCode(const std::string& value)
     this->redeemCode = sanitizeRedeemCodeValue(value);
     this->redeemCursorIndex = this->redeemCode.size();
     this->clearRedeemSelection();
+    this->redeemEditHistory.clear();
 }
 
 const std::string& GameSettingsWidget::getRedeemCode(void) const

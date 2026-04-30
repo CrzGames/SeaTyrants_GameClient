@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 /**
@@ -88,6 +89,12 @@ public:
      * @return True si l'evenement clavier est consomme.
      */
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+
+    /**
+     * @brief Injecte un texte finalise RC2D/SDL dans le champ de transfert.
+     * @return True si le texte a ete absorbe.
+     */
+    bool textinput(const char* text);
 
     /**
      * @brief Indique si le champ de transfert bloque les raccourcis gameplay.
@@ -199,6 +206,7 @@ private:
     bool transferGoldSelectingWithMouse;        /**< True pendant une selection souris dans l'input. */
     bool transferGoldCursorVisible;             /**< True si le curseur de saisie est visible. */
     float transferGoldCursorBlinkSec;           /**< Timer de clignotement du curseur. */
+    TextInputEditHistory transferGoldEditHistory; /**< Historique Ctrl+Z du montant de transfert. */
 
     /**
      * @brief Ressources graphiques.

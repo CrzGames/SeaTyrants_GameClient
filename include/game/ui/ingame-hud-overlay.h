@@ -130,6 +130,11 @@ public:
     bool textinput(const RC2D_TextInputEventInfo* info);
 
     /**
+     * @brief Synchronise la demande de saisie texte native avec le focus GUI courant.
+     */
+    void syncPlatformTextInputState(void);
+
+    /**
      * @brief True si un champ texte du HUD a le focus : pas de defilement camera ni raccourcis @ref GameScene.
      */
     bool isBlockingGameplayKeyboardInput(void) const;

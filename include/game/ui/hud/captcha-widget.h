@@ -6,6 +6,7 @@
 #include <string>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 /**
@@ -64,6 +65,13 @@ public:
      * @return true si la touche est absorbee par le widget.
      */
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+
+    /**
+     * @brief Injecte un texte finalise RC2D/SDL dans le champ reponse.
+     * @param text Texte saisi selon la disposition clavier active.
+     * @return true si le texte a ete absorbe par le widget.
+     */
+    bool textinput(const char* text);
 
     /**
      * @brief Retire le focus du champ reponse et replie toute selection texte.
@@ -166,6 +174,7 @@ private:
     bool inputSelectingWithMouse; /**< Selection etendue a la souris. */
     bool cursorVisible;           /**< Bit de clignotement du caret. */
     double cursorBlinkElapsed;    /**< Accumulateur pour le blink. */
+    TextInputEditHistory responseEditHistory; /**< Historique Ctrl+Z du champ reponse. */
     double solveTimeRemainingSec; /**< Compte a rebours pour valider (secondes restantes). */
 
     float widgetDragOffsetX;  /**< Offset souris -> coin haut gauche en drag. */

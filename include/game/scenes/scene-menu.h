@@ -6,6 +6,7 @@
 
 #include <RC2D/RC2D.h>
 #include "game/scenes/scene.h"
+#include "game/ui/text-input-edit-history.h"
 #include "services/http/types/auth/responses.h"
 
 /**
@@ -114,6 +115,8 @@ private:
     bool authFeedbackPopupVisible;            /**< True quand la popup auth modale doit rester visible. */
     MenuLoginTextSelectionState loginEmailSelectionState;    /**< Selection/caret du champ e-mail. */
     MenuLoginTextSelectionState loginPasswordSelectionState; /**< Selection/caret du champ mot de passe. */
+    TextInputEditHistory loginEmailEditHistory;             /**< Historique Ctrl+Z du champ e-mail. */
+    TextInputEditHistory loginPasswordEditHistory;          /**< Historique Ctrl+Z du champ mot de passe. */
 
     std::vector<MenuLanguageFlagEntry> languageFlags; /**< Drapeaux affiches dans le menu. */
     SDL_FRect languageButtonRect;                      /**< Rectangle du bouton langue compact. */

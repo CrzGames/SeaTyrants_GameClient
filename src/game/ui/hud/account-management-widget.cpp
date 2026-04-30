@@ -1,5 +1,8 @@
 #include "game/ui/hud/account-management-widget.h"
 #include "game/assets/title-asset-cache.h"
+#include "game/ui/text-input-shortcuts.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include "core/context.h"
 
@@ -1043,6 +1046,7 @@ static float getPickerListRowWidth(const PickerLayout& layout)
     return layout.body.w - (kScrollBarWidth + (kScrollBarPadding * 2.0f));
 }
 
+#if 0
 static char extractDigitFromKeyLabel(const char* key)
 {
     if (key == nullptr || key[0] == '\0')
@@ -1171,6 +1175,8 @@ static bool keyToPrintableChar(
 
     return false;
 }
+
+#endif
 
 static SDL_FRect getFleetCardRect(
     const SDL_FRect& viewport,
@@ -1324,10 +1330,12 @@ AccountManagementWidget::AccountManagementWidget(void)
       profileName{},
       profileInputFocused(false),
       profileCursorIndex(0),
+      profileSelectionAnchorIndex(0),
       profileCursorVisible(false),
       profileCursorBlinkElapsed(0.0)
 {
     this->profileCursorIndex = this->profileName.size();
+    this->profileSelectionAnchorIndex = this->profileCursorIndex;
 }
 
 AccountManagementWidget::~AccountManagementWidget(void)
@@ -2007,6 +2015,8 @@ void AccountManagementWidget::setAccountTabProfileName(const std::string& value)
 {
     this->profileName = clampProfileNameToUiLimit(value);
     this->profileCursorIndex = this->profileName.size();
+    this->profileSelectionAnchorIndex = this->profileCursorIndex;
+    this->profileEditHistory.clear();
 }
 
 AccountManagementWidget::AccountTabEliteProgressData AccountManagementWidget::getAccountTabEliteProgress(void) const
@@ -2113,6 +2123,8 @@ void AccountManagementWidget::clearAllData(void)
     this->boardingLootScrollWheelHighlightSec = 0.0f;
     this->profileName.clear();
     this->profileCursorIndex = 0;
+    this->profileSelectionAnchorIndex = 0;
+    this->profileEditHistory.clear();
 }
 
 std::vector<AccountManagementWidget::InternalShipEntry>* AccountManagementWidget::getShipsForCollection(
@@ -3214,8 +3226,47 @@ void AccountManagementWidget::closeAppearancePicker(void)
 void AccountManagementWidget::clearProfileInputFocus(void)
 {
     this->profileInputFocused = false;
+    this->profileSelectionAnchorIndex = this->profileCursorIndex;
     this->profileCursorVisible = false;
     this->profileCursorBlinkElapsed = 0.0;
+}
+
+bool AccountManagementWidget::hasProfileSelection(void) const
+{
+    return this->getProfileSelectionStart() != this->getProfileSelectionEnd();
+}
+
+std::size_t AccountManagementWidget::getProfileSelectionStart(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->profileCursorIndex, this->profileName.size());
+    const std::size_t clampedAnchor = (std::min)(this->profileSelectionAnchorIndex, this->profileName.size());
+    return (std::min)(clampedAnchor, clampedCursor);
+}
+
+std::size_t AccountManagementWidget::getProfileSelectionEnd(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->profileCursorIndex, this->profileName.size());
+    const std::size_t clampedAnchor = (std::min)(this->profileSelectionAnchorIndex, this->profileName.size());
+    return (std::max)(clampedAnchor, clampedCursor);
+}
+
+void AccountManagementWidget::clearProfileSelection(void)
+{
+    this->profileSelectionAnchorIndex = (std::min)(this->profileCursorIndex, this->profileName.size());
+}
+
+void AccountManagementWidget::deleteSelectedProfileText(void)
+{
+    if (!this->hasProfileSelection())
+    {
+        return;
+    }
+
+    const std::size_t selectionStart = this->getProfileSelectionStart();
+    const std::size_t selectionEnd = this->getProfileSelectionEnd();
+    this->profileName.erase(selectionStart, selectionEnd - selectionStart);
+    this->profileCursorIndex = selectionStart;
+    this->clearProfileSelection();
 }
 
 void AccountManagementWidget::clearAllFocus(void)
@@ -3263,6 +3314,8 @@ void AccountManagementWidget::load(void)
 
     this->profileInputFocused = false;
     this->profileCursorIndex = this->profileName.size();
+    this->profileSelectionAnchorIndex = this->profileCursorIndex;
+    this->profileEditHistory.clear();
     this->profileCursorVisible = false;
     this->profileCursorBlinkElapsed = 0.0;
     this->loadShipIcons();
@@ -3300,6 +3353,7 @@ void AccountManagementWidget::unload(void)
     ResetStorageImageRef(&this->forgeRubiesIcon);
     ResetStorageImageRef(&this->storageDropdownArrowImage);
     this->controlIcons.unload();
+    this->profileEditHistory.clear();
     this->resourcesLoaded = false;
     ResetStorageFontRef(&this->smallFont);
     ResetStorageFontRef(&this->bodyFont);
@@ -3581,6 +3635,7 @@ void AccountManagementWidget::hide(void)
     this->fleetScrollWheelHighlightSec = 0.0f;
     this->forgeScrollWheelHighlightSec = 0.0f;
     this->boardingLootScrollWheelHighlightSec = 0.0f;
+    this->profileEditHistory.clear();
     this->clearFocus();
     this->closeAppearancePicker();
     this->cancelStorageDrag();
@@ -4186,6 +4241,7 @@ bool AccountManagementWidget::mousepressed(float x, float y, RC2D_MouseButton bu
                 cursor = i;
             }
             this->profileCursorIndex = (std::min)(cursor, this->profileName.size());
+            this->profileSelectionAnchorIndex = this->profileCursorIndex;
             return true;
         }
 
@@ -4814,49 +4870,168 @@ bool AccountManagementWidget::keypressed(
     SDL_Keymod mod,
     bool isrepeat)
 {
-    (void)isrepeat;
-
     if (!this->visible || !this->profileInputFocused)
     {
         return false;
     }
 
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->profileEditHistory.undo(
+                &this->profileName,
+                &this->profileCursorIndex,
+                &this->profileSelectionAnchorIndex))
+        {
+            this->profileCursorVisible = true;
+            this->profileCursorBlinkElapsed = 0.0;
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
+    {
+        this->profileSelectionAnchorIndex = 0U;
+        this->profileCursorIndex = this->profileName.size();
+        this->profileCursorVisible = true;
+        this->profileCursorBlinkElapsed = 0.0;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasProfileSelection())
+        {
+            const std::size_t selectionStart = this->getProfileSelectionStart();
+            const std::size_t selectionEnd = this->getProfileSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->profileName.substr(selectionStart, selectionEnd - selectionStart).c_str());
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            std::string sanitized;
+            sanitized.reserve(static_cast<std::size_t>(kMaxProfileNameChars));
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                const unsigned char character = static_cast<unsigned char>(*cursor);
+                if (std::isprint(character) != 0)
+                {
+                    sanitized.push_back(static_cast<char>(character));
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                this->profileEditHistory.rememberState(
+                    this->profileName,
+                    this->profileCursorIndex,
+                    this->profileSelectionAnchorIndex);
+                if (this->hasProfileSelection())
+                {
+                    this->deleteSelectedProfileText();
+                }
+
+                const std::size_t availableCount =
+                    static_cast<std::size_t>(kMaxProfileNameChars) - this->profileName.size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->profileCursorIndex = (std::min)(this->profileCursorIndex, this->profileName.size());
+                this->profileName.insert(this->profileCursorIndex, sanitized);
+                this->profileCursorIndex += sanitized.size();
+                this->clearProfileSelection();
+                this->profileCursorVisible = true;
+                this->profileCursorBlinkElapsed = 0.0;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
+        }
+        return true;
+    }
+
     switch (scancode)
     {
         case SDL_SCANCODE_LEFT:
-            if (this->profileCursorIndex > 0) { --this->profileCursorIndex; }
+            if (this->hasProfileSelection())
+            {
+                this->profileCursorIndex = this->getProfileSelectionStart();
+            }
+            else if (this->profileCursorIndex > 0)
+            {
+                --this->profileCursorIndex;
+            }
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_RIGHT:
-            if (this->profileCursorIndex < this->profileName.size()) { ++this->profileCursorIndex; }
+            if (this->hasProfileSelection())
+            {
+                this->profileCursorIndex = this->getProfileSelectionEnd();
+            }
+            else if (this->profileCursorIndex < this->profileName.size())
+            {
+                ++this->profileCursorIndex;
+            }
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_HOME:
             this->profileCursorIndex = 0;
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_END:
             this->profileCursorIndex = this->profileName.size();
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_BACKSPACE:
-            if (this->profileCursorIndex > 0 && !this->profileName.empty())
+            if (this->hasProfileSelection())
             {
+                this->profileEditHistory.rememberState(
+                    this->profileName,
+                    this->profileCursorIndex,
+                    this->profileSelectionAnchorIndex);
+                this->deleteSelectedProfileText();
+            }
+            else if (this->profileCursorIndex > 0 && !this->profileName.empty())
+            {
+                this->profileEditHistory.rememberState(
+                    this->profileName,
+                    this->profileCursorIndex,
+                    this->profileSelectionAnchorIndex);
                 this->profileName.erase(this->profileCursorIndex - 1, 1);
                 --this->profileCursorIndex;
             }
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_DELETE:
-            if (this->profileCursorIndex < this->profileName.size())
+            if (this->hasProfileSelection())
             {
+                this->profileEditHistory.rememberState(
+                    this->profileName,
+                    this->profileCursorIndex,
+                    this->profileSelectionAnchorIndex);
+                this->deleteSelectedProfileText();
+            }
+            else if (this->profileCursorIndex < this->profileName.size())
+            {
+                this->profileEditHistory.rememberState(
+                    this->profileName,
+                    this->profileCursorIndex,
+                    this->profileSelectionAnchorIndex);
                 this->profileName.erase(this->profileCursorIndex, 1);
             }
+            this->clearProfileSelection();
             this->profileCursorVisible = true;
             this->profileCursorBlinkElapsed = 0.0;
             return true;
@@ -4871,23 +5046,51 @@ bool AccountManagementWidget::keypressed(
             break;
     }
 
-    char newCharacter = '\0';
-    if (keyToPrintableChar(key, scancode, keycode, mod, &newCharacter))
-    {
-        if (this->profileName.size() >= static_cast<std::size_t>(kMaxProfileNameChars))
-        {
-            return true;
-        }
+    return false;
+}
 
-        this->profileCursorIndex = (std::min)(this->profileCursorIndex, this->profileName.size());
-        this->profileName.insert(this->profileCursorIndex, 1, newCharacter);
-        ++this->profileCursorIndex;
-        this->profileCursorVisible = true;
-        this->profileCursorBlinkElapsed = 0.0;
+bool AccountManagementWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->profileInputFocused)
+    {
+        return false;
+    }
+
+    std::string sanitized;
+    sanitized.reserve(static_cast<std::size_t>(kMaxProfileNameChars));
+    for (const char* cursor = text; cursor != nullptr && *cursor != '\0'; ++cursor)
+    {
+        const unsigned char character = static_cast<unsigned char>(*cursor);
+        if (std::isprint(character) != 0)
+        {
+            sanitized.push_back(static_cast<char>(character));
+        }
+    }
+
+    if (sanitized.empty())
+    {
         return true;
     }
 
-    return false;
+    this->profileEditHistory.rememberState(
+        this->profileName,
+        this->profileCursorIndex,
+        this->profileSelectionAnchorIndex);
+    if (this->hasProfileSelection())
+    {
+        this->deleteSelectedProfileText();
+    }
+
+    const std::size_t availableCount =
+        static_cast<std::size_t>(kMaxProfileNameChars) - this->profileName.size();
+    sanitized.resize((std::min)(sanitized.size(), availableCount));
+    this->profileCursorIndex = (std::min)(this->profileCursorIndex, this->profileName.size());
+    this->profileName.insert(this->profileCursorIndex, sanitized);
+    this->profileCursorIndex += sanitized.size();
+    this->clearProfileSelection();
+    this->profileCursorVisible = true;
+    this->profileCursorBlinkElapsed = 0.0;
+    return true;
 }
 
 void AccountManagementWidget::draw(void) const
@@ -5036,6 +5239,26 @@ void AccountManagementWidget::draw(void) const
 
         rc2d_graphics_setColor(kFieldFill);
         rc2d_graphics_rectangle("fill", &layout.accountProfileNameInput);
+        if (self->profileInputFocused && self->hasProfileSelection())
+        {
+            const std::size_t selectionStart = self->getProfileSelectionStart();
+            const std::size_t selectionEnd = self->getProfileSelectionEnd();
+            const float selectionX = layout.accountProfileNameInput.x + 8.0f +
+                measureTextWidth(&self->bodyFont, self->profileName.substr(0, selectionStart));
+            const float selectionW =
+                measureTextWidth(&self->bodyFont, self->profileName.substr(selectionStart, selectionEnd - selectionStart));
+            if (selectionW > 0.0f)
+            {
+                const SDL_FRect selectionRect = SDL_FRect{
+                    selectionX,
+                    layout.accountProfileNameInput.y + 3.0f,
+                    selectionW,
+                    layout.accountProfileNameInput.h - 6.0f
+                };
+                rc2d_graphics_setColor(kSelectionFill);
+                rc2d_graphics_rectangle("fill", &selectionRect);
+            }
+        }
         rc2d_graphics_setColor(kGold);
         rc2d_graphics_rectangle("line", &layout.accountProfileNameInput);
         drawTextAt(&self->bodyFont, self->profileName, layout.accountProfileNameInput.x + 8.0f, layout.accountProfileNameInput.y + 6.0f, kTextGold);

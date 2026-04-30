@@ -1,5 +1,8 @@
 #include "game/ui/hud/espion-search-player-widget.h"
 #include "game/assets/title-asset-cache.h"
+#include "game/ui/text-input-shortcuts.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include "core/context.h"
 #include <algorithm>
@@ -188,6 +191,7 @@ static void drawImageFit(const RC2D_Image& image, const SDL_FRect& target, float
         false);
 }
 
+#if 0
 static char extractDigitFromKeyLabel(const char* key)
 {
     // Cas invalide: aucune touche exploitable.
@@ -230,6 +234,8 @@ static char extractDigitFromKeyLabel(const char* key)
 
     return '\0';
 }
+
+#endif
 
 EspionSearchPlayerWidget::EspionSearchPlayerWidget(void)
     : titleFont{},
@@ -282,6 +288,7 @@ void EspionSearchPlayerWidget::load(void)
     this->playerIdInput.clear();
     this->cursorIndex = 0;
     this->selectionAnchorIndex = 0;
+    this->playerIdEditHistory.clear();
     this->inputFocused = false;
     this->inputSelectingWithMouse = false;
     this->cursorVisible = true;
@@ -300,6 +307,7 @@ void EspionSearchPlayerWidget::unload(void)
     ResetStorageImageRef(&this->rubiesPriceIcon);
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
+    this->playerIdEditHistory.clear();
 }
 
 void EspionSearchPlayerWidget::update(double dt)
@@ -510,52 +518,84 @@ bool EspionSearchPlayerWidget::mousepressed(float x, float y, RC2D_MouseButton b
 
 bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat)
 {
-    (void)mod;
-
     if (!this->visible || !this->inputFocused)
     {
         // Le clavier n'est traite que si le champ ID est actif.
         return false;
     }
 
-    // On accepte la repetition des touches pour suppression fluide.
-    (void)isrepeat;
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->playerIdEditHistory.undo(
+                &this->playerIdInput,
+                &this->cursorIndex,
+                &this->selectionAnchorIndex))
+        {
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
+        return true;
+    }
 
-    // Priorite absolue aux chiffres (top-row + pave numerique).
-    // On le fait avant les raccourcis Home/End/Left/Right pour eviter
-    // qu'un event numpad mappe en navigation soit consomme trop tot.
-    char digit = '\0';
-    digit = extractDigitFromKeyLabel(key);
-    if (digit == '\0' && scancode >= SDL_SCANCODE_KP_0 && scancode <= SDL_SCANCODE_KP_9)
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
     {
-        digit = static_cast<char>('0' + static_cast<int>(scancode - SDL_SCANCODE_KP_0));
+        this->selectionAnchorIndex = 0U;
+        this->cursorIndex = this->playerIdInput.size();
+        this->cursorVisible = true;
+        this->cursorBlinkElapsed = 0.0;
+        return true;
     }
-    if (digit == '\0' && keycode >= SDLK_KP_0 && keycode <= SDLK_KP_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_KP_0));
-    }
-    if (digit == '\0' && keycode >= SDLK_0 && keycode <= SDLK_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_0));
-    }
-    if (digit != '\0')
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
     {
         if (this->hasPlayerIdSelection())
         {
-            this->deleteSelectedPlayerIdText();
+            const std::size_t selectionStart = this->getPlayerIdSelectionStart();
+            const std::size_t selectionEnd = this->getPlayerIdSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->playerIdInput.substr(selectionStart, selectionEnd - selectionStart).c_str());
         }
-        // Limitation stricte de la longueur numerique.
-        if (this->playerIdInput.size() >= kMaxPlayerIdDigits)
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
         {
-            return true;
+            std::string sanitized;
+            sanitized.reserve(kMaxPlayerIdDigits);
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                if (*cursor >= '0' && *cursor <= '9')
+                {
+                    sanitized.push_back(*cursor);
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                this->playerIdEditHistory.rememberState(
+                    this->playerIdInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
+                if (this->hasPlayerIdSelection())
+                {
+                    this->deleteSelectedPlayerIdText();
+                }
+
+                const std::size_t availableCount = kMaxPlayerIdDigits - this->playerIdInput.size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->cursorIndex = (std::min)(this->cursorIndex, this->playerIdInput.size());
+                this->playerIdInput.insert(this->cursorIndex, sanitized);
+                this->cursorIndex += sanitized.size();
+                this->clearPlayerIdSelection();
+                this->cursorVisible = true;
+                this->cursorBlinkElapsed = 0.0;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
         }
-        // Insertion du chiffre a la position du curseur.
-        this->cursorIndex = (std::min)(this->cursorIndex, this->playerIdInput.size());
-        this->playerIdInput.insert(this->cursorIndex, 1, digit);
-        ++this->cursorIndex;
-        this->clearPlayerIdSelection();
-        this->cursorVisible = true;
-        this->cursorBlinkElapsed = 0.0;
         return true;
     }
 
@@ -604,10 +644,18 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
             // Supprime d'abord la selection si elle existe.
             if (this->hasPlayerIdSelection())
             {
+                this->playerIdEditHistory.rememberState(
+                    this->playerIdInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->deleteSelectedPlayerIdText();
             }
             else if (this->cursorIndex > 0 && !this->playerIdInput.empty())
             {
+                this->playerIdEditHistory.rememberState(
+                    this->playerIdInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->playerIdInput.erase(this->cursorIndex - 1, 1);
                 --this->cursorIndex;
             }
@@ -619,10 +667,18 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
             // Supprime d'abord la selection si elle existe.
             if (this->hasPlayerIdSelection())
             {
+                this->playerIdEditHistory.rememberState(
+                    this->playerIdInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->deleteSelectedPlayerIdText();
             }
             else if (this->cursorIndex < this->playerIdInput.size())
             {
+                this->playerIdEditHistory.rememberState(
+                    this->playerIdInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->playerIdInput.erase(this->cursorIndex, 1);
             }
             this->clearPlayerIdSelection();
@@ -638,6 +694,48 @@ bool EspionSearchPlayerWidget::keypressed(const char* key, SDL_Scancode scancode
     }
 
     return false;
+}
+
+bool EspionSearchPlayerWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->inputFocused)
+    {
+        return false;
+    }
+
+    std::string sanitized;
+    sanitized.reserve(kMaxPlayerIdDigits);
+    for (const char* cursor = text; cursor != nullptr && *cursor != '\0'; ++cursor)
+    {
+        if (*cursor >= '0' && *cursor <= '9')
+        {
+            sanitized.push_back(*cursor);
+        }
+    }
+
+    if (sanitized.empty())
+    {
+        return true;
+    }
+
+    this->playerIdEditHistory.rememberState(
+        this->playerIdInput,
+        this->cursorIndex,
+        this->selectionAnchorIndex);
+    if (this->hasPlayerIdSelection())
+    {
+        this->deleteSelectedPlayerIdText();
+    }
+
+    const std::size_t availableCount = kMaxPlayerIdDigits - this->playerIdInput.size();
+    sanitized.resize((std::min)(sanitized.size(), availableCount));
+    this->cursorIndex = (std::min)(this->cursorIndex, this->playerIdInput.size());
+    this->playerIdInput.insert(this->cursorIndex, sanitized);
+    this->cursorIndex += sanitized.size();
+    this->clearPlayerIdSelection();
+    this->cursorVisible = true;
+    this->cursorBlinkElapsed = 0.0;
+    return true;
 }
 
 void EspionSearchPlayerWidget::publishSearchResult(const std::string& resultText)
@@ -996,6 +1094,7 @@ void EspionSearchPlayerWidget::show(void)
 {
     this->visible = true;
     this->widgetDragging = false;
+    this->playerIdEditHistory.clear();
     this->clearFocus();
 }
 
@@ -1003,6 +1102,7 @@ void EspionSearchPlayerWidget::hide(void)
 {
     this->visible = false;
     this->widgetDragging = false;
+    this->playerIdEditHistory.clear();
     this->clearFocus();
 }
 

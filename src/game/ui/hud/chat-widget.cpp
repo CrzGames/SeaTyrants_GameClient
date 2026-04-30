@@ -1,7 +1,9 @@
 #include "game/ui/hud/chat-widget.h"
 #include "game/assets/title-asset-cache.h"
+#include "game/ui/text-input-shortcuts.h"
 
 #include <RC2D/RC2D_keyboard.h>
+#include <RC2D/RC2D_system.h>
 
 #include <algorithm>
 #include <cctype>
@@ -559,6 +561,7 @@ void ChatWidget::load(void)
     this->inputBuffer.clear();
     this->cursorIndex = 0;
     this->selectionAnchorIndex = 0;
+    this->inputEditHistory.clear();
     this->inputFocused = false;
     this->inputSelectingWithMouse = false;
     this->cursorVisible = true;
@@ -587,6 +590,7 @@ void ChatWidget::load(void)
 void ChatWidget::unload(void)
 {
     this->inputFocused = false;
+    this->inputEditHistory.clear();
     this->syncPlatformTextInput();
     this->controlIcons.unload();
     // Libere les ressources TTF.
@@ -1208,10 +1212,12 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
         case SDL_SCANCODE_BACKSPACE:
             if (this->hasInputSelection())
             {
+                this->inputEditHistory.rememberState(this->inputBuffer, this->cursorIndex, this->selectionAnchorIndex);
                 this->deleteSelectedInputText();
             }
             else if (this->cursorIndex > 0 && !this->inputBuffer.empty())
             {
+                this->inputEditHistory.rememberState(this->inputBuffer, this->cursorIndex, this->selectionAnchorIndex);
                 const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
                 const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
                 if (caretIndex > 0U)
@@ -1229,10 +1235,12 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
         case SDL_SCANCODE_DELETE:
             if (this->hasInputSelection())
             {
+                this->inputEditHistory.rememberState(this->inputBuffer, this->cursorIndex, this->selectionAnchorIndex);
                 this->deleteSelectedInputText();
             }
             else if (this->cursorIndex < this->inputBuffer.size())
             {
+                this->inputEditHistory.rememberState(this->inputBuffer, this->cursorIndex, this->selectionAnchorIndex);
                 const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
                 const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
                 if (caretIndex + 1U < offsets.size())
@@ -1254,6 +1262,7 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
                 this->inputBuffer.clear();
                 this->cursorIndex = 0;
                 this->clearInputSelection();
+                this->inputEditHistory.clear();
             }
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
@@ -1276,14 +1285,45 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             break;
     }
 
-    if (!isrepeat &&
-        (mod & SDL_KMOD_CTRL) != 0 &&
-        scancode == SDL_SCANCODE_A)
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->inputEditHistory.undo(&this->inputBuffer, &this->cursorIndex, &this->selectionAnchorIndex))
+        {
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
     {
         this->selectionAnchorIndex = 0U;
         this->cursorIndex = this->inputBuffer.size();
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasInputSelection())
+        {
+            const std::size_t selectionStart = this->getInputSelectionStart();
+            const std::size_t selectionEnd = this->getInputSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->inputBuffer.substr(selectionStart, selectionEnd - selectionStart).c_str());
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            (void)this->textinput(clipboardText);
+            rc2d_system_freeClipboardText(clipboardText);
+        }
         return true;
     }
 
@@ -1310,14 +1350,16 @@ bool ChatWidget::textinput(const char* text)
         return false;
     }
 
-    if (this->hasInputSelection())
-    {
-        this->deleteSelectedInputText();
-    }
-
     if (this->inputBuffer.size() + sanitized.size() > kMaxChatInputBytes)
     {
         return true;
+    }
+
+    this->inputEditHistory.rememberState(this->inputBuffer, this->cursorIndex, this->selectionAnchorIndex);
+
+    if (this->hasInputSelection())
+    {
+        this->deleteSelectedInputText();
     }
 
     const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);

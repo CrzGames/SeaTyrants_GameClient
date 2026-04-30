@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 class ChatWidget {
@@ -174,6 +175,7 @@ private:
     bool inputSelectingWithMouse; /**< True si un glisser souris etend actuellement la selection dans la barre input. */
     bool cursorVisible; /**< True si le curseur de saisie doit etre visible. */
     double cursorBlinkElapsed; /**< Temps accumule pour l'animation de clignotement du curseur. */
+    TextInputEditHistory inputEditHistory; /**< Historique Ctrl+Z de la barre de saisie. */
 
     /**
      * @brief Etat de scroll vertical dans la zone messages.

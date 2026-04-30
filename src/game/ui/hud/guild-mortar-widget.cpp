@@ -1,6 +1,9 @@
 #include "game/ui/hud/guild-mortar-widget.h"
+#include "game/ui/text-input-shortcuts.h"
 
 #include "core/context.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include <SDL3/SDL.h>
 
@@ -126,6 +129,7 @@ static std::string formatSeconds(float seconds)
     return std::to_string(roundedTenths / 10) + "," + std::to_string(roundedTenths % 10);
 }
 
+#if 0
 static char extractDigitFromKeyLabel(const char* key)
 {
     if (key == nullptr || key[0] == '\0')
@@ -163,6 +167,8 @@ static char extractDigitFromKeyLabel(const char* key)
 
     return '\0';
 }
+
+#endif
 
 static bool parseGoldAmountInput(const std::string& text, std::int64_t* outAmount)
 {
@@ -365,6 +371,7 @@ void GuildMortarWidget::load(void)
     this->transferGoldInput.clear();
     this->transferGoldCursorIndex = 0U;
     this->transferGoldSelectionAnchorIndex = 0U;
+    this->transferGoldEditHistory.clear();
     this->transferGoldInputFocused = false;
     this->transferGoldSelectingWithMouse = false;
     this->transferGoldCursorVisible = true;
@@ -380,6 +387,7 @@ void GuildMortarWidget::unload(void)
     ResetStorageImageRef(&this->rubiesIcon);
     ResetStorageImageRef(&this->goldIcon);
     ResetStorageFontRef(&this->valueFont);
+    this->transferGoldEditHistory.clear();
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
 }
@@ -577,6 +585,7 @@ bool GuildMortarWidget::mousepressed(float x, float y, RC2D_MouseButton button, 
                     this->transferGoldInput.clear();
                     this->transferGoldCursorIndex = 0U;
                     this->transferGoldSelectionAnchorIndex = 0U;
+                    this->transferGoldEditHistory.clear();
                     this->transferGoldCursorVisible = true;
                     this->transferGoldCursorBlinkSec = 0.0f;
                 }
@@ -606,7 +615,6 @@ bool GuildMortarWidget::mousepressed(float x, float y, RC2D_MouseButton button, 
 
 bool GuildMortarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat)
 {
-    (void)mod;
     (void)isrepeat;
 
     if (!this->visible || !this->transferGoldInputFocused)
@@ -622,39 +630,78 @@ bool GuildMortarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_K
         return true;
     }
 
-    char digit = extractDigitFromKeyLabel(key);
-    if (digit == '\0' && scancode >= SDL_SCANCODE_0 && scancode <= SDL_SCANCODE_9)
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
     {
-        digit = static_cast<char>('0' + (scancode - SDL_SCANCODE_0));
-    }
-    if (digit == '\0' && scancode >= SDL_SCANCODE_KP_0 && scancode <= SDL_SCANCODE_KP_9)
-    {
-        digit = static_cast<char>('0' + (scancode - SDL_SCANCODE_KP_0));
-    }
-    if (digit == '\0' && keycode >= SDLK_KP_0 && keycode <= SDLK_KP_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_KP_0));
-    }
-    if (digit == '\0' && keycode >= SDLK_0 && keycode <= SDLK_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_0));
+        if (this->transferGoldEditHistory.undo(
+                &this->transferGoldInput,
+                &this->transferGoldCursorIndex,
+                &this->transferGoldSelectionAnchorIndex))
+        {
+            this->transferGoldCursorVisible = true;
+            this->transferGoldCursorBlinkSec = 0.0f;
+        }
+        return true;
     }
 
-    if (digit != '\0')
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
+    {
+        this->transferGoldSelectionAnchorIndex = 0U;
+        this->transferGoldCursorIndex = this->transferGoldInput.size();
+        this->transferGoldCursorVisible = true;
+        this->transferGoldCursorBlinkSec = 0.0f;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
     {
         if (this->hasTransferGoldSelection())
         {
-            this->deleteSelectedTransferGoldText();
+            const std::size_t selectionStart = this->getTransferGoldSelectionStart();
+            const std::size_t selectionEnd = this->getTransferGoldSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->transferGoldInput.substr(selectionStart, selectionEnd - selectionStart).c_str());
         }
-        if (this->transferGoldInput.size() < kTransferGoldMaxDigits)
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
         {
-            this->transferGoldCursorIndex = (std::min)(this->transferGoldCursorIndex, this->transferGoldInput.size());
-            this->transferGoldInput.insert(this->transferGoldCursorIndex, 1, digit);
-            ++this->transferGoldCursorIndex;
+            std::string sanitized;
+            sanitized.reserve(kTransferGoldMaxDigits);
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                if (*cursor >= '0' && *cursor <= '9')
+                {
+                    sanitized.push_back(*cursor);
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                this->transferGoldEditHistory.rememberState(
+                    this->transferGoldInput,
+                    this->transferGoldCursorIndex,
+                    this->transferGoldSelectionAnchorIndex);
+                if (this->hasTransferGoldSelection())
+                {
+                    this->deleteSelectedTransferGoldText();
+                }
+
+                const std::size_t availableCount = kTransferGoldMaxDigits - this->transferGoldInput.size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->transferGoldCursorIndex = (std::min)(this->transferGoldCursorIndex, this->transferGoldInput.size());
+                this->transferGoldInput.insert(this->transferGoldCursorIndex, sanitized);
+                this->transferGoldCursorIndex += sanitized.size();
+                this->clearTransferGoldSelection();
+                this->transferGoldCursorVisible = true;
+                this->transferGoldCursorBlinkSec = 0.0f;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
         }
-        this->clearTransferGoldSelection();
-        this->transferGoldCursorVisible = true;
-        this->transferGoldCursorBlinkSec = 0.0f;
         return true;
     }
 
@@ -693,10 +740,18 @@ bool GuildMortarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_K
         case SDL_SCANCODE_BACKSPACE:
             if (this->hasTransferGoldSelection())
             {
+                this->transferGoldEditHistory.rememberState(
+                    this->transferGoldInput,
+                    this->transferGoldCursorIndex,
+                    this->transferGoldSelectionAnchorIndex);
                 this->deleteSelectedTransferGoldText();
             }
             else if (this->transferGoldCursorIndex > 0U && !this->transferGoldInput.empty())
             {
+                this->transferGoldEditHistory.rememberState(
+                    this->transferGoldInput,
+                    this->transferGoldCursorIndex,
+                    this->transferGoldSelectionAnchorIndex);
                 this->transferGoldInput.erase(this->transferGoldCursorIndex - 1U, 1U);
                 --this->transferGoldCursorIndex;
             }
@@ -705,10 +760,18 @@ bool GuildMortarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_K
         case SDL_SCANCODE_DELETE:
             if (this->hasTransferGoldSelection())
             {
+                this->transferGoldEditHistory.rememberState(
+                    this->transferGoldInput,
+                    this->transferGoldCursorIndex,
+                    this->transferGoldSelectionAnchorIndex);
                 this->deleteSelectedTransferGoldText();
             }
             else if (this->transferGoldCursorIndex < this->transferGoldInput.size())
             {
+                this->transferGoldEditHistory.rememberState(
+                    this->transferGoldInput,
+                    this->transferGoldCursorIndex,
+                    this->transferGoldSelectionAnchorIndex);
                 this->transferGoldInput.erase(this->transferGoldCursorIndex, 1U);
             }
             this->clearTransferGoldSelection();
@@ -717,6 +780,48 @@ bool GuildMortarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_K
             return false;
     }
 
+    this->transferGoldCursorVisible = true;
+    this->transferGoldCursorBlinkSec = 0.0f;
+    return true;
+}
+
+bool GuildMortarWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->transferGoldInputFocused)
+    {
+        return false;
+    }
+
+    std::string sanitized;
+    sanitized.reserve(kTransferGoldMaxDigits);
+    for (const char* cursor = text; cursor != nullptr && *cursor != '\0'; ++cursor)
+    {
+        if (*cursor >= '0' && *cursor <= '9')
+        {
+            sanitized.push_back(*cursor);
+        }
+    }
+
+    if (sanitized.empty())
+    {
+        return true;
+    }
+
+    this->transferGoldEditHistory.rememberState(
+        this->transferGoldInput,
+        this->transferGoldCursorIndex,
+        this->transferGoldSelectionAnchorIndex);
+    if (this->hasTransferGoldSelection())
+    {
+        this->deleteSelectedTransferGoldText();
+    }
+
+    const std::size_t availableCount = kTransferGoldMaxDigits - this->transferGoldInput.size();
+    sanitized.resize((std::min)(sanitized.size(), availableCount));
+    this->transferGoldCursorIndex = (std::min)(this->transferGoldCursorIndex, this->transferGoldInput.size());
+    this->transferGoldInput.insert(this->transferGoldCursorIndex, sanitized);
+    this->transferGoldCursorIndex += sanitized.size();
+    this->clearTransferGoldSelection();
     this->transferGoldCursorVisible = true;
     this->transferGoldCursorBlinkSec = 0.0f;
     return true;
@@ -997,6 +1102,7 @@ void GuildMortarWidget::show(void)
 {
     this->visible = true;
     this->widgetDragging = false;
+    this->transferGoldEditHistory.clear();
     this->transferGoldInputFocused = false;
     this->transferGoldSelectingWithMouse = false;
     this->clearTransferGoldSelection();
@@ -1007,6 +1113,7 @@ void GuildMortarWidget::hide(void)
     this->visible = false;
     this->widgetDragging = false;
     this->levelScrollDragging = false;
+    this->transferGoldEditHistory.clear();
     this->transferGoldInputFocused = false;
     this->transferGoldSelectingWithMouse = false;
     this->clearTransferGoldSelection();

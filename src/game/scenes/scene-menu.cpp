@@ -4,6 +4,9 @@
 
 #include "core/context.h"
 #include "game/scenes/scene-manager.h"
+#include "game/ui/text-input-shortcuts.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include <algorithm>
 #include <array>
@@ -1319,6 +1322,11 @@ bool MenuScene::deleteSelectedLoginFieldText(MenuLoginFocusedField field)
 
     const std::size_t selectionStart = (std::min)(selectionState->anchorByte, selectionState->caretByte);
     const std::size_t selectionEnd = (std::max)(selectionState->anchorByte, selectionState->caretByte);
+    TextInputEditHistory* editHistory =
+        (field == MenuLoginFocusedField::EMAIL)
+            ? &this->loginEmailEditHistory
+            : &this->loginPasswordEditHistory;
+    editHistory->rememberState(*rawText, selectionState->caretByte, selectionState->anchorByte);
     rawText->erase(selectionStart, selectionEnd - selectionStart);
     this->collapseLoginFieldSelection(field, selectionStart);
     return true;
@@ -1351,6 +1359,12 @@ bool MenuScene::insertTextIntoLoginField(MenuLoginFocusedField field, const char
     {
         return false;
     }
+
+    TextInputEditHistory* editHistory =
+        (field == MenuLoginFocusedField::EMAIL)
+            ? &this->loginEmailEditHistory
+            : &this->loginPasswordEditHistory;
+    editHistory->rememberState(*rawText, selectionState->caretByte, selectionState->anchorByte);
 
     if (this->hasLoginFieldSelection(field))
     {
@@ -1482,12 +1496,76 @@ bool MenuScene::handleLoginInputKey(
         return true;
     }
 
-    if (!isrepeat &&
-        (mod & SDL_KMOD_CTRL) != 0 &&
-        scancode == SDL_SCANCODE_A &&
-        this->focusedLoginField != MenuLoginFocusedField::NONE)
+    if (this->focusedLoginField != MenuLoginFocusedField::NONE &&
+        isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        std::string* rawText = this->getLoginFieldValue(this->focusedLoginField);
+        MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(this->focusedLoginField);
+        TextInputEditHistory* editHistory =
+            (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+                ? &this->loginEmailEditHistory
+                : &this->loginPasswordEditHistory;
+        if (rawText != nullptr &&
+            selectionState != nullptr &&
+            editHistory->undo(rawText, &selectionState->caretByte, &selectionState->anchorByte))
+        {
+            if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+            {
+                this->loginEmailFieldErrorMessage.clear();
+            }
+            else if (this->focusedLoginField == MenuLoginFocusedField::PASSWORD)
+            {
+                this->loginPasswordFieldErrorMessage.clear();
+            }
+            this->menuLocalStatusMessage.clear();
+        }
+        this->stopLoginTextSelectionDrag();
+        return true;
+    }
+
+    if (this->focusedLoginField != MenuLoginFocusedField::NONE &&
+        isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
     {
         this->selectAllLoginFieldText(this->focusedLoginField);
+        return true;
+    }
+
+    if (this->focusedLoginField != MenuLoginFocusedField::NONE &&
+        isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasLoginFieldSelection(this->focusedLoginField))
+        {
+            const std::string* rawText = this->getLoginFieldValue(this->focusedLoginField);
+            const MenuLoginTextSelectionState* selectionState =
+                this->getLoginFieldSelectionState(this->focusedLoginField);
+            if (rawText != nullptr && selectionState != nullptr)
+            {
+                const std::size_t selectionStart =
+                    (std::min)(selectionState->anchorByte, selectionState->caretByte);
+                const std::size_t selectionEnd =
+                    (std::max)(selectionState->anchorByte, selectionState->caretByte);
+                rc2d_system_setClipboardText(
+                    rawText->substr(selectionStart, selectionEnd - selectionStart).c_str());
+            }
+        }
+        return true;
+    }
+
+    if (this->focusedLoginField != MenuLoginFocusedField::NONE &&
+        isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            const bool accepted = this->insertTextIntoLoginField(this->focusedLoginField, clipboardText);
+            rc2d_system_freeClipboardText(clipboardText);
+            if (accepted)
+            {
+                this->clearLoginFieldErrors();
+                this->menuLocalStatusMessage.clear();
+            }
+        }
+        this->stopLoginTextSelectionDrag();
         return true;
     }
 
@@ -1505,6 +1583,11 @@ bool MenuScene::handleLoginInputKey(
         MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(this->focusedLoginField);
         if (rawText != nullptr && selectionState != nullptr && selectionState->caretByte > 0U)
         {
+            TextInputEditHistory* editHistory =
+                (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+                    ? &this->loginEmailEditHistory
+                    : &this->loginPasswordEditHistory;
+            editHistory->rememberState(*rawText, selectionState->caretByte, selectionState->anchorByte);
             const std::vector<std::size_t> offsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
             const std::size_t caretIndex =
                 menu_scene::findCodepointIndexForByteOffset(offsets, selectionState->caretByte);
@@ -1550,6 +1633,11 @@ bool MenuScene::handleLoginInputKey(
             MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(this->focusedLoginField);
             if (rawText != nullptr && selectionState != nullptr)
             {
+                TextInputEditHistory* editHistory =
+                    (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+                        ? &this->loginEmailEditHistory
+                        : &this->loginPasswordEditHistory;
+                editHistory->rememberState(*rawText, selectionState->caretByte, selectionState->anchorByte);
                 const std::vector<std::size_t> offsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
                 const std::size_t caretIndex =
                     menu_scene::findCodepointIndexForByteOffset(offsets, selectionState->caretByte);
@@ -2096,6 +2184,8 @@ void MenuScene::unload(void)
     this->authFeedbackPopupVisible = false;
     this->loginEmailSelectionState = MenuLoginTextSelectionState{};
     this->loginPasswordSelectionState = MenuLoginTextSelectionState{};
+    this->loginEmailEditHistory.clear();
+    this->loginPasswordEditHistory.clear();
     this->authFeedbackPopupRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->hoveredAuthFeedbackPopupActionButton = false;
@@ -2187,6 +2277,8 @@ void MenuScene::load(void)
     this->authFeedbackPopupVisible = false;
     this->loginEmailSelectionState = MenuLoginTextSelectionState{};
     this->loginPasswordSelectionState = MenuLoginTextSelectionState{};
+    this->loginEmailEditHistory.clear();
+    this->loginPasswordEditHistory.clear();
     this->authFeedbackPopupRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->hoveredAuthFeedbackPopupActionButton = false;

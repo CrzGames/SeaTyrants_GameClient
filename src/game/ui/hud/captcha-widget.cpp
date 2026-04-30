@@ -1,8 +1,11 @@
 #include "game/ui/hud/captcha-widget.h"
 
 #include "game/assets/title-asset-cache.h"
+#include "game/ui/text-input-shortcuts.h"
 
 #include "core/context.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include <algorithm>
 #include <cctype>
@@ -335,6 +338,7 @@ void CaptchaWidget::load(void)
     this->userResponseInput.clear();
     this->cursorIndex = 0U;
     this->selectionAnchorIndex = 0U;
+    this->responseEditHistory.clear();
     this->inputFocused = false;
     this->inputSelectingWithMouse = false;
     this->cursorVisible = true;
@@ -349,6 +353,7 @@ void CaptchaWidget::unload(void)
     this->controlIcons.unload();
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
+    this->responseEditHistory.clear();
     this->resourcesLoaded = false;
 }
 
@@ -358,6 +363,7 @@ void CaptchaWidget::publishCaptchaChallenge(const std::string& challengeFromServ
     this->userResponseInput.clear();
     this->cursorIndex = 0U;
     this->selectionAnchorIndex = 0U;
+    this->responseEditHistory.clear();
     this->clearResponseSelection();
     this->cursorVisible = true;
     this->cursorBlinkElapsed = 0.0;
@@ -379,6 +385,7 @@ void CaptchaWidget::hide(void)
 {
     this->visible = false;
     this->widgetDragging = false;
+    this->responseEditHistory.clear();
     this->clearFocus();
 }
 
@@ -563,6 +570,83 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
             break;
     }
 
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->responseEditHistory.undo(
+                &this->userResponseInput,
+                &this->cursorIndex,
+                &this->selectionAnchorIndex))
+        {
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
+    {
+        this->selectionAnchorIndex = 0U;
+        this->cursorIndex = this->userResponseInput.size();
+        this->cursorVisible = true;
+        this->cursorBlinkElapsed = 0.0;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasResponseSelection())
+        {
+            const std::size_t selectionStart = this->getResponseSelectionStart();
+            const std::size_t selectionEnd = this->getResponseSelectionEnd();
+            rc2d_system_setClipboardText(
+                this->userResponseInput.substr(selectionStart, selectionEnd - selectionStart).c_str());
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            std::string sanitized;
+            sanitized.reserve(CaptchaWidget::kMaxUserResponseCharacters);
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                const unsigned char uc = static_cast<unsigned char>(*cursor);
+                if (std::isalnum(uc) != 0)
+                {
+                    sanitized.push_back(static_cast<char>(std::toupper(uc)));
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                this->responseEditHistory.rememberState(
+                    this->userResponseInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
+                if (this->hasResponseSelection())
+                {
+                    this->deleteSelectedResponseText();
+                }
+
+                const std::size_t availableCount =
+                    CaptchaWidget::kMaxUserResponseCharacters - this->userResponseInput.size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->cursorIndex = (std::min)(this->cursorIndex, this->userResponseInput.size());
+                this->userResponseInput.insert(this->cursorIndex, sanitized);
+                this->cursorIndex += sanitized.size();
+                this->clearResponseSelection();
+                this->cursorVisible = true;
+                this->cursorBlinkElapsed = 0.0;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
+        }
+        return true;
+    }
+
     switch (scancode)
     {
         case SDL_SCANCODE_LEFT:
@@ -606,10 +690,18 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
         case SDL_SCANCODE_BACKSPACE:
             if (this->hasResponseSelection())
             {
+                this->responseEditHistory.rememberState(
+                    this->userResponseInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->deleteSelectedResponseText();
             }
             else if (this->cursorIndex > 0U && !this->userResponseInput.empty())
             {
+                this->responseEditHistory.rememberState(
+                    this->userResponseInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->userResponseInput.erase(this->cursorIndex - 1U, 1U);
                 --this->cursorIndex;
             }
@@ -620,10 +712,18 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
         case SDL_SCANCODE_DELETE:
             if (this->hasResponseSelection())
             {
+                this->responseEditHistory.rememberState(
+                    this->userResponseInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->deleteSelectedResponseText();
             }
             else if (this->cursorIndex < this->userResponseInput.size())
             {
+                this->responseEditHistory.rememberState(
+                    this->userResponseInput,
+                    this->cursorIndex,
+                    this->selectionAnchorIndex);
                 this->userResponseInput.erase(this->cursorIndex, 1U);
             }
             this->clearResponseSelection();
@@ -633,6 +733,8 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
         default:
             break;
     }
+
+    return false;
 
     // Raccourcis Ctrl : pas d'insertion (AltGr est pris en charge via mod dans SDL_GetKeyFromScancode).
     if ((mod & SDL_KMOD_CTRL) != 0)
@@ -679,7 +781,18 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
 
     if (this->hasResponseSelection())
     {
+        this->responseEditHistory.rememberState(
+            this->userResponseInput,
+            this->cursorIndex,
+            this->selectionAnchorIndex);
         this->deleteSelectedResponseText();
+    }
+    else if (this->userResponseInput.size() < CaptchaWidget::kMaxUserResponseCharacters)
+    {
+        this->responseEditHistory.rememberState(
+            this->userResponseInput,
+            this->cursorIndex,
+            this->selectionAnchorIndex);
     }
     if (this->userResponseInput.size() >= CaptchaWidget::kMaxUserResponseCharacters)
     {
@@ -688,6 +801,50 @@ bool CaptchaWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keyco
     this->cursorIndex = (std::min)(this->cursorIndex, this->userResponseInput.size());
     this->userResponseInput.insert(this->cursorIndex, 1, asciiChar);
     ++this->cursorIndex;
+    this->clearResponseSelection();
+    this->cursorVisible = true;
+    this->cursorBlinkElapsed = 0.0;
+    return true;
+}
+
+bool CaptchaWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->inputFocused)
+    {
+        return false;
+    }
+
+    std::string sanitized;
+    sanitized.reserve(CaptchaWidget::kMaxUserResponseCharacters);
+    for (const char* cursor = text; cursor != nullptr && *cursor != '\0'; ++cursor)
+    {
+        const unsigned char uc = static_cast<unsigned char>(*cursor);
+        if (std::isalnum(uc) != 0)
+        {
+            sanitized.push_back(static_cast<char>(std::toupper(uc)));
+        }
+    }
+
+    if (sanitized.empty())
+    {
+        return true;
+    }
+
+    this->responseEditHistory.rememberState(
+        this->userResponseInput,
+        this->cursorIndex,
+        this->selectionAnchorIndex);
+    if (this->hasResponseSelection())
+    {
+        this->deleteSelectedResponseText();
+    }
+
+    const std::size_t availableCount =
+        CaptchaWidget::kMaxUserResponseCharacters - this->userResponseInput.size();
+    sanitized.resize((std::min)(sanitized.size(), availableCount));
+    this->cursorIndex = (std::min)(this->cursorIndex, this->userResponseInput.size());
+    this->userResponseInput.insert(this->cursorIndex, sanitized);
+    this->cursorIndex += sanitized.size();
     this->clearResponseSelection();
     this->cursorVisible = true;
     this->cursorBlinkElapsed = 0.0;

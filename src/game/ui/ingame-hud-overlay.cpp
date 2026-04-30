@@ -2,6 +2,7 @@
 
 #include "core/context.h"
 
+#include <RC2D/RC2D_keyboard.h>
 #include <RC2D/RC2D_memory.h>
 #include <RC2D/RC2D_storage.h>
 
@@ -2102,6 +2103,8 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
             map.rect,
             this->gameSettingsWidget.getCameraScrollSpeedSectors());
     }
+
+    this->syncPlatformTextInputState();
 }
 
 void IngameHudOverlay::drawBackgroundWidget(void)
@@ -2687,6 +2690,42 @@ bool IngameHudOverlay::textinput(const RC2D_TextInputEventInfo* info)
         const WindowLayer layer = this->windowDrawOrder[static_cast<std::size_t>(i)];
         switch (layer)
         {
+            case WindowLayer::ESPION:
+                if (this->espionSearchPlayerWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::MARKETS_AND_BAZAR:
+                if (this->marketsAndBazarWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::ACCOUNT_MANAGEMENT:
+                if (this->accountManagementWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::GAME_SETTINGS:
+                if (this->gameSettingsWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::GUILD_MORTAR:
+                if (this->guildMortarWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            case WindowLayer::CAPTCHA:
+                if (this->captchaWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::CHAT:
                 if (this->chatWidget.textinput(info->text))
                 {
@@ -2699,6 +2738,11 @@ bool IngameHudOverlay::textinput(const RC2D_TextInputEventInfo* info)
     }
 
     return false;
+}
+
+void IngameHudOverlay::syncPlatformTextInputState(void)
+{
+    rc2d_keyboard_setTextInput(this->isBlockingGameplayKeyboardInput());
 }
 
 bool IngameHudOverlay::isBlockingGameplayKeyboardInput(void) const

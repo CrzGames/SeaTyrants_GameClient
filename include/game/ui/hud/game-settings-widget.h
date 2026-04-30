@@ -9,6 +9,7 @@
 
 #include "game/map/map.h"
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 /**
@@ -168,6 +169,12 @@ public:
      * @return True si l'evenement est consomme.
      */
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+
+    /**
+     * @brief Injecte un texte finalise RC2D/SDL dans le champ de code.
+     * @return True si le texte a ete absorbe.
+     */
+    bool textinput(const char* text);
 
     /**
      * @brief Retourne true si la fenetre est visible.
@@ -483,6 +490,7 @@ private:
     bool redeemInputSelectingWithMouse;          /**< True si un glisser souris etend la selection de l'input code. */
     bool redeemCursorVisible;                    /**< Etat visible du curseur clignotant. */
     double redeemCursorBlinkElapsed;             /**< Temps ecoule depuis le dernier clignotement. */
+    TextInputEditHistory redeemEditHistory;      /**< Historique Ctrl+Z du champ redeem. */
     std::array<float, static_cast<std::size_t>(HudScaleTarget::COUNT)> hudScaleValues; /**< Valeurs affichees par les sliders HUD. */
     std::array<bool, static_cast<std::size_t>(HudScaleTarget::COUNT)> hudVisibilityValues; /**< Etats visibles affiches pour chaque widget HUD. */
     bool hudScaleDragging;                       /**< True pendant le drag horizontal d'un slider HUD. */

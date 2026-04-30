@@ -1,5 +1,8 @@
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/assets/title-asset-cache.h"
+#include "game/ui/text-input-shortcuts.h"
+
+#include <RC2D/RC2D_system.h>
 
 #include "core/context.h"
 
@@ -35,6 +38,7 @@ static constexpr RC2D_Color kButtonFill = RC2D_Color{7, 35, 52, 236};
 static constexpr RC2D_Color kTextGold = RC2D_Color{217, 200, 134, 255};
 static constexpr RC2D_Color kTextBody = RC2D_Color{210, 215, 225, 255};
 static constexpr RC2D_Color kTextMuted = RC2D_Color{126, 132, 142, 255};
+static constexpr RC2D_Color kInputSelectionFill = RC2D_Color{67, 96, 144, 215};
 static constexpr RC2D_Color kRowLine = RC2D_Color{134, 102, 39, 220};
 static constexpr RC2D_Color kScrollTrack = RC2D_Color{26, 29, 33, 235};
 static constexpr RC2D_Color kScrollThumb = RC2D_Color{124, 132, 142, 240};
@@ -174,6 +178,7 @@ static void drawCentered(RC2D_Font* font, const char* text, const SDL_FRect& r, 
     rc2d_graphics_destroyText(&t);
 }
 
+#if 0
 static char extractDigitFromKeyLabel(const char* key)
 {
     if (key == nullptr || key[0] == '\0')
@@ -212,6 +217,8 @@ static char extractDigitFromKeyLabel(const char* key)
 
     return '\0';
 }
+
+#endif
 
 static int parsePositiveInt(const std::string& value)
 {
@@ -564,6 +571,7 @@ MarketsAndBazarWidget::MarketsAndBazarWidget(void)
       focusedTab(ActiveTab::BASIC_MARKET),
       focusedRow(-1),
       cursorIndex(0),
+      selectionAnchorIndex(0),
       cursorVisible(false),
       cursorBlinkElapsed(0.0),
       timerText("15:02")
@@ -764,6 +772,10 @@ void MarketsAndBazarWidget::clearRows(void)
     this->blackMarketRows.clear();
     this->basicMarketRows.clear();
     this->eventMarketRows.clear();
+    this->bazarInputEditHistories.clear();
+    this->blackMarketInputEditHistories.clear();
+    this->basicMarketInputEditHistories.clear();
+    this->eventMarketInputEditHistories.clear();
 
     this->clearIcons(this->bazarRowIcons);
     this->clearIcons(this->blackMarketRowIcons);
@@ -814,6 +826,27 @@ void MarketsAndBazarWidget::setMarketFamilyRows(ActiveTab tab, const std::vector
         targetIcons->push_back(loadImageFromTitleOrEmpty(row.imagePath));
     }
 
+    std::vector<TextInputEditHistory>* targetHistories = nullptr;
+    switch (tab)
+    {
+        case ActiveTab::BLACK_MARKET:
+            targetHistories = &this->blackMarketInputEditHistories;
+            break;
+        case ActiveTab::BASIC_MARKET:
+            targetHistories = &this->basicMarketInputEditHistories;
+            break;
+        case ActiveTab::EVENT_MARKET:
+            targetHistories = &this->eventMarketInputEditHistories;
+            break;
+        case ActiveTab::BAZARD:
+        default:
+            break;
+    }
+    if (targetHistories != nullptr)
+    {
+        targetHistories->assign(targetRows->size(), TextInputEditHistory{});
+    }
+
     *firstRow = 0;
     if (this->focusedTab == tab)
     {
@@ -844,6 +877,8 @@ void MarketsAndBazarWidget::setBazarRows(const std::vector<BazarRow>& rows)
         this->bazarRowIcons.push_back(loadImageFromTitleOrEmpty(row.imagePath));
     }
 
+    this->bazarInputEditHistories.assign(this->bazarRows.size(), TextInputEditHistory{});
+
     this->bazarFirstRow = 0;
     if (this->focusedTab == ActiveTab::BAZARD)
     {
@@ -871,6 +906,7 @@ void MarketsAndBazarWidget::clearInputFocusInternal(void)
     this->inputFocused = false;
     this->focusedRow = -1;
     this->cursorIndex = 0;
+    this->selectionAnchorIndex = 0;
     this->cursorVisible = false;
     this->cursorBlinkElapsed = 0.0;
 }
@@ -924,6 +960,11 @@ void MarketsAndBazarWidget::submitFocusedInput(void)
         marketRow.quantity = (std::max)(0, marketRow.quantity);
         marketRow.yourOffer = "1";
         this->cursorIndex = marketRow.yourOffer.size();
+        TextInputEditHistory* editHistory = this->getFocusedInputEditHistory();
+        if (editHistory != nullptr)
+        {
+            editHistory->clear();
+        }
     }
 }
 
@@ -1293,6 +1334,7 @@ bool MarketsAndBazarWidget::mousepressed(float x, float y, RC2D_MouseButton butt
                     newCursor = i;
                 }
                 this->cursorIndex = (std::min)(newCursor, inputValue->size());
+                this->selectionAnchorIndex = this->cursorIndex;
             }
             return true;
         }
@@ -1392,9 +1434,6 @@ bool MarketsAndBazarWidget::mousewheelmoved(
 
 bool MarketsAndBazarWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat)
 {
-    (void)mod;
-    (void)isrepeat;
-
     if (!this->visible || !this->inputFocused || this->focusedRow < 0)
     {
         return false;
@@ -1424,76 +1463,167 @@ bool MarketsAndBazarWidget::keypressed(const char* key, SDL_Scancode scancode, S
         return false;
     }
 
-    char digit = '\0';
-    digit = extractDigitFromKeyLabel(key);
-    if (digit == '\0' && scancode >= SDL_SCANCODE_KP_0 && scancode <= SDL_SCANCODE_KP_9)
+    TextInputEditHistory* editHistory = this->getFocusedInputEditHistory();
+
+    if (isTextInputShortcutPressed(TextInputShortcut::UNDO, key, scancode, keycode, mod, isrepeat))
     {
-        digit = static_cast<char>('0' + static_cast<int>(scancode - SDL_SCANCODE_KP_0));
-    }
-    if (digit == '\0' && keycode >= SDLK_KP_0 && keycode <= SDLK_KP_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_KP_0));
-    }
-    if (digit == '\0' && keycode >= SDLK_0 && keycode <= SDLK_9)
-    {
-        digit = static_cast<char>('0' + static_cast<int>(keycode - SDLK_0));
+        if (editHistory != nullptr &&
+            editHistory->undo(input, &this->cursorIndex, &this->selectionAnchorIndex))
+        {
+            this->cursorVisible = true;
+            this->cursorBlinkElapsed = 0.0;
+        }
+        return true;
     }
 
-    if (digit != '\0')
+    if (isTextInputShortcutPressed(TextInputShortcut::SELECT_ALL, key, scancode, keycode, mod, isrepeat))
     {
-        if (input->size() == 1 && (*input)[0] == '0')
-        {
-            input->clear();
-            this->cursorIndex = 0;
-        }
-        if (input->size() >= static_cast<std::size_t>(kMaxInputDigits))
-        {
-            return true;
-        }
-        this->cursorIndex = (std::min)(this->cursorIndex, input->size());
-        input->insert(this->cursorIndex, 1, digit);
-        ++this->cursorIndex;
+        this->selectionAnchorIndex = 0U;
+        this->cursorIndex = input->size();
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::COPY, key, scancode, keycode, mod, isrepeat))
+    {
+        if (this->hasInputSelection())
+        {
+            const std::size_t selectionStart = this->getInputSelectionStart();
+            const std::size_t selectionEnd = this->getInputSelectionEnd();
+            rc2d_system_setClipboardText(
+                input->substr(selectionStart, selectionEnd - selectionStart).c_str());
+        }
+        return true;
+    }
+
+    if (isTextInputShortcutPressed(TextInputShortcut::PASTE, key, scancode, keycode, mod, isrepeat))
+    {
+        char* clipboardText = rc2d_system_getClipboardText();
+        if (clipboardText != nullptr)
+        {
+            std::string sanitized;
+            sanitized.reserve(kMaxInputDigits);
+            for (const char* cursor = clipboardText; *cursor != '\0'; ++cursor)
+            {
+                if (*cursor >= '0' && *cursor <= '9')
+                {
+                    sanitized.push_back(*cursor);
+                }
+            }
+
+            if (!sanitized.empty())
+            {
+                if (editHistory != nullptr)
+                {
+                    editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+                }
+                if (this->hasInputSelection())
+                {
+                    this->deleteSelectedInputText(input);
+                }
+
+                if (input->size() == 1U && (*input)[0] == '0')
+                {
+                    input->clear();
+                    this->cursorIndex = 0U;
+                }
+
+                const std::size_t availableCount = static_cast<std::size_t>(kMaxInputDigits) - input->size();
+                sanitized.resize((std::min)(sanitized.size(), availableCount));
+                this->cursorIndex = (std::min)(this->cursorIndex, input->size());
+                input->insert(this->cursorIndex, sanitized);
+                this->cursorIndex += sanitized.size();
+                this->clearInputSelection();
+                this->cursorVisible = true;
+                this->cursorBlinkElapsed = 0.0;
+            }
+
+            rc2d_system_freeClipboardText(clipboardText);
+        }
         return true;
     }
 
     switch (scancode)
     {
         case SDL_SCANCODE_LEFT:
-            if (this->cursorIndex > 0) { --this->cursorIndex; }
+            if (this->hasInputSelection())
+            {
+                this->cursorIndex = this->getInputSelectionStart();
+            }
+            else if (this->cursorIndex > 0)
+            {
+                --this->cursorIndex;
+            }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_RIGHT:
-            if (this->cursorIndex < input->size()) { ++this->cursorIndex; }
+            if (this->hasInputSelection())
+            {
+                this->cursorIndex = this->getInputSelectionEnd();
+            }
+            else if (this->cursorIndex < input->size())
+            {
+                ++this->cursorIndex;
+            }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_HOME:
             this->cursorIndex = 0;
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_END:
             this->cursorIndex = input->size();
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_BACKSPACE:
-            if (this->cursorIndex > 0 && !input->empty())
+            if (this->hasInputSelection())
             {
+                if (editHistory != nullptr)
+                {
+                    editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+                }
+                this->deleteSelectedInputText(input);
+            }
+            else if (this->cursorIndex > 0 && !input->empty())
+            {
+                if (editHistory != nullptr)
+                {
+                    editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+                }
                 input->erase(this->cursorIndex - 1, 1);
                 --this->cursorIndex;
             }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
         case SDL_SCANCODE_DELETE:
-            if (this->cursorIndex < input->size())
+            if (this->hasInputSelection())
             {
+                if (editHistory != nullptr)
+                {
+                    editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+                }
+                this->deleteSelectedInputText(input);
+            }
+            else if (this->cursorIndex < input->size())
+            {
+                if (editHistory != nullptr)
+                {
+                    editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+                }
                 input->erase(this->cursorIndex, 1);
             }
+            this->clearInputSelection();
             this->cursorVisible = true;
             this->cursorBlinkElapsed = 0.0;
             return true;
@@ -1511,6 +1641,149 @@ bool MarketsAndBazarWidget::keypressed(const char* key, SDL_Scancode scancode, S
     }
 
     return false;
+}
+
+bool MarketsAndBazarWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->inputFocused || this->focusedRow < 0)
+    {
+        return false;
+    }
+
+    std::string* input = nullptr;
+    if (this->focusedTab == ActiveTab::BAZARD)
+    {
+        if (this->focusedRow >= static_cast<int>(this->bazarRows.size()))
+        {
+            return false;
+        }
+        input = &this->bazarRows[static_cast<std::size_t>(this->focusedRow)].yourOffer;
+    }
+    else
+    {
+        std::vector<MarketRow>* focusedMarketRows = this->getMarketRowsForTab(this->focusedTab);
+        if (focusedMarketRows == nullptr || this->focusedRow >= static_cast<int>(focusedMarketRows->size()))
+        {
+            return false;
+        }
+        input = &(*focusedMarketRows)[static_cast<std::size_t>(this->focusedRow)].yourOffer;
+    }
+
+    if (input == nullptr)
+    {
+        return false;
+    }
+
+    std::string sanitized;
+    sanitized.reserve(kMaxInputDigits);
+    for (const char* cursor = text; cursor != nullptr && *cursor != '\0'; ++cursor)
+    {
+        if (*cursor >= '0' && *cursor <= '9')
+        {
+            sanitized.push_back(*cursor);
+        }
+    }
+
+    if (sanitized.empty())
+    {
+        return true;
+    }
+
+    TextInputEditHistory* editHistory = this->getFocusedInputEditHistory();
+    if (editHistory != nullptr)
+    {
+        editHistory->rememberState(*input, this->cursorIndex, this->selectionAnchorIndex);
+    }
+    if (this->hasInputSelection())
+    {
+        this->deleteSelectedInputText(input);
+    }
+
+    if (input->size() == 1U && (*input)[0] == '0')
+    {
+        input->clear();
+        this->cursorIndex = 0U;
+    }
+
+    const std::size_t availableCount = static_cast<std::size_t>(kMaxInputDigits) - input->size();
+    sanitized.resize((std::min)(sanitized.size(), availableCount));
+    this->cursorIndex = (std::min)(this->cursorIndex, input->size());
+    input->insert(this->cursorIndex, sanitized);
+    this->cursorIndex += sanitized.size();
+    this->clearInputSelection();
+    this->cursorVisible = true;
+    this->cursorBlinkElapsed = 0.0;
+    return true;
+}
+
+bool MarketsAndBazarWidget::hasInputSelection(void) const
+{
+    return this->getInputSelectionStart() != this->getInputSelectionEnd();
+}
+
+std::size_t MarketsAndBazarWidget::getInputSelectionStart(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, static_cast<std::size_t>(kMaxInputDigits));
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, static_cast<std::size_t>(kMaxInputDigits));
+    return (std::min)(clampedAnchor, clampedCursor);
+}
+
+std::size_t MarketsAndBazarWidget::getInputSelectionEnd(void) const
+{
+    const std::size_t clampedCursor = (std::min)(this->cursorIndex, static_cast<std::size_t>(kMaxInputDigits));
+    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, static_cast<std::size_t>(kMaxInputDigits));
+    return (std::max)(clampedAnchor, clampedCursor);
+}
+
+void MarketsAndBazarWidget::clearInputSelection(void)
+{
+    this->selectionAnchorIndex = this->cursorIndex;
+}
+
+void MarketsAndBazarWidget::deleteSelectedInputText(std::string* input)
+{
+    if (input == nullptr || !this->hasInputSelection())
+    {
+        return;
+    }
+
+    const std::size_t selectionStart = (std::min)(this->getInputSelectionStart(), input->size());
+    const std::size_t selectionEnd = (std::min)(this->getInputSelectionEnd(), input->size());
+    input->erase(selectionStart, selectionEnd - selectionStart);
+    this->cursorIndex = selectionStart;
+    this->clearInputSelection();
+}
+
+TextInputEditHistory* MarketsAndBazarWidget::getFocusedInputEditHistory(void)
+{
+    if (this->focusedRow < 0)
+    {
+        return nullptr;
+    }
+
+    const std::size_t rowIndex = static_cast<std::size_t>(this->focusedRow);
+    switch (this->focusedTab)
+    {
+        case ActiveTab::BAZARD:
+            return rowIndex < this->bazarInputEditHistories.size()
+                ? &this->bazarInputEditHistories[rowIndex]
+                : nullptr;
+        case ActiveTab::BLACK_MARKET:
+            return rowIndex < this->blackMarketInputEditHistories.size()
+                ? &this->blackMarketInputEditHistories[rowIndex]
+                : nullptr;
+        case ActiveTab::BASIC_MARKET:
+            return rowIndex < this->basicMarketInputEditHistories.size()
+                ? &this->basicMarketInputEditHistories[rowIndex]
+                : nullptr;
+        case ActiveTab::EVENT_MARKET:
+            return rowIndex < this->eventMarketInputEditHistories.size()
+                ? &this->eventMarketInputEditHistories[rowIndex]
+                : nullptr;
+        default:
+            break;
+    }
+    return nullptr;
 }
 
 bool MarketsAndBazarWidget::containsPoint(float x, float y) const
@@ -1878,6 +2151,29 @@ void MarketsAndBazarWidget::draw(void) const
             SDL_FRect submitRect = SDL_FRect{layout.col4X + 8.0f, rowRect.y + 46.0f, layout.col4W - 16.0f, 30.0f};
             rc2d_graphics_setColor(kFieldFill);
             rc2d_graphics_rectangle("fill", &inputRect);
+            if (self->inputFocused &&
+                self->focusedTab == ActiveTab::BAZARD &&
+                self->focusedRow == sourceRow &&
+                self->hasInputSelection())
+            {
+                const std::size_t selectionStart = (std::min)(self->getInputSelectionStart(), bazar.yourOffer.size());
+                const std::size_t selectionEnd = (std::min)(self->getInputSelectionEnd(), bazar.yourOffer.size());
+                const float selectionX = inputRect.x + 8.0f +
+                    measureTextWidth(&self->bodyFont, bazar.yourOffer.substr(0, selectionStart));
+                const float selectionW =
+                    measureTextWidth(&self->bodyFont, bazar.yourOffer.substr(selectionStart, selectionEnd - selectionStart));
+                if (selectionW > 0.0f)
+                {
+                    const SDL_FRect selectionRect = SDL_FRect{
+                        selectionX,
+                        inputRect.y + 3.0f,
+                        selectionW,
+                        inputRect.h - 6.0f
+                    };
+                    rc2d_graphics_setColor(kInputSelectionFill);
+                    rc2d_graphics_rectangle("fill", &selectionRect);
+                }
+            }
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &inputRect);
             drawTextAt(&self->bodyFont, bazar.yourOffer, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);
@@ -1955,6 +2251,29 @@ void MarketsAndBazarWidget::draw(void) const
             SDL_FRect submitRect = SDL_FRect{layout.col4X + 8.0f, rowRect.y + 46.0f, layout.col4W - 16.0f, 30.0f};
             rc2d_graphics_setColor(kFieldFill);
             rc2d_graphics_rectangle("fill", &inputRect);
+            if (self->inputFocused &&
+                self->focusedTab == self->activeTab &&
+                self->focusedRow == sourceRow &&
+                self->hasInputSelection())
+            {
+                const std::size_t selectionStart = (std::min)(self->getInputSelectionStart(), black.yourOffer.size());
+                const std::size_t selectionEnd = (std::min)(self->getInputSelectionEnd(), black.yourOffer.size());
+                const float selectionX = inputRect.x + 8.0f +
+                    measureTextWidth(&self->bodyFont, black.yourOffer.substr(0, selectionStart));
+                const float selectionW =
+                    measureTextWidth(&self->bodyFont, black.yourOffer.substr(selectionStart, selectionEnd - selectionStart));
+                if (selectionW > 0.0f)
+                {
+                    const SDL_FRect selectionRect = SDL_FRect{
+                        selectionX,
+                        inputRect.y + 3.0f,
+                        selectionW,
+                        inputRect.h - 6.0f
+                    };
+                    rc2d_graphics_setColor(kInputSelectionFill);
+                    rc2d_graphics_rectangle("fill", &selectionRect);
+                }
+            }
             rc2d_graphics_setColor(kGold);
             rc2d_graphics_rectangle("line", &inputRect);
             drawTextAt(&self->bodyFont, black.yourOffer, inputRect.x + 8.0f, inputRect.y + 5.0f, kTextGold);

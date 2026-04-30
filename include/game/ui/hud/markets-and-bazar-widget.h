@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 /**
@@ -144,6 +145,12 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
+     * @brief Injecte un texte finalise RC2D/SDL dans l'input d'offre focus.
+     * @return `true` si le texte a ete absorbe.
+     */
+    bool textinput(const char* text);
+
+    /**
      * @brief Enleve le focus des champs de saisie.
      */
     void clearFocus(void);
@@ -221,6 +228,10 @@ private:
     std::vector<MarketRow> blackMarketRows; /**< Donnees de l'onglet marche noir. */
     std::vector<MarketRow> basicMarketRows; /**< Donnees de l'onglet marche basique. */
     std::vector<MarketRow> eventMarketRows; /**< Donnees de l'onglet marche d'event. */
+    std::vector<TextInputEditHistory> bazarInputEditHistories; /**< Historiques Ctrl+Z des offres du bazar. */
+    std::vector<TextInputEditHistory> blackMarketInputEditHistories; /**< Historiques Ctrl+Z du marche noir. */
+    std::vector<TextInputEditHistory> basicMarketInputEditHistories; /**< Historiques Ctrl+Z du marche basique. */
+    std::vector<TextInputEditHistory> eventMarketInputEditHistories; /**< Historiques Ctrl+Z du marche d'event. */
 
     std::vector<RC2D_Image> bazarRowIcons; /**< Icones des lignes du bazar. */
     std::vector<RC2D_Image> blackMarketRowIcons; /**< Icones des lignes du marche noir. */
@@ -275,6 +286,7 @@ private:
     ActiveTab focusedTab; /**< Onglet auquel appartient le champ focus. */
     int focusedRow; /**< Index source de la ligne focussee (non index d'affichage). */
     std::size_t cursorIndex; /**< Position du caret dans le texte de l'input focus. */
+    std::size_t selectionAnchorIndex; /**< Point d'ancrage de la selection du champ focus. */
     bool cursorVisible; /**< Etat visuel courant du caret (blink). */
     double cursorBlinkElapsed; /**< Temps accumule pour alterner la visibilite du caret. */
     std::string timerText; /**< Texte du timer affiche dans le footer (bazar). */
@@ -333,6 +345,36 @@ private:
      * @brief Applique l'action du bouton de soumission sur la ligne focussee.
      */
     void submitFocusedInput(void);
+
+    /**
+     * @brief Retourne true si le champ focus possede une selection non vide.
+     */
+    bool hasInputSelection(void) const;
+
+    /**
+     * @brief Retourne le debut de la selection du champ focus.
+     */
+    std::size_t getInputSelectionStart(void) const;
+
+    /**
+     * @brief Retourne la fin de la selection du champ focus.
+     */
+    std::size_t getInputSelectionEnd(void) const;
+
+    /**
+     * @brief Replie la selection courante sur la position du caret.
+     */
+    void clearInputSelection(void);
+
+    /**
+     * @brief Supprime la selection courante dans le champ focus.
+     */
+    void deleteSelectedInputText(std::string* input);
+
+    /**
+     * @brief Retourne l'historique associe au champ actuellement focus.
+     */
+    TextInputEditHistory* getFocusedInputEditHistory(void);
 
     /**
      * @brief Indique si l'onglet actif est le bazar.

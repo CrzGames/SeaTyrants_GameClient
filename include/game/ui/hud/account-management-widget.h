@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 /**
@@ -640,6 +641,13 @@ public:
     bool isVisible(void) const { return this->visible; }
 
     /**
+     * @brief Injecte un texte finalise RC2D/SDL dans le champ de nom de profil.
+     * @param text Texte compose selon la disposition clavier active.
+     * @return True si le texte a ete absorbe par le widget.
+     */
+    bool textinput(const char* text);
+
+    /**
      * @brief True si le champ de nom de profil a le focus clavier.
      */
     bool hasBlockingProfileNameInputFocus(void) const { return this->visible && this->profileInputFocused; }
@@ -907,8 +915,10 @@ private:
     std::string profileName;         /**< Nom de profil editable affiche dans l'onglet compte. */
     bool profileInputFocused;        /**< True quand le champ de profil possede le focus clavier. */
     std::size_t profileCursorIndex;  /**< Position du curseur texte dans profileName. */
+    std::size_t profileSelectionAnchorIndex; /**< Point d'ancrage de la selection du champ profileName. */
     bool profileCursorVisible;       /**< Etat de visibilite du curseur clignotant. */
     double profileCursorBlinkElapsed;/**< Temps ecoule depuis le dernier changement du curseur clignotant. */
+    TextInputEditHistory profileEditHistory; /**< Historique Ctrl+Z du nom de profil. */
 
     /**
      * @brief Libere toutes les images RC2D stockees dans un vecteur de cache.
@@ -1255,6 +1265,31 @@ private:
      * @brief Retire le focus du champ de saisie du nom de profil.
      */
     void clearProfileInputFocus(void);
+
+    /**
+     * @brief Retourne true si le champ profileName a une selection non vide.
+     */
+    bool hasProfileSelection(void) const;
+
+    /**
+     * @brief Retourne le debut de la selection du champ profileName.
+     */
+    std::size_t getProfileSelectionStart(void) const;
+
+    /**
+     * @brief Retourne la fin de la selection du champ profileName.
+     */
+    std::size_t getProfileSelectionEnd(void) const;
+
+    /**
+     * @brief Replie la selection du champ profileName sur la position du caret.
+     */
+    void clearProfileSelection(void);
+
+    /**
+     * @brief Supprime la selection courante du champ profileName.
+     */
+    void deleteSelectedProfileText(void);
 
     /**
      * @brief Efface tous les focus transitoires possedes par le widget.

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "game/ui/hud/hud-cursor.h"
+#include "game/ui/text-input-edit-history.h"
 #include "game/ui/hud/window-control-icons.h"
 
 class EspionSearchPlayerWidget {
@@ -44,6 +45,12 @@ public:
      * @return True si la touche est consommee.
      */
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+
+    /**
+     * @brief Injecte le texte finalise RC2D/SDL dans l'input ID joueur.
+     * @return True si le texte a ete absorbe.
+     */
+    bool textinput(const char* text);
 
     /**
      * @brief Retire le focus de l'input ID et masque son curseur.
@@ -139,6 +146,7 @@ private:
     bool inputSelectingWithMouse; /**< True si un glisser souris etend actuellement la selection dans l'input ID. */
     bool cursorVisible; /**< True si le curseur doit etre affiche. */
     double cursorBlinkElapsed; /**< Temps accumule pour le blink du curseur. */
+    TextInputEditHistory playerIdEditHistory; /**< Historique Ctrl+Z de l'input ID. */
 
     /**
      * @brief Etat de deplacement de la fenetre.
