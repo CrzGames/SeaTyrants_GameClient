@@ -26,11 +26,15 @@ void GameScene::setExperiencePointsCurrent(int points)
 
 void GameScene::populateMoneyDemoData(void)
 {
-    GetIngameHudOverlay().getMoneyWidget().setCurrencyEntries(
+    IngameHudOverlay& hudOverlay = GetIngameHudOverlay();
+
+    hudOverlay.getMoneyWidget().setCurrencyEntries(
         std::vector<MoneyWidget::CurrencyEntry>{
             {MoneyWidget::CurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000},
             {MoneyWidget::CurrencyType::RUBIES, "assets/images/ui-scene-game/money-rubies.png", 3500}
         });
+    hudOverlay.getTopBarMainCurrencyWidget().setGoldAmount(125000000);
+    hudOverlay.getTopBarMainCurrencyWidget().setRubiesAmount(525000000);
 }
 
 void GameScene::populateGuildMortarData(void)

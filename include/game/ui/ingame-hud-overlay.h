@@ -30,6 +30,7 @@
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/money-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
+#include "game/ui/hud/top-bar-main-currency-widget.h"
 #include "game/ui/hud/top-bar-menu-widget.h"
 #include "game/ui/hud/zoom-widget.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
@@ -151,6 +152,12 @@ public:
      * @brief Retourne la barre de menu haute.
      */
     TopBarMenuWidget& getTopBarMenuWidget(void) { return this->topBarMenuWidget; }
+
+    /**
+     * @brief Retourne le widget des monnaies principales affichees sur la top bar.
+     * @return Reference mutable vers le widget rubies / gold permanent.
+     */
+    TopBarMainCurrencyWidget& getTopBarMainCurrencyWidget(void) { return this->topBarMainCurrencyWidget; }
 
     /**
      * @brief Retourne la minimap.
@@ -309,6 +316,7 @@ private:
      */
     BackgroundWidget backgroundWidget;                      /**< Fond UI gameplay (haut/bas). */
     TopBarMenuWidget topBarMenuWidget;                     /**< Barre de menu haute en haut de l'ecran. */
+    TopBarMainCurrencyWidget topBarMainCurrencyWidget;     /**< Widget permanent des rubies / gold en haut a gauche. */
     MinimapWidget minimapWidget;                           /**< Widget minimap. */
     MinimapEspionButtonWidget minimapEspionButtonWidget;   /**< Bouton espion ancre sur la minimap. */
     MinimapParamsButtonWidget minimapParamsButtonWidget;   /**< Bouton params minimap ancre sur la minimap. */

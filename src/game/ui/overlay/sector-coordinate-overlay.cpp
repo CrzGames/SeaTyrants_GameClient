@@ -2,8 +2,12 @@
 #include "game/assets/title-asset-cache.h"
 
 #include <cstdio>
+#include <cmath>
 
 #include "core/context.h"
+
+static constexpr float kTopBarHeight = 25.0f;
+static constexpr float kTopBarTextVisualOffsetY = 1.0f;
 
 SectorCoordinateOverlay::SectorCoordinateOverlay(void)
     : font{},
@@ -135,11 +139,13 @@ void SectorCoordinateOverlay::draw(const Map& map, const Player& player)
     // 6) Positionnement UI:
     //    - base sur gameScreen rect (pas map rect),
     //    - centre horizontal de l'ecran de jeu,
-    //    - centre vertical dans la bande UI haute (MAP_TOP_UI_MARGIN_PX).
+    //    - centre vertical dans la top bar haute de 25 px.
     // -------------------------------------------------------------------------
     const SDL_FRect& gameScreenRect = GetGameScreen().rect;
     const float drawX = (gameScreenRect.x + (gameScreenRect.w * 0.5f)) - (static_cast<float>(textWidth) * 0.5f);
-    const float drawY = gameScreenRect.y + ((Map::MAP_TOP_UI_MARGIN_PX - static_cast<float>(textHeight)) * 0.5f);
+    const float drawY =
+        gameScreenRect.y +
+        std::round(((kTopBarHeight - static_cast<float>(textHeight)) * 0.5f) + kTopBarTextVisualOffsetY);
 
     // -------------------------------------------------------------------------
     // 7) Draw + destruction des ressources texte temporaires.

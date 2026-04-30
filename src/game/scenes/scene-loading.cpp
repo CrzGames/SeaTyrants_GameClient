@@ -48,7 +48,7 @@ static std::string loadingScene_buildCountersLabel(const TitleAssetPreloadProgre
 static std::string loadingScene_buildFooterLabel(const TitleAssetPreloadProgress& progress)
 {
     (void)progress;
-    return "Le monde, l'interface et l'ambiance sonore se mettent en place.";
+    return "";
 }
 
 static void loadingScene_drawTextLine(const RC2D_Font* font, const std::string& text, float x, float y, RC2D_Color color)

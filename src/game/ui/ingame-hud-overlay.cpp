@@ -461,6 +461,7 @@ static void drawTextAt(RC2D_Font* font, const char* text, float x, float y, RC2D
 IngameHudOverlay::IngameHudOverlay(void)
     : backgroundWidget{},
       topBarMenuWidget{},
+      topBarMainCurrencyWidget{},
       sectorCoordinateOverlay{},
       tileClickMarkerOverlay{},
       scrollBarOverlay{},
@@ -1747,6 +1748,7 @@ void IngameHudOverlay::load(void)
 
     this->backgroundWidget.load();
     this->topBarMenuWidget.load();
+    this->topBarMainCurrencyWidget.load();
     this->scrollBarOverlay.load();
 
     this->minimapWidget.load();
@@ -1915,6 +1917,7 @@ void IngameHudOverlay::unload(void)
     this->zoomWidget.unload();
     this->tileClickMarkerOverlay.hide();
     this->scrollBarOverlay.unload();
+    this->topBarMainCurrencyWidget.unload();
     this->topBarMenuWidget.unload();
     this->backgroundWidget.unload();
 }
@@ -2128,6 +2131,7 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
         this->hudConfiguratorMode;
 
     this->topBarMenuWidget.draw();
+    this->topBarMainCurrencyWidget.draw();
     this->sectorCoordinateOverlay.draw(map, player);
     if (showMinimap)
     {
