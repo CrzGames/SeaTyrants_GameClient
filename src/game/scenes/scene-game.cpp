@@ -405,12 +405,12 @@ void GameScene::initializePlayerSpawnAndCamera(void)
             shipFolderPath.c_str());
     }
 
-    // Load le VFX du navire du joueur.
+    // Load le VFX ship du navire du joueur.
     /*if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
     {
         RC2D_log(
             RC2D_LOG_ERROR,
-            "GameScene: echec chargement VFX (shipFolder='%s', vfxFolder='%s')",
+            "GameScene: echec chargement VFXShip (shipFolder='%s', vfxFolder='%s')",
             this->playerShipFolderPath.c_str(),
             this->playerVfxFolderPath.c_str());
         return;
@@ -490,7 +490,7 @@ void GameScene::update(double dt)
     player.update(dt, map);
     oceanShader.endWakeFrame(map, map.rect);
 
-    // Met a jour les VFX du navire du joueur.
+    // Met a jour les VFX ship du navire du joueur.
     //this->shipVfx.update(dt, player.getShip(), nullptr);
 
     // Met a jour les shaders de visibilite (nuages + fog).
@@ -561,13 +561,13 @@ void GameScene::draw(void)
     // Dessine le marqueur de clic.
     GetIngameHudOverlay().drawTileClickMarkerOverlay(map);
 
-    // Dessine les VFX derriere le ship.
+    // Dessine les VFX ship derriere le ship.
     //this->shipVfx.draw(map, player.getShip(), true);
 
     // Dessine le joueur.
     player.draw(map);
 
-    // Dessine les VFX devant le ship.
+    // Dessine les VFX ship devant le ship.
     //this->shipVfx.draw(map, player.getShip(), false);
 
     // Dessine les barres de scroll par-dessus tout.

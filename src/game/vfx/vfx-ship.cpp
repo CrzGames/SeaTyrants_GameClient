@@ -1,4 +1,4 @@
-#include "game/vfx/vfx.h"
+#include "game/vfx/vfx-ship.h"
 #include "game/assets/title-asset-cache.h"
 
 #include <algorithm>
@@ -343,26 +343,26 @@ constexpr float kIdleRingPieceStaggerSec = 0.055f;
 constexpr float kRadToDeg = 57.29577951308232f;
 constexpr float kRelativeTargetSameTileEpsilon = 0.00001f;
 
-constexpr std::array<std::array<VFX::TargetRelativeFamily, 4>, 4> kTargetRelativeFamilyBySectorAndDirection = {{
+constexpr std::array<std::array<VFXShip::TargetRelativeFamily, 4>, 4> kTargetRelativeFamilyBySectorAndDirection = {{
     // Secteur [0,90): DL(BG)=A, UR(HD)=B, UL(HG)=B, DR(BD)=A
-    {{VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+    {{VFXShip::TargetRelativeFamily::A, VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A}},
     // Secteur [90,180): DL(BG)=B, UR(HD)=A, UL(HG)=A, DR(BD)=B
-    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B}},
+    {{VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A, VFXShip::TargetRelativeFamily::A, VFXShip::TargetRelativeFamily::B}},
     // Secteur [180,270): DL(BG)=B, UR(HD)=A, UL(HG)=B, DR(BD)=A
-    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+    {{VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A, VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A}},
     // Secteur [270,360): DL(BG)=B, UR(HD)=A, UL(HG)=B, DR(BD)=A
-    {{VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A, VFX::TargetRelativeFamily::B, VFX::TargetRelativeFamily::A}},
+    {{VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A, VFXShip::TargetRelativeFamily::B, VFXShip::TargetRelativeFamily::A}},
 }};
 
-constexpr std::array<std::array<VFX::ShipDirection, 4>, 4> kTargetRelativeStationaryDirectionRemapBySector = {{
+constexpr std::array<std::array<VFXShip::ShipDirection, 4>, 4> kTargetRelativeStationaryDirectionRemapBySector = {{
     // Secteur [0,90): BD->BG, HG->HD
-    {{VFX::ShipDirection::DOWN_LEFT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::DOWN_LEFT}},
+    {{VFXShip::ShipDirection::DOWN_LEFT, VFXShip::ShipDirection::UP_RIGHT, VFXShip::ShipDirection::UP_RIGHT, VFXShip::ShipDirection::DOWN_LEFT}},
     // Secteur [90,180): HD->HG, BG->BD
-    {{VFX::ShipDirection::DOWN_RIGHT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::DOWN_RIGHT}},
+    {{VFXShip::ShipDirection::DOWN_RIGHT, VFXShip::ShipDirection::UP_LEFT, VFXShip::ShipDirection::UP_LEFT, VFXShip::ShipDirection::DOWN_RIGHT}},
     // Secteur [180,270): BD->BG, HG->HD
-    {{VFX::ShipDirection::DOWN_LEFT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::UP_RIGHT, VFX::ShipDirection::DOWN_LEFT}},
+    {{VFXShip::ShipDirection::DOWN_LEFT, VFXShip::ShipDirection::UP_RIGHT, VFXShip::ShipDirection::UP_RIGHT, VFXShip::ShipDirection::DOWN_LEFT}},
     // Secteur [270,360): BG->BD, HD->HG
-    {{VFX::ShipDirection::DOWN_RIGHT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::UP_LEFT, VFX::ShipDirection::DOWN_RIGHT}},
+    {{VFXShip::ShipDirection::DOWN_RIGHT, VFXShip::ShipDirection::UP_LEFT, VFXShip::ShipDirection::UP_LEFT, VFXShip::ShipDirection::DOWN_RIGHT}},
 }};
 
 enum class PureMoveDirection {
@@ -419,7 +419,7 @@ bool resolvePureMoveDirectionFromPreviewPair(
     return false;
 }
 
-VFX::ShipDirection allowedAnimatedDirectionForPureMoveSlice(
+VFXShip::ShipDirection allowedAnimatedDirectionForPureMoveSlice(
     int slice45,
     PureMoveDirection pureDirection)
 {
@@ -429,60 +429,60 @@ VFX::ShipDirection allowedAnimatedDirectionForPureMoveSlice(
     case 0: // [0,45)
     case 1: // [45,90)
         return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::DOWN)
-            ? VFX::ShipDirection::DOWN_LEFT
-            : VFX::ShipDirection::UP_RIGHT;
+            ? VFXShip::ShipDirection::DOWN_LEFT
+            : VFXShip::ShipDirection::UP_RIGHT;
 
     case 2: // [90,135)
         return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::UP)
-            ? VFX::ShipDirection::UP_LEFT
-            : VFX::ShipDirection::DOWN_RIGHT;
+            ? VFXShip::ShipDirection::UP_LEFT
+            : VFXShip::ShipDirection::DOWN_RIGHT;
 
     case 3: // [135,180)
         switch (pureDirection)
         {
         case PureMoveDirection::LEFT:
-            return VFX::ShipDirection::DOWN_LEFT;
+            return VFXShip::ShipDirection::DOWN_LEFT;
         case PureMoveDirection::UP:
-            return VFX::ShipDirection::UP_LEFT;
+            return VFXShip::ShipDirection::UP_LEFT;
         case PureMoveDirection::RIGHT:
-            return VFX::ShipDirection::DOWN_RIGHT;
+            return VFXShip::ShipDirection::DOWN_RIGHT;
         case PureMoveDirection::DOWN:
-            return VFX::ShipDirection::DOWN_LEFT;
+            return VFXShip::ShipDirection::DOWN_LEFT;
         default:
-            return VFX::ShipDirection::DOWN_LEFT;
+            return VFXShip::ShipDirection::DOWN_LEFT;
         }
 
     case 4: // [180,225)
     case 5: // [225,270)
         return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::DOWN)
-            ? VFX::ShipDirection::DOWN_LEFT
-            : VFX::ShipDirection::UP_RIGHT;
+            ? VFXShip::ShipDirection::DOWN_LEFT
+            : VFXShip::ShipDirection::UP_RIGHT;
 
     case 6: // [270,315)
         switch (pureDirection)
         {
         case PureMoveDirection::LEFT:
-            return VFX::ShipDirection::UP_LEFT;
+            return VFXShip::ShipDirection::UP_LEFT;
         case PureMoveDirection::UP:
-            return VFX::ShipDirection::UP_LEFT;
+            return VFXShip::ShipDirection::UP_LEFT;
         case PureMoveDirection::RIGHT:
-            return VFX::ShipDirection::UP_RIGHT;
+            return VFXShip::ShipDirection::UP_RIGHT;
         case PureMoveDirection::DOWN:
-            return VFX::ShipDirection::DOWN_RIGHT;
+            return VFXShip::ShipDirection::DOWN_RIGHT;
         default:
-            return VFX::ShipDirection::DOWN_LEFT;
+            return VFXShip::ShipDirection::DOWN_LEFT;
         }
 
     default: // [315,360)
         return (pureDirection == PureMoveDirection::LEFT || pureDirection == PureMoveDirection::UP)
-            ? VFX::ShipDirection::UP_LEFT
-            : VFX::ShipDirection::DOWN_RIGHT;
+            ? VFXShip::ShipDirection::UP_LEFT
+            : VFXShip::ShipDirection::DOWN_RIGHT;
     }
 }
 
 bool shouldPlayMovingPureDirectionAnimation(
     const Ship& ship,
-    const VFX::DirectionStateResolution& resolution)
+    const VFXShip::DirectionStateResolution& resolution)
 {
     if (!ship.isMoving() || !resolution.usedTargetRelativeMode || !resolution.hasTargetTile)
     {
@@ -508,7 +508,7 @@ bool shouldPlayMovingPureDirectionAnimation(
 
     const float a = resolution.relativeAngleDeg;
     const int slice45 = std::clamp(static_cast<int>(std::floor(a / 45.0f)), 0, 7);
-    VFX::ShipDirection allowedDirection =
+    VFXShip::ShipDirection allowedDirection =
         allowedAnimatedDirectionForPureMoveSlice(slice45, pureDirection);
 
     // Corrections ciblees (directions pures EN MOUVEMENT) :
@@ -520,51 +520,51 @@ bool shouldPlayMovingPureDirectionAnimation(
     {
         if (pureDirection == PureMoveDirection::UP)
         {
-            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+            allowedDirection = VFXShip::ShipDirection::UP_RIGHT;
         }
         else if (pureDirection == PureMoveDirection::DOWN)
         {
-            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+            allowedDirection = VFXShip::ShipDirection::DOWN_LEFT;
         }
     }
     else if (a >= 90.0f && a < 135.0f)
     {
         if (pureDirection == PureMoveDirection::UP)
         {
-            allowedDirection = VFX::ShipDirection::UP_LEFT;
+            allowedDirection = VFXShip::ShipDirection::UP_LEFT;
         }
         else if (pureDirection == PureMoveDirection::DOWN)
         {
-            allowedDirection = VFX::ShipDirection::DOWN_RIGHT;
+            allowedDirection = VFXShip::ShipDirection::DOWN_RIGHT;
         }
     }
     else if (a >= 180.0f && a < 225.0f)
     {
         if (pureDirection == PureMoveDirection::RIGHT)
         {
-            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+            allowedDirection = VFXShip::ShipDirection::UP_RIGHT;
         }
         else if (pureDirection == PureMoveDirection::LEFT)
         {
-            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+            allowedDirection = VFXShip::ShipDirection::DOWN_LEFT;
         }
     }
     else if (a >= 225.0f && a < 270.0f)
     {
         if (pureDirection == PureMoveDirection::RIGHT)
         {
-            allowedDirection = VFX::ShipDirection::UP_RIGHT;
+            allowedDirection = VFXShip::ShipDirection::UP_RIGHT;
         }
         else if (pureDirection == PureMoveDirection::LEFT)
         {
-            allowedDirection = VFX::ShipDirection::DOWN_LEFT;
+            allowedDirection = VFXShip::ShipDirection::DOWN_LEFT;
         }
     }
 
     return resolution.sourceDirection == allowedDirection;
 }
 
-VFX::TargetingMode targetingModeFromString(const char* value, bool* outRecognized)
+VFXShip::TargetingMode targetingModeFromString(const char* value, bool* outRecognized)
 {
     if (outRecognized != nullptr)
     {
@@ -572,7 +572,7 @@ VFX::TargetingMode targetingModeFromString(const char* value, bool* outRecognize
     }
     if (value == nullptr)
     {
-        return VFX::TargetingMode::NONE;
+        return VFXShip::TargetingMode::NONE;
     }
 
     const std::string lowered = toLowerAscii(value);
@@ -582,7 +582,7 @@ VFX::TargetingMode targetingModeFromString(const char* value, bool* outRecognize
         {
             *outRecognized = true;
         }
-        return VFX::TargetingMode::TARGET_RELATIVE_AB;
+        return VFXShip::TargetingMode::TARGET_RELATIVE_AB;
     }
     if (lowered == "none" || lowered == "legacy")
     {
@@ -590,14 +590,14 @@ VFX::TargetingMode targetingModeFromString(const char* value, bool* outRecognize
         {
             *outRecognized = true;
         }
-        return VFX::TargetingMode::NONE;
+        return VFXShip::TargetingMode::NONE;
     }
-    return VFX::TargetingMode::NONE;
+    return VFXShip::TargetingMode::NONE;
 }
 
 bool isSameDirectionStateResolution(
-    const VFX::DirectionStateResolution& a,
-    const VFX::DirectionStateResolution& b)
+    const VFXShip::DirectionStateResolution& a,
+    const VFXShip::DirectionStateResolution& b)
 {
     return a.directionStateKey == b.directionStateKey &&
         a.sourceDirection == b.sourceDirection &&
@@ -687,7 +687,7 @@ void vfxSampleTrailConeDepthAndLateral(
 // Lifecycle
 // =============================================================================
 
-VFX::VFX(void)
+VFXShip::VFXShip(void)
     : spritesheetImage{},
       frames{},
       loadedDirectionStateCount(kDirectionStateCount),
@@ -709,12 +709,12 @@ VFX::VFX(void)
 {
 }
 
-VFX::~VFX(void)
+VFXShip::~VFXShip(void)
 {
     this->unload();
 }
 
-int VFX::directionStateKey(ShipDirection direction, ShipState state, int targetFireSector)
+int VFXShip::directionStateKey(ShipDirection direction, ShipState state, int targetFireSector)
 {
     const int dir = std::clamp(static_cast<int>(direction), 0, 3);
     const int st = std::clamp(static_cast<int>(state), 0, 1);
@@ -722,12 +722,12 @@ int VFX::directionStateKey(ShipDirection direction, ShipState state, int targetF
     return dir + (st * 4) + (sec * 8);
 }
 
-int VFX::shipDirectionToIndex(ShipDirection direction)
+int VFXShip::shipDirectionToIndex(ShipDirection direction)
 {
     return std::clamp(static_cast<int>(direction), 0, 3);
 }
 
-VFX::ShipDirection VFX::shipDirectionFromIndex(int directionIndex)
+VFXShip::ShipDirection VFXShip::shipDirectionFromIndex(int directionIndex)
 {
     switch (std::clamp(directionIndex, 0, 3))
     {
@@ -742,7 +742,7 @@ VFX::ShipDirection VFX::shipDirectionFromIndex(int directionIndex)
     }
 }
 
-float VFX::normalizeDegrees0To360(float deg)
+float VFXShip::normalizeDegrees0To360(float deg)
 {
     if (!std::isfinite(deg))
     {
@@ -756,7 +756,7 @@ float VFX::normalizeDegrees0To360(float deg)
     return normalized;
 }
 
-int VFX::computeRelativeTargetSectorFromTiles(
+int VFXShip::computeRelativeTargetSectorFromTiles(
     const SDL_FPoint& controlledShipTile,
     const SDL_FPoint& targetTile,
     float* outAngleDeg,
@@ -812,7 +812,7 @@ int VFX::computeRelativeTargetSectorFromTiles(
     return 3;
 }
 
-VFX::ShipDirection VFX::remapDirectionWhenStationaryForTargetSector(
+VFXShip::ShipDirection VFXShip::remapDirectionWhenStationaryForTargetSector(
     int sectorIndex,
     ShipDirection direction)
 {
@@ -821,14 +821,14 @@ VFX::ShipDirection VFX::remapDirectionWhenStationaryForTargetSector(
     return kTargetRelativeStationaryDirectionRemapBySector[static_cast<size_t>(s)][static_cast<size_t>(d)];
 }
 
-VFX::TargetRelativeFamily VFX::resolveTargetRelativeFamily(int sectorIndex, ShipDirection direction)
+VFXShip::TargetRelativeFamily VFXShip::resolveTargetRelativeFamily(int sectorIndex, ShipDirection direction)
 {
     const int s = std::clamp(sectorIndex, 0, 3);
     const int d = shipDirectionToIndex(direction);
     return kTargetRelativeFamilyBySectorAndDirection[static_cast<size_t>(s)][static_cast<size_t>(d)];
 }
 
-VFX::ShipDirection VFX::shipDirectionFromString(const char* value)
+VFXShip::ShipDirection VFXShip::shipDirectionFromString(const char* value)
 {
     if (value == nullptr)
     {
@@ -855,7 +855,7 @@ VFX::ShipDirection VFX::shipDirectionFromString(const char* value)
     return ShipDirection::DOWN_LEFT;
 }
 
-VFX::ShipState VFX::shipStateFromString(const char* value)
+VFXShip::ShipState VFXShip::shipStateFromString(const char* value)
 {
     if (value == nullptr)
     {
@@ -870,7 +870,7 @@ VFX::ShipState VFX::shipStateFromString(const char* value)
     return ShipState::HEALTHY;
 }
 
-VFX::ShipDirection VFX::shipDirectionFromPreviewDirection(Ship::PreviewDirection direction)
+VFXShip::ShipDirection VFXShip::shipDirectionFromPreviewDirection(Ship::PreviewDirection direction)
 {
     switch (direction)
     {
@@ -887,7 +887,7 @@ VFX::ShipDirection VFX::shipDirectionFromPreviewDirection(Ship::PreviewDirection
     }
 }
 
-Ship::PreviewDirection VFX::previewDirectionFromShipDirection(ShipDirection direction)
+Ship::PreviewDirection VFXShip::previewDirectionFromShipDirection(ShipDirection direction)
 {
     switch (direction)
     {
@@ -904,22 +904,22 @@ Ship::PreviewDirection VFX::previewDirectionFromShipDirection(ShipDirection dire
     }
 }
 
-VFX::ShipState VFX::shipStateFromHealthVisual(Ship::HealthVisual healthVisual)
+VFXShip::ShipState VFXShip::shipStateFromHealthVisual(Ship::HealthVisual healthVisual)
 {
     return (healthVisual == Ship::HealthVisual::LOW) ? ShipState::DAMAGED : ShipState::HEALTHY;
 }
 
-const char* VFX::targetingModeToString(TargetingMode mode)
+const char* VFXShip::targetingModeToString(TargetingMode mode)
 {
     return (mode == TargetingMode::TARGET_RELATIVE_AB) ? "target_relative_ab" : "none";
 }
 
-const char* VFX::targetRelativeFamilyToString(TargetRelativeFamily family)
+const char* VFXShip::targetRelativeFamilyToString(TargetRelativeFamily family)
 {
     return (family == TargetRelativeFamily::B) ? "B" : "A";
 }
 
-const char* VFX::shipDirectionToString(ShipDirection direction)
+const char* VFXShip::shipDirectionToString(ShipDirection direction)
 {
     switch (direction)
     {
@@ -936,7 +936,7 @@ const char* VFX::shipDirectionToString(ShipDirection direction)
     }
 }
 
-VFX::DirectionStateResolution VFX::resolveDirectionState(
+VFXShip::DirectionStateResolution VFXShip::resolveDirectionState(
     const Ship& ship,
     const SDL_FPoint* targetTile) const
 {
@@ -1080,7 +1080,7 @@ VFX::DirectionStateResolution VFX::resolveDirectionState(
     return resolution;
 }
 
-void VFX::logTargetRelativeResolutionIfChanged(const DirectionStateResolution& resolution)
+void VFXShip::logTargetRelativeResolutionIfChanged(const DirectionStateResolution& resolution)
 {
     if (!resolution.usedTargetRelativeMode)
     {
@@ -1094,7 +1094,7 @@ void VFX::logTargetRelativeResolutionIfChanged(const DirectionStateResolution& r
 
     RC2D_log(
         RC2D_LOG_DEBUG,
-        "VFX target-relative: mode=%s target=%s angle=%.2f sector=%d srcDir=%s finalDir=%s remap=%s family=%s key=%d",
+        "VFXShip target-relative: mode=%s target=%s angle=%.2f sector=%d srcDir=%s finalDir=%s remap=%s family=%s key=%d",
         targetingModeToString(this->targetingMode),
         resolution.hasTargetTile ? "ok" : "same-tile-or-invalid",
         resolution.relativeAngleDeg,
@@ -1109,21 +1109,21 @@ void VFX::logTargetRelativeResolutionIfChanged(const DirectionStateResolution& r
     this->hasLoggedTargetRelativeResolution = true;
 }
 
-void VFX::setDirectionStateFromShip(const Ship& ship, const SDL_FPoint* targetTile)
+void VFXShip::setDirectionStateFromShip(const Ship& ship, const SDL_FPoint* targetTile)
 {
     this->lastDirectionStateResolution = this->resolveDirectionState(ship, targetTile);
     this->activeDirectionStateKey = this->lastDirectionStateResolution.directionStateKey;
     this->logTargetRelativeResolutionIfChanged(this->lastDirectionStateResolution);
 }
 
-const VFX::DirectionStateData& VFX::currentDirectionState(void) const
+const VFXShip::DirectionStateData& VFXShip::currentDirectionState(void) const
 {
     const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
     const int key = std::clamp(this->activeDirectionStateKey, 0, maxKey);
     return this->directionStates[static_cast<size_t>(key)];
 }
 
-const VFX::Instance* VFX::findInstanceById(
+const VFXShip::Instance* VFXShip::findInstanceById(
     const DirectionStateData& directionState,
     uint32_t instanceId) const
 {
@@ -1142,7 +1142,7 @@ const VFX::Instance* VFX::findInstanceById(
     return nullptr;
 }
 
-float VFX::resolvedPlaybackPeriodSeconds(void) const
+float VFXShip::resolvedPlaybackPeriodSeconds(void) const
 {
     if (this->frames.empty())
     {
@@ -1153,7 +1153,7 @@ float VFX::resolvedPlaybackPeriodSeconds(void) const
     return static_cast<float>(this->frames.size()) / fps;
 }
 
-float VFX::computePhaseSecondsInCycle(
+float VFXShip::computePhaseSecondsInCycle(
     const DirectionStateData& directionState,
     const Instance& instance,
     int chainDepth) const
@@ -1193,7 +1193,7 @@ float VFX::computePhaseSecondsInCycle(
     return normalizePhase(anchorPhase - delaySeconds);
 }
 
-int VFX::computeFrameIndex(const DirectionStateData& directionState, const Instance& instance) const
+int VFXShip::computeFrameIndex(const DirectionStateData& directionState, const Instance& instance) const
 {
     const int frameCount = static_cast<int>(this->frames.size());
     if (frameCount <= 0)
@@ -1212,7 +1212,7 @@ int VFX::computeFrameIndex(const DirectionStateData& directionState, const Insta
     return index;
 }
 
-int VFX::runtimeTrailFrameIndex(float defaultFps, int frameCount, float ageSec)
+int VFXShip::runtimeTrailFrameIndex(float defaultFps, int frameCount, float ageSec)
 {
     if (frameCount <= 0)
     {
@@ -1232,7 +1232,7 @@ int VFX::runtimeTrailFrameIndex(float defaultFps, int frameCount, float ageSec)
     return (std::clamp)(frameIndex, 0, frameCount - 1);
 }
 
-void VFX::runtimeInitTrailMotionExtras(TrailPiece* piece, float moveDxTiles, float moveDyTiles)
+void VFXShip::runtimeInitTrailMotionExtras(TrailPiece* piece, float moveDxTiles, float moveDyTiles)
 {
     if (piece == nullptr)
     {
@@ -1249,7 +1249,7 @@ void VFX::runtimeInitTrailMotionExtras(TrailPiece* piece, float moveDxTiles, flo
     piece->trailSpinOmega0 = spinU(vfxTrailRng());
 }
 
-void VFX::runtimeAppendTrailPieceFromStep(
+void VFXShip::runtimeAppendTrailPieceFromStep(
     const Instance& inst,
     float anchorShipTileX,
     float anchorShipTileY,
@@ -1327,25 +1327,25 @@ void VFX::runtimeAppendTrailPieceFromStep(
         std::uniform_real_distribution<float> rotU(-kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
         piece.trailRotationJitterDeg = p * rotU(vfxTrailRng());
     }
-    VFX::runtimeInitTrailMotionExtras(&piece, moveDxTiles, moveDyTiles);
+    VFXShip::runtimeInitTrailMotionExtras(&piece, moveDxTiles, moveDyTiles);
     outPieces.push_back(std::move(piece));
 }
 
-bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
+bool VFXShip::loadFromFolders(const char* rawShipFolderPath, const char* rawVfxFolderPath)
 {
     // Toujours repartir d'un etat clean pour eviter les residus d'un precedent chargement.
     this->unload();
 
     // 1) Normaliser les chemins dossiers ship/vfx.
-    const std::string shipFolderPathNormalized = normalizeFolderPath(shipFolderPath);
-    const std::string vfxFolderPathNormalized = normalizeFolderPath(vfxFolderPath);
+    const std::string shipFolderPathNormalized = normalizeFolderPath(rawShipFolderPath);
+    const std::string vfxFolderPathNormalized = normalizeFolderPath(rawVfxFolderPath);
     if (shipFolderPathNormalized.empty() || vfxFolderPathNormalized.empty())
     {
         RC2D_log(
             RC2D_LOG_ERROR,
-            "VFX: chemins dossiers invalides (ship='%s', vfx='%s')",
-            (shipFolderPath != nullptr) ? shipFolderPath : "(null)",
-            (vfxFolderPath != nullptr) ? vfxFolderPath : "(null)");
+            "VFXShip: chemins dossiers invalides (ship='%s', vfx='%s')",
+            (rawShipFolderPath != nullptr) ? rawShipFolderPath : "(null)",
+            (rawVfxFolderPath != nullptr) ? rawVfxFolderPath : "(null)");
         return false;
     }
 
@@ -1356,7 +1356,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     {
         RC2D_log(
             RC2D_LOG_ERROR,
-            "VFX: impossible d'extraire le nom dossier (ship='%s', vfx='%s')",
+            "VFXShip: impossible d'extraire le nom dossier (ship='%s', vfx='%s')",
             shipFolderPathNormalized.c_str(),
             vfxFolderPathNormalized.c_str());
         return false;
@@ -1372,7 +1372,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     {
         RC2D_log(
             RC2D_LOG_ERROR,
-            "VFX: nom de dossier VFX invalide pour le slug config: %s",
+            "VFXShip: nom de dossier VFX invalide pour le slug config: %s",
             vfxFolderName.c_str());
         return false;
     }
@@ -1385,7 +1385,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     std::string configText;
     if (!readTextFileFromStorage(gameplayConfigJsonPath.c_str(), &configText))
     {
-        RC2D_log(RC2D_LOG_WARN, "VFX: JSON config introuvable: %s", gameplayConfigJsonPath.c_str());
+        RC2D_log(RC2D_LOG_WARN, "VFXShip: JSON config introuvable: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
 
@@ -1393,7 +1393,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     cJSON* root = cJSON_Parse(configText.c_str());
     if (root == nullptr)
     {
-        RC2D_log(RC2D_LOG_ERROR, "VFX: JSON config invalide: %s", gameplayConfigJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: JSON config invalide: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
 
@@ -1406,7 +1406,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (!cJSON_IsObject(gameplayNode))
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: key gameplay absente: %s", gameplayConfigJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: key gameplay absente: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
     const cJSON* editorNode = cJSON_GetObjectItemCaseSensitive(root, "editor");
@@ -1519,7 +1519,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (!cJSON_IsArray(directionStatesNode))
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: gameplay.directionStates[] absent: %s", gameplayConfigJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: gameplay.directionStates[] absent: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
     const int directionStatesArraySize = cJSON_GetArraySize(directionStatesNode);
@@ -1528,7 +1528,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         cJSON_Delete(root);
         RC2D_log(
             RC2D_LOG_ERROR,
-            "VFX: gameplay.directionStates[] doit contenir 8 ou %d entrees (ordre = cle 0..n-1): %s",
+            "VFXShip: gameplay.directionStates[] doit contenir 8 ou %d entrees (ordre = cle 0..n-1): %s",
             kDirectionStateCount,
             gameplayConfigJsonPath.c_str());
         return false;
@@ -1565,7 +1565,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     {
         RC2D_log(
             RC2D_LOG_WARN,
-            "VFX: targetingMode=target_relative_ab sans 16 pages; fallback none (%s)",
+            "VFXShip: targetingMode=target_relative_ab sans 16 pages; fallback none (%s)",
             gameplayConfigJsonPath.c_str());
         parsedTargetingMode = TargetingMode::NONE;
     }
@@ -1579,7 +1579,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
             cJSON_Delete(root);
             RC2D_log(
                 RC2D_LOG_ERROR,
-                "VFX: gameplay.directionStates[%d] doit etre un objet: %s",
+                "VFXShip: gameplay.directionStates[%d] doit etre un objet: %s",
                 directionStateIndex,
                 gameplayConfigJsonPath.c_str());
             return false;
@@ -1822,7 +1822,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
         cJSON_Delete(root);
         RC2D_log(
             RC2D_LOG_ERROR,
-            "VFX: gameplay.directionStates[] taille incoherente: %s",
+            "VFXShip: gameplay.directionStates[] taille incoherente: %s",
             gameplayConfigJsonPath.c_str());
         return false;
     }
@@ -1831,7 +1831,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (parsedSpritesheetJsonPath.empty())
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: source spritesheet JSON absent: %s", gameplayConfigJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: source spritesheet JSON absent: %s", gameplayConfigJsonPath.c_str());
         return false;
     }
 
@@ -1839,7 +1839,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (!readTextFileFromStorage(parsedSpritesheetJsonPath.c_str(), &spritesheetText))
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: spritesheet JSON introuvable: %s", parsedSpritesheetJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: spritesheet JSON introuvable: %s", parsedSpritesheetJsonPath.c_str());
         return false;
     }
 
@@ -1847,7 +1847,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (!parseSpritesheetJson(spritesheetText.c_str(), &parsedSpritesheet))
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: spritesheet JSON invalide: %s", parsedSpritesheetJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: spritesheet JSON invalide: %s", parsedSpritesheetJsonPath.c_str());
         return false;
     }
 
@@ -1857,7 +1857,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (parsedSpritesheetImagePath.empty())
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: path image spritesheet invalide: %s", parsedSpritesheetJsonPath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: path image spritesheet invalide: %s", parsedSpritesheetJsonPath.c_str());
         return false;
     }
 
@@ -1865,7 +1865,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     if (loadedImage.sdl_texture == nullptr)
     {
         cJSON_Delete(root);
-        RC2D_log(RC2D_LOG_ERROR, "VFX: image spritesheet introuvable: %s", parsedSpritesheetImagePath.c_str());
+        RC2D_log(RC2D_LOG_ERROR, "VFXShip: image spritesheet introuvable: %s", parsedSpritesheetImagePath.c_str());
         return false;
     }
 
@@ -1907,7 +1907,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
 
     RC2D_log(
         RC2D_LOG_INFO,
-        "VFX: charge depuis %s (frames=%d, fps=%.2f, durationMs=%d, targetingMode=%s)",
+        "VFXShip: charge depuis %s (frames=%d, fps=%.2f, durationMs=%d, targetingMode=%s)",
         this->configJsonPath.c_str(),
         static_cast<int>(this->frames.size()),
         this->defaultVfxFps,
@@ -1916,7 +1916,7 @@ bool VFX::loadFromFolders(const char* shipFolderPath, const char* vfxFolderPath)
     return true;
 }
 
-void VFX::unload(void)
+void VFXShip::unload(void)
 {
     // 1) Liberer la texture si elle existe.
     if (this->spritesheetImage.sdl_texture != nullptr)
@@ -1956,14 +1956,14 @@ void VFX::unload(void)
     this->spritesheetImagePath.clear();
 }
 
-bool VFX::isLoaded(void) const
+bool VFXShip::isLoaded(void) const
 {
     return this->loaded &&
         this->spritesheetImage.sdl_texture != nullptr &&
         !this->frames.empty();
 }
 
-void VFX::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
+void VFXShip::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
 {
     // 1) Pas de ressources chargees => rien a mettre a jour.
     if (!this->isLoaded())
@@ -1982,7 +1982,7 @@ void VFX::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
     }
 
     // Directions pures EN MOUVEMENT: garder l'alternance visuelle du ship,
-    // mais n'autoriser l'animation VFX que sur la diagonale autorisee.
+    // mais n'autoriser l'animation VFX ship que sur la diagonale autorisee.
     if (!shouldPlayMovingPureDirectionAnimation(ship, this->lastDirectionStateResolution))
     {
         return;
@@ -2032,7 +2032,7 @@ void VFX::update(double dt, Ship& ship, const SDL_FPoint* targetTile)
     }
 }
 
-void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool allowSpawn)
+void VFXShip::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool allowSpawn)
 {
     const int maxKey = (std::max)(1, this->loadedDirectionStateCount) - 1;
     const int activeKey = (std::clamp)(this->activeDirectionStateKey, 0, maxKey);
@@ -2137,7 +2137,7 @@ void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool a
                             : (std::clamp)(inst.motionTrailConeSpawnCount, 1, 32);
                         for (int burst = 0; burst < spawnCount && spawnGuard < 1024; ++burst)
                         {
-                            VFX::runtimeAppendTrailPieceFromStep(inst,
+                            VFXShip::runtimeAppendTrailPieceFromStep(inst,
                                                                    spawnTileX,
                                                                    spawnTileY,
                                                                    dx,
@@ -2216,7 +2216,7 @@ void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool a
                 std::uniform_real_distribution<float> rotU(-kMotionTrailRotationJitterMaxDeg, kMotionTrailRotationJitterMaxDeg);
                 piece.trailRotationJitterDeg = p * rotU(vfxTrailRng());
             }
-            VFX::runtimeInitTrailMotionExtras(&piece, 0.0f, 0.0f);
+            VFXShip::runtimeInitTrailMotionExtras(&piece, 0.0f, 0.0f);
             piece.fromIdleRingCrown = true;
             this->trailPieces.push_back(std::move(piece));
             return true;
@@ -2273,7 +2273,7 @@ void VFX::updateTrailsAndIdle(float dtf, float timeSec, const Ship& ship, bool a
     this->trailPrevShipTileValid = true;
 }
 
-void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const
+void VFXShip::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip, float timeSec) const
 {
     if (this->trailPieces.empty())
     {
@@ -2448,7 +2448,7 @@ void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip,
         const float trailPlaybackSec = piece.trailInitialPhaseSec + phaseTime;
         const int frameCount = static_cast<int>(this->frames.size());
         const int frameIndex =
-            VFX::runtimeTrailFrameIndex(this->defaultVfxFps, frameCount, trailPlaybackSec);
+            VFXShip::runtimeTrailFrameIndex(this->defaultVfxFps, frameCount, trailPlaybackSec);
         if (frameIndex < 0 || frameIndex >= frameCount)
         {
             continue;
@@ -2496,7 +2496,7 @@ void VFX::drawTrailPieces(const Map& map, const Ship& ship, bool drawBehindShip,
     }
 }
 
-void VFX::draw(const Map& map, const Ship& ship, bool drawBehindShip) const
+void VFXShip::draw(const Map& map, const Ship& ship, bool drawBehindShip) const
 {
     // 1) Guard global.
     if (!this->isLoaded())

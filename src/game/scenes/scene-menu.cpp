@@ -14,6 +14,10 @@
 #include <cmath>
 #include <mutex>
 
+#ifndef APP_VERSION
+#define APP_VERSION "dev"
+#endif
+
 namespace menu_scene
 {
     static constexpr std::array<const char*, 24> kLanguageFlagNames = {
@@ -445,6 +449,38 @@ namespace menu_scene
 
         const float drawX = std::round(rect.x + ((rect.w - static_cast<float>(textWidth)) * 0.5f));
         const float drawY = std::round(rect.y + ((rect.h - static_cast<float>(textHeight)) * 0.5f));
+        rc2d_graphics_drawText(&renderedText, drawX, drawY);
+        rc2d_graphics_destroyText(&renderedText);
+    }
+
+    /**
+     * @brief Dessine un texte aligne a droite et en bas dans un rectangle (marges interieures).
+     */
+    void drawTextRightBottom(
+        RC2D_Font* font,
+        const std::string& text,
+        const SDL_FRect& area,
+        float marginRight,
+        float marginBottom,
+        RC2D_Color color)
+    {
+        if (font == nullptr || font->sdl_font == nullptr || text.empty() || !isValidRect(area))
+        {
+            return;
+        }
+
+        RC2D_Text renderedText = rc2d_graphics_createText(font, text.c_str());
+        renderedText.color = color;
+        rc2d_graphics_setTextColor(&renderedText);
+
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&renderedText, &textWidth, &textHeight);
+
+        const float drawX = std::round(
+            area.x + area.w - marginRight - static_cast<float>(textWidth));
+        const float drawY = std::round(
+            area.y + area.h - marginBottom - static_cast<float>(textHeight));
         rc2d_graphics_drawText(&renderedText, drawX, drawY);
         rc2d_graphics_destroyText(&renderedText);
     }
@@ -3327,6 +3363,23 @@ void MenuScene::draw(void)
     if (this->loginFadeAlpha > 0.0f)
     {
         this->drawFullscreenBlackWithAlpha(this->loginFadeAlpha);
+    }
+
+    // Version build (CMake APP_VERSION) en bas a droite de l'aire jeu.
+    if (this->menuBodyFont.sdl_font != nullptr)
+    {
+        const SDL_FRect screenRect = GetGameScreen().rect;
+        if (menu_scene::isValidRect(screenRect))
+        {
+            constexpr float kVersionMargin = 10.0f;
+            menu_scene::drawTextRightBottom(
+                &this->menuBodyFont,
+                APP_VERSION,
+                screenRect,
+                kVersionMargin,
+                kVersionMargin,
+                menu_scene::kMutedText);
+        }
     }
 }
 

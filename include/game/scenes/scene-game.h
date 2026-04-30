@@ -7,7 +7,7 @@
 #include <RC2D/RC2D.h>
 
 #include "game/scenes/scene.h"
-#include "game/vfx/vfx.h"
+#include "game/vfx/vfx-ship.h"
 
 class Player;
 
@@ -27,8 +27,8 @@ private:
     bool shipAutoFollowEnabled;        /**< True tant que la camera suit auto le navire. */
     std::string playerShipFolderPath;  /**< Dossier ship (ex: assets/images/ships/ship-elite27). */
     int playerExperiencePointsCurrent; /**< Points d'experience courants pilotes par la scene gameplay. */
-    //std::string playerVfxFolderPath;   /**< Dossier VFX (ex: assets/images/vfx/vfx-cannon). */
-    //VFX shipVfx;                       /**< VFX runtime attache au navire joueur. */
+    //std::string playerVfxFolderPath;   /**< Dossier VFX ship (ex: assets/images/vfx/vfx-cannon). */
+    //VFXShip shipVfx;                   /**< VFX ship runtime attache au navire joueur. */
 
 public:
     /**
