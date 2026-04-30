@@ -5,12 +5,14 @@
 #include <mutex>       // std::mutex
 #include <string>      // std::string
 #include <string_view> // std::string_view
+#include <vector>      // std::vector
 
 #include <rcenet/RCENET_enet.h> // ENetPeer
 #include <sodium.h>             // crypto_kx_SESSIONKEYBYTES
 
 #include "crypto/kx.h"          // ClientCryptoKxState
 #include "network/protocol/secure_session.h" // CLIENT_SECURE_SESSION_CLIENT_NONCE_BYTES
+#include "services/http/types/auth/responses.h" // AuthSignInHTTPServerEntry
 
 struct NetworkState
 {
@@ -20,12 +22,6 @@ struct NetworkState
 
     // ENetPeer* du serveur, initialement nullptr, valide apres connexion reussie.
     ENetPeer* peerServer = nullptr;
-
-    // Adresse du serveur de jeu, recuperee depuis la reponse sign-in du backend d'authentification.
-    const char* peerServerAddress = "localhost";
-
-    // Port du serveur de jeu, recuperee depuis la reponse sign-in du backend d'authentification.
-    uint16_t peerServerPort = 12345;
 
     // ------------------------------------------------------------------------
     // Session/Crypto - protegee par mutex (thread reseau + simulation)
@@ -44,12 +40,12 @@ struct NetworkState
     // (AuthResponse status == SUCCESS).
     bool authTokenValidated = false;
 
-    // Token d'authentification récupérer après le signin.
-    // au près du backend web d'authentification.
+    // Bearer token opaque recupere apres le signin via le backend SeaTyrants.
+    // Ce token provient du backend CrzGames et est ensuite envoye au serveur de jeu.
     std::string authToken = "";
 
-    // Endpoint Quilkin recupere depuis la reponse sign-in backend.
-    // Utilisable plus tard pour la connexion reseau du client.
+    // Endpoint Quilkin recupere depuis la reponse signin du backend SeaTyrants.
+    // C'est la cible preferentielle pour la connexion reseau du client.
     std::string quilkinDns = "";
     uint16_t quilkinPort = 0;
 
@@ -62,12 +58,40 @@ struct NetworkState
     std::array<uint8_t, crypto_kx_SESSIONKEYBYTES> clientTxKey{};
     std::array<uint8_t, crypto_kx_SESSIONKEYBYTES> clientRxKey{};
 
-    // Mutex de protection des champs crypto/session utilises depuis plusieurs threads (reseau + simulation).
+    // Mutex de protection des champs crypto/session/auth utilises depuis plusieurs threads
+    // (reseau + simulation + rendu/menu).
     std::mutex sessionCryptoMutex;
 
+    // ------------------------------------------------------------------------
+    // Etat partage du flow de connexion menu -> backend SeaTyrants
+    // Protege lui aussi par `sessionCryptoMutex`.
+    // ------------------------------------------------------------------------
+
+    // Vrai quand une requete HTTP /signin a ete envoyee et qu'on attend encore
+    // la reponse du backend SeaTyrants.
+    bool authSignInRequestPending = false;
+
+    // Vrai uniquement si la derniere reponse /signin est un succes metier.
+    bool authSignInLastRequestSucceeded = false;
+
+    // Permet au menu d'afficher l'overlay de selection des serveurs apres une
+    // authentification HTTP reussie.
+    bool authSignInServerSelectionVisible = false;
+
+    // Code HTTP brut de la derniere reponse /signin recue par le client.
+    long authSignInLastHttpStatusCode = 0;
+
+    // Code metier renvoye par le backend quand present.
+    std::string authSignInLastCode = "";
+
+    // Message metier renvoye par le backend ou construit cote client.
+    std::string authSignInLastMessage = "";
+
+    // Liste minimale des serveurs a afficher dans le menu une fois connecte.
+    std::vector<AuthSignInHTTPServerEntry> authSignInAvailableServers{};
 
     // --------------------------------------------------------------------------
-    // API externe (backend web d'authentification, pour signup/signin)
+    // API externe (backend web SeaTyrants utilise pour le signin HTTP)
     // --------------------------------------------------------------------------
 
 #if GAME_ENV_DEV

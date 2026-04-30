@@ -50,7 +50,8 @@ private:
         INTERACT_ASSETS = 3, /**< Edition des GUI/rayons d'interaction des assets poses. */
         SPAWN_SHIP = 4, /**< Spawn/repositionnement du navire de test via preview. */
         CONTROL_SHIP = 5, /**< Controle du navire de test sur la map. */
-        HOTSPOT_TOWERS = 6 /**< Selection hotspots de tours via assets poses. */
+        HOTSPOT_TOWERS = 6, /**< Selection hotspots de tours via assets poses. */
+        HOTSPOT_MORTARS = 7 /**< Selection hotspots de mortiers via assets poses. */
     };
     enum class AssetInteractionEditMode {
         SELECT = 0, /**< Selectionne l'asset et la GUI cible. */
@@ -60,6 +61,19 @@ private:
     enum class TowerPreviewDisplayMode {
         HOTSPOTS = 0, /**< Affiche les tuiles hotspots. */
         TOWERS = 1 /**< Affiche les tours d'un niveau choisi. */
+    };
+    enum class TowerPlacementStage {
+        LEVEL_1 = 0, /**< Placement pixel perfect de la tour niveau 1. */
+        LEVEL_2 = 1, /**< Placement pixel perfect de la tour niveau 2. */
+        LEVEL_3 = 2, /**< Placement pixel perfect de la tour niveau 3. */
+        LEVEL_4 = 3, /**< Placement pixel perfect de la tour niveau 4. */
+        FIRE_HOTSPOT = 4 /**< Placement de la tuile de tir / hotspot. */
+    };
+    enum class MortarPlacementStage {
+        LEVEL_1 = 0, /**< Placement pixel perfect du mortier niveau 1. */
+        LEVEL_2 = 1, /**< Placement pixel perfect du mortier niveau 2. */
+        LEVEL_3 = 2, /**< Placement pixel perfect du mortier niveau 3. */
+        FIRE_HOTSPOT = 3 /**< Placement de la tuile de tir / hotspot du mortier. */
     };
 
     /**
@@ -105,13 +119,28 @@ private:
         std::vector<SDL_Point> clickGuiTiles; /**< Tuiles autorisees pour ouvrir la GUI de cet asset. */
     };
     struct TowerHotspot {
-        int tileX; /**< Tuile hotspot X. */
-        int tileY; /**< Tuile hotspot Y. */
+        float anchorTileX = 0.0f; /**< Ancre sub-tile X du point de tir. */
+        float anchorTileY = 0.0f; /**< Ancre sub-tile Y du point de tir. */
         int towerNumber = 1; /**< Numero logique de la tower [1..12]. */
     };
     struct TowerVisualSet {
         int towerNumber = 1; /**< Numero logique de la tower [1..12]. */
         std::array<int, 4> importedAssetIndices = {{-1, -1, -1, -1}}; /**< Variantes lvl1..lvl4. */
+        std::array<float, 4> anchorTileX = {{0.0f, 0.0f, 0.0f, 0.0f}}; /**< Ancres pixel perfect par niveau. */
+        std::array<float, 4> anchorTileY = {{0.0f, 0.0f, 0.0f, 0.0f}}; /**< Ancres pixel perfect par niveau. */
+        std::array<bool, 4> hasPlacement = {{false, false, false, false}}; /**< true si l'ancre du niveau est definie. */
+    };
+    struct MortarHotspot {
+        float anchorTileX = 0.0f; /**< Ancre sub-tile X du point de tir. */
+        float anchorTileY = 0.0f; /**< Ancre sub-tile Y du point de tir. */
+        int mortarNumber = 1; /**< Numero logique du mortier [1..12]. */
+    };
+    struct MortarVisualSet {
+        int mortarNumber = 1; /**< Numero logique du mortier [1..12]. */
+        std::array<int, 3> importedAssetIndices = {{-1, -1, -1}}; /**< Variantes lvl1..lvl3. */
+        std::array<float, 3> anchorTileX = {{0.0f, 0.0f, 0.0f}}; /**< Ancres pixel perfect par niveau. */
+        std::array<float, 3> anchorTileY = {{0.0f, 0.0f, 0.0f}}; /**< Ancres pixel perfect par niveau. */
+        std::array<bool, 3> hasPlacement = {{false, false, false}}; /**< true si l'ancre du niveau est definie. */
     };
 
     /**
@@ -175,6 +204,12 @@ private:
     int selectedTowerVariantLevel = 1; /**< Niveau de variante de tower en cours d'edition [1..4]. */
     int towerPreviewDisplayLevel = 1; /**< Niveau actuellement previsualise pour tous les hotspots [1..4]. */
     TowerPreviewDisplayMode towerPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS; /**< Mode d'affichage hotspot/towers. */
+    TowerPlacementStage towerPlacementStage = TowerPlacementStage::LEVEL_1; /**< Etape courante du workflow de pose tower. */
+    int selectedMortarHotspotNumber = 1; /**< Numero de mortier assigne au prochain hotspot [1..12]. */
+    int selectedMortarVariantLevel = 1; /**< Niveau de variante de mortier en cours d'edition [1..3]. */
+    int mortarPreviewDisplayLevel = 1; /**< Niveau actuellement previsualise pour tous les mortiers [1..3]. */
+    TowerPreviewDisplayMode mortarPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS; /**< Mode d'affichage hotspot/mortiers. */
+    MortarPlacementStage mortarPlacementStage = MortarPlacementStage::LEVEL_1; /**< Etape courante du workflow de pose mortier. */
     EditorMapAssetClickGuiTarget selectedAssetClickGuiTarget = EditorMapAssetClickGuiTarget::NONE; /**< GUI appliquee aux prochains assets poses. */
     int selectedAssetClickDistanceTiles = kEditorMapDefaultAssetClickDistanceTiles; /**< Rayon legacy conserve pour compatibilite import. */
     int selectedPlacedAssetIndex = -1; /**< Asset deja pose actuellement selectionne pour edition interaction. */
@@ -197,6 +232,8 @@ private:
     std::vector<PlacedAsset> placedAssets; /**< Assets poses sur la map. */
     std::vector<TowerHotspot> towerHotspots; /**< Hotspots tours poses sur la map. */
     std::vector<TowerVisualSet> towerVisualSets; /**< Variantes d'assets configurees par towerNumber. */
+    std::vector<MortarHotspot> mortarHotspots; /**< Hotspots mortiers poses sur la map. */
+    std::vector<MortarVisualSet> mortarVisualSets; /**< Variantes d'assets configurees par mortarNumber. */
     std::vector<HistoryAction> historyActions; /**< Pile d'historique undo/redo. */
     int historyCursor; /**< Curseur courant dans l'historique. */
     unsigned int importedAssetCounter; /**< Compteur auto pour ID d'import. */
@@ -246,6 +283,9 @@ private:
     SDL_FRect buttonToolHotspotRect; /**< Bouton outil hotspots tours. */
     SDL_FRect buttonTowerVariantsPickerRect; /**< Bouton ouverture popup variantes towers. */
     SDL_FRect buttonTowerDisplayModeRect; /**< Bouton affichage hotspots/towers. */
+    SDL_FRect buttonToolMortarHotspotRect; /**< Bouton outil hotspots mortiers. */
+    SDL_FRect buttonMortarVariantsPickerRect; /**< Bouton ouverture popup variantes mortiers. */
+    SDL_FRect buttonMortarDisplayModeRect; /**< Bouton affichage hotspots/mortiers. */
     SDL_FRect buttonAssetPrevRect; /**< Bouton asset precedent. */
     SDL_FRect buttonAssetNextRect; /**< Bouton asset suivant. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
@@ -281,6 +321,14 @@ private:
     std::array<SDL_FRect, 5> towerDisplayLevelTabRects; /**< Onglets tuile hotspot + niveaux de preview tower. */
     SDL_FRect towerDisplayConfirmRect; /**< Bouton confirmer popup affichage towers. */
     bool towerDisplayPickerVisible; /**< true si la popup de preview tower est ouverte. */
+    SDL_FRect mortarVariantPickerRect; /**< Popup de selection des variantes de mortiers. */
+    std::array<SDL_FRect, 3> mortarVariantLevelTabRects; /**< Onglets lvl1..lvl3 de la popup mortiers. */
+    SDL_FRect mortarVariantConfirmRect; /**< Bouton confirmer popup variantes mortier. */
+    bool mortarVariantPickerVisible; /**< true si la popup de variantes mortiers est ouverte. */
+    SDL_FRect mortarDisplayPickerRect; /**< Popup de selection du niveau de preview mortier. */
+    std::array<SDL_FRect, 4> mortarDisplayLevelTabRects; /**< Onglets tuile hotspot + niveaux de preview mortier. */
+    SDL_FRect mortarDisplayConfirmRect; /**< Bouton confirmer popup affichage mortiers. */
+    bool mortarDisplayPickerVisible; /**< true si la popup de preview mortier est ouverte. */
     bool miniMapDragActive; /**< true si drag minimap en cours. */
     float miniMapDragOffsetX; /**< Offset drag minimap en X. */
     float miniMapDragOffsetY; /**< Offset drag minimap en Y. */
@@ -318,11 +366,29 @@ private:
      *  @return true si le point est dans map.rect.
      */
     bool isInsideMapRect(float x, float y) const;
+    /** @brief Convertit la souris courante en tuile flottante + tuile arrondie. */
+    bool tryGetMouseTileExact(SDL_FPoint* outTileFloat, SDL_Point* outNearestTile) const;
     /** @brief Convertit la souris courante en tuile map.
      *  @param outTile Tuile resultante.
      *  @return true si conversion valide et dans la map.
      */
     bool tryGetMouseTile(SDL_Point* outTile) const;
+    /** @brief Retourne l'index de niveau associe a l'etape courante, sinon -1 pour le hotspot de tir. */
+    int getTowerPlacementStageLevelIndex(void) const;
+    /** @brief Retourne le libelle court de l'etape courante de pose tower. */
+    const char* getTowerPlacementStageLabel(void) const;
+    /** @brief Reinitialise le workflow de pose tower sur le niveau 1. */
+    void resetTowerPlacementStage(void);
+    /** @brief Passe a l'etape suivante du workflow de pose tower. */
+    void advanceTowerPlacementStage(void);
+    /** @brief Retourne l'index de niveau associe a l'etape courante du mortier, sinon -1 pour le hotspot de tir. */
+    int getMortarPlacementStageLevelIndex(void) const;
+    /** @brief Retourne le libelle court de l'etape courante de pose mortier. */
+    const char* getMortarPlacementStageLabel(void) const;
+    /** @brief Reinitialise le workflow de pose mortier sur le niveau 1. */
+    void resetMortarPlacementStage(void);
+    /** @brief Passe a l'etape suivante du workflow de pose mortier. */
+    void advanceMortarPlacementStage(void);
     /** @brief Met a jour la tuile survolee par la souris. */
     void updateHoveredTile(void);
     /** @brief Gere la peinture collision en drag souris. */
@@ -450,6 +516,22 @@ private:
     int findFirstFreeTowerHotspotNumber(void) const;
     /** @brief Toggle un hotspot tour. */
     void toggleTowerHotspotAtTile(int tileX, int tileY);
+    /** @brief Force le hotspot de tir d'une tower sur une ancre pixel perfect. */
+    void setTowerHotspotAnchor(int towerNumber, float anchorTileX, float anchorTileY);
+    /** @brief Place l'etape courante du workflow tower sous un point ecran. */
+    void placeTowerWorkflowAtScreenPoint(float renderX, float renderY);
+    /** @brief Trouve un hotspot mortier a la tuile demandee. */
+    int findMortarHotspotIndexAtTile(int tileX, int tileY) const;
+    /** @brief Trouve un hotspot mortier par numero. */
+    int findMortarHotspotIndexByNumber(int mortarNumber) const;
+    /** @brief Trouve une config visuelle de mortier par numero. */
+    int findMortarVisualSetIndexByNumber(int mortarNumber) const;
+    /** @brief Retourne la config visuelle de mortier creee au besoin. */
+    MortarVisualSet& ensureMortarVisualSet(int mortarNumber);
+    /** @brief Force le hotspot de tir d'un mortier sur une ancre pixel perfect. */
+    void setMortarHotspotAnchor(int mortarNumber, float anchorTileX, float anchorTileY);
+    /** @brief Place l'etape courante du workflow mortier sous un point ecran. */
+    void placeMortarWorkflowAtScreenPoint(float renderX, float renderY);
     /** @brief Ajuste l'opacite globale assets en %. */
     void setAssetOpacityPercent(int value);
     /** @brief Ajuste l'echelle navire test en %. */
@@ -491,6 +573,10 @@ private:
     void drawWorldGridAndBlockedTiles(void) const;
     /** @brief Dessine les assets poses et leur preview de pose. */
     void drawPlacedAssets(void) const;
+    /** @brief Dessine les hotspots tours et les previews de towers. */
+    void drawTowerHotspotsAndPreviews(void) const;
+    /** @brief Dessine les hotspots mortiers et les previews de mortiers. */
+    void drawMortarHotspotsAndPreviews(void) const;
     /** @brief Dessine le HUD, les boutons et infos editeur. */
     void drawEditorHud(void) const;
     /** @brief Recalcule les rects des boutons/panneaux UI. */
@@ -521,6 +607,10 @@ private:
     bool handleTowerVariantPickerClick(float x, float y);
     /** @brief Gere un clic dans la popup d'affichage tower global. */
     bool handleTowerDisplayPickerClick(float x, float y);
+    /** @brief Gere un clic dans la popup de variantes de mortiers. */
+    bool handleMortarVariantPickerClick(float x, float y);
+    /** @brief Gere un clic dans la popup d'affichage mortier global. */
+    bool handleMortarDisplayPickerClick(float x, float y);
     /** @brief Gere un clic dans le panneau liste navires.
      *  @return true si le clic est consomme.
      */
@@ -537,6 +627,10 @@ private:
     void drawTowerVariantPickerPopup(void) const;
     /** @brief Dessine la popup d'affichage tower global. */
     void drawTowerDisplayPickerPopup(void) const;
+    /** @brief Dessine la popup de variantes de mortiers. */
+    void drawMortarVariantPickerPopup(void) const;
+    /** @brief Dessine la popup d'affichage mortier global. */
+    void drawMortarDisplayPickerPopup(void) const;
     /** @brief Dessine le panneau liste navires. */
     void drawShipListPanel(void) const;
     /** @brief Construit le rect de vue courante pour la minimap.
@@ -555,6 +649,8 @@ private:
     void drawMiniMap(void) const;
     /** @brief Test point dans rect. */
     bool pointInRect(float x, float y, const SDL_FRect& rect) const;
+    /** @brief Retourne true si le point survole une zone UI qui doit bloquer le paint map. */
+    bool isPointOverBlockingEditorUi(float x, float y) const;
     /** @brief Gere un clic sur la toolbar/panneaux.
      *  @return true si consomme.
      */

@@ -25,6 +25,7 @@ public:
     void update(double dt);
     void draw(void);
     void keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID);
+    void textinput(const RC2D_TextInputEventInfo* info);
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID);
     void mousewheelmoved(
         RC2D_MouseWheelDirection direction,

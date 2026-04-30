@@ -21,6 +21,7 @@ class Scene {
         virtual void update(double dt) = 0;
         virtual void draw(void) = 0;
         virtual void keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID) = 0;
+        virtual void textinput(const RC2D_TextInputEventInfo* info) { (void)info; }
         virtual void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) = 0;
         virtual void mousewheelmoved(
             RC2D_MouseWheelDirection direction,

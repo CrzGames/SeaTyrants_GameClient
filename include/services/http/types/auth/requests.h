@@ -3,20 +3,14 @@
 #include <string> // std::string
 
 // ============================================================================
-// Request HTTP du client vers le backend d'authentification pour créer un nouveau compte.
-// ============================================================================
-struct AuthSignUpHTTPRequest
-{
-    std::string username;
-    std::string email;
-    std::string password;
-};
-
-// ============================================================================
-// Request HTTP du client vers le backend d'authentification pour se connecter à un compte existant.
+// Request HTTP du client vers le backend d'authentification pour se connecter
+// a un compte SeaTyrants existant.
 // ============================================================================
 struct AuthSignInHTTPRequest
 {
+    // Adresse e-mail du compte CrzGames utilise pour se connecter au jeu.
     std::string email;
+
+    // Mot de passe du compte CrzGames.
     std::string password;
 };

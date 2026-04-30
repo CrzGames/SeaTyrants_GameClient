@@ -8,6 +8,7 @@
 #include <cstring>
 
 constexpr int kEditorMapMaxTowerHotspots = 12;
+constexpr int kEditorMapMaxMortarHotspots = 12;
 constexpr int kEditorMapDefaultAssetClickDistanceTiles = 8;
 constexpr int kEditorMapMinAssetClickDistanceTiles = 1;
 constexpr int kEditorMapMaxAssetClickDistanceTiles = 30;
@@ -55,6 +56,11 @@ inline constexpr std::array<EditorMapAssetClickGuiTargetInfo, 13> kEditorMapAsse
 inline int ClampEditorMapTowerHotspotNumber(int value)
 {
     return std::clamp(value, 1, kEditorMapMaxTowerHotspots);
+}
+
+inline int ClampEditorMapMortarHotspotNumber(int value)
+{
+    return std::clamp(value, 1, kEditorMapMaxMortarHotspots);
 }
 
 inline int ClampEditorMapAssetClickDistanceTiles(int value)

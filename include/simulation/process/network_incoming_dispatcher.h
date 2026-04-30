@@ -18,7 +18,7 @@
  * @param simToNetQueue Queue simulation -> réseau utilisée pour préparer
  *        les messages reseau sortants du client vers le serveur.
  * @param simToHttpQueue Queue simulation -> HTTP utilisée pour déléguer
- *        les operations HTTP client (signup/signin).
+ *        les operations HTTP client (signin notamment).
  * @param messages Messages entrants réseau déjà drainés pour le tick courant.
  */
 void ClientSimulation_ProcessNetworkIncomingDispatcher(

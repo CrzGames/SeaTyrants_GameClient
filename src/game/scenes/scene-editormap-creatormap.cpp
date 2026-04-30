@@ -398,6 +398,9 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       buttonToolHotspotRect{},
       buttonTowerVariantsPickerRect{},
       buttonTowerDisplayModeRect{},
+      buttonToolMortarHotspotRect{},
+      buttonMortarVariantsPickerRect{},
+      buttonMortarDisplayModeRect{},
       buttonAssetPrevRect{},
       buttonAssetNextRect{},
       buttonOceanPrevRect{},
@@ -433,6 +436,14 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       towerDisplayLevelTabRects{},
       towerDisplayConfirmRect{},
       towerDisplayPickerVisible(false),
+      mortarVariantPickerRect{},
+      mortarVariantLevelTabRects{},
+      mortarVariantConfirmRect{},
+      mortarVariantPickerVisible(false),
+      mortarDisplayPickerRect{},
+      mortarDisplayLevelTabRects{},
+      mortarDisplayConfirmRect{},
+      mortarDisplayPickerVisible(false),
       miniMapDragActive(false),
       miniMapDragOffsetX(0.0f),
       miniMapDragOffsetY(0.0f)
@@ -466,11 +477,17 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->selectedHotspotColorIndex = 0;
     this->shipScalePercent = 100;
     this->selectedTowerHotspotNumber = 1;
-    this->selectedTowerVariantLevel = 1;
+    this->resetTowerPlacementStage();
     this->towerPreviewDisplayLevel = 1;
     this->towerPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS;
+    this->selectedMortarHotspotNumber = 1;
+    this->resetMortarPlacementStage();
+    this->mortarPreviewDisplayLevel = 1;
+    this->mortarPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS;
     this->towerVariantPickerVisible = false;
     this->towerDisplayPickerVisible = false;
+    this->mortarVariantPickerVisible = false;
+    this->mortarDisplayPickerVisible = false;
     this->selectedAssetClickGuiTarget = EditorMapAssetClickGuiTarget::NONE;
     this->selectedAssetClickDistanceTiles = kEditorMapDefaultAssetClickDistanceTiles;
     this->selectedPlacedAssetIndex = -1;
@@ -487,6 +504,8 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->historyCursor = 0;
     this->towerHotspots.clear();
     this->towerVisualSets.clear();
+    this->mortarHotspots.clear();
+    this->mortarVisualSets.clear();
     this->importedShips.clear();
     this->importedAssetCounter = 0U;
     this->statusMessage = "Editor map pret.";
@@ -551,6 +570,9 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->buttonToolHotspotRect = SDL_FRect{};
     this->buttonTowerVariantsPickerRect = SDL_FRect{};
     this->buttonTowerDisplayModeRect = SDL_FRect{};
+    this->buttonToolMortarHotspotRect = SDL_FRect{};
+    this->buttonMortarVariantsPickerRect = SDL_FRect{};
+    this->buttonMortarDisplayModeRect = SDL_FRect{};
     this->buttonAssetPrevRect = SDL_FRect{};
     this->buttonAssetNextRect = SDL_FRect{};
     this->buttonOceanPrevRect = SDL_FRect{};
@@ -584,6 +606,14 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->towerDisplayPickerRect = SDL_FRect{};
     this->towerDisplayLevelTabRects = {};
     this->towerDisplayConfirmRect = SDL_FRect{};
+    this->mortarVariantPickerRect = SDL_FRect{};
+    this->mortarVariantLevelTabRects = {};
+    this->mortarVariantConfirmRect = SDL_FRect{};
+    this->mortarVariantPickerVisible = false;
+    this->mortarDisplayPickerRect = SDL_FRect{};
+    this->mortarDisplayLevelTabRects = {};
+    this->mortarDisplayConfirmRect = SDL_FRect{};
+    this->mortarDisplayPickerVisible = false;
     this->miniMapDragActive = false;
     this->miniMapDragOffsetX = 0.0f;
     this->miniMapDragOffsetY = 0.0f;
@@ -607,7 +637,10 @@ void EditorMapCreateMapScene::unloadImportedAssets(void)
 
     this->importedAssets.clear();
     this->placedAssets.clear();
+    this->towerHotspots.clear();
     this->towerVisualSets.clear();
+    this->mortarHotspots.clear();
+    this->mortarVisualSets.clear();
     this->historyActions.clear();
     this->historyCursor = 0;
     this->selectedAssetIndex = -1;
@@ -754,6 +787,38 @@ bool EditorMapCreateMapScene::getMouseRenderPosition(float* outX, float* outY) c
     return true;
 }
 
+bool EditorMapCreateMapScene::tryGetMouseTileExact(SDL_FPoint* outTileFloat, SDL_Point* outNearestTile) const
+{
+    if (outTileFloat == nullptr || outNearestTile == nullptr)
+    {
+        return false;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return false;
+    }
+
+    if (!this->isInsideMapRect(mouseX, mouseY))
+    {
+        return false;
+    }
+
+    const Map& map = GetCurrentMap();
+    const SDL_FPoint tileFloat = map.screenToTile(mouseX, mouseY);
+    const SDL_Point nearestTile = map.roundTile(tileFloat.x, tileFloat.y);
+    if (!map.isInside(nearestTile.x, nearestTile.y))
+    {
+        return false;
+    }
+
+    *outTileFloat = tileFloat;
+    *outNearestTile = nearestTile;
+    return true;
+}
+
 bool EditorMapCreateMapScene::tryGetMouseTile(SDL_Point* outTile) const
 {
     if (outTile == nullptr)
@@ -782,6 +847,136 @@ bool EditorMapCreateMapScene::tryGetMouseTile(SDL_Point* outTile) const
 
     *outTile = tile;
     return true;
+}
+
+int EditorMapCreateMapScene::getTowerPlacementStageLevelIndex(void) const
+{
+    switch (this->towerPlacementStage)
+    {
+        case TowerPlacementStage::LEVEL_1:
+            return 0;
+        case TowerPlacementStage::LEVEL_2:
+            return 1;
+        case TowerPlacementStage::LEVEL_3:
+            return 2;
+        case TowerPlacementStage::LEVEL_4:
+            return 3;
+        case TowerPlacementStage::FIRE_HOTSPOT:
+        default:
+            return -1;
+    }
+}
+
+const char* EditorMapCreateMapScene::getTowerPlacementStageLabel(void) const
+{
+    switch (this->towerPlacementStage)
+    {
+        case TowerPlacementStage::LEVEL_1:
+            return "PLACER NIV1";
+        case TowerPlacementStage::LEVEL_2:
+            return "PLACER NIV2";
+        case TowerPlacementStage::LEVEL_3:
+            return "PLACER NIV3";
+        case TowerPlacementStage::LEVEL_4:
+            return "PLACER NIV4";
+        case TowerPlacementStage::FIRE_HOTSPOT:
+        default:
+            return "PLACER HOTSPOT TIR";
+    }
+}
+
+void EditorMapCreateMapScene::resetTowerPlacementStage(void)
+{
+    this->towerPlacementStage = TowerPlacementStage::LEVEL_1;
+    this->selectedTowerVariantLevel = 1;
+}
+
+void EditorMapCreateMapScene::advanceTowerPlacementStage(void)
+{
+    switch (this->towerPlacementStage)
+    {
+        case TowerPlacementStage::LEVEL_1:
+            this->towerPlacementStage = TowerPlacementStage::LEVEL_2;
+            this->selectedTowerVariantLevel = 2;
+            return;
+        case TowerPlacementStage::LEVEL_2:
+            this->towerPlacementStage = TowerPlacementStage::LEVEL_3;
+            this->selectedTowerVariantLevel = 3;
+            return;
+        case TowerPlacementStage::LEVEL_3:
+            this->towerPlacementStage = TowerPlacementStage::LEVEL_4;
+            this->selectedTowerVariantLevel = 4;
+            return;
+        case TowerPlacementStage::LEVEL_4:
+            this->towerPlacementStage = TowerPlacementStage::FIRE_HOTSPOT;
+            this->selectedTowerVariantLevel = 4;
+            return;
+        case TowerPlacementStage::FIRE_HOTSPOT:
+        default:
+            this->resetTowerPlacementStage();
+            return;
+    }
+}
+
+int EditorMapCreateMapScene::getMortarPlacementStageLevelIndex(void) const
+{
+    switch (this->mortarPlacementStage)
+    {
+        case MortarPlacementStage::LEVEL_1:
+            return 0;
+        case MortarPlacementStage::LEVEL_2:
+            return 1;
+        case MortarPlacementStage::LEVEL_3:
+            return 2;
+        case MortarPlacementStage::FIRE_HOTSPOT:
+        default:
+            return -1;
+    }
+}
+
+const char* EditorMapCreateMapScene::getMortarPlacementStageLabel(void) const
+{
+    switch (this->mortarPlacementStage)
+    {
+        case MortarPlacementStage::LEVEL_1:
+            return "PLACER NIV1";
+        case MortarPlacementStage::LEVEL_2:
+            return "PLACER NIV2";
+        case MortarPlacementStage::LEVEL_3:
+            return "PLACER NIV3";
+        case MortarPlacementStage::FIRE_HOTSPOT:
+        default:
+            return "PLACER HOTSPOT TIR";
+    }
+}
+
+void EditorMapCreateMapScene::resetMortarPlacementStage(void)
+{
+    this->mortarPlacementStage = MortarPlacementStage::LEVEL_1;
+    this->selectedMortarVariantLevel = 1;
+}
+
+void EditorMapCreateMapScene::advanceMortarPlacementStage(void)
+{
+    switch (this->mortarPlacementStage)
+    {
+        case MortarPlacementStage::LEVEL_1:
+            this->mortarPlacementStage = MortarPlacementStage::LEVEL_2;
+            this->selectedMortarVariantLevel = 2;
+            return;
+        case MortarPlacementStage::LEVEL_2:
+            this->mortarPlacementStage = MortarPlacementStage::LEVEL_3;
+            this->selectedMortarVariantLevel = 3;
+            return;
+        case MortarPlacementStage::LEVEL_3:
+            this->mortarPlacementStage = MortarPlacementStage::FIRE_HOTSPOT;
+            this->selectedMortarVariantLevel = 3;
+            return;
+        case MortarPlacementStage::FIRE_HOTSPOT:
+        default:
+            this->resetMortarPlacementStage();
+            return;
+    }
 }
 
 void EditorMapCreateMapScene::updateHoveredTile(void)
@@ -1207,6 +1402,16 @@ void EditorMapCreateMapScene::handleTilePaintFromMouseDrag(void)
     const bool leftDown = rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT);
     const bool rightDown = rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_RIGHT);
     if (!leftDown && !rightDown)
+    {
+        this->dragPaintActive = false;
+        this->lastDragPaintTileValid = false;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (this->getMouseRenderPosition(&mouseX, &mouseY) &&
+        this->isPointOverBlockingEditorUi(mouseX, mouseY))
     {
         this->dragPaintActive = false;
         this->lastDragPaintTileValid = false;
@@ -1875,10 +2080,13 @@ void EditorMapCreateMapScene::paintSelectedPlacedAssetInteractionAtMouse(bool en
 
 int EditorMapCreateMapScene::findTowerHotspotIndexAtTile(int tileX, int tileY) const
 {
+    const Map& map = GetCurrentMap();
     for (int i = 0; i < static_cast<int>(this->towerHotspots.size()); ++i)
     {
         const TowerHotspot& hotspot = this->towerHotspots[static_cast<size_t>(i)];
-        if (hotspot.tileX == tileX && hotspot.tileY == tileY)
+        const SDL_Point hotspotTile =
+            map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        if (hotspotTile.x == tileX && hotspotTile.y == tileY)
         {
             return i;
         }
@@ -1963,8 +2171,10 @@ void EditorMapCreateMapScene::toggleTowerHotspotAtTile(int tileX, int tileY)
     const int hotspotForTowerIndex = this->findTowerHotspotIndexByNumber(towerNumber);
     if (hotspotForTowerIndex >= 0)
     {
-        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].tileX = tileX;
-        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].tileY = tileY;
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].anchorTileX =
+            static_cast<float>(tileX);
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].anchorTileY =
+            static_cast<float>(tileY);
         (void)this->ensureTowerVisualSet(towerNumber);
 
         if (hotspotAtTileIndex >= 0 && hotspotAtTileIndex != hotspotForTowerIndex)
@@ -1991,9 +2201,254 @@ void EditorMapCreateMapScene::toggleTowerHotspotAtTile(int tileX, int tileY)
         return;
     }
 
-    this->towerHotspots.push_back(TowerHotspot{tileX, tileY, towerNumber});
+    this->towerHotspots.push_back(TowerHotspot{
+        static_cast<float>(tileX),
+        static_cast<float>(tileY),
+        towerNumber});
     (void)this->ensureTowerVisualSet(towerNumber);
     this->statusMessage = "Hotspot tour " + std::to_string(towerNumber) + " ajoute.";
+}
+
+void EditorMapCreateMapScene::setTowerHotspotAnchor(
+    int towerNumber,
+    float anchorTileX,
+    float anchorTileY)
+{
+    const int clampedTowerNumber = ClampEditorMapTowerHotspotNumber(towerNumber);
+    const int hotspotForTowerIndex = this->findTowerHotspotIndexByNumber(clampedTowerNumber);
+
+    if (hotspotForTowerIndex >= 0)
+    {
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].anchorTileX = anchorTileX;
+        this->towerHotspots[static_cast<size_t>(hotspotForTowerIndex)].anchorTileY = anchorTileY;
+
+        (void)this->ensureTowerVisualSet(clampedTowerNumber);
+        this->statusMessage =
+            std::string("Tower ") + std::to_string(clampedTowerNumber) +
+            " : hotspot de tir place.";
+        return;
+    }
+
+    if (this->towerHotspots.size() >= static_cast<size_t>(kEditorMapMaxTowerHotspots))
+    {
+        this->statusMessage = "Limite atteinte: 12 hotspots tour max.";
+        return;
+    }
+
+    this->towerHotspots.push_back(TowerHotspot{
+        anchorTileX,
+        anchorTileY,
+        clampedTowerNumber});
+    (void)this->ensureTowerVisualSet(clampedTowerNumber);
+    this->statusMessage =
+        std::string("Tower ") + std::to_string(clampedTowerNumber) +
+        " : hotspot de tir ajoute.";
+}
+
+void EditorMapCreateMapScene::placeTowerWorkflowAtScreenPoint(float renderX, float renderY)
+{
+    const Map& map = GetCurrentMap();
+    if (!this->isInsideMapRect(renderX, renderY))
+    {
+        this->statusMessage = "Placement tower hors map: ignore.";
+        return;
+    }
+
+    const SDL_FPoint tileFloat = map.screenToTile(renderX, renderY);
+    const SDL_Point nearestTile = map.roundTile(tileFloat.x, tileFloat.y);
+    if (!map.isInside(nearestTile.x, nearestTile.y))
+    {
+        this->statusMessage = "Placement tower hors map: ignore.";
+        return;
+    }
+
+    const int towerNumber = ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber);
+    TowerVisualSet& visualSet = this->ensureTowerVisualSet(towerNumber);
+    const int levelIndex = this->getTowerPlacementStageLevelIndex();
+    if (levelIndex >= 0)
+    {
+        const int importedAssetIndex = visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)];
+        if (importedAssetIndex < 0 ||
+            importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            this->selectedTowerVariantLevel = levelIndex + 1;
+            this->statusMessage =
+                std::string("Tower ") + std::to_string(towerNumber) +
+                " : choisis d'abord l'asset du niv " +
+                std::to_string(levelIndex + 1) +
+                " dans CHOISIR VARIANTE TOWERS.";
+            return;
+        }
+
+        visualSet.anchorTileX[static_cast<size_t>(levelIndex)] = tileFloat.x;
+        visualSet.anchorTileY[static_cast<size_t>(levelIndex)] = tileFloat.y;
+        visualSet.hasPlacement[static_cast<size_t>(levelIndex)] = true;
+
+        this->advanceTowerPlacementStage();
+        this->statusMessage =
+            std::string("Tower ") + std::to_string(towerNumber) +
+            " : niv " + std::to_string(levelIndex + 1) +
+            " place. Etape suivante: " + this->getTowerPlacementStageLabel() + ".";
+        return;
+    }
+
+    this->setTowerHotspotAnchor(towerNumber, tileFloat.x, tileFloat.y);
+    const std::string finalStatus = this->statusMessage;
+    this->resetTowerPlacementStage();
+    this->statusMessage = finalStatus + " Workflow tower reinitialise sur NIV1.";
+}
+
+int EditorMapCreateMapScene::findMortarHotspotIndexAtTile(int tileX, int tileY) const
+{
+    const Map& map = GetCurrentMap();
+    for (int i = 0; i < static_cast<int>(this->mortarHotspots.size()); ++i)
+    {
+        const MortarHotspot& hotspot = this->mortarHotspots[static_cast<size_t>(i)];
+        const SDL_Point hotspotTile =
+            map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        if (hotspotTile.x == tileX && hotspotTile.y == tileY)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int EditorMapCreateMapScene::findMortarHotspotIndexByNumber(int mortarNumber) const
+{
+    const int clampedMortarNumber = ClampEditorMapMortarHotspotNumber(mortarNumber);
+    for (int i = 0; i < static_cast<int>(this->mortarHotspots.size()); ++i)
+    {
+        if (this->mortarHotspots[static_cast<size_t>(i)].mortarNumber == clampedMortarNumber)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int EditorMapCreateMapScene::findMortarVisualSetIndexByNumber(int mortarNumber) const
+{
+    const int clampedMortarNumber = ClampEditorMapMortarHotspotNumber(mortarNumber);
+    for (int i = 0; i < static_cast<int>(this->mortarVisualSets.size()); ++i)
+    {
+        if (this->mortarVisualSets[static_cast<size_t>(i)].mortarNumber == clampedMortarNumber)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+EditorMapCreateMapScene::MortarVisualSet& EditorMapCreateMapScene::ensureMortarVisualSet(int mortarNumber)
+{
+    const int clampedMortarNumber = ClampEditorMapMortarHotspotNumber(mortarNumber);
+    const int existingIndex = this->findMortarVisualSetIndexByNumber(clampedMortarNumber);
+    if (existingIndex >= 0)
+    {
+        return this->mortarVisualSets[static_cast<size_t>(existingIndex)];
+    }
+
+    MortarVisualSet visualSet{};
+    visualSet.mortarNumber = clampedMortarNumber;
+    if (!this->mortarVisualSets.empty())
+    {
+        visualSet.importedAssetIndices = this->mortarVisualSets.front().importedAssetIndices;
+    }
+    this->mortarVisualSets.push_back(visualSet);
+    return this->mortarVisualSets.back();
+}
+
+void EditorMapCreateMapScene::setMortarHotspotAnchor(
+    int mortarNumber,
+    float anchorTileX,
+    float anchorTileY)
+{
+    const int clampedMortarNumber = ClampEditorMapMortarHotspotNumber(mortarNumber);
+    const int hotspotForMortarIndex = this->findMortarHotspotIndexByNumber(clampedMortarNumber);
+
+    if (hotspotForMortarIndex >= 0)
+    {
+        this->mortarHotspots[static_cast<size_t>(hotspotForMortarIndex)].anchorTileX = anchorTileX;
+        this->mortarHotspots[static_cast<size_t>(hotspotForMortarIndex)].anchorTileY = anchorTileY;
+
+        (void)this->ensureMortarVisualSet(clampedMortarNumber);
+        this->statusMessage =
+            std::string("Mortier ") + std::to_string(clampedMortarNumber) +
+            " : hotspot de tir place.";
+        return;
+    }
+
+    if (this->mortarHotspots.size() >= static_cast<size_t>(kEditorMapMaxMortarHotspots))
+    {
+        this->statusMessage = "Limite atteinte: 12 hotspots mortier max.";
+        return;
+    }
+
+    this->mortarHotspots.push_back(MortarHotspot{
+        anchorTileX,
+        anchorTileY,
+        clampedMortarNumber});
+    (void)this->ensureMortarVisualSet(clampedMortarNumber);
+    this->statusMessage =
+        std::string("Mortier ") + std::to_string(clampedMortarNumber) +
+        " : hotspot de tir ajoute.";
+}
+
+void EditorMapCreateMapScene::placeMortarWorkflowAtScreenPoint(float renderX, float renderY)
+{
+    const Map& map = GetCurrentMap();
+    if (!this->isInsideMapRect(renderX, renderY))
+    {
+        this->statusMessage = "Placement mortier hors map: ignore.";
+        return;
+    }
+
+    const SDL_FPoint tileFloat = map.screenToTile(renderX, renderY);
+    const SDL_Point nearestTile = map.roundTile(tileFloat.x, tileFloat.y);
+    if (!map.isInside(nearestTile.x, nearestTile.y))
+    {
+        this->statusMessage = "Placement mortier hors map: ignore.";
+        return;
+    }
+
+    const int mortarNumber = ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber);
+    MortarVisualSet& visualSet = this->ensureMortarVisualSet(mortarNumber);
+    const int levelIndex = this->getMortarPlacementStageLevelIndex();
+    if (levelIndex >= 0)
+    {
+        const int importedAssetIndex = visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)];
+        if (importedAssetIndex < 0 ||
+            importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            this->selectedMortarVariantLevel = levelIndex + 1;
+            this->statusMessage =
+                std::string("Mortier ") + std::to_string(mortarNumber) +
+                " : choisis d'abord l'asset du niv " +
+                std::to_string(levelIndex + 1) +
+                " dans CHOISIR VARIANTE MORTIERS.";
+            return;
+        }
+
+        visualSet.anchorTileX[static_cast<size_t>(levelIndex)] = tileFloat.x;
+        visualSet.anchorTileY[static_cast<size_t>(levelIndex)] = tileFloat.y;
+        visualSet.hasPlacement[static_cast<size_t>(levelIndex)] = true;
+
+        this->advanceMortarPlacementStage();
+        this->statusMessage =
+            std::string("Mortier ") + std::to_string(mortarNumber) +
+            " : niv " + std::to_string(levelIndex + 1) +
+            " place. Etape suivante: " + this->getMortarPlacementStageLabel() + ".";
+        return;
+    }
+
+    this->setMortarHotspotAnchor(mortarNumber, tileFloat.x, tileFloat.y);
+    const std::string finalStatus = this->statusMessage;
+    this->resetMortarPlacementStage();
+    this->statusMessage = finalStatus + " Workflow mortier reinitialise sur NIV1.";
 }
 
 void EditorMapCreateMapScene::setAssetOpacityPercent(int value)
@@ -2735,54 +3190,201 @@ bool EditorMapCreateMapScene::exportMapToAbsolutePath(const char* absolutePath)
     }
     cJSON* towerHotspotsArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "placedTowers", towerHotspotsArray);
-    for (const TowerHotspot& hotspot : this->towerHotspots)
+    for (int towerNumber = 1; towerNumber <= kEditorMapMaxTowerHotspots; ++towerNumber)
     {
-        cJSON* hotspotItem = cJSON_CreateObject();
-        cJSON_AddNumberToObject(hotspotItem, "tileX", hotspot.tileX);
-        cJSON_AddNumberToObject(hotspotItem, "tileY", hotspot.tileY);
+        const int visualSetIndex = this->findTowerVisualSetIndexByNumber(towerNumber);
+        const int hotspotIndex = this->findTowerHotspotIndexByNumber(towerNumber);
+        if (visualSetIndex < 0 && hotspotIndex < 0)
+        {
+            continue;
+        }
+
+        cJSON* towerItem = cJSON_CreateObject();
         cJSON_AddNumberToObject(
-            hotspotItem,
+            towerItem,
             "towerNumber",
-            ClampEditorMapTowerHotspotNumber(hotspot.towerNumber));
-        const int visualSetIndex = this->findTowerVisualSetIndexByNumber(hotspot.towerNumber);
+            ClampEditorMapTowerHotspotNumber(towerNumber));
+        bool hasTowerPayload = false;
+
+        if (hotspotIndex >= 0)
+        {
+            const TowerHotspot& hotspot = this->towerHotspots[static_cast<size_t>(hotspotIndex)];
+            cJSON* fireHotspotItem = cJSON_CreateObject();
+            cJSON_AddNumberToObject(
+                fireHotspotItem,
+                "anchorTileX",
+                static_cast<double>(hotspot.anchorTileX));
+            cJSON_AddNumberToObject(
+                fireHotspotItem,
+                "anchorTileY",
+                static_cast<double>(hotspot.anchorTileY));
+            cJSON_AddItemToObject(towerItem, "fireHotspot", fireHotspotItem);
+            hasTowerPayload = true;
+        }
+
         if (visualSetIndex >= 0)
         {
             const TowerVisualSet& visualSet =
                 this->towerVisualSets[static_cast<size_t>(visualSetIndex)];
-            cJSON* assetVariantsItem = cJSON_CreateObject();
-            bool hasAnyVariant = false;
+            cJSON* levelsItem = cJSON_CreateObject();
+            bool hasAnyLevel = false;
             for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
             {
                 const int importedAssetIndex =
                     visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)];
-                if (importedAssetIndex < 0 ||
-                    importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+                if (importedAssetIndex < 0)
                 {
                     continue;
                 }
 
-                const ImportedAsset& importedAsset =
-                    this->importedAssets[static_cast<size_t>(importedAssetIndex)];
-                const std::string runtimeStoragePath =
-                    buildRuntimeAssetPathFromSource(importedAsset.sourcePath, importedAsset.displayName);
                 const std::string variantKey = "lvl" + std::to_string(levelIndex + 1);
-                cJSON_AddStringToObject(
-                    assetVariantsItem,
-                    variantKey.c_str(),
-                    runtimeStoragePath.c_str());
-                hasAnyVariant = true;
+                cJSON* levelItem = cJSON_CreateObject();
+
+                if (importedAssetIndex < static_cast<int>(this->importedAssets.size()))
+                {
+                    const ImportedAsset& importedAsset =
+                        this->importedAssets[static_cast<size_t>(importedAssetIndex)];
+                    const std::string runtimeStoragePath =
+                        buildRuntimeAssetPathFromSource(importedAsset.sourcePath, importedAsset.displayName);
+                    cJSON_AddStringToObject(
+                        levelItem,
+                        "storagePath",
+                        runtimeStoragePath.c_str());
+                }
+
+                if (visualSet.hasPlacement[static_cast<size_t>(levelIndex)])
+                {
+                    cJSON_AddNumberToObject(
+                        levelItem,
+                        "anchorTileX",
+                        static_cast<double>(visualSet.anchorTileX[static_cast<size_t>(levelIndex)]));
+                    cJSON_AddNumberToObject(
+                        levelItem,
+                        "anchorTileY",
+                        static_cast<double>(visualSet.anchorTileY[static_cast<size_t>(levelIndex)]));
+                }
+
+                cJSON_AddItemToObject(levelsItem, variantKey.c_str(), levelItem);
+                hasAnyLevel = true;
             }
 
-            if (hasAnyVariant)
+            if (hasAnyLevel)
             {
-                cJSON_AddItemToObject(hotspotItem, "assetVariants", assetVariantsItem);
+                cJSON_AddItemToObject(towerItem, "levels", levelsItem);
+                hasTowerPayload = true;
             }
             else
             {
-                cJSON_Delete(assetVariantsItem);
+                cJSON_Delete(levelsItem);
             }
         }
-        cJSON_AddItemToArray(towerHotspotsArray, hotspotItem);
+
+        if (!hasTowerPayload)
+        {
+            cJSON_Delete(towerItem);
+            continue;
+        }
+
+        cJSON_AddItemToArray(towerHotspotsArray, towerItem);
+    }
+    cJSON* mortarHotspotsArray = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "placedMortars", mortarHotspotsArray);
+    for (int mortarNumber = 1; mortarNumber <= kEditorMapMaxMortarHotspots; ++mortarNumber)
+    {
+        const int visualSetIndex = this->findMortarVisualSetIndexByNumber(mortarNumber);
+        const int hotspotIndex = this->findMortarHotspotIndexByNumber(mortarNumber);
+        if (visualSetIndex < 0 && hotspotIndex < 0)
+        {
+            continue;
+        }
+
+        cJSON* mortarItem = cJSON_CreateObject();
+        cJSON_AddNumberToObject(
+            mortarItem,
+            "mortarNumber",
+            ClampEditorMapMortarHotspotNumber(mortarNumber));
+        bool hasMortarPayload = false;
+
+        if (hotspotIndex >= 0)
+        {
+            const MortarHotspot& hotspot = this->mortarHotspots[static_cast<size_t>(hotspotIndex)];
+            cJSON* fireHotspotItem = cJSON_CreateObject();
+            cJSON_AddNumberToObject(
+                fireHotspotItem,
+                "anchorTileX",
+                static_cast<double>(hotspot.anchorTileX));
+            cJSON_AddNumberToObject(
+                fireHotspotItem,
+                "anchorTileY",
+                static_cast<double>(hotspot.anchorTileY));
+            cJSON_AddItemToObject(mortarItem, "fireHotspot", fireHotspotItem);
+            hasMortarPayload = true;
+        }
+
+        if (visualSetIndex >= 0)
+        {
+            const MortarVisualSet& visualSet =
+                this->mortarVisualSets[static_cast<size_t>(visualSetIndex)];
+            cJSON* levelsItem = cJSON_CreateObject();
+            bool hasAnyLevel = false;
+            for (int levelIndex = 0; levelIndex < 3; ++levelIndex)
+            {
+                const int importedAssetIndex =
+                    visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)];
+                if (importedAssetIndex < 0)
+                {
+                    continue;
+                }
+
+                const std::string variantKey = "lvl" + std::to_string(levelIndex + 1);
+                cJSON* levelItem = cJSON_CreateObject();
+
+                if (importedAssetIndex < static_cast<int>(this->importedAssets.size()))
+                {
+                    const ImportedAsset& importedAsset =
+                        this->importedAssets[static_cast<size_t>(importedAssetIndex)];
+                    const std::string runtimeStoragePath =
+                        buildRuntimeAssetPathFromSource(importedAsset.sourcePath, importedAsset.displayName);
+                    cJSON_AddStringToObject(
+                        levelItem,
+                        "storagePath",
+                        runtimeStoragePath.c_str());
+                }
+
+                if (visualSet.hasPlacement[static_cast<size_t>(levelIndex)])
+                {
+                    cJSON_AddNumberToObject(
+                        levelItem,
+                        "anchorTileX",
+                        static_cast<double>(visualSet.anchorTileX[static_cast<size_t>(levelIndex)]));
+                    cJSON_AddNumberToObject(
+                        levelItem,
+                        "anchorTileY",
+                        static_cast<double>(visualSet.anchorTileY[static_cast<size_t>(levelIndex)]));
+                }
+
+                cJSON_AddItemToObject(levelsItem, variantKey.c_str(), levelItem);
+                hasAnyLevel = true;
+            }
+
+            if (hasAnyLevel)
+            {
+                cJSON_AddItemToObject(mortarItem, "levels", levelsItem);
+                hasMortarPayload = true;
+            }
+            else
+            {
+                cJSON_Delete(levelsItem);
+            }
+        }
+
+        if (!hasMortarPayload)
+        {
+            cJSON_Delete(mortarItem);
+            continue;
+        }
+
+        cJSON_AddItemToArray(mortarHotspotsArray, mortarItem);
     }
 
     char* jsonText = cJSON_Print(root);
@@ -3197,8 +3799,12 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     this->placedAssets.clear();
     this->towerHotspots.clear();
     this->towerVisualSets.clear();
+    this->mortarHotspots.clear();
+    this->mortarVisualSets.clear();
     this->historyActions.clear();
     this->historyCursor = 0;
+    this->resetTowerPlacementStage();
+    this->resetMortarPlacementStage();
 
     const cJSON* mapName = cJSON_GetObjectItemCaseSensitive(root, "mapName");
     if (cJSON_IsString(mapName) && mapName->valuestring != nullptr)
@@ -3207,8 +3813,8 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
     }
 
     std::string importStatusSuffix;
-    bool normalizedTowerHotspots = false;
     bool skippedTowerHotspots = false;
+    bool skippedMortarHotspots = false;
     bool normalizedAssetClickGui = false;
     bool shouldApplyOceanColor = false;
     const cJSON* oceanColor = cJSON_GetObjectItemCaseSensitive(root, "oceanColor");
@@ -3377,23 +3983,6 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
         cJSON* item = nullptr;
         cJSON_ArrayForEach(item, towerHotspotsJson)
         {
-            const cJSON* tileX = cJSON_GetObjectItemCaseSensitive(item, "tileX");
-            const cJSON* tileY = cJSON_GetObjectItemCaseSensitive(item, "tileY");
-            const cJSON* assetVariantsJson =
-                cJSON_GetObjectItemCaseSensitive(item, "assetVariants");
-            if (!cJSON_IsNumber(tileX) || !cJSON_IsNumber(tileY))
-            {
-                continue;
-            }
-
-            const int hotspotTileX = static_cast<int>(std::lround(tileX->valuedouble));
-            const int hotspotTileY = static_cast<int>(std::lround(tileY->valuedouble));
-            if (this->findTowerHotspotIndexAtTile(hotspotTileX, hotspotTileY) >= 0)
-            {
-                skippedTowerHotspots = true;
-                continue;
-            }
-
             int towerNumber = 0;
             const cJSON* towerNumberJson = cJSON_GetObjectItemCaseSensitive(item, "towerNumber");
             if (cJSON_IsNumber(towerNumberJson))
@@ -3404,74 +3993,203 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
                 {
                     towerNumber = parsedTowerNumber;
                 }
-                else
-                {
-                    normalizedTowerHotspots = true;
-                }
-            }
-            else
-            {
-                normalizedTowerHotspots = true;
             }
 
             if (towerNumber <= 0 ||
                 usedTowerNumbers[static_cast<size_t>(towerNumber)])
-            {
-                towerNumber = 0;
-                for (int candidate = 1; candidate <= kEditorMapMaxTowerHotspots; ++candidate)
-                {
-                    if (!usedTowerNumbers[static_cast<size_t>(candidate)])
-                    {
-                        towerNumber = candidate;
-                        break;
-                    }
-                }
-                normalizedTowerHotspots = true;
-            }
-
-            if (towerNumber <= 0)
             {
                 skippedTowerHotspots = true;
                 continue;
             }
 
             usedTowerNumbers[static_cast<size_t>(towerNumber)] = true;
-            this->towerHotspots.push_back(
-                TowerHotspot{
-                    hotspotTileX,
-                    hotspotTileY,
-                    towerNumber});
+            TowerVisualSet& visualSet = this->ensureTowerVisualSet(towerNumber);
 
-            if (cJSON_IsObject(assetVariantsJson))
+            const cJSON* levelsJson = cJSON_GetObjectItemCaseSensitive(item, "levels");
+            if (cJSON_IsObject(levelsJson))
             {
-                TowerVisualSet& visualSet = this->ensureTowerVisualSet(towerNumber);
                 for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
                 {
-                    const std::string variantKey = "lvl" + std::to_string(levelIndex + 1);
+                    const std::string levelKey = "lvl" + std::to_string(levelIndex + 1);
+                    const cJSON* levelJson =
+                        cJSON_GetObjectItemCaseSensitive(levelsJson, levelKey.c_str());
+                    if (!cJSON_IsObject(levelJson))
+                    {
+                        continue;
+                    }
+
                     const cJSON* storagePathJson =
-                        cJSON_GetObjectItemCaseSensitive(assetVariantsJson, variantKey.c_str());
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "storagePath");
                     if (!cJSON_IsString(storagePathJson) || storagePathJson->valuestring == nullptr)
                     {
-                        continue;
+                        skippedTowerHotspots = true;
                     }
-
-                    const int importedIndex =
-                        this->importAssetFromRuntimeStoragePath(storagePathJson->valuestring);
-                    if (importedIndex < 0)
+                    else
                     {
-                        continue;
+                        const int importedIndex =
+                            this->importAssetFromRuntimeStoragePath(storagePathJson->valuestring);
+                        if (importedIndex >= 0)
+                        {
+                            visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)] = importedIndex;
+                        }
+                        else
+                        {
+                            skippedTowerHotspots = true;
+                        }
                     }
 
-                    visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)] = importedIndex;
+                    const cJSON* anchorTileXJson =
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "anchorTileX");
+                    const cJSON* anchorTileYJson =
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "anchorTileY");
+                    if (cJSON_IsNumber(anchorTileXJson) && cJSON_IsNumber(anchorTileYJson))
+                    {
+                        visualSet.anchorTileX[static_cast<size_t>(levelIndex)] =
+                            static_cast<float>(anchorTileXJson->valuedouble);
+                        visualSet.anchorTileY[static_cast<size_t>(levelIndex)] =
+                            static_cast<float>(anchorTileYJson->valuedouble);
+                        visualSet.hasPlacement[static_cast<size_t>(levelIndex)] = true;
+                    }
+                }
+            }
+
+            const cJSON* fireHotspotJson = cJSON_GetObjectItemCaseSensitive(item, "fireHotspot");
+            if (cJSON_IsObject(fireHotspotJson))
+            {
+                const cJSON* anchorTileXJson =
+                    cJSON_GetObjectItemCaseSensitive(fireHotspotJson, "anchorTileX");
+                const cJSON* anchorTileYJson =
+                    cJSON_GetObjectItemCaseSensitive(fireHotspotJson, "anchorTileY");
+                if (cJSON_IsNumber(anchorTileXJson) && cJSON_IsNumber(anchorTileYJson))
+                {
+                    const float hotspotAnchorTileX =
+                        static_cast<float>(anchorTileXJson->valuedouble);
+                    const float hotspotAnchorTileY =
+                        static_cast<float>(anchorTileYJson->valuedouble);
+                    const SDL_Point hotspotTile =
+                        map.roundTile(hotspotAnchorTileX, hotspotAnchorTileY);
+                    if (map.isInside(hotspotTile.x, hotspotTile.y))
+                    {
+                        this->towerHotspots.push_back(
+                            TowerHotspot{
+                                hotspotAnchorTileX,
+                                hotspotAnchorTileY,
+                                towerNumber});
+                    }
+                    else
+                    {
+                        skippedTowerHotspots = true;
+                    }
                 }
             }
         }
+    }
 
-        if (!this->towerVisualSets.empty())
+    const cJSON* mortarHotspotsJson = cJSON_GetObjectItemCaseSensitive(root, "placedMortars");
+    if (cJSON_IsArray(mortarHotspotsJson))
+    {
+        std::array<bool, static_cast<size_t>(kEditorMapMaxMortarHotspots + 1)> usedMortarNumbers{};
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, mortarHotspotsJson)
         {
-            for (const TowerHotspot& hotspot : this->towerHotspots)
+            int mortarNumber = 0;
+            const cJSON* mortarNumberJson = cJSON_GetObjectItemCaseSensitive(item, "mortarNumber");
+            if (cJSON_IsNumber(mortarNumberJson))
             {
-                (void)this->ensureTowerVisualSet(hotspot.towerNumber);
+                const int parsedMortarNumber =
+                    static_cast<int>(std::lround(mortarNumberJson->valuedouble));
+                if (parsedMortarNumber >= 1 && parsedMortarNumber <= kEditorMapMaxMortarHotspots)
+                {
+                    mortarNumber = parsedMortarNumber;
+                }
+            }
+
+            if (mortarNumber <= 0 ||
+                usedMortarNumbers[static_cast<size_t>(mortarNumber)])
+            {
+                skippedMortarHotspots = true;
+                continue;
+            }
+
+            usedMortarNumbers[static_cast<size_t>(mortarNumber)] = true;
+            MortarVisualSet& visualSet = this->ensureMortarVisualSet(mortarNumber);
+
+            const cJSON* levelsJson = cJSON_GetObjectItemCaseSensitive(item, "levels");
+            if (cJSON_IsObject(levelsJson))
+            {
+                for (int levelIndex = 0; levelIndex < 3; ++levelIndex)
+                {
+                    const std::string levelKey = "lvl" + std::to_string(levelIndex + 1);
+                    const cJSON* levelJson =
+                        cJSON_GetObjectItemCaseSensitive(levelsJson, levelKey.c_str());
+                    if (!cJSON_IsObject(levelJson))
+                    {
+                        continue;
+                    }
+
+                    const cJSON* storagePathJson =
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "storagePath");
+                    if (!cJSON_IsString(storagePathJson) || storagePathJson->valuestring == nullptr)
+                    {
+                        skippedMortarHotspots = true;
+                    }
+                    else
+                    {
+                        const int importedIndex =
+                            this->importAssetFromRuntimeStoragePath(storagePathJson->valuestring);
+                        if (importedIndex >= 0)
+                        {
+                            visualSet.importedAssetIndices[static_cast<size_t>(levelIndex)] = importedIndex;
+                        }
+                        else
+                        {
+                            skippedMortarHotspots = true;
+                        }
+                    }
+
+                    const cJSON* anchorTileXJson =
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "anchorTileX");
+                    const cJSON* anchorTileYJson =
+                        cJSON_GetObjectItemCaseSensitive(levelJson, "anchorTileY");
+                    if (cJSON_IsNumber(anchorTileXJson) && cJSON_IsNumber(anchorTileYJson))
+                    {
+                        visualSet.anchorTileX[static_cast<size_t>(levelIndex)] =
+                            static_cast<float>(anchorTileXJson->valuedouble);
+                        visualSet.anchorTileY[static_cast<size_t>(levelIndex)] =
+                            static_cast<float>(anchorTileYJson->valuedouble);
+                        visualSet.hasPlacement[static_cast<size_t>(levelIndex)] = true;
+                    }
+                }
+            }
+
+            const cJSON* fireHotspotJson = cJSON_GetObjectItemCaseSensitive(item, "fireHotspot");
+            if (cJSON_IsObject(fireHotspotJson))
+            {
+                const cJSON* anchorTileXJson =
+                    cJSON_GetObjectItemCaseSensitive(fireHotspotJson, "anchorTileX");
+                const cJSON* anchorTileYJson =
+                    cJSON_GetObjectItemCaseSensitive(fireHotspotJson, "anchorTileY");
+                if (cJSON_IsNumber(anchorTileXJson) && cJSON_IsNumber(anchorTileYJson))
+                {
+                    const float hotspotAnchorTileX =
+                        static_cast<float>(anchorTileXJson->valuedouble);
+                    const float hotspotAnchorTileY =
+                        static_cast<float>(anchorTileYJson->valuedouble);
+                    const SDL_Point hotspotTile =
+                        map.roundTile(hotspotAnchorTileX, hotspotAnchorTileY);
+                    if (map.isInside(hotspotTile.x, hotspotTile.y))
+                    {
+                        this->mortarHotspots.push_back(
+                            MortarHotspot{
+                                hotspotAnchorTileX,
+                                hotspotAnchorTileY,
+                                mortarNumber});
+                    }
+                    else
+                    {
+                        skippedMortarHotspots = true;
+                    }
+                }
             }
         }
     }
@@ -3484,13 +4202,13 @@ bool EditorMapCreateMapScene::importMapFromAbsolutePath(const char* absolutePath
         this->applySelectedOceanColor();
         importStatusSuffix = " Ocean: " + std::string(entry.label) + ".";
     }
-    if (normalizedTowerHotspots)
-    {
-        importStatusSuffix += " Hotspots tours renumerotes.";
-    }
     if (skippedTowerHotspots)
     {
-        importStatusSuffix += " Hotspots tours en trop/dupliques ignores.";
+        importStatusSuffix += " Certaines towers/hotspots invalides ont ete ignores.";
+    }
+    if (skippedMortarHotspots)
+    {
+        importStatusSuffix += " Certains mortiers/hotspots invalides ont ete ignores.";
     }
     if (normalizedAssetClickGui)
     {
@@ -4152,30 +4870,172 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
         }
     }
 
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawTowerHotspotsAndPreviews(void) const
+{
+    const Map& map = GetCurrentMap();
+    const float tileWidth = map.getTileWidth();
+    const float tileHeight = map.getTileHeight();
     const RC2D_Color hotspotColor = kHotspotPalette[static_cast<size_t>(this->selectedHotspotColorIndex)];
     const bool previewHotspots =
         this->towerVariantPickerVisible ||
         (this->towerPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
     const int previewTowerLevel = std::clamp(this->towerPreviewDisplayLevel, 1, 4) - 1;
+
+    std::array<bool, static_cast<size_t>(kEditorMapMaxTowerHotspots + 1)> usedTowerNumbers{};
+    std::vector<int> drawOrder;
+    drawOrder.reserve(this->towerHotspots.size() + this->towerVisualSets.size());
+    auto drawHotspotMarker = [](const SDL_FPoint& hotspotScreen, RC2D_Color fillColor, RC2D_Color borderColor) {
+        SDL_FRect markerRect{
+            hotspotScreen.x - 5.0f,
+            hotspotScreen.y - 5.0f,
+            10.0f,
+            10.0f
+        };
+        rc2d_graphics_setColor(fillColor);
+        rc2d_graphics_rectangle("fill", &markerRect);
+        rc2d_graphics_setColor(borderColor);
+        rc2d_graphics_rectangle("line", &markerRect);
+    };
+
     for (const TowerHotspot& hotspot : this->towerHotspots)
     {
-        if (!map.isInside(hotspot.tileX, hotspot.tileY))
+        const SDL_Point hotspotTile =
+            map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        if (!map.isInside(hotspotTile.x, hotspotTile.y))
         {
             continue;
         }
-        const SDL_FPoint center = map.tileToScreenCenter(hotspot.tileX, hotspot.tileY);
-        if (previewHotspots)
+
+        const int towerNumber = ClampEditorMapTowerHotspotNumber(hotspot.towerNumber);
+        if (usedTowerNumbers[static_cast<size_t>(towerNumber)])
         {
-            rc2d_graphics_setColor(hotspotColor);
-            rc2d_graphics_drawTileIsometric("fill", center.x, center.y, tileWidth, tileHeight);
-            rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 240});
-            rc2d_graphics_drawTileIsometric("line", center.x, center.y, tileWidth, tileHeight);
+            continue;
+        }
+
+        usedTowerNumbers[static_cast<size_t>(towerNumber)] = true;
+        drawOrder.push_back(towerNumber);
+    }
+
+    for (const TowerVisualSet& visualSet : this->towerVisualSets)
+    {
+        const int towerNumber = ClampEditorMapTowerHotspotNumber(visualSet.towerNumber);
+        if (usedTowerNumbers[static_cast<size_t>(towerNumber)])
+        {
+            continue;
+        }
+
+        const bool hasAnyPlacement = std::any_of(
+            visualSet.hasPlacement.begin(),
+            visualSet.hasPlacement.end(),
+            [](bool value) { return value; });
+        if (!hasAnyPlacement)
+        {
+            continue;
+        }
+
+        usedTowerNumbers[static_cast<size_t>(towerNumber)] = true;
+        drawOrder.push_back(towerNumber);
+    }
+
+    auto resolveReferenceTile = [this, &map, previewTowerLevel](int towerNumber) -> SDL_Point {
+        const int hotspotIndex = this->findTowerHotspotIndexByNumber(towerNumber);
+        if (hotspotIndex >= 0)
+        {
+            const TowerHotspot& hotspot = this->towerHotspots[static_cast<size_t>(hotspotIndex)];
+            return map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        }
+
+        const int visualSetIndex = this->findTowerVisualSetIndexByNumber(towerNumber);
+        if (visualSetIndex < 0)
+        {
+            return SDL_Point{};
+        }
+
+        const TowerVisualSet& visualSet = this->towerVisualSets[static_cast<size_t>(visualSetIndex)];
+        if (visualSet.hasPlacement[static_cast<size_t>(previewTowerLevel)])
+        {
+            return map.roundTile(
+                visualSet.anchorTileX[static_cast<size_t>(previewTowerLevel)],
+                visualSet.anchorTileY[static_cast<size_t>(previewTowerLevel)]);
+        }
+
+        for (int levelIndex = 0; levelIndex < 4; ++levelIndex)
+        {
+            if (!visualSet.hasPlacement[static_cast<size_t>(levelIndex)])
+            {
+                continue;
+            }
+
+            return map.roundTile(
+                visualSet.anchorTileX[static_cast<size_t>(levelIndex)],
+                visualSet.anchorTileY[static_cast<size_t>(levelIndex)]);
+        }
+
+        return SDL_Point{};
+    };
+
+    std::sort(
+        drawOrder.begin(),
+        drawOrder.end(),
+        [&resolveReferenceTile](int towerNumberA, int towerNumberB) {
+            const SDL_Point refTileA = resolveReferenceTile(towerNumberA);
+            const SDL_Point refTileB = resolveReferenceTile(towerNumberB);
+            const int depthA = refTileA.x + refTileA.y;
+            const int depthB = refTileB.x + refTileB.y;
+            if (depthA != depthB)
+            {
+                return depthA < depthB;
+            }
+            if (refTileA.y != refTileB.y)
+            {
+                return refTileA.y < refTileB.y;
+            }
+            return towerNumberA < towerNumberB;
+        });
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+
+    for (int towerNumber : drawOrder)
+    {
+        const int hotspotIndex = this->findTowerHotspotIndexByNumber(towerNumber);
+        const bool hasHotspot = hotspotIndex >= 0;
+        const SDL_Point refTile = resolveReferenceTile(towerNumber);
+        const SDL_FPoint refTileCenter = map.tileToScreenCenter(refTile.x, refTile.y);
+        const SDL_FPoint hotspotScreen = hasHotspot
+            ? map.tileToScreenCenterFloat(
+                this->towerHotspots[static_cast<size_t>(hotspotIndex)].anchorTileX,
+                this->towerHotspots[static_cast<size_t>(hotspotIndex)].anchorTileY)
+            : refTileCenter;
+
+        if (previewHotspots && hasHotspot)
+        {
+            rc2d_graphics_setColor(RC2D_Color{hotspotColor.r, hotspotColor.g, hotspotColor.b, 52});
+            rc2d_graphics_drawTileIsometric(
+                "fill",
+                refTileCenter.x,
+                refTileCenter.y,
+                tileWidth,
+                tileHeight);
+            rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 180});
+            rc2d_graphics_drawTileIsometric(
+                "line",
+                refTileCenter.x,
+                refTileCenter.y,
+                tileWidth,
+                tileHeight);
+            drawHotspotMarker(
+                hotspotScreen,
+                hotspotColor,
+                RC2D_Color{245, 250, 255, 240});
         }
 
         if (this->overlayFont.sdl_font != nullptr)
         {
             const std::string towerNumberText =
-                std::to_string(ClampEditorMapTowerHotspotNumber(hotspot.towerNumber));
+                std::to_string(ClampEditorMapTowerHotspotNumber(towerNumber));
             RC2D_Text hotspotText =
                 rc2d_graphics_createText(
                     const_cast<RC2D_Font*>(&this->overlayFont),
@@ -4186,19 +5046,15 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
             int textW = 0;
             int textH = 0;
             rc2d_graphics_getTextSize(&hotspotText, &textW, &textH);
-            const float textX = center.x - (static_cast<float>(textW) * 0.5f);
+            const float textX = hotspotScreen.x - (static_cast<float>(textW) * 0.5f);
             const float textY = previewHotspots
-                ? (center.y - (static_cast<float>(textH) * 0.5f))
-                : (center.y - 28.0f - static_cast<float>(textH));
+                ? (hotspotScreen.y - 18.0f - static_cast<float>(textH))
+                : (hotspotScreen.y - 28.0f - static_cast<float>(textH));
             rc2d_graphics_drawText(&hotspotText, textX, textY);
             rc2d_graphics_destroyText(&hotspotText);
         }
 
-        int visualSetIndex = this->findTowerVisualSetIndexByNumber(hotspot.towerNumber);
-        if (visualSetIndex < 0 && !this->towerVisualSets.empty())
-        {
-            visualSetIndex = 0;
-        }
+        const int visualSetIndex = this->findTowerVisualSetIndexByNumber(towerNumber);
         if (visualSetIndex < 0)
         {
             continue;
@@ -4213,7 +5069,8 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
         const int importedAssetIndex =
             visualSet.importedAssetIndices[static_cast<size_t>(previewTowerLevel)];
         if (importedAssetIndex < 0 ||
-            importedAssetIndex >= static_cast<int>(this->importedAssets.size()))
+            importedAssetIndex >= static_cast<int>(this->importedAssets.size()) ||
+            !visualSet.hasPlacement[static_cast<size_t>(previewTowerLevel)])
         {
             continue;
         }
@@ -4225,27 +5082,40 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
             continue;
         }
 
-        const float previewScale = 0.55f * (std::max)(GetCamera().getZoomFactor(), 0.01f);
-        const float drawX = center.x - ((importedAsset.widthPx * previewScale) * 0.5f);
-        const float drawY = center.y - ((importedAsset.heightPx * previewScale) * 0.7f);
+        const float effectiveScale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+        const SDL_FPoint anchorScreen =
+            map.tileToScreenCenterFloat(
+                visualSet.anchorTileX[static_cast<size_t>(previewTowerLevel)],
+                visualSet.anchorTileY[static_cast<size_t>(previewTowerLevel)]);
+        const float drawX = anchorScreen.x;
+        const float drawY = anchorScreen.y;
         const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
             const_cast<RC2D_Image*>(&importedAsset.image),
             0.0f,
             0.0f,
             importedAsset.widthPx,
             importedAsset.heightPx);
+
+        Uint8 oldAlpha = 255;
+        SDL_GetTextureAlphaMod(importedAsset.image.sdl_texture, &oldAlpha);
+        const Uint8 alpha = this->assetTransparencyEnabled
+            ? static_cast<Uint8>(std::clamp((this->assetOpacityPercent * 255) / 100, 0, 255))
+            : static_cast<Uint8>(255);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, alpha);
+
         rc2d_graphics_drawQuad(
             const_cast<RC2D_Image*>(&importedAsset.image),
             &sourceQuad,
             drawX,
             drawY,
             0.0,
-            previewScale,
-            previewScale,
+            effectiveScale,
+            effectiveScale,
             0.0f,
             0.0f,
             false,
             false);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, oldAlpha);
 
         if (this->overlayFont.sdl_font != nullptr)
         {
@@ -4256,6 +5126,447 @@ void EditorMapCreateMapScene::drawWorldGridAndBlockedTiles(void) const
             rc2d_graphics_setTextColor(&levelText);
             rc2d_graphics_drawText(&levelText, drawX, drawY - 12.0f);
             rc2d_graphics_destroyText(&levelText);
+        }
+    }
+
+    if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
+    {
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        if (this->getMouseRenderPosition(&mouseX, &mouseY) &&
+            this->isInsideMapRect(mouseX, mouseY))
+        {
+            const int workflowLevelIndex = this->getTowerPlacementStageLevelIndex();
+            if (workflowLevelIndex >= 0)
+            {
+                int previewImportedAssetIndex = -1;
+                const int visualSetIndex =
+                    this->findTowerVisualSetIndexByNumber(this->selectedTowerHotspotNumber);
+                if (visualSetIndex >= 0)
+                {
+                    previewImportedAssetIndex =
+                        this->towerVisualSets[static_cast<size_t>(visualSetIndex)]
+                            .importedAssetIndices[static_cast<size_t>(workflowLevelIndex)];
+                }
+                else if (!this->towerVisualSets.empty())
+                {
+                    previewImportedAssetIndex =
+                        this->towerVisualSets.front()
+                            .importedAssetIndices[static_cast<size_t>(workflowLevelIndex)];
+                }
+
+                if (previewImportedAssetIndex >= 0 &&
+                    previewImportedAssetIndex < static_cast<int>(this->importedAssets.size()))
+                {
+                    const ImportedAsset& previewAsset =
+                        this->importedAssets[static_cast<size_t>(previewImportedAssetIndex)];
+                    if (previewAsset.image.sdl_texture != nullptr)
+                    {
+                        const SDL_FPoint previewAnchorTile = map.screenToTile(mouseX, mouseY);
+                        const SDL_FPoint previewAnchorScreen =
+                            map.tileToScreenCenterFloat(previewAnchorTile.x, previewAnchorTile.y);
+                        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+                            const_cast<RC2D_Image*>(&previewAsset.image),
+                            0.0f,
+                            0.0f,
+                            previewAsset.widthPx,
+                            previewAsset.heightPx);
+
+                        Uint8 oldAlpha = 255;
+                        SDL_GetTextureAlphaMod(previewAsset.image.sdl_texture, &oldAlpha);
+                        SDL_SetTextureAlphaMod(previewAsset.image.sdl_texture, 175);
+                        rc2d_graphics_drawQuad(
+                            const_cast<RC2D_Image*>(&previewAsset.image),
+                            &sourceQuad,
+                            previewAnchorScreen.x,
+                            previewAnchorScreen.y,
+                            0.0,
+                            (std::max)(GetCamera().getZoomFactor(), 0.01f),
+                            (std::max)(GetCamera().getZoomFactor(), 0.01f),
+                            0.0f,
+                            0.0f,
+                            false,
+                            false);
+                        SDL_SetTextureAlphaMod(previewAsset.image.sdl_texture, oldAlpha);
+                    }
+                }
+            }
+            else
+            {
+                const SDL_FPoint previewHotspotAnchorTile = map.screenToTile(mouseX, mouseY);
+                const SDL_Point previewTile =
+                    map.roundTile(previewHotspotAnchorTile.x, previewHotspotAnchorTile.y);
+                if (map.isInside(previewTile.x, previewTile.y))
+                {
+                    const SDL_FPoint previewCenter =
+                        map.tileToScreenCenter(previewTile.x, previewTile.y);
+                    const SDL_FPoint previewHotspotScreen =
+                        map.tileToScreenCenterFloat(
+                            previewHotspotAnchorTile.x,
+                            previewHotspotAnchorTile.y);
+                    rc2d_graphics_setColor(RC2D_Color{255, 210, 95, 180});
+                    rc2d_graphics_drawTileIsometric(
+                        "line",
+                        previewCenter.x,
+                        previewCenter.y,
+                        tileWidth,
+                        tileHeight);
+                    drawHotspotMarker(
+                        previewHotspotScreen,
+                        RC2D_Color{255, 210, 95, 120},
+                        RC2D_Color{255, 245, 190, 245});
+                }
+            }
+        }
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawMortarHotspotsAndPreviews(void) const
+{
+    const Map& map = GetCurrentMap();
+    const float tileWidth = map.getTileWidth();
+    const float tileHeight = map.getTileHeight();
+    const RC2D_Color hotspotColor = kHotspotPalette[static_cast<size_t>(this->selectedHotspotColorIndex)];
+    const bool previewHotspots =
+        this->mortarVariantPickerVisible ||
+        (this->mortarPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+    const int previewMortarLevel = std::clamp(this->mortarPreviewDisplayLevel, 1, 3) - 1;
+
+    std::array<bool, static_cast<size_t>(kEditorMapMaxMortarHotspots + 1)> usedMortarNumbers{};
+    std::vector<int> drawOrder;
+    drawOrder.reserve(this->mortarHotspots.size() + this->mortarVisualSets.size());
+    auto drawHotspotMarker = [](const SDL_FPoint& hotspotScreen, RC2D_Color fillColor, RC2D_Color borderColor) {
+        SDL_FRect markerRect{
+            hotspotScreen.x - 5.0f,
+            hotspotScreen.y - 5.0f,
+            10.0f,
+            10.0f
+        };
+        rc2d_graphics_setColor(fillColor);
+        rc2d_graphics_rectangle("fill", &markerRect);
+        rc2d_graphics_setColor(borderColor);
+        rc2d_graphics_rectangle("line", &markerRect);
+    };
+
+    for (const MortarHotspot& hotspot : this->mortarHotspots)
+    {
+        const SDL_Point hotspotTile =
+            map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        if (!map.isInside(hotspotTile.x, hotspotTile.y))
+        {
+            continue;
+        }
+
+        const int mortarNumber = ClampEditorMapMortarHotspotNumber(hotspot.mortarNumber);
+        if (usedMortarNumbers[static_cast<size_t>(mortarNumber)])
+        {
+            continue;
+        }
+
+        usedMortarNumbers[static_cast<size_t>(mortarNumber)] = true;
+        drawOrder.push_back(mortarNumber);
+    }
+
+    for (const MortarVisualSet& visualSet : this->mortarVisualSets)
+    {
+        const int mortarNumber = ClampEditorMapMortarHotspotNumber(visualSet.mortarNumber);
+        if (usedMortarNumbers[static_cast<size_t>(mortarNumber)])
+        {
+            continue;
+        }
+
+        const bool hasAnyPlacement = std::any_of(
+            visualSet.hasPlacement.begin(),
+            visualSet.hasPlacement.end(),
+            [](bool value) { return value; });
+        if (!hasAnyPlacement)
+        {
+            continue;
+        }
+
+        usedMortarNumbers[static_cast<size_t>(mortarNumber)] = true;
+        drawOrder.push_back(mortarNumber);
+    }
+
+    auto resolveReferenceTile = [this, &map, previewMortarLevel](int mortarNumber) -> SDL_Point {
+        const int hotspotIndex = this->findMortarHotspotIndexByNumber(mortarNumber);
+        if (hotspotIndex >= 0)
+        {
+            const MortarHotspot& hotspot = this->mortarHotspots[static_cast<size_t>(hotspotIndex)];
+            return map.roundTile(hotspot.anchorTileX, hotspot.anchorTileY);
+        }
+
+        const int visualSetIndex = this->findMortarVisualSetIndexByNumber(mortarNumber);
+        if (visualSetIndex < 0)
+        {
+            return SDL_Point{};
+        }
+
+        const MortarVisualSet& visualSet = this->mortarVisualSets[static_cast<size_t>(visualSetIndex)];
+        if (visualSet.hasPlacement[static_cast<size_t>(previewMortarLevel)])
+        {
+            return map.roundTile(
+                visualSet.anchorTileX[static_cast<size_t>(previewMortarLevel)],
+                visualSet.anchorTileY[static_cast<size_t>(previewMortarLevel)]);
+        }
+
+        for (int levelIndex = 0; levelIndex < 3; ++levelIndex)
+        {
+            if (!visualSet.hasPlacement[static_cast<size_t>(levelIndex)])
+            {
+                continue;
+            }
+
+            return map.roundTile(
+                visualSet.anchorTileX[static_cast<size_t>(levelIndex)],
+                visualSet.anchorTileY[static_cast<size_t>(levelIndex)]);
+        }
+
+        return SDL_Point{};
+    };
+
+    std::sort(
+        drawOrder.begin(),
+        drawOrder.end(),
+        [&resolveReferenceTile](int mortarNumberA, int mortarNumberB) {
+            const SDL_Point refTileA = resolveReferenceTile(mortarNumberA);
+            const SDL_Point refTileB = resolveReferenceTile(mortarNumberB);
+            const int depthA = refTileA.x + refTileA.y;
+            const int depthB = refTileB.x + refTileB.y;
+            if (depthA != depthB)
+            {
+                return depthA < depthB;
+            }
+            if (refTileA.y != refTileB.y)
+            {
+                return refTileA.y < refTileB.y;
+            }
+            return mortarNumberA < mortarNumberB;
+        });
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+
+    for (int mortarNumber : drawOrder)
+    {
+        const int hotspotIndex = this->findMortarHotspotIndexByNumber(mortarNumber);
+        const bool hasHotspot = hotspotIndex >= 0;
+        const SDL_Point refTile = resolveReferenceTile(mortarNumber);
+        const SDL_FPoint refTileCenter = map.tileToScreenCenter(refTile.x, refTile.y);
+        const SDL_FPoint hotspotScreen = hasHotspot
+            ? map.tileToScreenCenterFloat(
+                this->mortarHotspots[static_cast<size_t>(hotspotIndex)].anchorTileX,
+                this->mortarHotspots[static_cast<size_t>(hotspotIndex)].anchorTileY)
+            : refTileCenter;
+
+        if (previewHotspots && hasHotspot)
+        {
+            rc2d_graphics_setColor(RC2D_Color{hotspotColor.r, hotspotColor.g, hotspotColor.b, 52});
+            rc2d_graphics_drawTileIsometric(
+                "fill",
+                refTileCenter.x,
+                refTileCenter.y,
+                tileWidth,
+                tileHeight);
+            rc2d_graphics_setColor(RC2D_Color{245, 250, 255, 180});
+            rc2d_graphics_drawTileIsometric(
+                "line",
+                refTileCenter.x,
+                refTileCenter.y,
+                tileWidth,
+                tileHeight);
+            drawHotspotMarker(
+                hotspotScreen,
+                hotspotColor,
+                RC2D_Color{245, 250, 255, 240});
+        }
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const std::string mortarNumberText =
+                std::to_string(ClampEditorMapMortarHotspotNumber(mortarNumber));
+            RC2D_Text hotspotText =
+                rc2d_graphics_createText(
+                    const_cast<RC2D_Font*>(&this->overlayFont),
+                    mortarNumberText.c_str());
+            hotspotText.color = RC2D_Color{255, 255, 255, 250};
+            rc2d_graphics_setTextColor(&hotspotText);
+
+            int textW = 0;
+            int textH = 0;
+            rc2d_graphics_getTextSize(&hotspotText, &textW, &textH);
+            const float textX = hotspotScreen.x - (static_cast<float>(textW) * 0.5f);
+            const float textY = previewHotspots
+                ? (hotspotScreen.y - 18.0f - static_cast<float>(textH))
+                : (hotspotScreen.y - 28.0f - static_cast<float>(textH));
+            rc2d_graphics_drawText(&hotspotText, textX, textY);
+            rc2d_graphics_destroyText(&hotspotText);
+        }
+
+        const int visualSetIndex = this->findMortarVisualSetIndexByNumber(mortarNumber);
+        if (visualSetIndex < 0)
+        {
+            continue;
+        }
+
+        const MortarVisualSet& visualSet = this->mortarVisualSets[static_cast<size_t>(visualSetIndex)];
+        if (previewHotspots)
+        {
+            continue;
+        }
+
+        const int importedAssetIndex =
+            visualSet.importedAssetIndices[static_cast<size_t>(previewMortarLevel)];
+        if (importedAssetIndex < 0 ||
+            importedAssetIndex >= static_cast<int>(this->importedAssets.size()) ||
+            !visualSet.hasPlacement[static_cast<size_t>(previewMortarLevel)])
+        {
+            continue;
+        }
+
+        const ImportedAsset& importedAsset =
+            this->importedAssets[static_cast<size_t>(importedAssetIndex)];
+        if (importedAsset.image.sdl_texture == nullptr)
+        {
+            continue;
+        }
+
+        const float effectiveScale = (std::max)(GetCamera().getZoomFactor(), 0.01f);
+        const SDL_FPoint anchorScreen =
+            map.tileToScreenCenterFloat(
+                visualSet.anchorTileX[static_cast<size_t>(previewMortarLevel)],
+                visualSet.anchorTileY[static_cast<size_t>(previewMortarLevel)]);
+        const float drawX = anchorScreen.x;
+        const float drawY = anchorScreen.y;
+        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+            const_cast<RC2D_Image*>(&importedAsset.image),
+            0.0f,
+            0.0f,
+            importedAsset.widthPx,
+            importedAsset.heightPx);
+
+        Uint8 oldAlpha = 255;
+        SDL_GetTextureAlphaMod(importedAsset.image.sdl_texture, &oldAlpha);
+        const Uint8 alpha = this->assetTransparencyEnabled
+            ? static_cast<Uint8>(std::clamp((this->assetOpacityPercent * 255) / 100, 0, 255))
+            : static_cast<Uint8>(255);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, alpha);
+
+        rc2d_graphics_drawQuad(
+            const_cast<RC2D_Image*>(&importedAsset.image),
+            &sourceQuad,
+            drawX,
+            drawY,
+            0.0,
+            effectiveScale,
+            effectiveScale,
+            0.0f,
+            0.0f,
+            false,
+            false);
+        SDL_SetTextureAlphaMod(importedAsset.image.sdl_texture, oldAlpha);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const std::string levelLabel = "Niv " + std::to_string(previewMortarLevel + 1);
+            RC2D_Text levelText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), levelLabel.c_str());
+            levelText.color = RC2D_Color{255, 240, 170, 250};
+            rc2d_graphics_setTextColor(&levelText);
+            rc2d_graphics_drawText(&levelText, drawX, drawY - 12.0f);
+            rc2d_graphics_destroyText(&levelText);
+        }
+    }
+
+    if (this->editorTool == EditorTool::HOTSPOT_MORTARS)
+    {
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        if (this->getMouseRenderPosition(&mouseX, &mouseY) &&
+            this->isInsideMapRect(mouseX, mouseY))
+        {
+            const int workflowLevelIndex = this->getMortarPlacementStageLevelIndex();
+            if (workflowLevelIndex >= 0)
+            {
+                int previewImportedAssetIndex = -1;
+                const int visualSetIndex =
+                    this->findMortarVisualSetIndexByNumber(this->selectedMortarHotspotNumber);
+                if (visualSetIndex >= 0)
+                {
+                    previewImportedAssetIndex =
+                        this->mortarVisualSets[static_cast<size_t>(visualSetIndex)]
+                            .importedAssetIndices[static_cast<size_t>(workflowLevelIndex)];
+                }
+                else if (!this->mortarVisualSets.empty())
+                {
+                    previewImportedAssetIndex =
+                        this->mortarVisualSets.front()
+                            .importedAssetIndices[static_cast<size_t>(workflowLevelIndex)];
+                }
+
+                if (previewImportedAssetIndex >= 0 &&
+                    previewImportedAssetIndex < static_cast<int>(this->importedAssets.size()))
+                {
+                    const ImportedAsset& previewAsset =
+                        this->importedAssets[static_cast<size_t>(previewImportedAssetIndex)];
+                    if (previewAsset.image.sdl_texture != nullptr)
+                    {
+                        const SDL_FPoint previewAnchorTile = map.screenToTile(mouseX, mouseY);
+                        const SDL_FPoint previewAnchorScreen =
+                            map.tileToScreenCenterFloat(previewAnchorTile.x, previewAnchorTile.y);
+                        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+                            const_cast<RC2D_Image*>(&previewAsset.image),
+                            0.0f,
+                            0.0f,
+                            previewAsset.widthPx,
+                            previewAsset.heightPx);
+
+                        Uint8 oldAlpha = 255;
+                        SDL_GetTextureAlphaMod(previewAsset.image.sdl_texture, &oldAlpha);
+                        SDL_SetTextureAlphaMod(previewAsset.image.sdl_texture, 175);
+                        rc2d_graphics_drawQuad(
+                            const_cast<RC2D_Image*>(&previewAsset.image),
+                            &sourceQuad,
+                            previewAnchorScreen.x,
+                            previewAnchorScreen.y,
+                            0.0,
+                            (std::max)(GetCamera().getZoomFactor(), 0.01f),
+                            (std::max)(GetCamera().getZoomFactor(), 0.01f),
+                            0.0f,
+                            0.0f,
+                            false,
+                            false);
+                        SDL_SetTextureAlphaMod(previewAsset.image.sdl_texture, oldAlpha);
+                    }
+                }
+            }
+            else
+            {
+                const SDL_FPoint previewHotspotAnchorTile = map.screenToTile(mouseX, mouseY);
+                const SDL_Point previewTile =
+                    map.roundTile(previewHotspotAnchorTile.x, previewHotspotAnchorTile.y);
+                if (map.isInside(previewTile.x, previewTile.y))
+                {
+                    const SDL_FPoint previewCenter =
+                        map.tileToScreenCenter(previewTile.x, previewTile.y);
+                    const SDL_FPoint previewHotspotScreen =
+                        map.tileToScreenCenterFloat(
+                            previewHotspotAnchorTile.x,
+                            previewHotspotAnchorTile.y);
+                    rc2d_graphics_setColor(RC2D_Color{255, 210, 95, 180});
+                    rc2d_graphics_drawTileIsometric(
+                        "line",
+                        previewCenter.x,
+                        previewCenter.y,
+                        tileWidth,
+                        tileHeight);
+                    drawHotspotMarker(
+                        previewHotspotScreen,
+                        RC2D_Color{255, 210, 95, 120},
+                        RC2D_Color{255, 245, 190, 245});
+                }
+            }
         }
     }
 
@@ -4503,6 +5814,9 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     setNextButton(&this->buttonToolHotspotRect, &x, row2Y, 122.0f);
     setNextButton(&this->buttonTowerVariantsPickerRect, &x, row2Y, 256.0f);
     setNextButton(&this->buttonTowerDisplayModeRect, &x, row2Y, 238.0f);
+    setNextButton(&this->buttonToolMortarHotspotRect, &x, row2Y, 168.0f);
+    setNextButton(&this->buttonMortarVariantsPickerRect, &x, row2Y, 268.0f);
+    setNextButton(&this->buttonMortarDisplayModeRect, &x, row2Y, 224.0f);
     setNextButton(&this->buttonCenterShipRect, &x, row2Y, 150.0f);
     setNextButton(&this->buttonAssetPrevRect, &x, row2Y, 124.0f);
     setNextButton(&this->buttonAssetNextRect, &x, row2Y, 124.0f);
@@ -4573,7 +5887,7 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         overflowX += rect->w + gap;
     };
 
-    const std::array<SDL_FRect*, 28> buttonsToClamp = {{
+    const std::array<SDL_FRect*, 31> buttonsToClamp = {{
         &this->buttonImportRect,
         &this->buttonImportMapRect,
         &this->buttonExportRect,
@@ -4589,6 +5903,9 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         &this->buttonToolHotspotRect,
         &this->buttonTowerVariantsPickerRect,
         &this->buttonTowerDisplayModeRect,
+        &this->buttonToolMortarHotspotRect,
+        &this->buttonMortarVariantsPickerRect,
+        &this->buttonMortarDisplayModeRect,
         &this->buttonGridRect,
         &this->buttonCenterShipRect,
         &this->buttonAssetPrevRect,
@@ -4697,6 +6014,54 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     this->towerDisplayConfirmRect = SDL_FRect{
         this->towerDisplayPickerRect.x + this->towerDisplayPickerRect.w - 126.0f,
         this->towerDisplayPickerRect.y + this->towerDisplayPickerRect.h - 32.0f,
+        112.0f,
+        24.0f
+    };
+
+    this->mortarVariantPickerRect = SDL_FRect{
+        map.rect.x + (map.rect.w * 0.5f) - 320.0f,
+        map.rect.y + 52.0f,
+        640.0f,
+        452.0f
+    };
+    const float mortarTabY = this->mortarVariantPickerRect.y + 28.0f;
+    const float mortarTabX = this->mortarVariantPickerRect.x + 10.0f;
+    for (int i = 0; i < 3; ++i)
+    {
+        this->mortarVariantLevelTabRects[static_cast<size_t>(i)] = SDL_FRect{
+            mortarTabX + (static_cast<float>(i) * 100.0f),
+            mortarTabY,
+            92.0f,
+            22.0f
+        };
+    }
+    this->mortarVariantConfirmRect = SDL_FRect{
+        this->mortarVariantPickerRect.x + this->mortarVariantPickerRect.w - 130.0f,
+        this->mortarVariantPickerRect.y + this->mortarVariantPickerRect.h - 34.0f,
+        116.0f,
+        24.0f
+    };
+
+    this->mortarDisplayPickerRect = SDL_FRect{
+        map.rect.x + (map.rect.w * 0.5f) - 182.0f,
+        map.rect.y + 72.0f,
+        364.0f,
+        138.0f
+    };
+    const float mortarDisplayTabY = this->mortarDisplayPickerRect.y + 46.0f;
+    const float mortarDisplayTabX = this->mortarDisplayPickerRect.x + 10.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        this->mortarDisplayLevelTabRects[static_cast<size_t>(i)] = SDL_FRect{
+            mortarDisplayTabX + (static_cast<float>(i) * 84.0f),
+            mortarDisplayTabY,
+            78.0f,
+            22.0f
+        };
+    }
+    this->mortarDisplayConfirmRect = SDL_FRect{
+        this->mortarDisplayPickerRect.x + this->mortarDisplayPickerRect.w - 126.0f,
+        this->mortarDisplayPickerRect.y + this->mortarDisplayPickerRect.h - 32.0f,
         112.0f,
         24.0f
     };
@@ -5082,6 +6447,142 @@ bool EditorMapCreateMapScene::handleTowerDisplayPickerClick(float x, float y)
         this->towerPreviewDisplayLevel = i;
         this->statusMessage =
             "Preview towers globale: niv " + std::to_string(this->towerPreviewDisplayLevel);
+        return true;
+    }
+
+    return true;
+}
+
+bool EditorMapCreateMapScene::handleMortarVariantPickerClick(float x, float y)
+{
+    if (!this->mortarVariantPickerVisible)
+    {
+        return false;
+    }
+
+    if (!this->pointInRect(x, y, this->mortarVariantPickerRect))
+    {
+        this->mortarVariantPickerVisible = false;
+        this->statusMessage = "Popup variantes mortier fermee.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->mortarVariantConfirmRect))
+    {
+        this->mortarVariantPickerVisible = false;
+        this->statusMessage = "Variantes mortier confirmees.";
+        return true;
+    }
+
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!this->pointInRect(x, y, this->mortarVariantLevelTabRects[static_cast<size_t>(i)]))
+        {
+            continue;
+        }
+
+        this->selectedMortarVariantLevel = i + 1;
+        this->statusMessage =
+            "Edition variantes mortier: niv " + std::to_string(this->selectedMortarVariantLevel);
+        return true;
+    }
+
+    const float panelPadding = 6.0f;
+    const float rowsTopY = this->mortarVariantPickerRect.y + 58.0f;
+    const float rowsLeftX = this->mortarVariantPickerRect.x + panelPadding;
+    const float rowsWidth =
+        this->mortarVariantPickerRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+    const float rowsHeight = this->mortarVariantPickerRect.h - 154.0f;
+    const float rowGap = 3.0f;
+    const float rowHeight =
+        (rowsHeight - ((kAssetListVisibleRows - 1) * rowGap)) / static_cast<float>(kAssetListVisibleRows);
+    const int startIndex = std::clamp(this->assetListScrollOffset, 0, this->getAssetListMaxScrollOffset());
+
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{
+            rowsLeftX,
+            rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap)),
+            rowsWidth,
+            rowHeight
+        };
+        if (!this->pointInRect(x, y, rowRect))
+        {
+            continue;
+        }
+
+        this->selectedAssetIndex = rowIndex;
+        this->ensureSelectedAssetVisible();
+        if (this->mortarVisualSets.empty())
+        {
+            (void)this->ensureMortarVisualSet(this->selectedMortarHotspotNumber);
+        }
+        for (const MortarHotspot& hotspot : this->mortarHotspots)
+        {
+            (void)this->ensureMortarVisualSet(hotspot.mortarNumber);
+        }
+        for (MortarVisualSet& visualSet : this->mortarVisualSets)
+        {
+            visualSet.importedAssetIndices[static_cast<size_t>(this->selectedMortarVariantLevel - 1)] =
+                this->selectedAssetIndex;
+        }
+        const ImportedAsset& selectedAsset =
+            this->importedAssets[static_cast<size_t>(this->selectedAssetIndex)];
+        this->statusMessage =
+            "Tous les mortiers: niv " + std::to_string(this->selectedMortarVariantLevel)
+            + " assigne a " + selectedAsset.displayName;
+        return true;
+    }
+
+    return true;
+}
+
+bool EditorMapCreateMapScene::handleMortarDisplayPickerClick(float x, float y)
+{
+    if (!this->mortarDisplayPickerVisible)
+    {
+        return false;
+    }
+
+    if (!this->pointInRect(x, y, this->mortarDisplayPickerRect))
+    {
+        this->mortarDisplayPickerVisible = false;
+        this->statusMessage = "Popup affichage mortiers fermee.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->mortarDisplayConfirmRect))
+    {
+        this->mortarDisplayPickerVisible = false;
+        this->statusMessage =
+            "Affichage mortiers confirme: niv " + std::to_string(this->mortarPreviewDisplayLevel) + ".";
+        return true;
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!this->pointInRect(x, y, this->mortarDisplayLevelTabRects[static_cast<size_t>(i)]))
+        {
+            continue;
+        }
+
+        if (i == 0)
+        {
+            this->mortarPreviewDisplayMode = TowerPreviewDisplayMode::HOTSPOTS;
+            this->statusMessage = "Preview mortiers: tuile active.";
+            return true;
+        }
+
+        this->mortarPreviewDisplayMode = TowerPreviewDisplayMode::TOWERS;
+        this->mortarPreviewDisplayLevel = i;
+        this->statusMessage =
+            "Preview mortiers globale: niv " + std::to_string(this->mortarPreviewDisplayLevel);
         return true;
     }
 
@@ -5500,7 +7001,7 @@ void EditorMapCreateMapScene::drawTowerVariantPickerPopup(void) const
     if (this->overlayFont.sdl_font != nullptr)
     {
         const std::string helpText =
-            "Choisis un niveau puis clique l'asset a lier.";
+            "Choisis un niveau puis clique l'asset global a lier.";
         RC2D_Text help =
             rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), helpText.c_str());
         help.color = kHudStatusColor;
@@ -5568,6 +7069,228 @@ void EditorMapCreateMapScene::drawTowerDisplayPickerPopup(void) const
     }
 
     this->drawToolbarButton(this->towerDisplayConfirmRect, "CONFIRMER", false);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawMortarVariantPickerPopup(void) const
+{
+    if (!this->mortarVariantPickerVisible)
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{8, 12, 18, 180});
+    rc2d_graphics_rectangle("fill", &GetGameScreen().rect);
+    rc2d_graphics_setColor(kAssetPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->mortarVariantPickerRect);
+    rc2d_graphics_setColor(kAssetPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->mortarVariantPickerRect);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string title =
+            "VARIANTES MORTIERS - LIER NIVEAUX ET ASSETS";
+        RC2D_Text titleText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title.c_str());
+        titleText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&titleText);
+        rc2d_graphics_drawText(
+            &titleText,
+            this->mortarVariantPickerRect.x + 10.0f,
+            this->mortarVariantPickerRect.y + 6.0f);
+        rc2d_graphics_destroyText(&titleText);
+    }
+
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool active = (this->selectedMortarVariantLevel == (i + 1));
+        const std::string label = "Niv " + std::to_string(i + 1);
+        this->drawToolbarButton(
+            this->mortarVariantLevelTabRects[static_cast<size_t>(i)],
+            label.c_str(),
+            active);
+    }
+
+    const float panelPadding = 6.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->mortarVariantPickerRect.y + 58.0f;
+    const float rowsLeftX = this->mortarVariantPickerRect.x + panelPadding;
+    const float rowsWidth =
+        this->mortarVariantPickerRect.w - ((panelPadding * 2.0f) + kAssetListScrollBarWidth + 4.0f);
+    const float rowsHeight = this->mortarVariantPickerRect.h - 154.0f;
+    const float rowHeight =
+        (rowsHeight - ((kAssetListVisibleRows - 1) * rowGap)) / static_cast<float>(kAssetListVisibleRows);
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAssetListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+    const int startIndex = std::clamp(this->assetListScrollOffset, 0, this->getAssetListMaxScrollOffset());
+    const int visualSetIndex = this->findMortarVisualSetIndexByNumber(this->selectedMortarHotspotNumber);
+    int selectedVariantAssetIndex = -1;
+    if (visualSetIndex >= 0)
+    {
+        selectedVariantAssetIndex =
+            this->mortarVisualSets[static_cast<size_t>(visualSetIndex)]
+                .importedAssetIndices[static_cast<size_t>(this->selectedMortarVariantLevel - 1)];
+    }
+    const int rowCount = static_cast<int>(this->importedAssets.size());
+    const int maxOffset = (std::max)(rowCount - kAssetListVisibleRows, 0);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(
+            14.0f,
+            (scrollTrackRect.h * static_cast<float>(kAssetListVisibleRows)) / static_cast<float>(rowCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    for (int i = 0; i < kAssetListVisibleRows; ++i)
+    {
+        const int rowIndex = startIndex + i;
+        if (rowIndex >= static_cast<int>(this->importedAssets.size()))
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{
+            rowsLeftX,
+            rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap)),
+            rowsWidth,
+            rowHeight
+        };
+        const bool isSelected = (selectedVariantAssetIndex == rowIndex);
+        rc2d_graphics_setColor(isSelected ? kAssetRowSelectedFillColor : kAssetRowFillColor);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(kAssetRowBorderColor);
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const ImportedAsset& importedAsset = this->importedAssets[static_cast<size_t>(rowIndex)];
+            const std::string rowLabel = std::to_string(rowIndex + 1) + ". " +
+                makeAssetLabel(importedAsset.displayName, 26);
+            RC2D_Text rowText =
+                rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), rowLabel.c_str());
+            rowText.color = RC2D_Color{235, 242, 250, 248};
+            rc2d_graphics_setTextColor(&rowText);
+            rc2d_graphics_drawText(&rowText, rowRect.x + 6.0f, rowRect.y + 3.0f);
+            rc2d_graphics_destroyText(&rowText);
+        }
+
+        for (int levelIndex = 0; levelIndex < 3; ++levelIndex)
+        {
+            if (visualSetIndex < 0)
+            {
+                break;
+            }
+            if (this->mortarVisualSets[static_cast<size_t>(visualSetIndex)]
+                    .importedAssetIndices[static_cast<size_t>(levelIndex)] != rowIndex)
+            {
+                continue;
+            }
+
+            SDL_FRect badgeRect{
+                rowRect.x + rowRect.w - 44.0f - (static_cast<float>(2 - levelIndex) * 40.0f),
+                rowRect.y + 3.0f,
+                34.0f,
+                rowRect.h - 6.0f
+            };
+            this->drawToolbarButton(
+                badgeRect,
+                ("N" + std::to_string(levelIndex + 1)).c_str(),
+                levelIndex + 1 == this->selectedMortarVariantLevel);
+        }
+    }
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string helpText =
+            "Choisis un niveau puis clique l'asset global a lier.";
+        RC2D_Text help =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), helpText.c_str());
+        help.color = kHudStatusColor;
+        rc2d_graphics_setTextColor(&help);
+        rc2d_graphics_drawText(
+            &help,
+            this->mortarVariantPickerRect.x + 10.0f,
+            this->mortarVariantConfirmRect.y - 20.0f);
+        rc2d_graphics_destroyText(&help);
+    }
+
+    this->drawToolbarButton(this->mortarVariantConfirmRect, "CONFIRMER", false);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapCreateMapScene::drawMortarDisplayPickerPopup(void) const
+{
+    if (!this->mortarDisplayPickerVisible)
+    {
+        return;
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{8, 12, 18, 180});
+    rc2d_graphics_rectangle("fill", &GetGameScreen().rect);
+    rc2d_graphics_setColor(kAssetPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->mortarDisplayPickerRect);
+    rc2d_graphics_setColor(kAssetPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->mortarDisplayPickerRect);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const std::string title = "CHOISIR AFFICHAGE HOTSPOT / MORTIER";
+        RC2D_Text titleText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title.c_str());
+        titleText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&titleText);
+        rc2d_graphics_drawText(
+            &titleText,
+            this->mortarDisplayPickerRect.x + 10.0f,
+            this->mortarDisplayPickerRect.y + 8.0f);
+        rc2d_graphics_destroyText(&titleText);
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        std::string label = "Niv " + std::to_string(i);
+        bool active = false;
+        if (i == 0)
+        {
+            label = "Tuile";
+            active = (this->mortarPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+        }
+        else
+        {
+            active =
+                this->mortarPreviewDisplayMode == TowerPreviewDisplayMode::TOWERS &&
+                this->mortarPreviewDisplayLevel == i;
+        }
+        this->drawToolbarButton(
+            this->mortarDisplayLevelTabRects[static_cast<size_t>(i)],
+            label.c_str(),
+            active);
+    }
+
+    this->drawToolbarButton(this->mortarDisplayConfirmRect, "CONFIRMER", false);
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
@@ -6172,6 +7895,106 @@ bool EditorMapCreateMapScene::pointInRect(float x, float y, const SDL_FRect& rec
         y <= (rect.y + rect.h));
 }
 
+bool EditorMapCreateMapScene::isPointOverBlockingEditorUi(float x, float y) const
+{
+    if (this->pointInRect(x, y, this->mapNameInputRect) ||
+        this->pointInRect(x, y, this->miniMapRect))
+    {
+        return true;
+    }
+
+    if (this->towerVariantPickerVisible &&
+        this->pointInRect(x, y, this->towerVariantPickerRect))
+    {
+        return true;
+    }
+    if (this->towerDisplayPickerVisible &&
+        this->pointInRect(x, y, this->towerDisplayPickerRect))
+    {
+        return true;
+    }
+    if (this->mortarVariantPickerVisible &&
+        this->pointInRect(x, y, this->mortarVariantPickerRect))
+    {
+        return true;
+    }
+    if (this->mortarDisplayPickerVisible &&
+        this->pointInRect(x, y, this->mortarDisplayPickerRect))
+    {
+        return true;
+    }
+
+    if (this->showBottomRightLists &&
+        (this->pointInRect(x, y, this->assetListRect) ||
+         this->pointInRect(x, y, this->shipListRect)))
+    {
+        return true;
+    }
+
+    const std::array<const SDL_FRect*, 31> toolbarRects = {{
+        &this->buttonImportRect,
+        &this->buttonImportMapRect,
+        &this->buttonImportShipRect,
+        &this->buttonExportRect,
+        &this->buttonUndoRect,
+        &this->buttonRedoRect,
+        &this->buttonToolBlockRect,
+        &this->buttonToolUnblockRect,
+        &this->buttonToolPlaceRect,
+        &this->buttonToolRemoveRect,
+        &this->buttonToolInteractRect,
+        &this->buttonToolShipRect,
+        &this->buttonToolShipControlRect,
+        &this->buttonToolHotspotRect,
+        &this->buttonTowerVariantsPickerRect,
+        &this->buttonTowerDisplayModeRect,
+        &this->buttonToolMortarHotspotRect,
+        &this->buttonMortarVariantsPickerRect,
+        &this->buttonMortarDisplayModeRect,
+        &this->buttonAssetPrevRect,
+        &this->buttonAssetNextRect,
+        &this->buttonOceanPrevRect,
+        &this->buttonOceanNextRect,
+        &this->buttonGridRect,
+        &this->buttonBlockedTilesRect,
+        &this->buttonCenterRect,
+        &this->buttonCenterShipRect,
+        &this->buttonZoomOutRect,
+        &this->buttonZoomInRect,
+        &this->buttonListsVisibilityRect,
+        &this->buttonAssetOpacityToggleRect
+    }};
+    for (const SDL_FRect* rect : toolbarRects)
+    {
+        if (rect != nullptr && this->pointInRect(x, y, *rect))
+        {
+            return true;
+        }
+    }
+
+    const std::array<const SDL_FRect*, 10> utilityRects = {{
+        &this->buttonBlockedBrushMinusRect,
+        &this->buttonBlockedBrushPlusRect,
+        &this->buttonBlockedColorPrevRect,
+        &this->buttonBlockedColorNextRect,
+        &this->buttonHotspotColorPrevRect,
+        &this->buttonHotspotColorNextRect,
+        &this->buttonAssetOpacityMinusRect,
+        &this->buttonAssetOpacityPlusRect,
+        &this->buttonShipScaleMinusRect,
+        &this->buttonShipScalePlusRect
+    }};
+    for (const SDL_FRect* rect : utilityRects)
+    {
+        if (rect != nullptr && this->pointInRect(x, y, *rect))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // UI editeur (toolbar, infos, listes, minimap).
 // ---------------------------------------------------------------------------
@@ -6296,15 +8119,20 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonToolHotspotRect))
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
+        this->resetTowerPlacementStage();
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
         this->statusMessage =
-            "Mode HOTSPOT TOUR: clique sur la tuile voulue pour la tower "
+            std::string("Mode HOTSPOT TOUR: tower ")
             + std::to_string(ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber))
-            + ".";
+            + " | etape " + this->getTowerPlacementStageLabel() + ".";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonTowerVariantsPickerRect))
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
         this->towerDisplayPickerVisible = false;
         this->towerVariantPickerVisible = !this->towerVariantPickerVisible;
         this->statusMessage = this->towerVariantPickerVisible
@@ -6314,11 +8142,48 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     }
     if (this->pointInRect(x, y, this->buttonTowerDisplayModeRect))
     {
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
         this->towerVariantPickerVisible = false;
         this->towerDisplayPickerVisible = !this->towerDisplayPickerVisible;
         this->statusMessage = this->towerDisplayPickerVisible
             ? "Choisis TUILE HOTSPOT ou un niveau global puis confirme."
             : "Popup affichage fermee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonToolMortarHotspotRect))
+    {
+        this->editorTool = EditorTool::HOTSPOT_MORTARS;
+        this->resetMortarPlacementStage();
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = false;
+        this->statusMessage =
+            std::string("Mode HOTSPOT MORTIER: mortier ")
+            + std::to_string(ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber))
+            + " | etape " + this->getMortarPlacementStageLabel() + ".";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonMortarVariantsPickerRect))
+    {
+        this->editorTool = EditorTool::HOTSPOT_MORTARS;
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
+        this->mortarVariantPickerVisible = !this->mortarVariantPickerVisible;
+        this->statusMessage = this->mortarVariantPickerVisible
+            ? "Popup variantes mortiers ouverte."
+            : "Popup variantes mortier fermee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonMortarDisplayModeRect))
+    {
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = false;
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = !this->mortarDisplayPickerVisible;
+        this->statusMessage = this->mortarDisplayPickerVisible
+            ? "Choisis TUILE HOTSPOT ou un niveau global de mortier puis confirme."
+            : "Popup affichage mortiers fermee.";
         return true;
     }
     if (this->pointInRect(x, y, this->buttonAssetPrevRect))
@@ -6371,9 +8236,22 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         {
             this->selectedTowerHotspotNumber =
                 ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber - 1);
+            this->resetTowerPlacementStage();
             this->statusMessage =
-                "Tower hotspot selectionnee: "
-                + std::to_string(this->selectedTowerHotspotNumber) + "/12";
+                std::string("Tower selectionnee: ")
+                + std::to_string(this->selectedTowerHotspotNumber) + "/12"
+                + " | etape " + this->getTowerPlacementStageLabel() + ".";
+            return true;
+        }
+        if (this->editorTool == EditorTool::HOTSPOT_MORTARS)
+        {
+            this->selectedMortarHotspotNumber =
+                ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber - 1);
+            this->resetMortarPlacementStage();
+            this->statusMessage =
+                std::string("Mortier selectionne: ")
+                + std::to_string(this->selectedMortarHotspotNumber) + "/12"
+                + " | etape " + this->getMortarPlacementStageLabel() + ".";
             return true;
         }
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles - 1, 0, 8);
@@ -6386,9 +8264,22 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
         {
             this->selectedTowerHotspotNumber =
                 ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber + 1);
+            this->resetTowerPlacementStage();
             this->statusMessage =
-                "Tower hotspot selectionnee: "
-                + std::to_string(this->selectedTowerHotspotNumber) + "/12";
+                std::string("Tower selectionnee: ")
+                + std::to_string(this->selectedTowerHotspotNumber) + "/12"
+                + " | etape " + this->getTowerPlacementStageLabel() + ".";
+            return true;
+        }
+        if (this->editorTool == EditorTool::HOTSPOT_MORTARS)
+        {
+            this->selectedMortarHotspotNumber =
+                ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber + 1);
+            this->resetMortarPlacementStage();
+            this->statusMessage =
+                std::string("Mortier selectionne: ")
+                + std::to_string(this->selectedMortarHotspotNumber) + "/12"
+                + " | etape " + this->getMortarPlacementStageLabel() + ".";
             return true;
         }
         this->blockedBrushRadiusTiles = std::clamp(this->blockedBrushRadiusTiles + 1, 0, 8);
@@ -6538,6 +8429,10 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     {
         toolLabel = "Hotspot tours";
     }
+    else if (this->editorTool == EditorTool::HOTSPOT_MORTARS)
+    {
+        toolLabel = "Hotspot mortiers";
+    }
     const char* oceanLabel = kOceanColors[static_cast<size_t>(this->selectedOceanColorIndex)].label;
     const bool assetInteractionToolActive =
         (this->editorTool == EditorTool::INTERACT_ASSETS);
@@ -6553,21 +8448,30 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     const bool assetInteractionPaintRemoveModeActive =
         assetInteractionToolActive &&
         this->assetInteractionEditMode == AssetInteractionEditMode::PAINT_REMOVE;
-    const bool hotspotToolActive = (this->editorTool == EditorTool::HOTSPOT_TOWERS);
+    const bool towerHotspotToolActive = (this->editorTool == EditorTool::HOTSPOT_TOWERS);
+    const bool mortarHotspotToolActive = (this->editorTool == EditorTool::HOTSPOT_MORTARS);
     const bool towerPreviewShowsHotspots =
         (this->towerPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
+    const bool mortarPreviewShowsHotspots =
+        (this->mortarPreviewDisplayMode == TowerPreviewDisplayMode::HOTSPOTS);
     const std::string towerViewSummary = towerPreviewShowsHotspots
         ? std::string("TUILE HOTSPOT")
         : ("NIV " + std::to_string(std::clamp(this->towerPreviewDisplayLevel, 1, 4)));
+    const std::string mortarViewSummary = mortarPreviewShowsHotspots
+        ? std::string("TUILE HOTSPOT")
+        : ("NIV " + std::to_string(std::clamp(this->mortarPreviewDisplayLevel, 1, 3)));
     const char* blockedBrushMinusLabel =
-        hotspotToolActive ? "Tour# -" : "Block -";
+        towerHotspotToolActive ? "Tour# -" : (mortarHotspotToolActive ? "Mort# -" : "Block -");
     const char* blockedBrushPlusLabel =
-        hotspotToolActive ? "Tour# +" : "Block +";
+        towerHotspotToolActive ? "Tour# +" : (mortarHotspotToolActive ? "Mort# +" : "Block +");
     const char* oceanPrevLabel = "Ocean -";
     const char* oceanNextLabel = "Ocean +";
     const std::string towerDisplayModeLabel = towerPreviewShowsHotspots
         ? std::string("AFFICHAGE TOWERS : TUILE")
         : ("AFFICHAGE TOWERS : NIV " + std::to_string(std::clamp(this->towerPreviewDisplayLevel, 1, 4)));
+    const std::string mortarDisplayModeLabel = mortarPreviewShowsHotspots
+        ? std::string("AFFICHAGE MORTIER : TUILE")
+        : ("AFFICHAGE MORTIER : NIV " + std::to_string(std::clamp(this->mortarPreviewDisplayLevel, 1, 3)));
     const char* toolBlockLabel = assetInteractionToolActive ? "TILE GUI" : "Collision";
     const char* toolUnblockLabel = assetInteractionToolActive ? "SUPPR TILE GUI" : "Suppr Collision";
     const EditorMapAssetClickGuiTargetInfo& selectedClickGuiInfo = selectedPlacedAssetActive
@@ -6611,6 +8515,15 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         this->buttonTowerDisplayModeRect,
         towerDisplayModeLabel.c_str(),
         this->towerDisplayPickerVisible);
+    this->drawToolbarButton(this->buttonToolMortarHotspotRect, "HOTSPOT MORTIER", this->editorTool == EditorTool::HOTSPOT_MORTARS);
+    this->drawToolbarButton(
+        this->buttonMortarVariantsPickerRect,
+        "CHOISIR VARIANTE MORTIERS",
+        this->editorTool == EditorTool::HOTSPOT_MORTARS && this->mortarVariantPickerVisible);
+    this->drawToolbarButton(
+        this->buttonMortarDisplayModeRect,
+        mortarDisplayModeLabel.c_str(),
+        this->mortarDisplayPickerVisible);
     this->drawToolbarButton(this->buttonAssetPrevRect, "Asset precedent", false);
     this->drawToolbarButton(this->buttonAssetNextRect, "Asset suivant", false);
     this->drawToolbarButton(this->buttonOceanPrevRect, oceanPrevLabel, false);
@@ -6676,10 +8589,11 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Assets importes:%d | Assets poses:%d | Hotspots:%d | Selection:%s | Navires:%d | Navire actif:%s",
+        "Assets importes:%d | Assets poses:%d | Towers:%d | Mortiers:%d | Selection:%s | Navires:%d | Navire actif:%s",
         static_cast<int>(this->importedAssets.size()),
         static_cast<int>(this->placedAssets.size()),
         static_cast<int>(this->towerHotspots.size()),
+        static_cast<int>(this->mortarHotspots.size()),
         selectedAssetName,
         static_cast<int>(this->importedShips.size()),
         selectedShipName);
@@ -6704,19 +8618,35 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
             this->testShip.isMoving() ? "ON" : "OFF",
             this->testShipCameraFollowEnabled ? "ON" : "OFF");
     }
+    std::string activeDefenseSummary =
+        "TowerView:" + towerViewSummary + " | MortarView:" + mortarViewSummary;
+    if (towerHotspotToolActive)
+    {
+        activeDefenseSummary =
+            "TowerSel:" + std::to_string(ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber))
+            + "/12 | TowerVar:Niv" + std::to_string(std::clamp(this->selectedTowerVariantLevel, 1, 4))
+            + " | TowerStep:" + this->getTowerPlacementStageLabel()
+            + " | TowerView:" + towerViewSummary;
+    }
+    else if (mortarHotspotToolActive)
+    {
+        activeDefenseSummary =
+            "MortierSel:" + std::to_string(ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber))
+            + "/12 | MortierVar:Niv" + std::to_string(std::clamp(this->selectedMortarVariantLevel, 1, 3))
+            + " | MortierStep:" + this->getMortarPlacementStageLabel()
+            + " | MortierView:" + mortarViewSummary;
+    }
     char line4[1024] = {};
     SDL_snprintf(
         line4,
         sizeof(line4),
-        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%% | TowerSel:%d/12 | TowerVar:Niv%d | TowerView:%s | AssetEdit:%s | ClickGui:%s | ClickTiles:%d",
+        "MapName:%s | BlockBrush:%dx | AssetOpacity:%d%%(%s) | ShipScale:%d%% | %s | AssetEdit:%s | ClickGui:%s | ClickTiles:%d",
         this->mapNameInput.empty() ? "<vide>" : this->mapNameInput.c_str(),
         (this->blockedBrushRadiusTiles * 2) + 1,
         this->assetOpacityPercent,
         this->assetTransparencyEnabled ? "ON" : "OFF",
         this->shipScalePercent,
-        ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber),
-        std::clamp(this->selectedTowerVariantLevel, 1, 4),
-        towerViewSummary.c_str(),
+        activeDefenseSummary.c_str(),
         selectedPlacedAssetActive ? "ON" : "OFF",
         selectedClickGuiInfo.label,
         selectedClickTileCount);
@@ -6762,6 +8692,14 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     if (this->towerDisplayPickerVisible)
     {
         this->drawTowerDisplayPickerPopup();
+    }
+    if (this->mortarVariantPickerVisible)
+    {
+        this->drawMortarVariantPickerPopup();
+    }
+    if (this->mortarDisplayPickerVisible)
+    {
+        this->drawMortarDisplayPickerPopup();
     }
 }
 void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index)
@@ -7020,6 +8958,8 @@ void EditorMapCreateMapScene::draw(void)
     this->drawWorldGridAndBlockedTiles();
     this->drawPlacedAssets();
     this->drawTestShip();
+    this->drawTowerHotspotsAndPreviews();
+    this->drawMortarHotspotsAndPreviews();
     this->scrollBarOverlay.draw(map.rect, map);
 
     WorldRenderClip::end(renderer);
@@ -7179,7 +9119,29 @@ void EditorMapCreateMapScene::keypressed(
     if (scancode == SDL_SCANCODE_T && !isrepeat)
     {
         this->editorTool = EditorTool::HOTSPOT_TOWERS;
-        this->statusMessage = "Mode HOTSPOT TOUR: clique sur la tuile voulue.";
+        this->resetTowerPlacementStage();
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = false;
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
+        this->statusMessage =
+            std::string("Mode HOTSPOT TOUR: tower ")
+            + std::to_string(ClampEditorMapTowerHotspotNumber(this->selectedTowerHotspotNumber))
+            + " | etape " + this->getTowerPlacementStageLabel() + ".";
+        return;
+    }
+    if (scancode == SDL_SCANCODE_M && !isrepeat)
+    {
+        this->editorTool = EditorTool::HOTSPOT_MORTARS;
+        this->resetMortarPlacementStage();
+        this->towerVariantPickerVisible = false;
+        this->towerDisplayPickerVisible = false;
+        this->mortarVariantPickerVisible = false;
+        this->mortarDisplayPickerVisible = false;
+        this->statusMessage =
+            std::string("Mode HOTSPOT MORTIER: mortier ")
+            + std::to_string(ClampEditorMapMortarHotspotNumber(this->selectedMortarHotspotNumber))
+            + " | etape " + this->getMortarPlacementStageLabel() + ".";
         return;
     }
     if (scancode == SDL_SCANCODE_COMMA && !isrepeat)
@@ -7291,6 +9253,14 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     {
         return;
     }
+    if (this->handleMortarVariantPickerClick(renderX, renderY))
+    {
+        return;
+    }
+    if (this->handleMortarDisplayPickerClick(renderX, renderY))
+    {
+        return;
+    }
     if (this->handleToolbarClick(renderX, renderY))
     {
         return;
@@ -7393,17 +9363,38 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     }
     if (this->editorTool == EditorTool::HOTSPOT_TOWERS)
     {
+        if (button == RC2D_MOUSE_BUTTON_RIGHT)
+        {
+            this->resetTowerPlacementStage();
+            this->statusMessage =
+                std::string("Tower ") + std::to_string(this->selectedTowerHotspotNumber) +
+                " : workflow reinitialise sur " + this->getTowerPlacementStageLabel() + ".";
+            return;
+        }
+
         if (button != RC2D_MOUSE_BUTTON_LEFT)
         {
             return;
         }
-        const SDL_Point tile = map.screenToTileNearest(renderX, renderY);
-        if (!map.isInside(tile.x, tile.y))
+        this->placeTowerWorkflowAtScreenPoint(renderX, renderY);
+        return;
+    }
+    if (this->editorTool == EditorTool::HOTSPOT_MORTARS)
+    {
+        if (button == RC2D_MOUSE_BUTTON_RIGHT)
         {
-            this->statusMessage = "Hotspot hors map: ignore.";
+            this->resetMortarPlacementStage();
+            this->statusMessage =
+                std::string("Mortier ") + std::to_string(this->selectedMortarHotspotNumber) +
+                " : workflow reinitialise sur " + this->getMortarPlacementStageLabel() + ".";
             return;
         }
-        this->toggleTowerHotspotAtTile(tile.x, tile.y);
+
+        if (button != RC2D_MOUSE_BUTTON_LEFT)
+        {
+            return;
+        }
+        this->placeMortarWorkflowAtScreenPoint(renderX, renderY);
         return;
     }
 }
@@ -7463,6 +9454,16 @@ void EditorMapCreateMapScene::mousewheelmoved(
         return;
     }
     if (this->towerDisplayPickerVisible && this->pointInRect(renderX, renderY, this->towerDisplayPickerRect))
+    {
+        return;
+    }
+    if (this->mortarVariantPickerVisible && this->pointInRect(renderX, renderY, this->mortarVariantPickerRect))
+    {
+        this->assetListScrollOffset += (delta > 0) ? -step : step;
+        this->clampAssetListScrollOffset();
+        return;
+    }
+    if (this->mortarDisplayPickerVisible && this->pointInRect(renderX, renderY, this->mortarDisplayPickerRect))
     {
         return;
     }

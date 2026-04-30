@@ -85,6 +85,14 @@ void SceneManager::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycod
     }
 }
 
+void SceneManager::textinput(const RC2D_TextInputEventInfo* info)
+{
+    if (this->currentScene)
+    {
+        this->currentScene->textinput(info);
+    }
+}
+
 void SceneManager::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) 
 {
     if (this->currentScene) 

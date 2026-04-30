@@ -1,8 +1,8 @@
 #pragma once
 
-#include <mutex>   // std::mutex
+#include <cstdint> // uint8_t
 #include <deque>   // std::deque
-#include <cstdint> // uint16_t, uint32_t, etc.
+#include <mutex>   // std::mutex
 
 #include "services/http/types/auth/responses.h"
 
@@ -12,18 +12,14 @@
 
 enum class HttpToSimulationMessageType : uint8_t
 {
-    AUTH_SIGNUP_RESPONSE = 0,
-    AUTH_SIGNIN_RESPONSE = 1,
+    AUTH_SIGNIN_RESPONSE = 0,
 };
 
 struct HttpToSimulationMessage
 {
     HttpToSimulationMessageType type;
 
-    // Pour le type AUTH_SIGNUP_RESPONSE
-    AuthSignUpHTTPResponse authSignUpResponse;
-
-    // Pour le type AUTH_SIGNIN_RESPONSE
+    // Payload utilise lorsque `type == AUTH_SIGNIN_RESPONSE`.
     AuthSignInHTTPResponse authSignInResponse;
 };
 

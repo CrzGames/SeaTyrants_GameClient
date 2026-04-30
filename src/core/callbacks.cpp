@@ -39,8 +39,7 @@ void rc2d_unload(void)
 
 void rc2d_load(void)
 {
-    // Detecter la langue systeme des le boot pour la rendre disponible
-    // globalement avant la creation des scenes UI.
+    // Detecter la langue systeme des le boot pour la rendre disponible globalement avant la creation des scenes UI.
     RC2D_Locale* preferredLocales = rc2d_local_getPreferredLocales();
     SystemLocaleLanguageResolver::StorePreferredLocaleInContext(preferredLocales);
     rc2d_local_freeLocales(preferredLocales);
@@ -66,15 +65,20 @@ void rc2d_load(void)
     // Si le format hexadécimal est invalide, arrêter immédiatement le client.
     if (!ClientSecureSession_InitializePinnedServerSigningPublicKey())
     {
+        // Demande d'arrêt propre du moteur.
         rc2d_event_quit();
+
+        // Log explicite de l'erreur pour diagnostic.
         RC2D_log(RC2D_LOG_ERROR, "Failed to initialize pinned server signing public key");
+
+        // Sort de la fonction de callback pour éviter de continuer l'initialisation du client dans un état potentiellement instable.
         return;
     }
 
     // Scene de départ visible au boot.
     // - "splashscreen"  => splashscreen puis loading puis menu
     // - autre valeur    => loading puis cette scene
-    const std::string startupSceneName = "game";
+    const std::string startupSceneName = "menu";
     const std::string loadingNextSceneName =
         (startupSceneName == "splashscreen" || startupSceneName == "loading")
             ? std::string("menu")
@@ -103,37 +107,11 @@ void rc2d_load(void)
         sceneManager.changeScene("loading");
     }
 
-    // Mettre en plein écran.
-    //rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
+    // Maximise la fenêtre.
+    rc2d_window_maximize();
 
-    // Cache le curseur de la souris, pour une meilleure immersion.
-    // Le client vas le réafficher dans la scène de menu pour permettre l'interaction avec l'UI.
-    //rc2d_mouse_setVisible(false);
-
-    // À ce stade, l'initialisation applicative est terminée.
-    // Le client peut commencer à accepter et traiter son activité normale.
+    // Log de confirmation que le client a terminé son initialisation.
     RC2D_log(RC2D_LOG_INFO, "Client is ready");
-
-    // --------------------------------------------------------------------
-    // Bootstrap temporaire (DEV):
-    // - en attendant l'UI de login, on envoie un signup puis un signin
-    //   hardcodes au thread HTTP.
-    // - le signin reussi declenchera ensuite la connexion reseau jeu.
-    // --------------------------------------------------------------------
-    /*SimulationToHttpQueue& simToHttpQueue = GetSimulationToHttpQueue();
-
-    SimulationToHttpMessage signUpMessage{};
-    signUpMessage.type = SimulationToHttpMessageType::AUTH_SIGNUP_REQUEST;
-    signUpMessage.authSignUpRequest.username = "coco";
-    signUpMessage.authSignUpRequest.email = "coco@orangexxx.fr";
-    signUpMessage.authSignUpRequest.password = "toto35000!xx";
-    simToHttpQueue.push(signUpMessage);
-
-    SimulationToHttpMessage signInMessage{};
-    signInMessage.type = SimulationToHttpMessageType::AUTH_SIGNIN_REQUEST;
-    signInMessage.authSignInRequest.email = "coco@orangexxx.fr";
-    signInMessage.authSignInRequest.password = "toto35000!xx";
-    simToHttpQueue.push(signInMessage);*/
 }
 
 void rc2d_update(double dt)
@@ -252,6 +230,11 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
 #endif
 
     sceneManager.keypressed(key, scancode, keycode, mod, isrepeat, keyboardID);
+}
+
+void rc2d_textinput(const RC2D_TextInputEventInfo* info)
+{
+    sceneManager.textinput(info);
 }
 
 void rc2d_localechanged(RC2D_Locale* locales)

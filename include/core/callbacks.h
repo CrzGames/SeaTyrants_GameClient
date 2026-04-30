@@ -14,6 +14,7 @@ void rc2d_websocket_update(void);
 void rc2d_wake_blocking_threads(void);
 void rc2d_draw(void);
 void rc2d_mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID);
+void rc2d_textinput(const RC2D_TextInputEventInfo* info);
 void rc2d_mousewheelmoved(
     RC2D_MouseWheelDirection direction,
     float x,

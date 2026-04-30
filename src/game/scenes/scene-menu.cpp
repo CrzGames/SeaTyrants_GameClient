@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <mutex>
 
 namespace menu_scene
 {
@@ -69,6 +71,19 @@ namespace menu_scene
     static constexpr RC2D_Color kFlagNormalBorder = RC2D_Color{105, 138, 164, 178};
     static constexpr RC2D_Color kFlagHoverBorder = RC2D_Color{218, 187, 96, 240};
     static constexpr RC2D_Color kFlagSelectedBorder = RC2D_Color{237, 210, 124, 255};
+    static constexpr RC2D_Color kErrorText = RC2D_Color{255, 129, 113, 255};
+    static constexpr RC2D_Color kSuccessText = RC2D_Color{161, 220, 155, 255};
+    static constexpr RC2D_Color kOverlayDim = RC2D_Color{0, 0, 0, 160};
+    static constexpr RC2D_Color kServerRowFill = RC2D_Color{10, 20, 32, 214};
+    static constexpr RC2D_Color kServerRowBorder = RC2D_Color{110, 146, 170, 182};
+    static constexpr RC2D_Color kServerOpenText = RC2D_Color{161, 220, 155, 255};
+    static constexpr RC2D_Color kServerClosedText = RC2D_Color{255, 129, 113, 255};
+    static constexpr RC2D_Color kServerButtonFill = RC2D_Color{24, 48, 70, 226};
+    static constexpr RC2D_Color kServerButtonHoverFill = RC2D_Color{43, 72, 98, 238};
+    static constexpr RC2D_Color kServerButtonBorder = RC2D_Color{226, 191, 91, 255};
+    static constexpr RC2D_Color kPendingPanelFill = RC2D_Color{9, 19, 31, 234};
+    static constexpr RC2D_Color kPendingPanelBorder = RC2D_Color{236, 201, 102, 255};
+    static constexpr RC2D_Color kPendingLoaderColor = RC2D_Color{211, 223, 236, 255};
 
     /**
      * @brief Applique un alpha global a une couleur RGBA existante.
@@ -209,30 +224,29 @@ namespace menu_scene
     /**
      * @brief Met a jour le curseur systeme du menu sans recreer le curseur a chaque frame.
      */
-    void applyMenuCursor(bool wantsPointer)
+    void applyMenuCursor(SDL_SystemCursor cursorId)
     {
-        static SDL_Cursor* defaultCursor = nullptr;
-        static SDL_Cursor* pointerCursor = nullptr;
-        static bool lastPointerState = false;
-        static bool initialized = false;
+        static SDL_SystemCursor lastCursorId = static_cast<SDL_SystemCursor>(-1);
+        static SDL_Cursor* cachedCursors[3] = {nullptr, nullptr, nullptr};
+        const int cacheIndex =
+            (cursorId == SDL_SYSTEM_CURSOR_POINTER) ? 1 :
+            (cursorId == SDL_SYSTEM_CURSOR_TEXT) ? 2 : 0;
 
-        if (!initialized)
-        {
-            defaultCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
-            pointerCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
-            initialized = true;
-        }
-
-        if (initialized && wantsPointer == lastPointerState)
+        if (cursorId == lastCursorId)
         {
             return;
         }
 
-        SDL_Cursor* targetCursor = wantsPointer ? pointerCursor : defaultCursor;
+        if (cachedCursors[cacheIndex] == nullptr)
+        {
+            cachedCursors[cacheIndex] = SDL_CreateSystemCursor(cursorId);
+        }
+
+        SDL_Cursor* targetCursor = cachedCursors[cacheIndex];
         if (targetCursor != nullptr)
         {
             rc2d_mouse_setCursor(targetCursor);
-            lastPointerState = wantsPointer;
+            lastCursorId = cursorId;
         }
     }
 
@@ -359,6 +373,375 @@ namespace menu_scene
         SDL_RenderTexture(renderer, image->sdl_texture, nullptr, &dstRect);
         SDL_SetTextureAlphaMod(image->sdl_texture, previousAlpha);
     }
+
+    /**
+     * @brief Mesure la largeur d'un texte avec la police indiquee.
+     */
+    float measureTextWidth(RC2D_Font* font, const std::string& text)
+    {
+        if (font == nullptr || font->sdl_font == nullptr || text.empty())
+        {
+            return 0.0f;
+        }
+
+        RC2D_Text renderedText = rc2d_graphics_createText(font, text.c_str());
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&renderedText, &textWidth, &textHeight);
+        rc2d_graphics_destroyText(&renderedText);
+        return static_cast<float>(textWidth);
+    }
+
+    /**
+     * @brief Dessine un texte aligne a gauche et centre verticalement dans un rectangle.
+     */
+    void drawTextLeftCenteredY(
+        RC2D_Font* font,
+        const std::string& text,
+        const SDL_FRect& rect,
+        float leftX,
+        RC2D_Color color)
+    {
+        if (font == nullptr || font->sdl_font == nullptr || text.empty() || !isValidRect(rect))
+        {
+            return;
+        }
+
+        RC2D_Text renderedText = rc2d_graphics_createText(font, text.c_str());
+        renderedText.color = color;
+        rc2d_graphics_setTextColor(&renderedText);
+
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&renderedText, &textWidth, &textHeight);
+        (void)textWidth;
+
+        const float drawX = std::round(leftX);
+        const float drawY = std::round(rect.y + ((rect.h - static_cast<float>(textHeight)) * 0.5f));
+        rc2d_graphics_drawText(&renderedText, drawX, drawY);
+        rc2d_graphics_destroyText(&renderedText);
+    }
+
+    /**
+     * @brief Dessine un texte centre dans un rectangle.
+     */
+    void drawCenteredText(RC2D_Font* font, const std::string& text, const SDL_FRect& rect, RC2D_Color color)
+    {
+        if (font == nullptr || font->sdl_font == nullptr || text.empty() || !isValidRect(rect))
+        {
+            return;
+        }
+
+        RC2D_Text renderedText = rc2d_graphics_createText(font, text.c_str());
+        renderedText.color = color;
+        rc2d_graphics_setTextColor(&renderedText);
+
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&renderedText, &textWidth, &textHeight);
+
+        const float drawX = std::round(rect.x + ((rect.w - static_cast<float>(textWidth)) * 0.5f));
+        const float drawY = std::round(rect.y + ((rect.h - static_cast<float>(textHeight)) * 0.5f));
+        rc2d_graphics_drawText(&renderedText, drawX, drawY);
+        rc2d_graphics_destroyText(&renderedText);
+    }
+
+    bool isUtf8ContinuationByte(unsigned char byteValue)
+    {
+        return (byteValue & 0xC0U) == 0x80U;
+    }
+
+    /**
+     * @brief Retourne la version masquee d'un mot de passe pour l'affichage menu.
+     */
+    std::string buildMaskedPassword(const std::string& password)
+    {
+        std::size_t codepointCount = 0U;
+        for (std::size_t index = 0U; index < password.size();)
+        {
+            ++codepointCount;
+            ++index;
+            while (index < password.size() &&
+                   isUtf8ContinuationByte(static_cast<unsigned char>(password[index])))
+            {
+                ++index;
+            }
+        }
+
+        return std::string(codepointCount, '*');
+    }
+
+    void eraseLastUtf8Codepoint(std::string* text)
+    {
+        if (text == nullptr || text->empty())
+        {
+            return;
+        }
+
+        std::size_t newSize = text->size() - 1U;
+        while (newSize > 0U && isUtf8ContinuationByte(static_cast<unsigned char>((*text)[newSize])))
+        {
+            --newSize;
+        }
+
+        text->erase(newSize);
+    }
+
+    std::vector<std::size_t> buildUtf8CodepointOffsets(const std::string& text)
+    {
+        std::vector<std::size_t> offsets{};
+        offsets.reserve(text.size() + 1U);
+        offsets.push_back(0U);
+
+        std::size_t index = 0U;
+        while (index < text.size())
+        {
+            ++index;
+            while (index < text.size() &&
+                   isUtf8ContinuationByte(static_cast<unsigned char>(text[index])))
+            {
+                ++index;
+            }
+
+            offsets.push_back(index);
+        }
+
+        return offsets;
+    }
+
+    std::size_t clampByteOffsetToUtf8Boundary(const std::vector<std::size_t>& offsets, std::size_t byteOffset)
+    {
+        if (offsets.empty())
+        {
+            return 0U;
+        }
+
+        std::size_t clamped = (std::min)(byteOffset, offsets.back());
+        for (std::size_t offset : offsets)
+        {
+            if (offset == clamped)
+            {
+                return offset;
+            }
+
+            if (offset > clamped)
+            {
+                break;
+            }
+        }
+
+        std::size_t previousOffset = 0U;
+        for (std::size_t offset : offsets)
+        {
+            if (offset > clamped)
+            {
+                break;
+            }
+
+            previousOffset = offset;
+        }
+
+        return previousOffset;
+    }
+
+    std::size_t findCodepointIndexForByteOffset(const std::vector<std::size_t>& offsets, std::size_t byteOffset)
+    {
+        if (offsets.empty())
+        {
+            return 0U;
+        }
+
+        const std::size_t clampedOffset = clampByteOffsetToUtf8Boundary(offsets, byteOffset);
+        for (std::size_t index = 0U; index < offsets.size(); ++index)
+        {
+            if (offsets[index] == clampedOffset)
+            {
+                return index;
+            }
+        }
+
+        return offsets.size() - 1U;
+    }
+
+    std::size_t findDisplayCaretIndexForX(
+        RC2D_Font* font,
+        const std::string& displayText,
+        const std::vector<std::size_t>& displayOffsets,
+        float textStartX,
+        float mouseX)
+    {
+        if (displayOffsets.empty())
+        {
+            return 0U;
+        }
+
+        const std::size_t codepointCount = displayOffsets.size() - 1U;
+        for (std::size_t index = 0U; index < codepointCount; ++index)
+        {
+            const float prefixWidth =
+                menu_scene::measureTextWidth(font, displayText.substr(0U, displayOffsets[index]));
+            const float nextPrefixWidth =
+                menu_scene::measureTextWidth(font, displayText.substr(0U, displayOffsets[index + 1U]));
+            const float midpointX = textStartX + prefixWidth + ((nextPrefixWidth - prefixWidth) * 0.5f);
+            if (mouseX < midpointX)
+            {
+                return index;
+            }
+        }
+
+        return codepointCount;
+    }
+
+    std::string sanitizeTextInput(const char* text)
+    {
+        if (text == nullptr || text[0] == '\0')
+        {
+            return {};
+        }
+
+        std::string sanitized{};
+        for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text); *cursor != 0U; ++cursor)
+        {
+            if ((*cursor < 32U || *cursor == 127U) && *cursor != ' ')
+            {
+                continue;
+            }
+
+            sanitized.push_back(static_cast<char>(*cursor));
+        }
+
+        return sanitized;
+    }
+
+    bool appendSanitizedTextWithLimit(std::string* destination, const char* text, std::size_t maxBytes)
+    {
+        if (destination == nullptr)
+        {
+            return false;
+        }
+
+        const std::string sanitized = sanitizeTextInput(text);
+        if (sanitized.empty())
+        {
+            return false;
+        }
+
+        if (destination->size() + sanitized.size() > maxBytes)
+        {
+            return false;
+        }
+
+        destination->append(sanitized);
+        return true;
+    }
+
+    /**
+     * @brief Retourne une copie trimmee en debut/fin pour la validation locale.
+     */
+    std::string trimCopy(const std::string& text)
+    {
+        std::size_t startIndex = 0U;
+        while (startIndex < text.size() &&
+               std::isspace(static_cast<unsigned char>(text[startIndex])) != 0)
+        {
+            ++startIndex;
+        }
+
+        std::size_t endIndex = text.size();
+        while (endIndex > startIndex &&
+               std::isspace(static_cast<unsigned char>(text[endIndex - 1U])) != 0)
+        {
+            --endIndex;
+        }
+
+        return text.substr(startIndex, endIndex - startIndex);
+    }
+
+    std::string buildAuthFeedbackFailureTitle(long httpStatusCode, const std::string& code)
+    {
+        if (httpStatusCode == 401)
+        {
+            return "Connexion refusee";
+        }
+
+        if (httpStatusCode == 403)
+        {
+            return "Acces refuse";
+        }
+
+        if (httpStatusCode == 422)
+        {
+            return "Informations invalides";
+        }
+
+        if (httpStatusCode == 429)
+        {
+            return "Trop de tentatives";
+        }
+
+        if (code == "E_BACKEND_TIMEOUT")
+        {
+            return "Delai depasse";
+        }
+
+        if (code == "E_BACKEND_UNAVAILABLE" ||
+            code == "E_BACKEND_SERVER" ||
+            code == "E_BACKEND_NETWORK")
+        {
+            return "Backend indisponible";
+        }
+
+        return "Echec de connexion";
+    }
+
+    std::string buildAuthFeedbackDetailText(long httpStatusCode, const std::string& code)
+    {
+        std::string detailText{};
+        if (!code.empty())
+        {
+            detailText = code;
+        }
+
+        if (httpStatusCode != 0)
+        {
+            if (!detailText.empty())
+            {
+                detailText += "  |  ";
+            }
+            detailText += "HTTP " + std::to_string(httpStatusCode);
+        }
+
+        if (detailText.empty())
+        {
+            detailText = "Aucun status HTTP exploitable.";
+        }
+
+        return detailText;
+    }
+
+    std::string buildAuthFeedbackHintText(long httpStatusCode, const std::string& code)
+    {
+        if (httpStatusCode == 401 || httpStatusCode == 403 || httpStatusCode == 422)
+        {
+            return "Verifiez les identifiants et les droits du compte puis reessayez.";
+        }
+
+        if (httpStatusCode == 429)
+        {
+            return "Patientez un instant avant une nouvelle tentative.";
+        }
+
+        if (code == "E_BACKEND_TIMEOUT")
+        {
+            return "Verifiez que le backend repond bien, puis relancez la connexion.";
+        }
+
+#if GAME_ENV_DEV
+        return "Mode DEV: verifiez que le backend local HTTP est demarre puis reessayez.";
+#else
+        return "Verifiez la disponibilite du service puis reessayez.";
+#endif
+    }
 }
 
 double MenuScene::clamp01(double value)
@@ -388,6 +771,19 @@ MenuScene::MenuScene(void)
       inputEmailUi{},
       inputPasswordUi{},
       buttonLoginUi{},
+      menuTitleFont{},
+      menuBodyFont{},
+      loginEmailValue{},
+      loginPasswordValue{},
+      loginEmailFieldErrorMessage{},
+      loginPasswordFieldErrorMessage{},
+      focusedLoginField(MenuLoginFocusedField::NONE),
+      menuLocalStatusMessage{},
+      menuLocalStatusIsError(false),
+      authUiSnapshot{},
+      authFeedbackPopupVisible(false),
+      loginEmailSelectionState{},
+      loginPasswordSelectionState{},
       languageFlags{},
       languageButtonRect{0.0f, 0.0f, 0.0f, 0.0f},
       languageDropdownRect{0.0f, 0.0f, 0.0f, 0.0f},
@@ -395,10 +791,18 @@ MenuScene::MenuScene(void)
       languageScrollTrackRect{0.0f, 0.0f, 0.0f, 0.0f},
       languageScrollThumbRect{0.0f, 0.0f, 0.0f, 0.0f},
       loginCardRect{0.0f, 0.0f, 0.0f, 0.0f},
+      authFeedbackPopupRect{0.0f, 0.0f, 0.0f, 0.0f},
+      authFeedbackPopupActionButtonRect{0.0f, 0.0f, 0.0f, 0.0f},
+      serverSelectionOverlayRect{0.0f, 0.0f, 0.0f, 0.0f},
+      serverSelectionHeaderRect{0.0f, 0.0f, 0.0f, 0.0f},
+      serverSelectionRowRects{},
+      serverSelectionButtonRects{},
       hoveredLanguageButton(false),
       hoveredLanguageScrollbar(false),
+      hoveredAuthFeedbackPopupActionButton(false),
       hoveredLanguageFlagIndex(-1),
       selectedLanguageFlagIndex(-1),
+      hoveredServerSelectionButtonIndex(-1),
       languageDropdownOpen(false),
       languageScrollDragging(false),
       languageScrollWheelHighlightSec(0.0f),
@@ -613,15 +1017,701 @@ void MenuScene::syncAnimatedUiState(void)
     this->inputPasswordUi.last_drawn_rect = menu_scene::computeAnchoredImageRect(this->inputPasswordUi);
 
     const SDL_FRect loginButtonBaseRect = menu_scene::computeAnchoredImageRect(this->buttonLoginUi);
-    const float pulseAmount =
-        std::sin(static_cast<float>(this->ambientAnimationTime * menu_scene::kLoginButtonPulseSpeed)) *
-        menu_scene::kLoginButtonPulseScaleAmplitude *
-        static_cast<float>(this->clamp01(this->buttonReveal.currentAlpha));
+    float pulseAmount = 0.0f;
+    if (!this->authUiSnapshot.signInRequestPending)
+    {
+        pulseAmount =
+            std::sin(static_cast<float>(this->ambientAnimationTime * menu_scene::kLoginButtonPulseSpeed)) *
+            menu_scene::kLoginButtonPulseScaleAmplitude *
+            static_cast<float>(this->clamp01(this->buttonReveal.currentAlpha));
+    }
     const float pulseScale = 1.0f + pulseAmount;
     this->buttonLoginUi.last_drawn_rect = menu_scene::scaleRectFromCenter(
         loginButtonBaseRect,
         pulseScale,
         pulseScale);
+}
+
+void MenuScene::refreshAuthUiSnapshotFromNetworkState(void)
+{
+    // Lire une copie locale du resultat signin pour dessiner l'UI sans garder
+    // le mutex partage pendant toute la phase de rendu.
+    NetworkState& networkState = GetNetworkState();
+    std::lock_guard<std::mutex> lock(networkState.sessionCryptoMutex);
+
+    this->authUiSnapshot.signInRequestPending = networkState.authSignInRequestPending;
+    this->authUiSnapshot.signInLastRequestSucceeded = networkState.authSignInLastRequestSucceeded;
+    this->authUiSnapshot.serverSelectionVisible = networkState.authSignInServerSelectionVisible;
+    this->authUiSnapshot.lastHttpStatusCode = networkState.authSignInLastHttpStatusCode;
+    this->authUiSnapshot.lastCode = networkState.authSignInLastCode;
+    this->authUiSnapshot.lastMessage = networkState.authSignInLastMessage;
+    this->authUiSnapshot.servers = networkState.authSignInAvailableServers;
+}
+
+void MenuScene::rebuildAuthFeedbackOverlayLayout(void)
+{
+    this->authFeedbackPopupRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->hoveredAuthFeedbackPopupActionButton = false;
+
+    if (!this->authFeedbackPopupVisible)
+    {
+        return;
+    }
+
+    const SDL_FRect safeRect = rc2d_engine_getVisibleSafeRectRender();
+    const bool isPending = this->authUiSnapshot.signInRequestPending;
+    const float panelWidth = std::clamp(safeRect.w - 40.0f, 340.0f, 620.0f);
+    const float targetPanelHeight = isPending ? 205.0f : 300.0f;
+    const float panelHeight = std::clamp(safeRect.h - 40.0f, 180.0f, targetPanelHeight);
+    this->authFeedbackPopupRect = SDL_FRect{
+        std::round(safeRect.x + ((safeRect.w - panelWidth) * 0.5f)),
+        std::round(safeRect.y + ((safeRect.h - panelHeight) * 0.5f)),
+        panelWidth,
+        panelHeight};
+
+    if (!isPending)
+    {
+        this->authFeedbackPopupActionButtonRect = SDL_FRect{
+            std::round(this->authFeedbackPopupRect.x + ((this->authFeedbackPopupRect.w - 160.0f) * 0.5f)),
+            std::round(this->authFeedbackPopupRect.y + this->authFeedbackPopupRect.h - 60.0f),
+            160.0f,
+            36.0f};
+    }
+}
+
+void MenuScene::rebuildServerSelectionLayout(void)
+{
+    // Reinitialiser les rectangles a vide quand l'overlay n'est pas actif.
+    this->serverSelectionOverlayRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionHeaderRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionRowRects.clear();
+    this->serverSelectionButtonRects.clear();
+    this->hoveredServerSelectionButtonIndex = -1;
+
+    // Rien a dessiner si aucun overlay serveur n'est demande.
+    if (!this->authUiSnapshot.serverSelectionVisible)
+    {
+        return;
+    }
+
+    const SDL_FRect safeRect = rc2d_engine_getVisibleSafeRectRender();
+    const float panelWidth = (std::min)(960.0f, safeRect.w * 0.82f);
+    const float rowHeight = 56.0f;
+    const float rowGap = 10.0f;
+    const float panelPadding = 18.0f;
+    const float headerHeight = 46.0f;
+    const float tableHeaderHeight = 28.0f;
+    const std::size_t rowCount = this->authUiSnapshot.servers.size();
+    const float bodyHeight =
+        rowCount > 0U
+            ? (static_cast<float>(rowCount) * rowHeight) + (static_cast<float>(rowCount - 1U) * rowGap)
+            : rowHeight;
+    const float panelHeight = (std::min)(safeRect.h * 0.78f, 132.0f + tableHeaderHeight + bodyHeight);
+
+    // Centrer le panneau principal au-dessus du menu.
+    this->serverSelectionOverlayRect = SDL_FRect{
+        std::round(safeRect.x + ((safeRect.w - panelWidth) * 0.5f)),
+        std::round(safeRect.y + ((safeRect.h - panelHeight) * 0.5f)),
+        panelWidth,
+        panelHeight};
+
+    // Reserver un bandeau titre fixe pour presenter la liste des serveurs.
+    this->serverSelectionHeaderRect = SDL_FRect{
+        this->serverSelectionOverlayRect.x + panelPadding,
+        this->serverSelectionOverlayRect.y + 14.0f,
+        this->serverSelectionOverlayRect.w - (panelPadding * 2.0f),
+        headerHeight};
+
+    // Precalculer toutes les lignes et tous les boutons de connexion.
+    this->serverSelectionRowRects.resize(rowCount);
+    this->serverSelectionButtonRects.resize(rowCount);
+    float currentRowY = this->serverSelectionHeaderRect.y + this->serverSelectionHeaderRect.h + tableHeaderHeight + 26.0f;
+    for (std::size_t rowIndex = 0U; rowIndex < rowCount; ++rowIndex)
+    {
+        this->serverSelectionRowRects[rowIndex] = SDL_FRect{
+            this->serverSelectionOverlayRect.x + panelPadding,
+            std::round(currentRowY),
+            this->serverSelectionOverlayRect.w - (panelPadding * 2.0f),
+            rowHeight};
+
+        this->serverSelectionButtonRects[rowIndex] = SDL_FRect{
+            std::round(this->serverSelectionRowRects[rowIndex].x + this->serverSelectionRowRects[rowIndex].w - 150.0f),
+            std::round(this->serverSelectionRowRects[rowIndex].y + 9.0f),
+            132.0f,
+            this->serverSelectionRowRects[rowIndex].h - 18.0f};
+
+        currentRowY += rowHeight + rowGap;
+    }
+}
+
+bool MenuScene::appendCharacterToEmailField(char character)
+{
+    const char text[2] = {character, '\0'};
+    return this->insertTextIntoLoginField(MenuLoginFocusedField::EMAIL, text);
+}
+
+bool MenuScene::appendCharacterToPasswordField(char character)
+{
+    const char text[2] = {character, '\0'};
+    return this->insertTextIntoLoginField(MenuLoginFocusedField::PASSWORD, text);
+}
+
+std::string* MenuScene::getLoginFieldValue(MenuLoginFocusedField field)
+{
+    switch (field)
+    {
+        case MenuLoginFocusedField::EMAIL:
+            return &this->loginEmailValue;
+
+        case MenuLoginFocusedField::PASSWORD:
+            return &this->loginPasswordValue;
+
+        case MenuLoginFocusedField::NONE:
+        default:
+            return nullptr;
+    }
+}
+
+const std::string* MenuScene::getLoginFieldValue(MenuLoginFocusedField field) const
+{
+    switch (field)
+    {
+        case MenuLoginFocusedField::EMAIL:
+            return &this->loginEmailValue;
+
+        case MenuLoginFocusedField::PASSWORD:
+            return &this->loginPasswordValue;
+
+        case MenuLoginFocusedField::NONE:
+        default:
+            return nullptr;
+    }
+}
+
+MenuScene::MenuLoginTextSelectionState* MenuScene::getLoginFieldSelectionState(MenuLoginFocusedField field)
+{
+    switch (field)
+    {
+        case MenuLoginFocusedField::EMAIL:
+            return &this->loginEmailSelectionState;
+
+        case MenuLoginFocusedField::PASSWORD:
+            return &this->loginPasswordSelectionState;
+
+        case MenuLoginFocusedField::NONE:
+        default:
+            return nullptr;
+    }
+}
+
+const MenuScene::MenuLoginTextSelectionState* MenuScene::getLoginFieldSelectionState(MenuLoginFocusedField field) const
+{
+    switch (field)
+    {
+        case MenuLoginFocusedField::EMAIL:
+            return &this->loginEmailSelectionState;
+
+        case MenuLoginFocusedField::PASSWORD:
+            return &this->loginPasswordSelectionState;
+
+        case MenuLoginFocusedField::NONE:
+        default:
+            return nullptr;
+    }
+}
+
+bool MenuScene::buildLoginFieldTextView(MenuLoginFocusedField field, MenuLoginFieldTextView* outView) const
+{
+    if (outView == nullptr)
+    {
+        return false;
+    }
+
+    const std::string* rawText = this->getLoginFieldValue(field);
+    if (rawText == nullptr)
+    {
+        *outView = MenuLoginFieldTextView{};
+        return false;
+    }
+
+    outView->sourceRect =
+        (field == MenuLoginFocusedField::EMAIL)
+            ? this->inputEmailUi.last_drawn_rect
+            : this->inputPasswordUi.last_drawn_rect;
+    if (!menu_scene::isValidRect(outView->sourceRect))
+    {
+        *outView = MenuLoginFieldTextView{};
+        return false;
+    }
+
+    outView->textRect = SDL_FRect{
+        outView->sourceRect.x + 34.0f,
+        outView->sourceRect.y + 18.0f,
+        outView->sourceRect.w - 68.0f,
+        outView->sourceRect.h - 30.0f};
+    outView->textStartX = outView->textRect.x + 42.0f;
+    outView->rawOffsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
+    outView->displayText =
+        (field == MenuLoginFocusedField::PASSWORD)
+            ? menu_scene::buildMaskedPassword(*rawText)
+            : *rawText;
+    outView->displayOffsets = menu_scene::buildUtf8CodepointOffsets(outView->displayText);
+    return true;
+}
+
+void MenuScene::collapseLoginFieldSelection(MenuLoginFocusedField field, std::size_t caretByte)
+{
+    std::string* rawText = this->getLoginFieldValue(field);
+    MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    if (rawText == nullptr || selectionState == nullptr)
+    {
+        return;
+    }
+
+    const std::vector<std::size_t> offsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
+    const std::size_t clampedCaret = menu_scene::clampByteOffsetToUtf8Boundary(offsets, caretByte);
+    selectionState->anchorByte = clampedCaret;
+    selectionState->caretByte = clampedCaret;
+    selectionState->dragging = false;
+}
+
+void MenuScene::stopLoginTextSelectionDrag(void)
+{
+    this->loginEmailSelectionState.dragging = false;
+    this->loginPasswordSelectionState.dragging = false;
+}
+
+void MenuScene::clearAllLoginTextSelections(void)
+{
+    this->collapseLoginFieldSelection(MenuLoginFocusedField::EMAIL, this->loginEmailSelectionState.caretByte);
+    this->collapseLoginFieldSelection(MenuLoginFocusedField::PASSWORD, this->loginPasswordSelectionState.caretByte);
+}
+
+bool MenuScene::hasLoginFieldSelection(MenuLoginFocusedField field) const
+{
+    const MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    return selectionState != nullptr && selectionState->anchorByte != selectionState->caretByte;
+}
+
+void MenuScene::selectAllLoginFieldText(MenuLoginFocusedField field)
+{
+    std::string* rawText = this->getLoginFieldValue(field);
+    MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    if (rawText == nullptr || selectionState == nullptr)
+    {
+        return;
+    }
+
+    selectionState->anchorByte = 0U;
+    selectionState->caretByte = rawText->size();
+    selectionState->dragging = false;
+}
+
+bool MenuScene::deleteSelectedLoginFieldText(MenuLoginFocusedField field)
+{
+    std::string* rawText = this->getLoginFieldValue(field);
+    MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    if (rawText == nullptr || selectionState == nullptr || !this->hasLoginFieldSelection(field))
+    {
+        return false;
+    }
+
+    const std::size_t selectionStart = (std::min)(selectionState->anchorByte, selectionState->caretByte);
+    const std::size_t selectionEnd = (std::max)(selectionState->anchorByte, selectionState->caretByte);
+    rawText->erase(selectionStart, selectionEnd - selectionStart);
+    this->collapseLoginFieldSelection(field, selectionStart);
+    return true;
+}
+
+bool MenuScene::insertTextIntoLoginField(MenuLoginFocusedField field, const char* text)
+{
+    std::string* rawText = this->getLoginFieldValue(field);
+    MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    if (rawText == nullptr || selectionState == nullptr)
+    {
+        return false;
+    }
+
+    const std::string sanitized = menu_scene::sanitizeTextInput(text);
+    if (sanitized.empty())
+    {
+        return false;
+    }
+
+    const std::size_t selectionStart = (std::min)(selectionState->anchorByte, selectionState->caretByte);
+    const std::size_t selectionEnd = (std::max)(selectionState->anchorByte, selectionState->caretByte);
+    const std::size_t replacedByteCount = selectionEnd - selectionStart;
+    const std::size_t nextSize = rawText->size() - replacedByteCount + sanitized.size();
+    const std::size_t maxBytes =
+        (field == MenuLoginFocusedField::EMAIL)
+            ? kMaxLoginEmailLength
+            : kMaxLoginPasswordLength;
+    if (nextSize > maxBytes)
+    {
+        return false;
+    }
+
+    if (this->hasLoginFieldSelection(field))
+    {
+        rawText->erase(selectionStart, replacedByteCount);
+        selectionState->anchorByte = selectionStart;
+        selectionState->caretByte = selectionStart;
+    }
+
+    rawText->insert(selectionState->caretByte, sanitized);
+    this->collapseLoginFieldSelection(field, selectionState->caretByte + sanitized.size());
+    return true;
+}
+
+void MenuScene::placeLoginCaretFromMouse(MenuLoginFocusedField field, float mouseX, bool keepAnchor)
+{
+    MenuLoginFieldTextView textView{};
+    MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+    if (selectionState == nullptr || !this->buildLoginFieldTextView(field, &textView))
+    {
+        return;
+    }
+
+    const float displayWidth = menu_scene::measureTextWidth(&this->menuBodyFont, textView.displayText);
+    const float clampedMouseX = std::clamp(mouseX, textView.textStartX, textView.textStartX + displayWidth);
+    const std::size_t displayIndex = menu_scene::findDisplayCaretIndexForX(
+        &this->menuBodyFont,
+        textView.displayText,
+        textView.displayOffsets,
+        textView.textStartX,
+        clampedMouseX);
+    const std::size_t clampedDisplayIndex = (std::min)(displayIndex, textView.rawOffsets.size() - 1U);
+    const std::size_t nextCaretByte = textView.rawOffsets[clampedDisplayIndex];
+
+    if (!keepAnchor)
+    {
+        selectionState->anchorByte = nextCaretByte;
+    }
+    selectionState->caretByte = nextCaretByte;
+}
+
+void MenuScene::updateLoginTextSelectionDrag(void)
+{
+    if (this->authFeedbackPopupVisible ||
+        this->authUiSnapshot.serverSelectionVisible ||
+        this->authUiSnapshot.signInRequestPending)
+    {
+        this->stopLoginTextSelectionDrag();
+        return;
+    }
+
+    const auto updateDragForField =
+        [this](MenuLoginFocusedField field)
+        {
+            MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+            if (selectionState == nullptr || !selectionState->dragging)
+            {
+                return;
+            }
+
+            if (this->focusedLoginField != field || !rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+            {
+                selectionState->dragging = false;
+                return;
+            }
+
+            float mouseX = 0.0f;
+            float mouseY = 0.0f;
+            menu_scene::getMouseRenderPosition(&mouseX, &mouseY);
+            (void)mouseY;
+
+            this->placeLoginCaretFromMouse(field, mouseX, true);
+        };
+
+    updateDragForField(MenuLoginFocusedField::EMAIL);
+    updateDragForField(MenuLoginFocusedField::PASSWORD);
+}
+
+bool MenuScene::handleLoginInputKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+
+    // Une fois l'overlay serveurs ouvert, le formulaire de login n'accepte plus
+    // de nouvelles saisies tant que le joueur reste sur cette etape.
+    if (this->authFeedbackPopupVisible ||
+        this->authUiSnapshot.serverSelectionVisible ||
+        this->authUiSnapshot.signInRequestPending)
+    {
+        return false;
+    }
+
+    // Permettre Tab meme sans focus initial pour activer rapidement le formulaire.
+    if (!isrepeat && scancode == SDL_SCANCODE_TAB)
+    {
+        if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+        {
+            this->focusedLoginField = MenuLoginFocusedField::PASSWORD;
+        }
+        else
+        {
+            this->focusedLoginField = MenuLoginFocusedField::EMAIL;
+        }
+        this->stopLoginTextSelectionDrag();
+        return true;
+    }
+
+    // Si aucun champ n'est actif, ignorer le reste des touches texte.
+    if (this->focusedLoginField == MenuLoginFocusedField::NONE)
+    {
+        return false;
+    }
+
+    // Escape retire simplement le focus du formulaire.
+    if (!isrepeat && scancode == SDL_SCANCODE_ESCAPE)
+    {
+        this->focusedLoginField = MenuLoginFocusedField::NONE;
+        this->stopLoginTextSelectionDrag();
+        return true;
+    }
+
+    // Enter lance la requete HTTP de connexion.
+    if (!isrepeat && (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER))
+    {
+        this->submitLoginRequest();
+        return true;
+    }
+
+    if (!isrepeat &&
+        (mod & SDL_KMOD_CTRL) != 0 &&
+        scancode == SDL_SCANCODE_A &&
+        this->focusedLoginField != MenuLoginFocusedField::NONE)
+    {
+        this->selectAllLoginFieldText(this->focusedLoginField);
+        return true;
+    }
+
+    // Backspace supprime le dernier caractere du champ actif.
+    if (scancode == SDL_SCANCODE_BACKSPACE)
+    {
+        if (this->deleteSelectedLoginFieldText(this->focusedLoginField))
+        {
+            this->menuLocalStatusMessage.clear();
+            this->stopLoginTextSelectionDrag();
+            return true;
+        }
+
+        std::string* rawText = this->getLoginFieldValue(this->focusedLoginField);
+        MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(this->focusedLoginField);
+        if (rawText != nullptr && selectionState != nullptr && selectionState->caretByte > 0U)
+        {
+            const std::vector<std::size_t> offsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
+            const std::size_t caretIndex =
+                menu_scene::findCodepointIndexForByteOffset(offsets, selectionState->caretByte);
+            if (caretIndex > 0U)
+            {
+                const std::size_t eraseStart = offsets[caretIndex - 1U];
+                rawText->erase(eraseStart, selectionState->caretByte - eraseStart);
+                this->collapseLoginFieldSelection(this->focusedLoginField, eraseStart);
+            }
+
+            if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+            {
+                this->loginEmailFieldErrorMessage.clear();
+            }
+            else if (this->focusedLoginField == MenuLoginFocusedField::PASSWORD)
+            {
+                this->loginPasswordFieldErrorMessage.clear();
+            }
+            this->menuLocalStatusMessage.clear();
+            return true;
+        }
+
+        return true;
+    }
+
+    // Delete vide entierement le champ actuellement edite.
+    if (!isrepeat && scancode == SDL_SCANCODE_DELETE)
+    {
+        if (this->deleteSelectedLoginFieldText(this->focusedLoginField))
+        {
+            if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+            {
+                this->loginEmailFieldErrorMessage.clear();
+            }
+            else if (this->focusedLoginField == MenuLoginFocusedField::PASSWORD)
+            {
+                this->loginPasswordFieldErrorMessage.clear();
+            }
+        }
+        else
+        {
+            std::string* rawText = this->getLoginFieldValue(this->focusedLoginField);
+            MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(this->focusedLoginField);
+            if (rawText != nullptr && selectionState != nullptr)
+            {
+                const std::vector<std::size_t> offsets = menu_scene::buildUtf8CodepointOffsets(*rawText);
+                const std::size_t caretIndex =
+                    menu_scene::findCodepointIndexForByteOffset(offsets, selectionState->caretByte);
+                if (caretIndex + 1U < offsets.size())
+                {
+                    rawText->erase(selectionState->caretByte, offsets[caretIndex + 1U] - selectionState->caretByte);
+                    this->collapseLoginFieldSelection(this->focusedLoginField, selectionState->caretByte);
+                }
+            }
+
+            if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+            {
+                this->loginEmailFieldErrorMessage.clear();
+            }
+            else if (this->focusedLoginField == MenuLoginFocusedField::PASSWORD)
+            {
+                this->loginPasswordFieldErrorMessage.clear();
+            }
+        }
+        this->menuLocalStatusMessage.clear();
+        return true;
+    }
+
+    return false;
+}
+
+void MenuScene::clearLoginFieldErrors(void)
+{
+    this->loginEmailFieldErrorMessage.clear();
+    this->loginPasswordFieldErrorMessage.clear();
+}
+
+void MenuScene::handleLoginTextInput(const char* text)
+{
+    if (this->authFeedbackPopupVisible ||
+        this->focusedLoginField == MenuLoginFocusedField::NONE ||
+        this->authUiSnapshot.serverSelectionVisible ||
+        this->authUiSnapshot.signInRequestPending)
+    {
+        return;
+    }
+
+    bool accepted = false;
+    if (this->focusedLoginField == MenuLoginFocusedField::EMAIL)
+    {
+        accepted = this->insertTextIntoLoginField(MenuLoginFocusedField::EMAIL, text);
+        if (accepted)
+        {
+            this->loginEmailFieldErrorMessage.clear();
+        }
+    }
+    else if (this->focusedLoginField == MenuLoginFocusedField::PASSWORD)
+    {
+        accepted = this->insertTextIntoLoginField(MenuLoginFocusedField::PASSWORD, text);
+        if (accepted)
+        {
+            this->loginPasswordFieldErrorMessage.clear();
+        }
+    }
+
+    if (accepted)
+    {
+        this->menuLocalStatusMessage.clear();
+    }
+}
+
+void MenuScene::submitLoginRequest(void)
+{
+    // Si une requete est deja en vol, eviter de saturer la queue HTTP.
+    if (this->authUiSnapshot.signInRequestPending)
+    {
+        this->menuLocalStatusMessage = "Connexion deja en cours...";
+        this->menuLocalStatusIsError = false;
+        return;
+    }
+
+    // Si l'overlay serveur est deja visible, rester sur l'etape de selection.
+    if (this->authUiSnapshot.serverSelectionVisible)
+    {
+        this->menuLocalStatusMessage = "Choisissez d'abord un serveur dans la liste.";
+        this->menuLocalStatusIsError = false;
+        return;
+    }
+
+    // Nettoyer l'e-mail en debut/fin pour eviter les erreurs de saisie triviales.
+    const std::string trimmedEmail = menu_scene::trimCopy(this->loginEmailValue);
+    this->clearLoginFieldErrors();
+
+    if (trimmedEmail.empty())
+    {
+        this->loginEmailFieldErrorMessage = "Identifiant / e-mail requis.";
+        this->focusedLoginField = MenuLoginFocusedField::EMAIL;
+        this->menuLocalStatusMessage.clear();
+        this->menuLocalStatusIsError = true;
+        if (this->loginPasswordValue.empty())
+        {
+            this->loginPasswordFieldErrorMessage = "Mot de passe requis.";
+        }
+        return;
+    }
+
+    if (this->loginPasswordValue.empty())
+    {
+        this->loginPasswordFieldErrorMessage = "Mot de passe requis.";
+        this->focusedLoginField = MenuLoginFocusedField::PASSWORD;
+        this->menuLocalStatusMessage.clear();
+        this->menuLocalStatusIsError = true;
+        return;
+    }
+
+    // Normaliser la valeur visible du champ e-mail avec la version trimmee.
+    this->loginEmailValue = trimmedEmail;
+    this->clearAllLoginTextSelections();
+    this->stopLoginTextSelectionDrag();
+
+    // Reinitialiser l'etat partage avant d'envoyer la nouvelle requete HTTP.
+    NetworkState& networkState = GetNetworkState();
+    {
+        std::lock_guard<std::mutex> lock(networkState.sessionCryptoMutex);
+
+        networkState.authSignInRequestPending = true;
+        networkState.authSignInLastRequestSucceeded = false;
+        networkState.authSignInServerSelectionVisible = false;
+        networkState.authSignInLastHttpStatusCode = 0;
+        networkState.authSignInLastCode.clear();
+        networkState.authSignInLastMessage.clear();
+        networkState.authSignInAvailableServers.clear();
+        networkState.authToken.clear();
+        networkState.authTokenValidated = false;
+        networkState.quilkinDns.clear();
+        networkState.quilkinPort = 0;
+    }
+
+    // Refleter immediatement l'attente HTTP dans le snapshot local.
+    this->authUiSnapshot.signInRequestPending = true;
+    this->authUiSnapshot.signInLastRequestSucceeded = false;
+    this->authUiSnapshot.serverSelectionVisible = false;
+    this->authUiSnapshot.lastHttpStatusCode = 0;
+    this->authUiSnapshot.lastCode.clear();
+    this->authUiSnapshot.lastMessage.clear();
+    this->authUiSnapshot.servers.clear();
+    this->authFeedbackPopupVisible = true;
+    this->hoveredAuthFeedbackPopupActionButton = false;
+    this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+
+    // Effacer les messages precedents avant la nouvelle tentative.
+    this->menuLocalStatusMessage = "Connexion au backend SeaTyrants en cours...";
+    this->menuLocalStatusIsError = false;
+
+    // Construire le job HTTP consomme par le worker dedie.
+    SimulationToHttpMessage message{};
+    message.type = SimulationToHttpMessageType::AUTH_SIGNIN_REQUEST;
+    message.authSignInRequest.email = this->loginEmailValue;
+    message.authSignInRequest.password = this->loginPasswordValue;
+
+    // Envoyer la requete dans la queue Simulation -> HTTP.
+    GetSimulationToHttpQueue().push(message);
+
+    RC2D_log(
+        RC2D_LOG_INFO,
+        "[CLIENT] [MENU] [AUTH_SIGNIN] - Sign-in request queued for email=%s",
+        this->loginEmailValue.c_str());
 }
 
 void MenuScene::rebuildLanguageSelectionFromContext(void)
@@ -754,6 +1844,59 @@ void MenuScene::updateMenuInteractivity(void)
     float mouseY = 0.0f;
     menu_scene::getMouseRenderPosition(&mouseX, &mouseY);
 
+    if (this->authFeedbackPopupVisible)
+    {
+        this->hoveredLanguageButton = false;
+        this->hoveredLanguageScrollbar = false;
+        this->hoveredLanguageFlagIndex = -1;
+        this->hoveredServerSelectionButtonIndex = -1;
+        this->hoveredAuthFeedbackPopupActionButton =
+            !this->authUiSnapshot.signInRequestPending &&
+            menu_scene::pointInRect(this->authFeedbackPopupActionButtonRect, mouseX, mouseY);
+        menu_scene::applyMenuCursor(
+            this->hoveredAuthFeedbackPopupActionButton
+                ? SDL_SYSTEM_CURSOR_POINTER
+                : SDL_SYSTEM_CURSOR_DEFAULT);
+        return;
+    }
+
+    if (this->authUiSnapshot.signInRequestPending)
+    {
+        this->hoveredLanguageButton = false;
+        this->hoveredLanguageScrollbar = false;
+        this->hoveredLanguageFlagIndex = -1;
+        this->hoveredServerSelectionButtonIndex = -1;
+        menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+        return;
+    }
+
+    // Quand l'overlay serveur est visible, il devient la priorite interactive
+    // absolue et bloque les interactions avec le formulaire dessous.
+    this->hoveredServerSelectionButtonIndex = -1;
+    if (this->authUiSnapshot.serverSelectionVisible)
+    {
+        this->hoveredLanguageButton = false;
+        this->hoveredLanguageScrollbar = false;
+        this->hoveredLanguageFlagIndex = -1;
+
+        for (std::size_t index = 0U; index < this->serverSelectionButtonRects.size(); ++index)
+        {
+            if (!menu_scene::pointInRect(this->serverSelectionButtonRects[index], mouseX, mouseY))
+            {
+                continue;
+            }
+
+            this->hoveredServerSelectionButtonIndex = static_cast<int>(index);
+            break;
+        }
+
+        menu_scene::applyMenuCursor(
+            this->hoveredServerSelectionButtonIndex >= 0
+                ? SDL_SYSTEM_CURSOR_POINTER
+                : SDL_SYSTEM_CURSOR_DEFAULT);
+        return;
+    }
+
     this->hoveredLanguageButton = menu_scene::pointInRect(this->languageButtonRect, mouseX, mouseY);
     this->hoveredLanguageScrollbar =
         this->languageDropdownOpen &&
@@ -779,19 +1922,22 @@ void MenuScene::updateMenuInteractivity(void)
         }
     }
 
-    // Le menu entier utilise une logique simple de main au survol des elements cliquables.
     const bool hoveringEmail = rc2d_collision_pointInUIImagePixelPerfect(&this->inputEmailUi, mouseX, mouseY);
     const bool hoveringPassword = rc2d_collision_pointInUIImagePixelPerfect(&this->inputPasswordUi, mouseX, mouseY);
     const bool hoveringLogin = menu_scene::pointInRect(this->buttonLoginUi.last_drawn_rect, mouseX, mouseY);
+    if (hoveringEmail || hoveringPassword)
+    {
+        menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_TEXT);
+        return;
+    }
+
     const bool wantsPointer =
         this->hoveredLanguageButton ||
         this->hoveredLanguageScrollbar ||
         (this->hoveredLanguageFlagIndex >= 0) ||
-        hoveringEmail ||
-        hoveringPassword ||
         hoveringLogin;
 
-    menu_scene::applyMenuCursor(wantsPointer);
+    menu_scene::applyMenuCursor(wantsPointer ? SDL_SYSTEM_CURSOR_POINTER : SDL_SYSTEM_CURSOR_DEFAULT);
 }
 
 void MenuScene::updateLanguageScrollbarDrag(void)
@@ -908,6 +2054,10 @@ void MenuScene::unload(void)
     // Free login button CPU image data.
     ResetStorageImageDataRef(&this->buttonLoginUi.imageData);
 
+    // Relacher les polices utilisees par le formulaire et l'overlay serveur.
+    ResetStorageFontRef(&this->menuTitleFont);
+    ResetStorageFontRef(&this->menuBodyFont);
+
     // Invalider les refs locales des drapeaux partages par le cache TITLE.
     for (MenuLanguageFlagEntry& entry : this->languageFlags)
     {
@@ -920,19 +2070,39 @@ void MenuScene::unload(void)
     this->languageScrollTrackRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->languageScrollThumbRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->loginCardRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionOverlayRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionHeaderRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionRowRects.clear();
+    this->serverSelectionButtonRects.clear();
     this->hoveredLanguageButton = false;
     this->hoveredLanguageScrollbar = false;
     this->hoveredLanguageFlagIndex = -1;
     this->selectedLanguageFlagIndex = -1;
+    this->hoveredServerSelectionButtonIndex = -1;
     this->languageDropdownOpen = false;
     this->languageScrollDragging = false;
     this->languageScrollWheelHighlightSec = 0.0f;
     this->languageScrollOffset = 0.0f;
     this->maxLanguageScrollOffset = 0.0f;
     this->languageScrollDragOffsetY = 0.0f;
+    this->loginEmailValue.clear();
+    this->loginPasswordValue.clear();
+    this->loginEmailFieldErrorMessage.clear();
+    this->loginPasswordFieldErrorMessage.clear();
+    this->focusedLoginField = MenuLoginFocusedField::NONE;
+    this->menuLocalStatusMessage.clear();
+    this->menuLocalStatusIsError = false;
+    this->authUiSnapshot = MenuAuthUiSnapshot{};
+    this->authFeedbackPopupVisible = false;
+    this->loginEmailSelectionState = MenuLoginTextSelectionState{};
+    this->loginPasswordSelectionState = MenuLoginTextSelectionState{};
+    this->authFeedbackPopupRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->hoveredAuthFeedbackPopupActionButton = false;
 
     // Restore a neutral cursor when leaving the menu.
-    menu_scene::applyMenuCursor(false);
+    menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    rc2d_keyboard_setTextInput(false);
 
     // Stop and destroy active track.
     if (this->menuTrack != nullptr)
@@ -970,7 +2140,8 @@ void MenuScene::load(void)
 {
     // Show mouse cursor for menu interaction.
     rc2d_mouse_setVisible(true);
-    menu_scene::applyMenuCursor(false);
+    menu_scene::applyMenuCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    rc2d_keyboard_setTextInput(true);
 
     // Reset video struct to clean state.
     this->loginBackgroundVideo = {};
@@ -1002,6 +2173,27 @@ void MenuScene::load(void)
     this->languageScrollTrackRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->languageScrollThumbRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
     this->loginCardRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionOverlayRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionHeaderRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->serverSelectionRowRects.clear();
+    this->serverSelectionButtonRects.clear();
+    this->hoveredServerSelectionButtonIndex = -1;
+    this->focusedLoginField = MenuLoginFocusedField::EMAIL;
+    this->loginEmailFieldErrorMessage.clear();
+    this->loginPasswordFieldErrorMessage.clear();
+    this->menuLocalStatusMessage.clear();
+    this->menuLocalStatusIsError = false;
+    this->authUiSnapshot = MenuAuthUiSnapshot{};
+    this->authFeedbackPopupVisible = false;
+    this->loginEmailSelectionState = MenuLoginTextSelectionState{};
+    this->loginPasswordSelectionState = MenuLoginTextSelectionState{};
+    this->authFeedbackPopupRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->authFeedbackPopupActionButtonRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->hoveredAuthFeedbackPopupActionButton = false;
+
+    // Charger les polices utilisees pour le texte saisi et l'overlay serveur.
+    this->menuTitleFont = OpenStorageFont("assets/fonts/TradeWinds-Regular.ttf", RC2D_STORAGE_TITLE, 24.0f);
+    this->menuBodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 18.0f);
 
     // Load logo texture.
     this->logoUi.image = LoadStorageImage("assets/images/ui-scene-menu/logo-st.png", RC2D_STORAGE_TITLE);
@@ -1119,8 +2311,10 @@ void MenuScene::load(void)
     this->resetRevealAnimations();
     this->syncAnimatedUiState();
     this->rebuildLanguageSelectionFromContext();
+    this->refreshAuthUiSnapshotFromNetworkState();
     this->updateLanguageFlagLayout();
     this->snapLanguageScrollToSelection();
+    this->rebuildServerSelectionLayout();
 
     // Load menu music audio.
     this->menuMusic = LoadStorageAudio("assets/sounds/sound_menu.opus", RC2D_STORAGE_TITLE, true);
@@ -1224,10 +2418,38 @@ void MenuScene::update(double dt)
 
     // Recalculer l'etat UI dynamique et les zones interactives du menu.
     this->syncAnimatedUiState();
+    this->refreshAuthUiSnapshotFromNetworkState();
     this->rebuildLanguageSelectionFromContext();
     this->updateLanguageFlagLayout();
     this->updateLanguageScrollbarDrag();
     this->updateLanguageFlagLayout();
+    if (this->authUiSnapshot.signInRequestPending)
+    {
+        this->authFeedbackPopupVisible = true;
+    }
+    else if (this->authUiSnapshot.serverSelectionVisible || this->authUiSnapshot.signInLastRequestSucceeded)
+    {
+        this->authFeedbackPopupVisible = false;
+    }
+    else if (this->authFeedbackPopupVisible &&
+             this->authUiSnapshot.lastMessage.empty() &&
+             this->authUiSnapshot.lastCode.empty() &&
+             this->authUiSnapshot.lastHttpStatusCode == 0)
+    {
+        this->authFeedbackPopupVisible = false;
+    }
+    this->rebuildAuthFeedbackOverlayLayout();
+    this->rebuildServerSelectionLayout();
+    this->updateLoginTextSelectionDrag();
+
+    // Laisser ensuite les messages backend reprendre la main une fois que la
+    // requete HTTP n'est plus en cours.
+    if (!this->authUiSnapshot.signInRequestPending &&
+        this->menuLocalStatusMessage == "Connexion au backend SeaTyrants en cours...")
+    {
+        this->menuLocalStatusMessage.clear();
+    }
+
     this->updateMenuInteractivity();
 
     if (this->languageScrollWheelHighlightSec > 0.0f)
@@ -1488,6 +2710,507 @@ void MenuScene::drawUiImageWithAlpha(RC2D_UIImage* uiImage, float alpha01)
     SDL_SetTextureAlphaMod(uiImage->image.sdl_texture, previousAlpha);
 }
 
+void MenuScene::drawLoginFieldContents(void)
+{
+    // Sans police chargee, il est impossible d'afficher le texte saisi.
+    if (this->menuBodyFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    // Le curseur clignotant reste volontairement simple pour garder l'UI lisible.
+    const bool blinkVisible = std::fmod(this->ambientAnimationTime, 0.9) < 0.45;
+
+    const auto drawSingleField =
+        [this, blinkVisible](
+            MenuLoginFocusedField field,
+            bool focused)
+        {
+            MenuLoginFieldTextView textView{};
+            if (!this->buildLoginFieldTextView(field, &textView))
+            {
+                return;
+            }
+
+            const MenuLoginTextSelectionState* selectionState = this->getLoginFieldSelectionState(field);
+            if (focused && selectionState != nullptr && selectionState->anchorByte != selectionState->caretByte)
+            {
+                const std::size_t selectionStartByte = (std::min)(selectionState->anchorByte, selectionState->caretByte);
+                const std::size_t selectionEndByte = (std::max)(selectionState->anchorByte, selectionState->caretByte);
+                const std::size_t selectionStartIndex =
+                    menu_scene::findCodepointIndexForByteOffset(textView.rawOffsets, selectionStartByte);
+                const std::size_t selectionEndIndex =
+                    menu_scene::findCodepointIndexForByteOffset(textView.rawOffsets, selectionEndByte);
+
+                const float prefixWidth = menu_scene::measureTextWidth(
+                    &this->menuBodyFont,
+                    textView.displayText.substr(0U, textView.displayOffsets[selectionStartIndex]));
+                const float selectionWidth = menu_scene::measureTextWidth(
+                    &this->menuBodyFont,
+                    textView.displayText.substr(
+                        textView.displayOffsets[selectionStartIndex],
+                        textView.displayOffsets[selectionEndIndex] - textView.displayOffsets[selectionStartIndex]));
+                SDL_FRect selectionRect = SDL_FRect{
+                    std::round(textView.textStartX + prefixWidth - 1.0f),
+                    std::round(textView.textRect.y + 3.0f),
+                    std::round(selectionWidth + 2.0f),
+                    std::round(textView.textRect.h - 6.0f)};
+                if (selectionRect.w > 0.0f)
+                {
+                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+                    rc2d_graphics_setColor(menu_scene::applyAlpha(menu_scene::kFlagSelectedFill, 0.88f));
+                    rc2d_graphics_rectangle("fill", &selectionRect);
+                    rc2d_graphics_setColor(menu_scene::applyAlpha(menu_scene::kFlagSelectedBorder, 0.92f));
+                    rc2d_graphics_rectangle("line", &selectionRect);
+                    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+                }
+            }
+
+            menu_scene::drawTextLeftCenteredY(
+                &this->menuBodyFont,
+                textView.displayText,
+                textView.textRect,
+                textView.textStartX,
+                menu_scene::kBodyText);
+
+            if (focused && blinkVisible && selectionState != nullptr && selectionState->anchorByte == selectionState->caretByte)
+            {
+                const std::size_t caretIndex =
+                    menu_scene::findCodepointIndexForByteOffset(textView.rawOffsets, selectionState->caretByte);
+                const float cursorX = std::round(
+                    textView.textStartX +
+                    menu_scene::measureTextWidth(
+                        &this->menuBodyFont,
+                        textView.displayText.substr(0U, textView.displayOffsets[caretIndex])));
+                const float cursorTop = std::round(textView.textRect.y + 4.0f);
+                const float cursorBottom = std::round(textView.textRect.y + textView.textRect.h - 4.0f);
+                rc2d_graphics_setColor(menu_scene::kBodyText);
+                rc2d_graphics_line(cursorX, cursorTop, cursorX, cursorBottom);
+            }
+        };
+
+    // Dessiner le contenu des deux inputs exactement a l'endroit de leurs images.
+    drawSingleField(
+        MenuLoginFocusedField::EMAIL,
+        this->focusedLoginField == MenuLoginFocusedField::EMAIL);
+    drawSingleField(
+        MenuLoginFocusedField::PASSWORD,
+        this->focusedLoginField == MenuLoginFocusedField::PASSWORD);
+}
+
+void MenuScene::drawLoginStatusMessage(void)
+{
+    // Sans police, ne rien tenter pour eviter un rendu incoherent.
+    if (this->menuBodyFont.sdl_font == nullptr || !menu_scene::isValidRect(this->inputPasswordUi.last_drawn_rect))
+    {
+        return;
+    }
+
+    // Priorite:
+    // 1. message local de validation / action temporaire
+    // 2. message "connexion en cours"
+    // 3. erreur backend
+    // 4. succes backend avant selection serveur
+    std::string messageToDraw;
+    RC2D_Color messageColor = menu_scene::kMutedText;
+
+    if (!this->menuLocalStatusMessage.empty())
+    {
+        messageToDraw = this->menuLocalStatusMessage;
+        messageColor = this->menuLocalStatusIsError ? menu_scene::kErrorText : menu_scene::kMutedText;
+    }
+    else if (!this->authUiSnapshot.signInLastRequestSucceeded &&
+             (!this->authUiSnapshot.lastMessage.empty() ||
+              !this->authUiSnapshot.lastCode.empty() ||
+              this->authUiSnapshot.lastHttpStatusCode != 0))
+    {
+        messageToDraw = this->authUiSnapshot.lastMessage;
+        if (messageToDraw.empty())
+        {
+            messageToDraw = "Erreur de connexion";
+        }
+        if (this->authUiSnapshot.lastHttpStatusCode != 0)
+        {
+            messageToDraw += " (HTTP " + std::to_string(this->authUiSnapshot.lastHttpStatusCode) + ")";
+        }
+        messageColor = menu_scene::kErrorText;
+    }
+    else if (this->authUiSnapshot.serverSelectionVisible)
+    {
+        messageToDraw = "Connexion web reussie. Selectionnez maintenant un serveur.";
+        messageColor = menu_scene::kSuccessText;
+    }
+
+    if (messageToDraw.empty())
+    {
+        return;
+    }
+
+    const SDL_FRect statusRect = SDL_FRect{
+        this->inputPasswordUi.last_drawn_rect.x - 20.0f,
+        this->inputPasswordUi.last_drawn_rect.y + this->inputPasswordUi.last_drawn_rect.h + 32.0f,
+        this->inputPasswordUi.last_drawn_rect.w + 40.0f,
+        32.0f};
+    menu_scene::drawCenteredText(&this->menuBodyFont, messageToDraw, statusRect, messageColor);
+}
+
+void MenuScene::drawLoginFieldErrors(void)
+{
+    if (this->menuBodyFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    if (!this->loginEmailFieldErrorMessage.empty() && menu_scene::isValidRect(this->inputEmailUi.last_drawn_rect))
+    {
+        const SDL_FRect errorRect = SDL_FRect{
+            this->inputEmailUi.last_drawn_rect.x + 26.0f,
+            this->inputEmailUi.last_drawn_rect.y + this->inputEmailUi.last_drawn_rect.h - 3.0f,
+            this->inputEmailUi.last_drawn_rect.w - 52.0f,
+            24.0f};
+        menu_scene::drawTextLeftCenteredY(
+            &this->menuBodyFont,
+            this->loginEmailFieldErrorMessage,
+            errorRect,
+            errorRect.x,
+            menu_scene::kErrorText);
+    }
+
+    if (!this->loginPasswordFieldErrorMessage.empty() && menu_scene::isValidRect(this->inputPasswordUi.last_drawn_rect))
+    {
+        const SDL_FRect errorRect = SDL_FRect{
+            this->inputPasswordUi.last_drawn_rect.x + 26.0f,
+            this->inputPasswordUi.last_drawn_rect.y + this->inputPasswordUi.last_drawn_rect.h + 4.0f,
+            this->inputPasswordUi.last_drawn_rect.w - 52.0f,
+            24.0f};
+        menu_scene::drawTextLeftCenteredY(
+            &this->menuBodyFont,
+            this->loginPasswordFieldErrorMessage,
+            errorRect,
+            errorRect.x,
+            menu_scene::kErrorText);
+    }
+}
+
+void MenuScene::drawAuthFeedbackOverlay(void)
+{
+    if (!this->authFeedbackPopupVisible || !menu_scene::isValidRect(this->authFeedbackPopupRect))
+    {
+        return;
+    }
+
+    const SDL_FRect safeRect = rc2d_engine_getVisibleSafeRectRender();
+    const SDL_FRect panelRect = this->authFeedbackPopupRect;
+    const SDL_FRect innerRect = menu_scene::expandRect(panelRect, -8.0f, -8.0f);
+    const bool isPending = this->authUiSnapshot.signInRequestPending;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(menu_scene::kOverlayDim);
+    rc2d_graphics_rectangle("fill", &safeRect);
+    rc2d_graphics_setColor(menu_scene::kPendingPanelFill);
+    rc2d_graphics_rectangle("fill", &panelRect);
+    rc2d_graphics_setColor(menu_scene::kPendingPanelBorder);
+    rc2d_graphics_rectangle("line", &panelRect);
+    rc2d_graphics_setColor(menu_scene::kCardInnerBorder);
+    rc2d_graphics_rectangle("line", &innerRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    const float centerX = panelRect.x + (panelRect.w * 0.5f);
+    if (isPending)
+    {
+        const float centerY = panelRect.y + 62.0f;
+        const float radius = 18.0f;
+        for (int spokeIndex = 0; spokeIndex < 10; ++spokeIndex)
+        {
+            const float angle =
+                static_cast<float>(this->ambientAnimationTime * 4.5) +
+                (static_cast<float>(spokeIndex) * 0.62831853f);
+            RC2D_Color spokeColor = menu_scene::applyAlpha(
+                menu_scene::kPendingLoaderColor,
+                0.25f + (static_cast<float>(spokeIndex) / 12.0f));
+            rc2d_graphics_setColor(spokeColor);
+            rc2d_graphics_line(
+                centerX + (std::cos(angle) * (radius - 6.0f)),
+                centerY + (std::sin(angle) * (radius - 6.0f)),
+                centerX + (std::cos(angle) * radius),
+                centerY + (std::sin(angle) * radius));
+        }
+
+        const SDL_FRect titleRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 84.0f, panelRect.w - 44.0f, 30.0f};
+        const SDL_FRect bodyRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 118.0f, panelRect.w - 44.0f, 36.0f};
+        const SDL_FRect detailRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 150.0f, panelRect.w - 44.0f, 24.0f};
+        if (this->menuTitleFont.sdl_font != nullptr)
+        {
+            menu_scene::drawCenteredText(
+                &this->menuTitleFont,
+                "Connexion en cours",
+                titleRect,
+                menu_scene::kTitleText);
+        }
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Tentative de connexion au backend SeaTyrants...",
+            bodyRect,
+            menu_scene::kBodyText);
+#if GAME_ENV_DEV
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Mode DEV: connexion HTTP locale.",
+            detailRect,
+            menu_scene::kMutedText);
+#else
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Attente de la reponse du service d'authentification.",
+            detailRect,
+            menu_scene::kMutedText);
+#endif
+        return;
+    }
+
+    const float iconCenterY = panelRect.y + 44.0f;
+    rc2d_graphics_setColor(menu_scene::kErrorText);
+    rc2d_graphics_line(centerX - 12.0f, iconCenterY - 12.0f, centerX + 12.0f, iconCenterY + 12.0f);
+    rc2d_graphics_line(centerX - 12.0f, iconCenterY + 12.0f, centerX + 12.0f, iconCenterY - 12.0f);
+
+    const std::string titleText =
+        menu_scene::buildAuthFeedbackFailureTitle(this->authUiSnapshot.lastHttpStatusCode, this->authUiSnapshot.lastCode);
+    const std::string bodyText =
+        !this->authUiSnapshot.lastMessage.empty()
+            ? this->authUiSnapshot.lastMessage
+            : std::string("La connexion au backend SeaTyrants a echoue.");
+    const std::string detailText =
+        menu_scene::buildAuthFeedbackDetailText(this->authUiSnapshot.lastHttpStatusCode, this->authUiSnapshot.lastCode);
+    const std::string hintText =
+        menu_scene::buildAuthFeedbackHintText(this->authUiSnapshot.lastHttpStatusCode, this->authUiSnapshot.lastCode);
+
+    const SDL_FRect titleRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 66.0f, panelRect.w - 44.0f, 32.0f};
+    const SDL_FRect bodyRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 108.0f, panelRect.w - 44.0f, 34.0f};
+    const SDL_FRect detailRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 146.0f, panelRect.w - 44.0f, 26.0f};
+    const SDL_FRect hintRect = SDL_FRect{panelRect.x + 22.0f, panelRect.y + 178.0f, panelRect.w - 44.0f, 40.0f};
+    if (this->menuTitleFont.sdl_font != nullptr)
+    {
+        menu_scene::drawCenteredText(
+            &this->menuTitleFont,
+            titleText,
+            titleRect,
+            menu_scene::kTitleText);
+    }
+    menu_scene::drawCenteredText(&this->menuBodyFont, bodyText, bodyRect, menu_scene::kBodyText);
+    menu_scene::drawCenteredText(&this->menuBodyFont, detailText, detailRect, menu_scene::kMutedText);
+    menu_scene::drawCenteredText(&this->menuBodyFont, hintText, hintRect, menu_scene::kMutedText);
+
+    if (menu_scene::isValidRect(this->authFeedbackPopupActionButtonRect))
+    {
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(
+            this->hoveredAuthFeedbackPopupActionButton
+                ? menu_scene::kServerButtonHoverFill
+                : menu_scene::kServerButtonFill);
+        rc2d_graphics_rectangle("fill", &this->authFeedbackPopupActionButtonRect);
+        rc2d_graphics_setColor(menu_scene::kServerButtonBorder);
+        rc2d_graphics_rectangle("line", &this->authFeedbackPopupActionButtonRect);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Fermer",
+            this->authFeedbackPopupActionButtonRect,
+            menu_scene::kTitleText);
+    }
+}
+
+void MenuScene::drawServerSelectionOverlay(void)
+{
+    // Sortir si l'etape de selection serveur n'est pas active.
+    if (!this->authUiSnapshot.serverSelectionVisible || !menu_scene::isValidRect(this->serverSelectionOverlayRect))
+    {
+        return;
+    }
+
+    // Assombrir le menu derriere l'overlay pour attirer le regard sur la selection.
+    const SDL_FRect safeRect = rc2d_engine_getVisibleSafeRectRender();
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(menu_scene::kOverlayDim);
+    rc2d_graphics_rectangle("fill", &safeRect);
+
+    // Dessiner le panneau principal avec le meme langage visuel que le reste du menu.
+    SDL_FRect shadowRect = this->serverSelectionOverlayRect;
+    shadowRect.x += 12.0f;
+    shadowRect.y += 14.0f;
+    const SDL_FRect innerRect = menu_scene::expandRect(this->serverSelectionOverlayRect, -8.0f, -8.0f);
+
+    rc2d_graphics_setColor(menu_scene::kCardShadow);
+    rc2d_graphics_rectangle("fill", &shadowRect);
+    rc2d_graphics_setColor(menu_scene::kCardFill);
+    rc2d_graphics_rectangle("fill", &this->serverSelectionOverlayRect);
+    rc2d_graphics_setColor(menu_scene::kCardBorder);
+    rc2d_graphics_rectangle("line", &this->serverSelectionOverlayRect);
+    rc2d_graphics_setColor(menu_scene::kCardInnerFill);
+    rc2d_graphics_rectangle("fill", &innerRect);
+    rc2d_graphics_setColor(menu_scene::kCardInnerBorder);
+    rc2d_graphics_rectangle("line", &innerRect);
+    rc2d_graphics_setColor(menu_scene::kHeaderFill);
+    rc2d_graphics_rectangle("fill", &this->serverSelectionHeaderRect);
+    rc2d_graphics_setColor(menu_scene::kHeaderLine);
+    rc2d_graphics_rectangle("line", &this->serverSelectionHeaderRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    // Afficher le titre principal.
+    if (this->menuTitleFont.sdl_font != nullptr)
+    {
+        menu_scene::drawCenteredText(
+            &this->menuTitleFont,
+            "Liste des serveurs",
+            this->serverSelectionHeaderRect,
+            menu_scene::kTitleText);
+    }
+
+    const SDL_FRect tableHeaderRect = SDL_FRect{
+        this->serverSelectionOverlayRect.x + 18.0f,
+        this->serverSelectionHeaderRect.y + this->serverSelectionHeaderRect.h + 12.0f,
+        this->serverSelectionOverlayRect.w - 36.0f,
+        28.0f};
+    const SDL_FRect nameHeaderRect = SDL_FRect{
+        tableHeaderRect.x + 16.0f,
+        tableHeaderRect.y,
+        tableHeaderRect.w * 0.42f,
+        tableHeaderRect.h};
+    const SDL_FRect regionHeaderRect = SDL_FRect{
+        tableHeaderRect.x + (tableHeaderRect.w * 0.46f),
+        tableHeaderRect.y,
+        120.0f,
+        tableHeaderRect.h};
+    const SDL_FRect statusHeaderRect = SDL_FRect{
+        tableHeaderRect.x + (tableHeaderRect.w * 0.62f),
+        tableHeaderRect.y,
+        110.0f,
+        tableHeaderRect.h};
+    const SDL_FRect actionHeaderRect = SDL_FRect{
+        std::round(tableHeaderRect.x + tableHeaderRect.w - 150.0f),
+        tableHeaderRect.y,
+        132.0f,
+        tableHeaderRect.h};
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(menu_scene::kHeaderFill);
+    rc2d_graphics_rectangle("fill", &tableHeaderRect);
+    rc2d_graphics_setColor(menu_scene::kCardInnerBorder);
+    rc2d_graphics_rectangle("line", &tableHeaderRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    menu_scene::drawTextLeftCenteredY(
+        &this->menuBodyFont,
+        "Nom du serveur",
+        nameHeaderRect,
+        nameHeaderRect.x,
+        menu_scene::kTitleText);
+    menu_scene::drawTextLeftCenteredY(
+        &this->menuBodyFont,
+        "Region",
+        regionHeaderRect,
+        regionHeaderRect.x,
+        menu_scene::kTitleText);
+    menu_scene::drawTextLeftCenteredY(
+        &this->menuBodyFont,
+        "Statut",
+        statusHeaderRect,
+        statusHeaderRect.x,
+        menu_scene::kTitleText);
+    menu_scene::drawCenteredText(
+        &this->menuBodyFont,
+        "Action",
+        actionHeaderRect,
+        menu_scene::kTitleText);
+
+    // Si la liste est vide, l'overlay reste visible mais affiche un message explicite.
+    if (this->authUiSnapshot.servers.empty())
+    {
+        const SDL_FRect emptyRect = SDL_FRect{
+            this->serverSelectionOverlayRect.x + 20.0f,
+            tableHeaderRect.y + tableHeaderRect.h + 20.0f,
+            this->serverSelectionOverlayRect.w - 40.0f,
+            46.0f};
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Aucun serveur disponible pour le moment.",
+            emptyRect,
+            menu_scene::kBodyText);
+        return;
+    }
+
+    // Dessiner une ligne par serveur: nom, region, etat, bouton.
+    const std::size_t rowCount = (std::min)(
+        this->authUiSnapshot.servers.size(),
+        (std::min)(this->serverSelectionRowRects.size(), this->serverSelectionButtonRects.size()));
+    for (std::size_t index = 0U; index < rowCount; ++index)
+    {
+        const AuthSignInHTTPServerEntry& serverEntry = this->authUiSnapshot.servers[index];
+        const SDL_FRect& rowRect = this->serverSelectionRowRects[index];
+        const SDL_FRect& buttonRect = this->serverSelectionButtonRects[index];
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(menu_scene::kServerRowFill);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(menu_scene::kServerRowBorder);
+        rc2d_graphics_rectangle("line", &rowRect);
+        rc2d_graphics_setColor(
+            static_cast<int>(index) == this->hoveredServerSelectionButtonIndex
+                ? menu_scene::kServerButtonHoverFill
+                : menu_scene::kServerButtonFill);
+        rc2d_graphics_rectangle("fill", &buttonRect);
+        rc2d_graphics_setColor(menu_scene::kServerButtonBorder);
+        rc2d_graphics_rectangle("line", &buttonRect);
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        // Colonne nom.
+        const SDL_FRect nameRect = SDL_FRect{
+            rowRect.x + 16.0f,
+            rowRect.y,
+            rowRect.w * 0.42f,
+            rowRect.h};
+        menu_scene::drawTextLeftCenteredY(
+            &this->menuBodyFont,
+            serverEntry.name,
+            nameRect,
+            nameRect.x,
+            menu_scene::kBodyText);
+
+        // Colonne region.
+        const SDL_FRect regionRect = SDL_FRect{
+            rowRect.x + (rowRect.w * 0.46f),
+            rowRect.y,
+            120.0f,
+            rowRect.h};
+        menu_scene::drawTextLeftCenteredY(
+            &this->menuBodyFont,
+            serverEntry.region,
+            regionRect,
+            regionRect.x,
+            menu_scene::kMutedText);
+
+        // Colonne statut d'ouverture.
+        const SDL_FRect statusRect = SDL_FRect{
+            rowRect.x + (rowRect.w * 0.62f),
+            rowRect.y,
+            110.0f,
+            rowRect.h};
+        menu_scene::drawTextLeftCenteredY(
+            &this->menuBodyFont,
+            serverEntry.isClosed ? "Ferme" : "Ouvert",
+            statusRect,
+            statusRect.x,
+            serverEntry.isClosed ? menu_scene::kServerClosedText : menu_scene::kServerOpenText);
+
+        // Bouton de ligne.
+        menu_scene::drawCenteredText(
+            &this->menuBodyFont,
+            "Connexion",
+            buttonRect,
+            menu_scene::kTitleText);
+    }
+}
+
 void MenuScene::draw(void)
 {
     // Draw menu video if opened.
@@ -1502,6 +3225,11 @@ void MenuScene::draw(void)
     this->drawUiImageWithAlpha(&this->inputEmailUi, this->emailReveal.currentAlpha);
     this->drawUiImageWithAlpha(&this->inputPasswordUi, this->passwordReveal.currentAlpha);
     this->drawUiImageWithAlpha(&this->buttonLoginUi, this->buttonReveal.currentAlpha);
+    this->drawLoginFieldContents();
+    this->drawLoginFieldErrors();
+    this->drawLoginStatusMessage();
+    this->drawServerSelectionOverlay();
+    this->drawAuthFeedbackOverlay();
 
     // Draw intro fade if still active.
     if (this->loginFadeAlpha > 0.0f)
@@ -1518,18 +3246,63 @@ void MenuScene::keypressed(
     bool isrepeat,
     SDL_KeyboardID keyboardID)
 {
-    (void)key;
-    (void)scancode;
-    (void)mod;
-    (void)isrepeat;
     (void)keyboardID;
 
-    // Enter starts game.
-    if (keycode == SDLK_RETURN || keycode == SDLK_KP_ENTER)
+    if (this->authFeedbackPopupVisible)
     {
-        this->goToGameScene();
+        if (this->authUiSnapshot.signInRequestPending)
+        {
+            return;
+        }
+
+        if (!isrepeat &&
+            (keycode == SDLK_ESCAPE ||
+             keycode == SDLK_RETURN ||
+             keycode == SDLK_KP_ENTER ||
+             keycode == SDLK_SPACE))
+        {
+            this->authFeedbackPopupVisible = false;
+            this->hoveredAuthFeedbackPopupActionButton = false;
+            return;
+        }
+
         return;
     }
+
+    // Laisser le formulaire du menu consommer les touches de saisie en priorite.
+    if (this->handleLoginInputKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
+
+    // Lorsque l'overlay serveur est visible, ignorer les autres raccourcis du menu.
+    if (this->authUiSnapshot.serverSelectionVisible || this->authUiSnapshot.signInRequestPending)
+    {
+        return;
+    }
+
+    // A ce stade, Enter sur le menu lance simplement la meme requete signin
+    // que le bouton de connexion.
+    if (!isrepeat && (keycode == SDLK_RETURN || keycode == SDLK_KP_ENTER))
+    {
+        this->submitLoginRequest();
+        return;
+    }
+}
+
+void MenuScene::textinput(const RC2D_TextInputEventInfo* info)
+{
+    if (info == nullptr)
+    {
+        return;
+    }
+
+    if (this->authFeedbackPopupVisible)
+    {
+        return;
+    }
+
+    this->handleLoginTextInput(info->text);
 }
 
 void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
@@ -1540,6 +3313,56 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     // Only process left click.
     if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
+        return;
+    }
+
+    if (this->authFeedbackPopupVisible)
+    {
+        if (this->authUiSnapshot.signInRequestPending)
+        {
+            return;
+        }
+
+        this->authFeedbackPopupVisible = false;
+        this->hoveredAuthFeedbackPopupActionButton = false;
+        return;
+    }
+
+    if (this->authUiSnapshot.signInRequestPending)
+    {
+        return;
+    }
+
+    // Si l'overlay de serveurs est ouvert, il capture tout le clic gauche.
+    if (this->authUiSnapshot.serverSelectionVisible)
+    {
+        const std::size_t rowCount = (std::min)(
+            this->authUiSnapshot.servers.size(),
+            this->serverSelectionButtonRects.size());
+        for (std::size_t index = 0U; index < rowCount; ++index)
+        {
+            if (!menu_scene::pointInRect(this->serverSelectionButtonRects[index], x, y))
+            {
+                continue;
+            }
+
+            // A ce stade, le bouton ne connecte pas encore au serveur du jeu.
+            this->menuLocalStatusMessage =
+                "Connexion reseau au serveur \"" + this->authUiSnapshot.servers[index].name +
+                "\" non activee pour le moment.";
+            this->menuLocalStatusIsError = false;
+
+            RC2D_log(
+                RC2D_LOG_INFO,
+                "[CLIENT] [MENU] [AUTH_SIGNIN] - Clicked server row connect button (server=%s, region=%s, isClosed=%d).",
+                this->authUiSnapshot.servers[index].name.c_str(),
+                this->authUiSnapshot.servers[index].region.c_str(),
+                this->authUiSnapshot.servers[index].isClosed ? 1 : 0);
+            return;
+        }
+
+        // Les clics hors boutons sont absorbes par l'overlay pour eviter de
+        // reinteragir avec le menu place dessous.
         return;
     }
 
@@ -1623,17 +3446,57 @@ void MenuScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
     // Check email box hit.
     if (rc2d_collision_pointInUIImagePixelPerfect(&this->inputEmailUi, x, y))
     {
+        this->focusedLoginField = MenuLoginFocusedField::EMAIL;
+        this->stopLoginTextSelectionDrag();
+        this->collapseLoginFieldSelection(
+            MenuLoginFocusedField::PASSWORD,
+            this->loginPasswordSelectionState.caretByte);
+        this->loginEmailFieldErrorMessage.clear();
+        this->menuLocalStatusMessage.clear();
+        if (clicks >= 2)
+        {
+            this->selectAllLoginFieldText(MenuLoginFocusedField::EMAIL);
+        }
+        else
+        {
+            this->placeLoginCaretFromMouse(MenuLoginFocusedField::EMAIL, x, false);
+            this->loginEmailSelectionState.dragging = true;
+        }
         RC2D_log(RC2D_LOG_INFO, "Clicked EMAIL input box");
     }
     // Check password box hit.
     else if (rc2d_collision_pointInUIImagePixelPerfect(&this->inputPasswordUi, x, y))
     {
+        this->focusedLoginField = MenuLoginFocusedField::PASSWORD;
+        this->stopLoginTextSelectionDrag();
+        this->collapseLoginFieldSelection(
+            MenuLoginFocusedField::EMAIL,
+            this->loginEmailSelectionState.caretByte);
+        this->loginPasswordFieldErrorMessage.clear();
+        this->menuLocalStatusMessage.clear();
+        if (clicks >= 2)
+        {
+            this->selectAllLoginFieldText(MenuLoginFocusedField::PASSWORD);
+        }
+        else
+        {
+            this->placeLoginCaretFromMouse(MenuLoginFocusedField::PASSWORD, x, false);
+            this->loginPasswordSelectionState.dragging = true;
+        }
         RC2D_log(RC2D_LOG_INFO, "Clicked PASSWORD input box");
     }
     // Check login button hit.
     else if (menu_scene::pointInRect(this->buttonLoginUi.last_drawn_rect, x, y))
     {
+        this->stopLoginTextSelectionDrag();
+        this->submitLoginRequest();
         RC2D_log(RC2D_LOG_INFO, "Clicked LOGIN button");
+    }
+    else
+    {
+        // Cliquer ailleurs retire le focus des champs pour garder un comportement simple.
+        this->focusedLoginField = MenuLoginFocusedField::NONE;
+        this->stopLoginTextSelectionDrag();
     }
 }
 
@@ -1650,6 +3513,11 @@ void MenuScene::mousewheelmoved(
     (void)x;
     (void)integer_x;
     (void)mouseID;
+
+    if (this->authFeedbackPopupVisible)
+    {
+        return;
+    }
 
     if (!this->languageDropdownOpen || !menu_scene::pointInRect(this->languageListViewportRect, mouse_x, mouse_y))
     {
