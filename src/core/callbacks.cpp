@@ -74,7 +74,7 @@ void rc2d_load(void)
     // Scene de départ visible au boot.
     // - "splashscreen"  => splashscreen puis loading puis menu
     // - autre valeur    => loading puis cette scene
-    const std::string startupSceneName = "editormap-creatormap";
+    const std::string startupSceneName = "game";
     const std::string loadingNextSceneName =
         (startupSceneName == "splashscreen" || startupSceneName == "loading")
             ? std::string("menu")
