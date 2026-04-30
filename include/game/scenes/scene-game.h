@@ -73,6 +73,11 @@ public:
     void keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID) override;
 
     /**
+     * @brief Callback texte finalise RC2D/SDL de la scene gameplay.
+     */
+    void textinput(const RC2D_TextInputEventInfo* info) override;
+
+    /**
      * @brief Callback clic souris de la scene gameplay.
      */
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) override;

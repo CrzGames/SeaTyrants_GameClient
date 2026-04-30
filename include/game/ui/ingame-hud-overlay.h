@@ -124,6 +124,12 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
+     * @brief Propage un texte finalise RC2D/SDL au HUD.
+     * @return True si le texte est consomme par l'UI.
+     */
+    bool textinput(const RC2D_TextInputEventInfo* info);
+
+    /**
      * @brief True si un champ texte du HUD a le focus : pas de defilement camera ni raccourcis @ref GameScene.
      */
     bool isBlockingGameplayKeyboardInput(void) const;

@@ -1,6 +1,8 @@
 #include "game/ui/hud/chat-widget.h"
 #include "game/assets/title-asset-cache.h"
 
+#include <RC2D/RC2D_keyboard.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -34,6 +36,7 @@ static constexpr float kScrollBarWidth = 8.0f;
 static constexpr float kScrollBarPadding = 4.0f;
 static constexpr float kMinThumbHeight = 22.0f;
 static constexpr float kScrollThumbWheelHighlightSec = 0.25f;
+static constexpr std::size_t kMaxChatInputBytes = 2048U;
 
 /**
  * @brief Ligne visuelle issue du wrapping d'un message.
@@ -396,6 +399,99 @@ static bool keyToPrintableChar(
     return false;
 }
 
+static bool isUtf8ContinuationByte(unsigned char byteValue)
+{
+    return (byteValue & 0xC0U) == 0x80U;
+}
+
+static std::vector<std::size_t> buildUtf8CodepointOffsets(const std::string& text)
+{
+    std::vector<std::size_t> offsets{};
+    offsets.reserve(text.size() + 1U);
+    offsets.push_back(0U);
+
+    std::size_t index = 0U;
+    while (index < text.size())
+    {
+        ++index;
+        while (index < text.size() &&
+               isUtf8ContinuationByte(static_cast<unsigned char>(text[index])))
+        {
+            ++index;
+        }
+
+        offsets.push_back(index);
+    }
+
+    return offsets;
+}
+
+static std::size_t clampByteOffsetToUtf8Boundary(const std::vector<std::size_t>& offsets, std::size_t byteOffset)
+{
+    if (offsets.empty())
+    {
+        return 0U;
+    }
+
+    const std::size_t clamped = (std::min)(byteOffset, offsets.back());
+    std::size_t previousOffset = 0U;
+    for (std::size_t offset : offsets)
+    {
+        if (offset == clamped)
+        {
+            return offset;
+        }
+        if (offset > clamped)
+        {
+            break;
+        }
+
+        previousOffset = offset;
+    }
+
+    return previousOffset;
+}
+
+static std::size_t findCodepointIndexForByteOffset(const std::vector<std::size_t>& offsets, std::size_t byteOffset)
+{
+    if (offsets.empty())
+    {
+        return 0U;
+    }
+
+    const std::size_t clampedOffset = clampByteOffsetToUtf8Boundary(offsets, byteOffset);
+    for (std::size_t index = 0U; index < offsets.size(); ++index)
+    {
+        if (offsets[index] == clampedOffset)
+        {
+            return index;
+        }
+    }
+
+    return offsets.size() - 1U;
+}
+
+static std::string sanitizeTextInput(const char* text)
+{
+    if (text == nullptr || text[0] == '\0')
+    {
+        return {};
+    }
+
+    std::string sanitized{};
+    for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text); *cursor != 0U; ++cursor)
+    {
+        if ((*cursor < 32U || *cursor == 127U) && *cursor != ' ')
+        {
+            continue;
+        }
+
+        sanitized.push_back(static_cast<char>(*cursor));
+    }
+
+    return sanitized;
+}
+
 ChatWidget::ChatWidget(void)
     : chatMessages{},
       titleFont{},
@@ -482,6 +578,7 @@ void ChatWidget::load(void)
     this->resizeStartHeight = this->widgetHeight;
     this->chatMessages.clear();
     this->scrollFirstLine = 0;
+    this->syncPlatformTextInput();
 
     // 3) Messages systeme initiaux propres au widget.
     this->publishChatMessage(ChatWidget::ChatMessageAuthor::SYSTEM, "Bienvenue dans le chat du serveur ! Sois respectueux et amuse-toi ! On surveille...");
@@ -489,6 +586,8 @@ void ChatWidget::load(void)
 
 void ChatWidget::unload(void)
 {
+    this->inputFocused = false;
+    this->syncPlatformTextInput();
     this->controlIcons.unload();
     // Libere les ressources TTF.
     ResetStorageFontRef(&this->bodyFont);
@@ -877,6 +976,7 @@ bool ChatWidget::mousepressed(float x, float y, RC2D_MouseButton button, int cli
         this->inputFocused = true;
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
+        this->syncPlatformTextInput();
 
         // Double-clic: selection complete du texte saisi.
         if (clicks >= 2)
@@ -1060,7 +1160,12 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             }
             else if (this->cursorIndex > 0)
             {
-                --this->cursorIndex;
+                const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+                const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
+                if (caretIndex > 0U)
+                {
+                    this->cursorIndex = offsets[caretIndex - 1U];
+                }
             }
             this->clearInputSelection();
             this->cursorVisible = true;
@@ -1074,7 +1179,12 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             }
             else if (this->cursorIndex < this->inputBuffer.size())
             {
-                ++this->cursorIndex;
+                const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+                const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
+                if (caretIndex + 1U < offsets.size())
+                {
+                    this->cursorIndex = offsets[caretIndex + 1U];
+                }
             }
             this->clearInputSelection();
             this->cursorVisible = true;
@@ -1102,8 +1212,14 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             }
             else if (this->cursorIndex > 0 && !this->inputBuffer.empty())
             {
-                this->inputBuffer.erase(this->cursorIndex - 1, 1);
-                --this->cursorIndex;
+                const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+                const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
+                if (caretIndex > 0U)
+                {
+                    const std::size_t eraseStart = offsets[caretIndex - 1U];
+                    this->inputBuffer.erase(eraseStart, this->cursorIndex - eraseStart);
+                    this->cursorIndex = eraseStart;
+                }
             }
             this->clearInputSelection();
             this->cursorVisible = true;
@@ -1117,7 +1233,12 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             }
             else if (this->cursorIndex < this->inputBuffer.size())
             {
-                this->inputBuffer.erase(this->cursorIndex, 1);
+                const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+                const std::size_t caretIndex = findCodepointIndexForByteOffset(offsets, this->cursorIndex);
+                if (caretIndex + 1U < offsets.size())
+                {
+                    this->inputBuffer.erase(this->cursorIndex, offsets[caretIndex + 1U] - this->cursorIndex);
+                }
             }
             this->clearInputSelection();
             this->cursorVisible = true;
@@ -1155,23 +1276,58 @@ bool ChatWidget::keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode 
             break;
     }
 
-    // Insertion caractere imprimable.
-    char newCharacter = '\0';
-    if (keyToPrintableChar(key, scancode, keycode, mod, &newCharacter))
+    if (!isrepeat &&
+        (mod & SDL_KMOD_CTRL) != 0 &&
+        scancode == SDL_SCANCODE_A)
     {
-        if (this->hasInputSelection())
-        {
-            this->deleteSelectedInputText();
-        }
-        this->inputBuffer.insert(this->cursorIndex, 1, newCharacter);
-        ++this->cursorIndex;
-        this->clearInputSelection();
+        this->selectionAnchorIndex = 0U;
+        this->cursorIndex = this->inputBuffer.size();
         this->cursorVisible = true;
         this->cursorBlinkElapsed = 0.0;
         return true;
     }
 
+    // Les caracteres imprimables sont maintenant fournis par le callback textinput.
+    char ignoredCharacter = '\0';
+    if (keyToPrintableChar(key, scancode, keycode, mod, &ignoredCharacter))
+    {
+        return true;
+    }
+
     return false;
+}
+
+bool ChatWidget::textinput(const char* text)
+{
+    if (!this->visible || !this->inputFocused)
+    {
+        return false;
+    }
+
+    const std::string sanitized = sanitizeTextInput(text);
+    if (sanitized.empty())
+    {
+        return false;
+    }
+
+    if (this->hasInputSelection())
+    {
+        this->deleteSelectedInputText();
+    }
+
+    if (this->inputBuffer.size() + sanitized.size() > kMaxChatInputBytes)
+    {
+        return true;
+    }
+
+    const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+    this->cursorIndex = clampByteOffsetToUtf8Boundary(offsets, this->cursorIndex);
+    this->inputBuffer.insert(this->cursorIndex, sanitized);
+    this->cursorIndex += sanitized.size();
+    this->clearInputSelection();
+    this->cursorVisible = true;
+    this->cursorBlinkElapsed = 0.0;
+    return true;
 }
 
 void ChatWidget::draw(void) const
@@ -1435,6 +1591,7 @@ void ChatWidget::clearFocus(void)
     this->cursorVisible = false;
     this->cursorBlinkElapsed = 0.0;
     this->clearInputSelection();
+    this->syncPlatformTextInput();
 }
 
 void ChatWidget::computeInputVisibleRange(
@@ -1448,23 +1605,40 @@ void ChatWidget::computeInputVisibleRange(
         return;
     }
 
-    const std::size_t clampedFocusIndex = (std::min)(focusIndex, this->inputBuffer.size());
-    std::size_t renderStart = 0;
-    while (renderStart < clampedFocusIndex &&
-           measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, this->inputBuffer.substr(renderStart, clampedFocusIndex - renderStart)) > inputMaxWidth)
+    const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+    const std::size_t clampedFocusIndex = clampByteOffsetToUtf8Boundary(offsets, (std::min)(focusIndex, this->inputBuffer.size()));
+    const std::size_t focusCodepointIndex = findCodepointIndexForByteOffset(offsets, clampedFocusIndex);
+
+    std::size_t renderStart = 0U;
+    std::size_t probeStartCodepointIndex = 0U;
+    while (probeStartCodepointIndex < focusCodepointIndex)
     {
-        ++renderStart;
+        const std::size_t candidateStart = offsets[probeStartCodepointIndex];
+        if (measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, this->inputBuffer.substr(candidateStart, clampedFocusIndex - candidateStart)) <= inputMaxWidth)
+        {
+            renderStart = candidateStart;
+            break;
+        }
+
+        ++probeStartCodepointIndex;
+    }
+    if (probeStartCodepointIndex >= focusCodepointIndex)
+    {
+        renderStart = clampedFocusIndex;
     }
 
     std::size_t renderEnd = clampedFocusIndex;
-    while (renderEnd < this->inputBuffer.size())
+    std::size_t renderEndCodepointIndex = focusCodepointIndex;
+    while (renderEndCodepointIndex + 1U < offsets.size())
     {
-        const std::string candidate = this->inputBuffer.substr(renderStart, (renderEnd - renderStart) + 1);
-        if (measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, candidate) > inputMaxWidth)
+        const std::size_t candidateEnd = offsets[renderEndCodepointIndex + 1U];
+        if (measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, this->inputBuffer.substr(renderStart, candidateEnd - renderStart)) > inputMaxWidth)
         {
             break;
         }
-        ++renderEnd;
+
+        ++renderEndCodepointIndex;
+        renderEnd = candidateEnd;
     }
 
     *outStart = renderStart;
@@ -1480,20 +1654,24 @@ std::size_t ChatWidget::getInputCursorIndexFromPosition(float renderX, const SDL
     this->computeInputVisibleRange(inputMaxWidth, this->cursorIndex, &renderStart, &renderEnd);
 
     const std::string visibleText = this->inputBuffer.substr(renderStart, renderEnd - renderStart);
+    const std::vector<std::size_t> visibleOffsets = buildUtf8CodepointOffsets(visibleText);
     const float localX = clampf(renderX - inputTextX, 0.0f, inputMaxWidth);
     std::size_t newCursor = renderStart;
     float previousWidth = 0.0f;
-    for (std::size_t i = 0; i < visibleText.size(); ++i)
+    const std::size_t codepointCount = visibleOffsets.empty() ? 0U : (visibleOffsets.size() - 1U);
+    for (std::size_t i = 0; i < codepointCount; ++i)
     {
-        const float nextWidth = measureTextWidth(&const_cast<ChatWidget*>(this)->bodyFont, visibleText.substr(0, i + 1));
+        const float nextWidth = measureTextWidth(
+            &const_cast<ChatWidget*>(this)->bodyFont,
+            visibleText.substr(0U, visibleOffsets[i + 1U]));
         const float midpoint = previousWidth + ((nextWidth - previousWidth) * 0.5f);
         if (localX <= midpoint)
         {
-            newCursor = renderStart + i;
+            newCursor = renderStart + visibleOffsets[i];
             return (std::min)(newCursor, this->inputBuffer.size());
         }
         previousWidth = nextWidth;
-        newCursor = renderStart + i + 1;
+        newCursor = renderStart + visibleOffsets[i + 1U];
     }
 
     return (std::min)(newCursor, this->inputBuffer.size());
@@ -1506,21 +1684,26 @@ bool ChatWidget::hasInputSelection(void) const
 
 std::size_t ChatWidget::getInputSelectionStart(void) const
 {
-    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->inputBuffer.size());
-    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->inputBuffer.size());
+    const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+    const std::size_t clampedCursor = clampByteOffsetToUtf8Boundary(offsets, (std::min)(this->cursorIndex, this->inputBuffer.size()));
+    const std::size_t clampedAnchor = clampByteOffsetToUtf8Boundary(offsets, (std::min)(this->selectionAnchorIndex, this->inputBuffer.size()));
     return (std::min)(clampedAnchor, clampedCursor);
 }
 
 std::size_t ChatWidget::getInputSelectionEnd(void) const
 {
-    const std::size_t clampedCursor = (std::min)(this->cursorIndex, this->inputBuffer.size());
-    const std::size_t clampedAnchor = (std::min)(this->selectionAnchorIndex, this->inputBuffer.size());
+    const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+    const std::size_t clampedCursor = clampByteOffsetToUtf8Boundary(offsets, (std::min)(this->cursorIndex, this->inputBuffer.size()));
+    const std::size_t clampedAnchor = clampByteOffsetToUtf8Boundary(offsets, (std::min)(this->selectionAnchorIndex, this->inputBuffer.size()));
     return (std::max)(clampedAnchor, clampedCursor);
 }
 
 void ChatWidget::clearInputSelection(void)
 {
-    this->selectionAnchorIndex = (std::min)(this->cursorIndex, this->inputBuffer.size());
+    const std::vector<std::size_t> offsets = buildUtf8CodepointOffsets(this->inputBuffer);
+    this->selectionAnchorIndex = clampByteOffsetToUtf8Boundary(
+        offsets,
+        (std::min)(this->cursorIndex, this->inputBuffer.size()));
 }
 
 void ChatWidget::deleteSelectedInputText(void)
@@ -1554,6 +1737,11 @@ void ChatWidget::hide(void)
     this->scrollBarDragging = false;
     this->scrollBarWheelHighlightSec = 0.0f;
     this->clearFocus();
+}
+
+void ChatWidget::syncPlatformTextInput(void)
+{
+    rc2d_keyboard_setTextInput(this->visible && this->inputFocused);
 }
 
 bool ChatWidget::containsPoint(float x, float y) const

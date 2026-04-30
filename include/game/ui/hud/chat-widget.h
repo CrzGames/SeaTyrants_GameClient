@@ -80,6 +80,13 @@ public:
     bool keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
 
     /**
+     * @brief Injecte un texte deja compose par SDL/RC2D dans la barre de saisie.
+     * @param text Texte UTF-8 finalise a inserer.
+     * @return True si le texte a ete consomme par le chat.
+     */
+    bool textinput(const char* text);
+
+    /**
      * @brief Dessine la fenetre de chat dans le rectangle cible.
      */
     void draw(void) const;
@@ -250,4 +257,9 @@ private:
      * Le curseur est replace au debut de la plage supprimee.
      */
     void deleteSelectedInputText(void);
+
+    /**
+     * @brief Synchronise l'etat du text input RC2D/SDL avec le focus du champ.
+     */
+    void syncPlatformTextInput(void);
 };

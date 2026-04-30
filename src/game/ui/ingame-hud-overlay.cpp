@@ -2675,6 +2675,32 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
     return false;
 }
 
+bool IngameHudOverlay::textinput(const RC2D_TextInputEventInfo* info)
+{
+    if (this->hudConfiguratorMode || info == nullptr)
+    {
+        return false;
+    }
+
+    for (int i = static_cast<int>(this->windowDrawOrder.size()) - 1; i >= 0; --i)
+    {
+        const WindowLayer layer = this->windowDrawOrder[static_cast<std::size_t>(i)];
+        switch (layer)
+        {
+            case WindowLayer::CHAT:
+                if (this->chatWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    return false;
+}
+
 bool IngameHudOverlay::isBlockingGameplayKeyboardInput(void) const
 {
     if (this->chatWidget.hasBlockingTextInputFocus())

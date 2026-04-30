@@ -628,6 +628,16 @@ void GameScene::keypressed(
     }
 }
 
+void GameScene::textinput(const RC2D_TextInputEventInfo* info)
+{
+    if (info == nullptr)
+    {
+        return;
+    }
+
+    (void)GetIngameHudOverlay().textinput(info);
+}
+
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
     // Recupere les references aux systemes et objets necessaires.
