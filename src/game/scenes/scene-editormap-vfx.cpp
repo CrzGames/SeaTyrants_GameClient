@@ -3988,9 +3988,17 @@ float EditorMapVfxScene::computeVfxPreviewPhaseSecondsInCycle(
         return x;
     };
 
+    auto computeRootElapsedSeconds = [timeSeconds](const ShipVfxInstance& inst) -> float {
+        if (std::isfinite(inst.previewSpawnTimeSeconds) && inst.previewSpawnTimeSeconds >= 0.0f)
+        {
+            return (std::max)(0.0f, timeSeconds - inst.previewSpawnTimeSeconds);
+        }
+        return (std::max)(0.0f, timeSeconds);
+    };
+
     if (instance.spawnAfterInstanceId == 0U || chainDepth > 32)
     {
-        return normalizePhase(timeSeconds);
+        return normalizePhase(computeRootElapsedSeconds(instance));
     }
 
     const ShipVfxInstance* anchor = nullptr;
@@ -4004,11 +4012,11 @@ float EditorMapVfxScene::computeVfxPreviewPhaseSecondsInCycle(
     }
     if (anchor == nullptr || anchor->importedSfxIndex != instance.importedSfxIndex)
     {
-        return normalizePhase(timeSeconds);
+        return normalizePhase(computeRootElapsedSeconds(instance));
     }
     if (anchor->importedSfxIndex < 0 || anchor->importedSfxIndex >= static_cast<int>(this->importedSfx.size()))
     {
-        return normalizePhase(timeSeconds);
+        return normalizePhase(computeRootElapsedSeconds(instance));
     }
 
     const float anchorPhase = this->computeVfxPreviewPhaseSecondsInCycle(
@@ -4463,6 +4471,7 @@ EditorMapVfxScene::ShipVfxInstance EditorMapVfxScene::duplicateShipVfxInstanceFr
 {
     ShipVfxInstance duplicate = src;
     duplicate.instanceId = this->nextVfxInstanceId++;
+    duplicate.previewSpawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     // Runtime-only accumulators reset; toutes les proprietes editor/gameplay restent copiees.
     duplicate.motionTrailIdleSpawnAccSec = 0.0f;
     duplicate.motionTrailIdleRingSalvoPiecesRemaining = 0;
@@ -9546,6 +9555,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     }
 
     const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
+    const float previewSpawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     ShipVfxInstance instance{};
     instance.instanceId = this->nextVfxInstanceId++;
     int sourceInstanceNumber = 1;
@@ -9575,6 +9585,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     instance.sharedForAllDirections = true;
     instance.sharedForAllStates = true;
     instance.placementSnapClickToTile = false;
+    instance.previewSpawnTimeSeconds = previewSpawnTimeSeconds;
     for (DirectionOverride& override : instance.directionOverrides)
     {
         override.enabled = false;
@@ -10218,7 +10229,7 @@ void EditorMapVfxScene::updateLoosePreviewPlacementExpirations(void)
         vec.end());
 }
 
-int EditorMapVfxScene::computeLooseAnimatedFrameIndex(float nowSeconds, int frameCount, float fpsFallback) const
+int EditorMapVfxScene::computeLooseAnimatedFrameIndex(float elapsedSeconds, int frameCount, float fpsFallback) const
 {
     if (frameCount <= 0)
     {
@@ -10226,7 +10237,9 @@ int EditorMapVfxScene::computeLooseAnimatedFrameIndex(float nowSeconds, int fram
     }
 
     const float clampedFps = std::clamp(fpsFallback, kSfxFpsMin, kSfxFpsMax);
-    return static_cast<int>(std::floor(nowSeconds * (std::max)(clampedFps, 1.0f))) % frameCount;
+    const float safeElapsedSeconds =
+        (std::isfinite(elapsedSeconds) && elapsedSeconds > 0.0f) ? elapsedSeconds : 0.0f;
+    return static_cast<int>(std::floor(safeElapsedSeconds * (std::max)(clampedFps, 1.0f))) % frameCount;
 }
 
 float EditorMapVfxScene::computeLooseExportSpritesheetFps(int frameCount) const
@@ -11671,6 +11684,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
     this->setSelectedVfxInstanceIndex(-1);
     this->nextVfxInstanceId = 1U;
     this->previewTargetFireSectorIndex = 0;
+    const float importedPreviewSpawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
 
     auto findImportedSfxIndex = [this](const std::string& sourceJsonPath, const std::string& displayName) -> int {
         const std::string sourceKey = makeComparableSourcePathKey(sourceJsonPath);
@@ -11746,7 +11760,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         }
     };
 
-    auto pushParsedInstance = [this, &findImportedSfxIndex, &parseDirectionOverride](
+    auto pushParsedInstance = [this, &findImportedSfxIndex, &parseDirectionOverride, importedPreviewSpawnTimeSeconds](
                                   const cJSON* node,
                                   std::vector<ShipVfxInstance>& targetVec,
                                   int shipDrawOrderForPage) {
@@ -11847,6 +11861,7 @@ bool EditorMapVfxScene::importShipVfxConfigFromPath(const char* absoluteFilePath
         {
             instance.spawnAfterDelayMs = static_cast<int>(std::llround(spawnAfterMsNode->valuedouble));
         }
+        instance.previewSpawnTimeSeconds = importedPreviewSpawnTimeSeconds;
 
         const cJSON* motionSpawnCapNode = cJSON_GetObjectItemCaseSensitive(node, "motionSpawnCaptured");
         instance.motionSpawnCaptured = cJSON_IsBool(motionSpawnCapNode) ? cJSON_IsTrue(motionSpawnCapNode) : false;
@@ -14592,14 +14607,14 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
         }
     }
 
-    auto drawAnimatedAtTile = [&](float tileX, float tileY, float fps, Uint8 textureAlpha255) {
+    auto drawAnimatedAtTile = [&](float tileX, float tileY, float elapsedSeconds, float fps, Uint8 textureAlpha255) {
         if (frameCount <= 0)
         {
             return;
         }
 
         const float clampedFps = std::clamp(fps, kSfxFpsMin, kSfxFpsMax);
-        const int frameIndex = this->computeLooseAnimatedFrameIndex(nowSecondsPl, frameCount, clampedFps);
+        const int frameIndex = this->computeLooseAnimatedFrameIndex(elapsedSeconds, frameCount, clampedFps);
         const ImportedLooseSprite& sprite = folder.sprites[static_cast<size_t>(frameIndex)];
         RC2D_Image* spriteImage = const_cast<RC2D_Image*>(&sprite.image);
 
@@ -14686,7 +14701,12 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
 
     for (const LoosePreviewPlacement& placement : this->loosePreviewPlacements)
     {
-        drawAnimatedAtTile(placement.tileX, placement.tileY, placement.fps, 255);
+        drawAnimatedAtTile(
+            placement.tileX,
+            placement.tileY,
+            nowSecondsPl - placement.spawnTimeSeconds,
+            placement.fps,
+            255);
     }
 
     float mouseX = 0.0f;
@@ -14727,6 +14747,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
                 drawAnimatedAtTile(
                     htx,
                     hty,
+                    0.0f,
                     this->getLoosePreviewFpsOrDefault(),
                     kLoosePlacementCursorPreviewAlpha);
             }
@@ -14739,6 +14760,7 @@ void EditorMapVfxScene::drawLoosePlacementPreview(void) const
                 drawAnimatedAtTile(
                     hoveredTileF.x,
                     hoveredTileF.y,
+                    0.0f,
                     this->getLoosePreviewFpsOrDefault(),
                     kLoosePlacementCursorPreviewAlpha);
             }

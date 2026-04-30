@@ -124,6 +124,8 @@ private:
         uint32_t spawnAfterInstanceId = 0;
         /** Delai apres la phase de l'instance reference (ms), pour la lecture preview / jeu. */
         int spawnAfterDelayMs = 0;
+        /** Horloge SDL_GetTicks (s) au spawn preview editor ; non serialise. */
+        float previewSpawnTimeSeconds = -1.0f;
         /**
          * Preview editor: decal SPAWN (meme unite que offsetX/Y) pour placer les rejets de trainee au sol.
          */
@@ -1087,7 +1089,7 @@ private:
     float getLoosePreviewFpsOrDefault(void) const;
     int getLoosePreviewTotalDurationMsActive(void) const;
     bool applyLoosePreviewTotalDurationMsInput(void);
-    int computeLooseAnimatedFrameIndex(float nowSeconds, int frameCount, float fpsFallback) const;
+    int computeLooseAnimatedFrameIndex(float elapsedSeconds, int frameCount, float fpsFallback) const;
     float computeLooseExportSpritesheetFps(int frameCount) const;
     bool handleLayerNameInputKey(
         const char* key,
