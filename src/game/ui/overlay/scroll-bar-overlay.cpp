@@ -6,7 +6,7 @@
 #include <cmath>
 
 #include "core/context.h"
-#include "game/camera.h"
+#include "game/camera/camera.h"
 #include "game/map/map.h"
 
 ScrollBarOverlay::ScrollBarOverlay(void)

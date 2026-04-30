@@ -7,7 +7,7 @@
 #include <cmath>
 #include <utility>
 
-#include "game/camera.h"
+#include "game/camera/camera.h"
 
 static constexpr float kZoomWidgetScreenMarginPx = 5.0f;
 static constexpr float kZoomTooltipOffsetX = 14.0f;

@@ -3,7 +3,7 @@
 #include "core/context.h"
 #include "game/controllers/gameplay-camera-controller.h"
 #include "game/render/world-render-clip.h"
-#include "game/shaders/gameplay-shader-controller.h"
+#include "game/controllers/gameplay-shader-controller.h"
 #include "game/ui/ingame-hud-overlay.h"
 
 #include <algorithm>

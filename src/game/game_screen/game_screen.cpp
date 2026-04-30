@@ -1,4 +1,4 @@
-#include "game/game_screen.h"
+#include "game/game_screen/game_screen.h"
 
 #include <RC2D/RC2D.h> // <- pour rc2d_engine_getVisibleSafeRectRender()
 

@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-#include "game/camera.h"
+#include "game/camera/camera.h"
 #include "game/entities/player.h"
 #include "game/map/map.h"
 

@@ -1,4 +1,4 @@
-#include "game/shaders/gameplay-shader-controller.h"
+#include "game/controllers/gameplay-shader-controller.h"
 
 #include "core/context.h"
 #include "game/entities/player.h"

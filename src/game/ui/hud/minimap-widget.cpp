@@ -1,7 +1,7 @@
 #include "game/ui/hud/minimap-widget.h"
 
 #include "game/assets/title-asset-cache.h"
-#include "game/camera.h"
+#include "game/camera/camera.h"
 #include "game/map/map.h"
 
 #include <algorithm>

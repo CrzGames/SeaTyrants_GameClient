@@ -4,6 +4,8 @@
 
 #include "game/entities/player.h"
 #include "game/map/map.h"
+#include "game/vfx/vfx-classic.h"
+#include "game/vfx/vfx-ship.h"
 
 /**
  * @brief Etat runtime global du gameplay.
@@ -17,6 +19,9 @@ public:
     std::vector<Player> npcs;         /**< Liste des NPC (base temporaire Player). */
     std::vector<Player> monsters;     /**< Liste des monstres (base temporaire Player). */
     std::vector<Player> otherPlayers; /**< Liste des autres joueurs. */
+    std::vector<Player> scintilles;   /**< Scintilles (types a affiner plus tard). */
+    std::vector<VFXShip> vfxShips;    /**< VFX complexes lies aux navires (gameplay). */
+    std::vector<VFXClassic> vfxClassics; /**< VFX spritesheet simples (gameplay). */
 
     /**
      * @brief Constructeur.
@@ -25,7 +30,10 @@ public:
         : player{},
           npcs{},
           monsters{},
-          otherPlayers{}
+          otherPlayers{},
+          scintilles{},
+          vfxShips{},
+          vfxClassics{}
     {
     }
 
