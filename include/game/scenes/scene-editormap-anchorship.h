@@ -7,6 +7,7 @@
 #include <array>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "game/scenes/scene.h"
 #include "game/ships/ship.h"
@@ -37,6 +38,11 @@ private:
         bool loaded; /**< True si la texture est valide. */
     };
 
+    struct ImportedShip {
+        std::string displayName; /**< Libelle UI du dossier navire. */
+        std::string folderAbsolutePath; /**< Chemin absolu du dossier source. */
+    };
+
     BackgroundWidget backgroundWidget; /**< Fond UI ingame (haut/bas). */
     RC2D_Font overlayFont; /**< Police overlay/outils. */
     std::array<ShipFrame, 8> shipFrames; /**< Sprites 1..8 du navire. */
@@ -47,9 +53,18 @@ private:
     int pendingOceanColorDelta; /**< Delta ocean en attente d'application. */
     float cameraZoomBeforeCheck; /**< Zoom camera memorise avant le check deplacement. */
     bool showAnchorGuides; /**< Affiche/masque les guides (carre + ancre + croix cyan). */
+    bool previewIsoGridVisible; /**< Affiche/masque une grille isometrique debug 50x50. */
     float spritePreviewZoom; /**< Zoom du sprite en mode edition anchor. */
     std::string loadedShipFolderAbsolute; /**< Dossier source navire selectionne. */
     std::string statusMessage; /**< Message d'etat affiche a l'ecran. */
+    std::vector<ImportedShip> importedShips; /**< Dossiers navire valides trouves dans assets/images/ships. */
+    std::vector<std::string> pendingShipFolderScanPaths; /**< File de scan progressif des dossiers navire. */
+    int pendingShipFolderScanIndex; /**< Index courant dans la file de scan. */
+    bool shipFolderScanCompleted; /**< True quand le scan progressif est termine. */
+    int selectedImportedShipIndex; /**< Index navire selectionne dans la liste. */
+    int shipListScrollOffset; /**< Scroll vertical de la liste navires. */
+    bool shipListScrollDragActive; /**< True pendant le drag du thumb de scroll. */
+    float shipListScrollDragGrabOffsetY; /**< Offset souris/thumb pendant le drag. */
 
     bool pendingFolderDialogCompleted; /**< True si callback dossier recu. */
     bool pendingFolderDialogCanceled; /**< True si selection dossier annulee. */
@@ -74,8 +89,10 @@ private:
     SDL_FRect buttonSaveAnchorRect; /**< Bouton sauvegarde ship_anchor.json. */
     SDL_FRect buttonResetAnchorRect; /**< Bouton reset ancre sprite courant. */
     SDL_FRect buttonToggleGuidesRect; /**< Bouton toggle affichage guides anchor. */
+    SDL_FRect buttonToggleIsoGridRect; /**< Bouton toggle grille isometrique 50x50. */
     SDL_FRect buttonOceanPrevRect; /**< Bouton ocean precedent. */
     SDL_FRect buttonOceanNextRect; /**< Bouton ocean suivant. */
+    SDL_FRect shipListRect; /**< Panel liste navires bas-droite. */
 
     static EditorMapAnchorShipScene* activeInstance; /**< Instance active pour callbacks async. */
 
@@ -97,6 +114,14 @@ private:
      *  @param delta Pas de rotation couleur (+1/-1).
      */
     void cycleOceanColor(int delta);
+    /** @brief Lance un scan progressif des dossiers navire de assets/images/ships. */
+    void beginShipFolderBatchScan(void);
+    /** @brief Scanne quelques dossiers navire par frame pour eviter un pic CPU. */
+    void processShipFolderBatchScan(void);
+    /** @brief Tente d'ajouter un dossier navire a la liste importee. */
+    bool tryAppendImportedShipFolder(const std::string& folderAbsolutePath);
+    /** @brief Selectionne un navire dans la liste et le charge. */
+    bool selectImportedShipAtIndex(int shipIndex);
     /** @brief Restaure le zoom camera memorise avant le check deplacement. */
     void restoreCameraZoomAfterCheck(void);
     /** @brief Ouvre le dialogue de selection dossier navire. */
@@ -119,14 +144,34 @@ private:
     bool saveAnchorsToJson(void);
     /** @brief Lance le check auto deplacement 8 directions. */
     void startMovementPreviewCheck(void);
+    /** @brief Repositionne le marqueur persistant sur la tuile de reference. */
+    void showPersistentAnchorTileMarker(void);
+    /** @brief Synchronise le Ship de preview avec le sprite actuellement edite. */
+    void syncStaticPreviewShipToSelectedSprite(void);
     /** @brief Met a jour l'animation de check deplacement.
      *  @param dt Delta time secondes.
      */
     void updateMovementPreview(double dt);
     /** @brief Recalcule les rectangles des boutons UI. */
     void updateToolbarLayout(void);
+    /** @brief Retourne le scroll max d'une liste simple. */
+    int getShipListMaxScrollOffset(int itemCount) const;
+    /** @brief Clamp le scroll de liste. */
+    void clampShipListScrollOffset(int* scrollOffset, int itemCount) const;
+    /** @brief Assure qu'une selection reste visible dans la liste. */
+    void ensureShipSelectionVisible(int selectedIndex, int* scrollOffset, int itemCount) const;
+    /** @brief Retourne l'offset de depart reel de la liste. */
+    int computeShipListStartIndex(int scrollOffset, int itemCount) const;
+    /** @brief Gere un clic dans le panel liste navires. */
+    bool handleShipListPanelClick(float x, float y, int* outClickedIndex);
+    /** @brief Met a jour le drag du scroll de liste. */
+    void handleShipListPanelScrollDrag(void);
     /** @brief Dessine un bouton toolbar standard. */
     void drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const;
+    /** @brief Dessine le panel scrollable des navires. */
+    void drawShipListPanel(void) const;
+    /** @brief Dessine une grille isometrique debug 50x50 sous la tuile de preview. */
+    void drawPreviewIsoGrid(void) const;
     /** @brief Dessine le sprite courant + guides anchor. */
     void drawShipAnchorPreview(void) const;
     /** @brief Dessine le HUD texte + boutons. */
@@ -177,6 +222,16 @@ public:
     void keypressed(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat, SDL_KeyboardID keyboardID) override;
     /** @brief Callback souris scene. */
     void mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID) override;
+    /** @brief Callback molette scene. */
+    void mousewheelmoved(
+        RC2D_MouseWheelDirection direction,
+        float x,
+        float y,
+        Sint32 integer_x,
+        Sint32 integer_y,
+        float mouse_x,
+        float mouse_y,
+        SDL_MouseID mouseID) override;
 };
 
 #endif // GAME_ENV_DEV

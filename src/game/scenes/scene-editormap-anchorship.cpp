@@ -19,6 +19,7 @@
 #include "core/context.h"
 #include "game/render/world-render-clip.h"
 #include "game/scenes/editormap-scene-layout.h"
+#include <RC2D/RC2D_keyboard.h>
 
 struct OceanColorEntry
 {
@@ -38,6 +39,14 @@ constexpr double kPreviewPauseAfterArrivalSec = 0.55;
 constexpr float kSpritePreviewZoomMin = 0.25f;
 constexpr float kSpritePreviewZoomMax = 8.0f;
 constexpr Uint8 kAnchorPlacementSpriteAlpha = 51; // 20% pour voir la tile dessous.
+constexpr int kAnchorShipVisibleListRows = 10;
+constexpr float kAnchorShipListScrollBarWidth = 10.0f;
+constexpr RC2D_Color kAnchorShipPanelFillColor = RC2D_Color{16, 24, 33, 212};
+constexpr RC2D_Color kAnchorShipPanelBorderColor = RC2D_Color{114, 130, 148, 228};
+constexpr RC2D_Color kAnchorShipRowFillColor = RC2D_Color{30, 42, 55, 212};
+constexpr RC2D_Color kAnchorShipRowSelectedFillColor = RC2D_Color{71, 105, 140, 232};
+constexpr RC2D_Color kAnchorShipRowBorderColor = RC2D_Color{100, 118, 136, 220};
+constexpr RC2D_Color kAnchorShipPanelMutedTextColor = RC2D_Color{194, 204, 216, 220};
 
 constexpr std::array<RC2D_FileDialogFilter, 1> kFolderFilters = {{
     {"Dossier navire", "*"},
@@ -91,6 +100,94 @@ static std::string shortenMiddle(const std::string& text, size_t maxLen)
     return text.substr(0, headLen) + "..." + text.substr(text.size() - tailLen);
 }
 
+static std::string trimAsciiAnchorShip(std::string value)
+{
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+    {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+    {
+        value.pop_back();
+    }
+    return value;
+}
+
+static std::string stripListPrefixAnchorShip(const std::string& rawName, const char* expectedPrefix)
+{
+    if (expectedPrefix == nullptr || expectedPrefix[0] == '\0')
+    {
+        return trimAsciiAnchorShip(rawName);
+    }
+
+    const std::string normalized = trimAsciiAnchorShip(rawName);
+    const std::string prefix(expectedPrefix);
+    if (normalized.size() >= prefix.size())
+    {
+        std::string candidate = normalized.substr(0, prefix.size());
+        std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        std::string expectedLower = prefix;
+        std::transform(expectedLower.begin(), expectedLower.end(), expectedLower.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        if (candidate == expectedLower)
+        {
+            return trimAsciiAnchorShip(normalized.substr(prefix.size()));
+        }
+    }
+    return normalized;
+}
+
+static std::string makeAssetLabelAnchorShip(const std::string& label, int maxChars)
+{
+    const std::string normalized = trimAsciiAnchorShip(label);
+    if (static_cast<int>(normalized.size()) <= maxChars)
+    {
+        return normalized;
+    }
+    if (maxChars <= 6)
+    {
+        return normalized.substr(0, static_cast<size_t>((std::max)(maxChars, 0)));
+    }
+    return normalized.substr(0, static_cast<size_t>(maxChars - 3)) + "...";
+}
+
+static bool getMouseRenderPositionAnchorShip(float* outX, float* outY)
+{
+    if (outX == nullptr || outY == nullptr)
+    {
+        return false;
+    }
+
+    float windowX = 0.0f;
+    float windowY = 0.0f;
+    rc2d_mouse_getPosition(&windowX, &windowY);
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer == nullptr)
+    {
+        *outX = windowX;
+        *outY = windowY;
+        return true;
+    }
+
+    float renderX = windowX;
+    float renderY = windowY;
+    if (!SDL_RenderCoordinatesFromWindow(renderer, windowX, windowY, &renderX, &renderY))
+    {
+        renderX = windowX;
+        renderY = windowY;
+    }
+
+    *outX = renderX;
+    *outY = renderY;
+    return true;
+}
+
 EditorMapAnchorShipScene* EditorMapAnchorShipScene::activeInstance = nullptr;
 
 EditorMapAnchorShipScene::EditorMapAnchorShipScene(void)
@@ -103,9 +200,18 @@ EditorMapAnchorShipScene::EditorMapAnchorShipScene(void)
       pendingOceanColorDelta(0),
       cameraZoomBeforeCheck(0.60f),
       showAnchorGuides(true),
+      previewIsoGridVisible(false),
       spritePreviewZoom(1.0f),
       loadedShipFolderAbsolute{},
       statusMessage("Editor anchor navire pret."),
+      importedShips{},
+      pendingShipFolderScanPaths{},
+      pendingShipFolderScanIndex(0),
+      shipFolderScanCompleted(false),
+      selectedImportedShipIndex(-1),
+      shipListScrollOffset(0),
+      shipListScrollDragActive(false),
+      shipListScrollDragGrabOffsetY(0.0f),
       pendingFolderDialogCompleted(false),
       pendingFolderDialogCanceled(false),
       pendingFolderAbsolute{},
@@ -126,8 +232,10 @@ EditorMapAnchorShipScene::EditorMapAnchorShipScene(void)
       buttonSaveAnchorRect{},
       buttonResetAnchorRect{},
       buttonToggleGuidesRect{},
+      buttonToggleIsoGridRect{},
       buttonOceanPrevRect{},
-      buttonOceanNextRect{}
+      buttonOceanNextRect{},
+      shipListRect{}
 {
     this->resetEditorState();
 }
@@ -143,9 +251,18 @@ void EditorMapAnchorShipScene::resetEditorState(void)
     this->pendingOceanColorDelta = 0;
     this->cameraZoomBeforeCheck = 0.60f;
     this->showAnchorGuides = true;
+    this->previewIsoGridVisible = false;
     this->spritePreviewZoom = 1.0f;
     this->loadedShipFolderAbsolute.clear();
     this->statusMessage = "Editor anchor navire pret.";
+    this->importedShips.clear();
+    this->pendingShipFolderScanPaths.clear();
+    this->pendingShipFolderScanIndex = 0;
+    this->shipFolderScanCompleted = false;
+    this->selectedImportedShipIndex = -1;
+    this->shipListScrollOffset = 0;
+    this->shipListScrollDragActive = false;
+    this->shipListScrollDragGrabOffsetY = 0.0f;
 
     this->pendingFolderDialogCompleted = false;
     this->pendingFolderDialogCanceled = false;
@@ -165,6 +282,8 @@ void EditorMapAnchorShipScene::resetEditorState(void)
     this->movementPreviewShip.setPositionTile(0.0f, 0.0f);
     this->movementPreviewShip.setSpeedTilesPerSecond(4.0f);
     this->movementPreviewShip.setHealthVisual(Ship::HealthVisual::FULL);
+    this->movementPreviewShip.setDrawScale(1.0f);
+    this->movementPreviewShip.setDrawAlpha(kAnchorPlacementSpriteAlpha);
     this->movementPreviewShip.unloadSprites();
     // Dans cette scene, le marqueur doit rester visible jusqu'au prochain clic simule.
     this->clickMarker.setDurationSeconds(0.0);
@@ -266,6 +385,446 @@ void EditorMapAnchorShipScene::cycleOceanColor(int delta)
 
     this->selectedOceanColorIndex = index;
     this->applySelectedOceanColor();
+}
+
+void EditorMapAnchorShipScene::beginShipFolderBatchScan(void)
+{
+    this->importedShips.clear();
+    this->pendingShipFolderScanPaths.clear();
+    this->pendingShipFolderScanIndex = 0;
+    this->shipFolderScanCompleted = false;
+    this->selectedImportedShipIndex = -1;
+    this->shipListScrollOffset = 0;
+    this->shipListScrollDragActive = false;
+    this->shipListScrollDragGrabOffsetY = 0.0f;
+
+    std::error_code fsError;
+    const std::filesystem::path rootPath("assets/images/ships");
+    if (!std::filesystem::exists(rootPath, fsError) || !std::filesystem::is_directory(rootPath, fsError))
+    {
+        this->shipFolderScanCompleted = true;
+        this->statusMessage = "Dossier assets/images/ships introuvable.";
+        return;
+    }
+
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(rootPath, fsError))
+    {
+        if (fsError)
+        {
+            break;
+        }
+        if (!entry.is_directory(fsError))
+        {
+            continue;
+        }
+        this->pendingShipFolderScanPaths.push_back(normalizePathSlashes(entry.path().string()));
+    }
+
+    std::sort(
+        this->pendingShipFolderScanPaths.begin(),
+        this->pendingShipFolderScanPaths.end(),
+        [](const std::string& a, const std::string& b) {
+            return trimAsciiAnchorShip(a) < trimAsciiAnchorShip(b);
+        });
+
+    if (this->pendingShipFolderScanPaths.empty())
+    {
+        this->shipFolderScanCompleted = true;
+        this->statusMessage = "Aucun dossier navire trouve dans assets/images/ships.";
+    }
+    else if (this->loadedShipFolderAbsolute.empty())
+    {
+        this->statusMessage =
+            "Scan navires assets/images/ships en cours (0/" +
+            std::to_string(static_cast<int>(this->pendingShipFolderScanPaths.size())) + ").";
+    }
+}
+
+void EditorMapAnchorShipScene::processShipFolderBatchScan(void)
+{
+    if (this->shipFolderScanCompleted)
+    {
+        return;
+    }
+
+    constexpr int kFoldersPerUpdate = 3;
+    const int totalCount = static_cast<int>(this->pendingShipFolderScanPaths.size());
+    int processedThisFrame = 0;
+    while (this->pendingShipFolderScanIndex < totalCount && processedThisFrame < kFoldersPerUpdate)
+    {
+        const std::string folderPath =
+            this->pendingShipFolderScanPaths[static_cast<size_t>(this->pendingShipFolderScanIndex)];
+        this->tryAppendImportedShipFolder(folderPath);
+        this->pendingShipFolderScanIndex += 1;
+        processedThisFrame += 1;
+    }
+
+    if (this->pendingShipFolderScanIndex >= totalCount)
+    {
+        this->shipFolderScanCompleted = true;
+        if (!this->importedShips.empty())
+        {
+            std::sort(
+                this->importedShips.begin(),
+                this->importedShips.end(),
+                [](const ImportedShip& a, const ImportedShip& b) {
+                    const std::string aKey = stripListPrefixAnchorShip(a.displayName, "ship-");
+                    const std::string bKey = stripListPrefixAnchorShip(b.displayName, "ship-");
+                    if (aKey != bKey)
+                    {
+                        return aKey < bKey;
+                    }
+                    return a.folderAbsolutePath < b.folderAbsolutePath;
+                });
+
+            if (this->selectedImportedShipIndex < 0)
+            {
+                (void)this->selectImportedShipAtIndex(0);
+            }
+            this->statusMessage =
+                std::to_string(static_cast<int>(this->importedShips.size())) +
+                " navire(s) detecte(s) dans assets/images/ships.";
+        }
+        else
+        {
+            this->statusMessage = "Aucun navire valide detecte dans assets/images/ships.";
+        }
+        return;
+    }
+
+    if (this->loadedShipFolderAbsolute.empty())
+    {
+        this->statusMessage =
+            "Scan navires assets/images/ships en cours (" +
+            std::to_string(this->pendingShipFolderScanIndex) + "/" +
+            std::to_string(totalCount) + ").";
+    }
+}
+
+bool EditorMapAnchorShipScene::tryAppendImportedShipFolder(const std::string& folderAbsolutePath)
+{
+    if (folderAbsolutePath.empty())
+    {
+        return false;
+    }
+
+    std::error_code fsError;
+    const std::filesystem::path folderPath(folderAbsolutePath);
+    if (!std::filesystem::exists(folderPath, fsError) || !std::filesystem::is_directory(folderPath, fsError))
+    {
+        return false;
+    }
+
+    for (int i = 0; i < kShipSpriteCount; ++i)
+    {
+        const std::filesystem::path pngPath = folderPath / (std::to_string(i + 1) + ".png");
+        if (!std::filesystem::exists(pngPath, fsError) || !std::filesystem::is_regular_file(pngPath, fsError))
+        {
+            return false;
+        }
+    }
+
+    for (const ImportedShip& existingShip : this->importedShips)
+    {
+        if (normalizePathSlashes(existingShip.folderAbsolutePath) == normalizePathSlashes(folderAbsolutePath))
+        {
+            return false;
+        }
+    }
+
+    ImportedShip importedShip{};
+    importedShip.folderAbsolutePath = normalizePathSlashes(folderAbsolutePath);
+    importedShip.displayName = folderPath.filename().string();
+    if (importedShip.displayName.empty())
+    {
+        importedShip.displayName = importedShip.folderAbsolutePath;
+    }
+    this->importedShips.push_back(std::move(importedShip));
+    return true;
+}
+
+bool EditorMapAnchorShipScene::selectImportedShipAtIndex(int shipIndex)
+{
+    if (shipIndex < 0 || shipIndex >= static_cast<int>(this->importedShips.size()))
+    {
+        return false;
+    }
+
+    const ImportedShip& ship = this->importedShips[static_cast<size_t>(shipIndex)];
+    if (!this->loadShipFolderFromAbsolutePath(ship.folderAbsolutePath.c_str()))
+    {
+        return false;
+    }
+
+    this->selectedImportedShipIndex = shipIndex;
+    this->ensureShipSelectionVisible(
+        this->selectedImportedShipIndex,
+        &this->shipListScrollOffset,
+        static_cast<int>(this->importedShips.size()));
+    this->statusMessage = "Navire charge depuis la liste: " + stripListPrefixAnchorShip(ship.displayName, "ship-");
+    return true;
+}
+
+int EditorMapAnchorShipScene::getShipListMaxScrollOffset(int itemCount) const
+{
+    return (std::max)(itemCount - kAnchorShipVisibleListRows, 0);
+}
+
+void EditorMapAnchorShipScene::clampShipListScrollOffset(int* scrollOffset, int itemCount) const
+{
+    if (scrollOffset == nullptr)
+    {
+        return;
+    }
+    *scrollOffset = std::clamp(*scrollOffset, 0, this->getShipListMaxScrollOffset(itemCount));
+}
+
+void EditorMapAnchorShipScene::ensureShipSelectionVisible(int selectedIndex, int* scrollOffset, int itemCount) const
+{
+    if (scrollOffset == nullptr)
+    {
+        return;
+    }
+
+    this->clampShipListScrollOffset(scrollOffset, itemCount);
+    if (selectedIndex < 0)
+    {
+        return;
+    }
+    if (selectedIndex < *scrollOffset)
+    {
+        *scrollOffset = selectedIndex;
+        this->clampShipListScrollOffset(scrollOffset, itemCount);
+        return;
+    }
+
+    const int lastVisibleIndex = *scrollOffset + kAnchorShipVisibleListRows - 1;
+    if (selectedIndex > lastVisibleIndex)
+    {
+        *scrollOffset = selectedIndex - (kAnchorShipVisibleListRows - 1);
+        this->clampShipListScrollOffset(scrollOffset, itemCount);
+    }
+}
+
+int EditorMapAnchorShipScene::computeShipListStartIndex(int scrollOffset, int itemCount) const
+{
+    return std::clamp(scrollOffset, 0, this->getShipListMaxScrollOffset(itemCount));
+}
+
+bool EditorMapAnchorShipScene::handleShipListPanelClick(float x, float y, int* outClickedIndex)
+{
+    if (outClickedIndex != nullptr)
+    {
+        *outClickedIndex = -1;
+    }
+    if (!this->pointInRect(x, y, this->shipListRect))
+    {
+        return false;
+    }
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAnchorShipVisibleListRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kAnchorShipVisibleListRows);
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAnchorShipListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAnchorShipListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    const int itemCount = static_cast<int>(this->importedShips.size());
+    if (this->pointInRect(x, y, scrollTrackRect))
+    {
+        const int maxOffset = this->getShipListMaxScrollOffset(itemCount);
+        if (maxOffset <= 0)
+        {
+            this->shipListScrollDragActive = false;
+            return true;
+        }
+
+        const float thumbHeight = (std::max)(
+            14.0f,
+            (scrollTrackRect.h * static_cast<float>(kAnchorShipVisibleListRows)) / static_cast<float>((std::max)(itemCount, 1)));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio =
+            static_cast<float>(this->computeShipListStartIndex(this->shipListScrollOffset, itemCount)) /
+            static_cast<float>(maxOffset);
+        const float thumbY = scrollTrackRect.y + (ratio * thumbTravel);
+
+        SDL_FRect scrollThumbRect{};
+        scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+        scrollThumbRect.y = thumbY;
+        scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+        scrollThumbRect.h = thumbHeight;
+
+        this->shipListScrollDragActive = true;
+        if (this->pointInRect(x, y, scrollThumbRect))
+        {
+            this->shipListScrollDragGrabOffsetY = y - scrollThumbRect.y;
+        }
+        else
+        {
+            const float targetThumbY = std::clamp(
+                y - (scrollThumbRect.h * 0.5f),
+                scrollTrackRect.y,
+                scrollTrackRect.y + thumbTravel);
+            const float clickRatio =
+                (thumbTravel > 0.0f) ? ((targetThumbY - scrollTrackRect.y) / thumbTravel) : 0.0f;
+            this->shipListScrollOffset =
+                static_cast<int>(std::round(clickRatio * static_cast<float>(maxOffset)));
+            this->clampShipListScrollOffset(&this->shipListScrollOffset, itemCount);
+            this->shipListScrollDragGrabOffsetY = scrollThumbRect.h * 0.5f;
+        }
+        return true;
+    }
+
+    this->shipListScrollDragActive = false;
+    if (itemCount <= 0)
+    {
+        return true;
+    }
+
+    const int startIndex = this->computeShipListStartIndex(this->shipListScrollOffset, itemCount);
+    for (int i = 0; i < kAnchorShipVisibleListRows; ++i)
+    {
+        const int itemIndex = startIndex + i;
+        if (itemIndex >= itemCount)
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+        if (this->pointInRect(x, y, rowRect))
+        {
+            if (outClickedIndex != nullptr)
+            {
+                *outClickedIndex = itemIndex;
+            }
+            return true;
+        }
+    }
+
+    return true;
+}
+
+void EditorMapAnchorShipScene::handleShipListPanelScrollDrag(void)
+{
+    if (!this->shipListScrollDragActive)
+    {
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->shipListScrollDragActive = false;
+        this->shipListScrollDragGrabOffsetY = 0.0f;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!getMouseRenderPositionAnchorShip(&mouseX, &mouseY))
+    {
+        return;
+    }
+    (void)mouseX;
+
+    const int itemCount = static_cast<int>(this->importedShips.size());
+    const int maxOffset = this->getShipListMaxScrollOffset(itemCount);
+    if (maxOffset <= 0)
+    {
+        this->shipListScrollDragActive = false;
+        this->shipListScrollDragGrabOffsetY = 0.0f;
+        return;
+    }
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAnchorShipVisibleListRows - 1) * rowGap));
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAnchorShipListScrollBarWidth + 4.0f);
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAnchorShipListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+
+    const float thumbHeight = (std::max)(
+        14.0f,
+        (scrollTrackRect.h * static_cast<float>(kAnchorShipVisibleListRows)) / static_cast<float>(itemCount));
+    const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+    const float targetThumbY = std::clamp(
+        mouseY - this->shipListScrollDragGrabOffsetY,
+        scrollTrackRect.y,
+        scrollTrackRect.y + thumbTravel);
+    const float ratio = (thumbTravel > 0.0f) ? ((targetThumbY - scrollTrackRect.y) / thumbTravel) : 0.0f;
+    this->shipListScrollOffset = static_cast<int>(std::round(ratio * static_cast<float>(maxOffset)));
+    this->clampShipListScrollOffset(&this->shipListScrollOffset, itemCount);
+}
+
+void EditorMapAnchorShipScene::showPersistentAnchorTileMarker(void)
+{
+    const Map& map = GetCurrentMap();
+    const SDL_Point markerTile = map.roundTile(
+        this->movementPreviewBaseTile.x,
+        this->movementPreviewBaseTile.y);
+    this->clickMarker.show(markerTile.x, markerTile.y);
+}
+
+void EditorMapAnchorShipScene::syncStaticPreviewShipToSelectedSprite(void)
+{
+    if (!this->movementPreviewShip.areSpritesLoaded())
+    {
+        return;
+    }
+
+    const int clampedSpriteIndex = std::clamp(this->selectedSpriteIndex, 0, kShipSpriteCount - 1);
+    const int directionIndex = clampedSpriteIndex % 4;
+
+    Ship::PreviewDirection previewDirection = Ship::PreviewDirection::DOWN_LEFT;
+    switch (directionIndex)
+    {
+        case 0:
+            previewDirection = Ship::PreviewDirection::DOWN_LEFT;
+            break;
+        case 1:
+            previewDirection = Ship::PreviewDirection::UP_RIGHT;
+            break;
+        case 2:
+            previewDirection = Ship::PreviewDirection::UP_LEFT;
+            break;
+        case 3:
+            previewDirection = Ship::PreviewDirection::DOWN_RIGHT;
+            break;
+        default:
+            break;
+    }
+
+    this->movementPreviewShip.setPreviewDirection(previewDirection);
+    this->movementPreviewShip.setHealthVisual(
+        (clampedSpriteIndex < 4)
+            ? Ship::HealthVisual::FULL
+            : Ship::HealthVisual::LOW);
+    this->movementPreviewShip.setDrawScale(
+        std::clamp(this->spritePreviewZoom, kSpritePreviewZoomMin, kSpritePreviewZoomMax));
+    this->movementPreviewShip.setDrawAlpha(kAnchorPlacementSpriteAlpha);
+    this->movementPreviewShip.setPositionTile(
+        this->movementPreviewBaseTile.x,
+        this->movementPreviewBaseTile.y);
 }
 
 void EditorMapAnchorShipScene::restoreCameraZoomAfterCheck(void)
@@ -459,9 +1018,28 @@ bool EditorMapAnchorShipScene::loadShipFolderFromAbsolutePath(const char* folder
         const SDL_FPoint anchor = this->spriteAnchors[static_cast<size_t>(i)];
         this->movementPreviewShip.setDrawAnchorForSprite(i, anchor.x, anchor.y);
     }
+    if (!this->movementPreviewActive)
+    {
+        this->syncStaticPreviewShipToSelectedSprite();
+    }
     if (wasPreviewActive)
     {
         this->restoreCameraZoomAfterCheck();
+    }
+    this->showPersistentAnchorTileMarker();
+
+    for (int shipIndex = 0; shipIndex < static_cast<int>(this->importedShips.size()); ++shipIndex)
+    {
+        if (normalizePathSlashes(this->importedShips[static_cast<size_t>(shipIndex)].folderAbsolutePath) ==
+            this->loadedShipFolderAbsolute)
+        {
+            this->selectedImportedShipIndex = shipIndex;
+            this->ensureShipSelectionVisible(
+                this->selectedImportedShipIndex,
+                &this->shipListScrollOffset,
+                static_cast<int>(this->importedShips.size()));
+            break;
+        }
     }
     return true;
 }
@@ -857,6 +1435,8 @@ void EditorMapAnchorShipScene::startMovementPreviewCheck(void)
     this->movementPreviewTargetIndex = 0;
     this->movementPreviewPauseRemainingSec = 0.0;
     this->movementPreviewShip.setPositionTileInt(centerTile.x, centerTile.y);
+    this->movementPreviewShip.setDrawScale(1.0f);
+    this->movementPreviewShip.setDrawAlpha(255);
 
     SDL_Point firstTargetTile{};
     if (!computeTargetFromSimulatedClick(this->movementPreviewShip.getPositionTile(), this->movementPreviewTargets[0], &firstTargetTile))
@@ -1001,6 +1581,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
             {
                 this->movementPreviewActive = false;
                 this->restoreCameraZoomAfterCheck();
+                this->syncStaticPreviewShipToSelectedSprite();
+                this->showPersistentAnchorTileMarker();
                 this->statusMessage = "Check interrompu: calcul premier clic pass 2 echoue.";
                 return;
             }
@@ -1009,6 +1591,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
             {
                 this->movementPreviewActive = false;
                 this->restoreCameraZoomAfterCheck();
+                this->syncStaticPreviewShipToSelectedSprite();
+                this->showPersistentAnchorTileMarker();
                 this->statusMessage = "Check interrompu: pass 2 cible hors map.";
                 return;
             }
@@ -1018,6 +1602,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
             {
                 this->movementPreviewActive = false;
                 this->restoreCameraZoomAfterCheck();
+                this->syncStaticPreviewShipToSelectedSprite();
+                this->showPersistentAnchorTileMarker();
                 this->statusMessage = "Check interrompu: A* pass 2 impossible.";
                 return;
             }
@@ -1034,6 +1620,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
         this->restoreCameraZoomAfterCheck();
         this->movementPreviewCurrentTile = this->movementPreviewBaseTile;
         this->movementPreviewShip.setHealthVisual(Ship::HealthVisual::FULL);
+        this->syncStaticPreviewShipToSelectedSprite();
+        this->showPersistentAnchorTileMarker();
         this->statusMessage = "Check termine: deplacement A* valide sur sprites 1..8.";
         return;
     }
@@ -1045,6 +1633,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
     {
         this->movementPreviewActive = false;
         this->restoreCameraZoomAfterCheck();
+        this->syncStaticPreviewShipToSelectedSprite();
+        this->showPersistentAnchorTileMarker();
         this->statusMessage = "Check interrompu: calcul cible clic echoue.";
         return;
     }
@@ -1053,6 +1643,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
     {
         this->movementPreviewActive = false;
         this->restoreCameraZoomAfterCheck();
+        this->syncStaticPreviewShipToSelectedSprite();
+        this->showPersistentAnchorTileMarker();
         this->statusMessage = "Check interrompu: cible hors map.";
         return;
     }
@@ -1062,6 +1654,8 @@ void EditorMapAnchorShipScene::updateMovementPreview(double dt)
     {
         this->movementPreviewActive = false;
         this->restoreCameraZoomAfterCheck();
+        this->syncStaticPreviewShipToSelectedSprite();
+        this->showPersistentAnchorTileMarker();
         this->statusMessage = "Check interrompu: A* impossible sur une etape.";
         return;
     }
@@ -1132,6 +1726,9 @@ void EditorMapAnchorShipScene::updateToolbarLayout(void)
     x += this->buttonNextSpriteRect.w + gap;
 
     this->buttonToggleGuidesRect = SDL_FRect{x, row1Y, 170.0f, h};
+    x += this->buttonToggleGuidesRect.w + gap;
+
+    this->buttonToggleIsoGridRect = SDL_FRect{x, row1Y, 170.0f, h};
 
     // Stop check: haut-droite de la zone map.
     this->buttonStopCheckRect = SDL_FRect{
@@ -1153,6 +1750,11 @@ void EditorMapAnchorShipScene::updateToolbarLayout(void)
     this->buttonOceanPrevRect = SDL_FRect{x, row2Y, 92.0f, h};
     x += this->buttonOceanPrevRect.w + gap;
     this->buttonOceanNextRect = SDL_FRect{x, row2Y, 92.0f, h};
+
+    this->shipListRect.w = 250.0f;
+    this->shipListRect.h = 276.0f;
+    this->shipListRect.x = map.rect.x + map.rect.w - this->shipListRect.w - 40.0f;
+    this->shipListRect.y = map.rect.y + map.rect.h - this->shipListRect.h - 40.0f;
 }
 
 void EditorMapAnchorShipScene::drawToolbarButton(const SDL_FRect& rect, const char* label, bool active) const
@@ -1186,6 +1788,181 @@ void EditorMapAnchorShipScene::drawToolbarButton(const SDL_FRect& rect, const ch
     rc2d_graphics_destroyText(&text);
 }
 
+void EditorMapAnchorShipScene::drawShipListPanel(void) const
+{
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kAnchorShipPanelFillColor);
+    rc2d_graphics_rectangle("fill", &this->shipListRect);
+    rc2d_graphics_setColor(kAnchorShipPanelBorderColor);
+    rc2d_graphics_rectangle("line", &this->shipListRect);
+
+    const float panelPadding = 4.0f;
+    const float headerHeight = 14.0f;
+    const float rowGap = 3.0f;
+    const float rowsTopY = this->shipListRect.y + panelPadding + headerHeight + 1.0f;
+    const float rowsHeight =
+        this->shipListRect.h - ((panelPadding * 2.0f) + headerHeight + ((kAnchorShipVisibleListRows - 1) * rowGap));
+    const float rowHeight = rowsHeight / static_cast<float>(kAnchorShipVisibleListRows);
+    const float rowsLeftX = this->shipListRect.x + panelPadding;
+    const float rowsWidth = this->shipListRect.w - ((panelPadding * 2.0f) + kAnchorShipListScrollBarWidth + 4.0f);
+
+    if (this->overlayFont.sdl_font != nullptr)
+    {
+        const char* title = this->shipFolderScanCompleted
+            ? "Navires assets/images/ships"
+            : "Navires assets/images/ships (scan...)";
+        RC2D_Text headerText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), title);
+        headerText.color = kHudTextColor;
+        rc2d_graphics_setTextColor(&headerText);
+        rc2d_graphics_drawText(&headerText, this->shipListRect.x + panelPadding, this->shipListRect.y + 1.0f);
+        rc2d_graphics_destroyText(&headerText);
+    }
+
+    SDL_FRect scrollTrackRect{};
+    scrollTrackRect.x = rowsLeftX + rowsWidth + 4.0f;
+    scrollTrackRect.y = rowsTopY;
+    scrollTrackRect.w = kAnchorShipListScrollBarWidth;
+    scrollTrackRect.h = rowsHeight;
+    rc2d_graphics_setColor(RC2D_Color{58, 68, 79, 220});
+    rc2d_graphics_rectangle("fill", &scrollTrackRect);
+    rc2d_graphics_setColor(RC2D_Color{110, 122, 136, 220});
+    rc2d_graphics_rectangle("line", &scrollTrackRect);
+
+    if (this->importedShips.empty())
+    {
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const char* emptyLabel = this->shipFolderScanCompleted ? "Aucun navire" : "Scan en cours...";
+            RC2D_Text emptyText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), emptyLabel);
+            emptyText.color = kAnchorShipPanelMutedTextColor;
+            rc2d_graphics_setTextColor(&emptyText);
+            rc2d_graphics_drawText(&emptyText, this->shipListRect.x + panelPadding, rowsTopY + 2.0f);
+            rc2d_graphics_destroyText(&emptyText);
+        }
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        return;
+    }
+
+    const int itemCount = static_cast<int>(this->importedShips.size());
+    const int startIndex = this->computeShipListStartIndex(this->shipListScrollOffset, itemCount);
+    const int maxOffset = this->getShipListMaxScrollOffset(itemCount);
+    float thumbHeight = scrollTrackRect.h;
+    float thumbY = scrollTrackRect.y;
+    if (maxOffset > 0)
+    {
+        thumbHeight = (std::max)(
+            14.0f,
+            (scrollTrackRect.h * static_cast<float>(kAnchorShipVisibleListRows)) / static_cast<float>(itemCount));
+        const float thumbTravel = (std::max)(scrollTrackRect.h - thumbHeight, 0.0f);
+        const float ratio = static_cast<float>(startIndex) / static_cast<float>(maxOffset);
+        thumbY += ratio * thumbTravel;
+    }
+
+    SDL_FRect scrollThumbRect{};
+    scrollThumbRect.x = scrollTrackRect.x + 1.0f;
+    scrollThumbRect.y = thumbY;
+    scrollThumbRect.w = scrollTrackRect.w - 2.0f;
+    scrollThumbRect.h = thumbHeight;
+    rc2d_graphics_setColor(RC2D_Color{170, 188, 210, 235});
+    rc2d_graphics_rectangle("fill", &scrollThumbRect);
+    rc2d_graphics_setColor(RC2D_Color{205, 220, 238, 245});
+    rc2d_graphics_rectangle("line", &scrollThumbRect);
+
+    for (int i = 0; i < kAnchorShipVisibleListRows; ++i)
+    {
+        const int itemIndex = startIndex + i;
+        if (itemIndex >= itemCount)
+        {
+            break;
+        }
+
+        SDL_FRect rowRect{};
+        rowRect.x = rowsLeftX;
+        rowRect.y = rowsTopY + (static_cast<float>(i) * (rowHeight + rowGap));
+        rowRect.w = rowsWidth;
+        rowRect.h = rowHeight;
+
+        const bool isSelected = (itemIndex == this->selectedImportedShipIndex);
+        rc2d_graphics_setColor(isSelected ? kAnchorShipRowSelectedFillColor : kAnchorShipRowFillColor);
+        rc2d_graphics_rectangle("fill", &rowRect);
+        rc2d_graphics_setColor(kAnchorShipRowBorderColor);
+        rc2d_graphics_rectangle("line", &rowRect);
+
+        if (this->overlayFont.sdl_font != nullptr)
+        {
+            const std::string shipLabel = stripListPrefixAnchorShip(
+                this->importedShips[static_cast<size_t>(itemIndex)].displayName,
+                "ship-");
+            const int maxChars = std::clamp(static_cast<int>((rowsWidth - 20.0f) / 6.7f), 14, 84);
+            char textBuffer[256] = {};
+            SDL_snprintf(
+                textBuffer,
+                sizeof(textBuffer),
+                "%d. %s",
+                itemIndex + 1,
+                makeAssetLabelAnchorShip(shipLabel, maxChars).c_str());
+            RC2D_Text rowText = rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), textBuffer);
+            rowText.color = kHudTextColor;
+            rc2d_graphics_setTextColor(&rowText);
+            rc2d_graphics_drawText(&rowText, rowRect.x + 4.0f, rowRect.y + 1.0f);
+            rc2d_graphics_destroyText(&rowText);
+        }
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
+void EditorMapAnchorShipScene::drawPreviewIsoGrid(void) const
+{
+    if (!this->previewIsoGridVisible)
+    {
+        return;
+    }
+
+    const Map& map = GetCurrentMap();
+    const int cx = static_cast<int>(std::lround(static_cast<double>(this->movementPreviewBaseTile.x)));
+    const int cy = static_cast<int>(std::lround(static_cast<double>(this->movementPreviewBaseTile.y)));
+    constexpr int kAnchorShipDebugIsoGridTiles = 50;
+    static_assert(kAnchorShipDebugIsoGridTiles % 2 == 0, "grille paire pour centrage entier");
+    const int half = kAnchorShipDebugIsoGridTiles / 2;
+    const int baseX = cx - half;
+    const int baseY = cy - half;
+
+    const float hw = map.getTileWidth() * 0.5f;
+    const float hh = map.getTileHeight() * 0.5f;
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{120, 200, 255, 185});
+    for (int iy = 0; iy < kAnchorShipDebugIsoGridTiles; ++iy)
+    {
+        for (int ix = 0; ix < kAnchorShipDebugIsoGridTiles; ++ix)
+        {
+            const int tx = baseX + ix;
+            const int ty = baseY + iy;
+            if (!map.isInside(tx, ty))
+            {
+                continue;
+            }
+
+            const SDL_FPoint c = map.tileToScreenCenter(tx, ty);
+            const float xTop = c.x;
+            const float yTop = c.y - hh;
+            const float xRight = c.x + hw;
+            const float yRight = c.y;
+            const float xBot = c.x;
+            const float yBot = c.y + hh;
+            const float xLeft = c.x - hw;
+            const float yLeft = c.y;
+            rc2d_graphics_line(xTop, yTop, xRight, yRight);
+            rc2d_graphics_line(xRight, yRight, xBot, yBot);
+            rc2d_graphics_line(xBot, yBot, xLeft, yLeft);
+            rc2d_graphics_line(xLeft, yLeft, xTop, yTop);
+        }
+    }
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
 bool EditorMapAnchorShipScene::tryBuildCurrentSpriteDrawRect(
     SDL_FRect* outRect,
     float* outAnchorScreenX,
@@ -1215,10 +1992,9 @@ bool EditorMapAnchorShipScene::tryBuildCurrentSpriteDrawRect(
     }
     else
     {
-        const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
         spriteCenterScreen = map.tileToScreenCenterFloat(
-            static_cast<float>(centerTile.x),
-            static_cast<float>(centerTile.y));
+            this->movementPreviewBaseTile.x,
+            this->movementPreviewBaseTile.y);
     }
 
     SDL_FPoint anchor = this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)];
@@ -1269,10 +2045,9 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
     }
     else
     {
-        const SDL_Point centerTile = map.sectorToTile(Map::NUM_SECTORS_X / 2, Map::NUM_SECTORS_Y / 2);
         tileAnchorCenterScreen = map.tileToScreenCenterFloat(
-            static_cast<float>(centerTile.x),
-            static_cast<float>(centerTile.y));
+            this->movementPreviewBaseTile.x,
+            this->movementPreviewBaseTile.y);
     }
 
     auto drawTileAnchorMarker = [&map](const SDL_FPoint& center, bool drawCrosshair, float zoomScale) {
@@ -1308,6 +2083,12 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         return;
     }
 
+    if (this->movementPreviewShip.areSpritesLoaded())
+    {
+        const_cast<EditorMapAnchorShipScene*>(this)->syncStaticPreviewShipToSelectedSprite();
+        this->movementPreviewShip.draw(GetCurrentMap());
+    }
+
     SDL_FRect drawRect{};
     float anchorScreenX = 0.0f;
     float anchorScreenY = 0.0f;
@@ -1317,30 +2098,33 @@ void EditorMapAnchorShipScene::drawShipAnchorPreview(void) const
         return;
     }
 
-    const ShipFrame& frame = this->shipFrames[static_cast<size_t>(this->selectedSpriteIndex)];
-    const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
-        const_cast<RC2D_Image*>(&frame.image),
-        0.0f,
-        0.0f,
-        frame.widthPx,
-        frame.heightPx);
+    if (!this->movementPreviewShip.areSpritesLoaded())
+    {
+        const ShipFrame& frame = this->shipFrames[static_cast<size_t>(this->selectedSpriteIndex)];
+        const RC2D_Quad sourceQuad = rc2d_graphics_newQuad(
+            const_cast<RC2D_Image*>(&frame.image),
+            0.0f,
+            0.0f,
+            frame.widthPx,
+            frame.heightPx);
 
-    Uint8 previousAlpha = 255;
-    SDL_GetTextureAlphaMod(frame.image.sdl_texture, &previousAlpha);
-    SDL_SetTextureAlphaMod(frame.image.sdl_texture, kAnchorPlacementSpriteAlpha);
-    rc2d_graphics_drawQuad(
-        const_cast<RC2D_Image*>(&frame.image),
-        &sourceQuad,
-        drawRect.x,
-        drawRect.y,
-        0.0,
-        scale,
-        scale,
-        -1.0f,
-        -1.0f,
-        false,
-        false);
-    SDL_SetTextureAlphaMod(frame.image.sdl_texture, previousAlpha);
+        Uint8 previousAlpha = 255;
+        SDL_GetTextureAlphaMod(frame.image.sdl_texture, &previousAlpha);
+        SDL_SetTextureAlphaMod(frame.image.sdl_texture, kAnchorPlacementSpriteAlpha);
+        rc2d_graphics_drawQuad(
+            const_cast<RC2D_Image*>(&frame.image),
+            &sourceQuad,
+            drawRect.x,
+            drawRect.y,
+            0.0,
+            scale,
+            scale,
+            -1.0f,
+            -1.0f,
+            false,
+            false);
+        SDL_SetTextureAlphaMod(frame.image.sdl_texture, previousAlpha);
+    }
 
     // La tuile d'ancrage clignotante reste toujours visible pour faciliter
     // le placement precis, meme quand les autres guides sont masques.
@@ -1377,6 +2161,8 @@ void EditorMapAnchorShipScene::drawHud(void) const
         return;
     }
 
+    this->drawShipListPanel();
+
     this->drawToolbarButton(this->buttonImportFolderRect, "IMPORTER DOSSIER NAVIRE", false);
     this->drawToolbarButton(this->buttonPrevSpriteRect, "SPRITE -", false);
     this->drawToolbarButton(this->buttonNextSpriteRect, "SPRITE +", false);
@@ -1384,6 +2170,10 @@ void EditorMapAnchorShipScene::drawHud(void) const
         this->buttonToggleGuidesRect,
         this->showAnchorGuides ? "MASQUER GUIDES" : "AFFICHER GUIDES",
         this->showAnchorGuides);
+    this->drawToolbarButton(
+        this->buttonToggleIsoGridRect,
+        "GRILLE ISO 50x50",
+        this->previewIsoGridVisible);
     this->drawToolbarButton(this->buttonCheckMovementRect, "CHECK DEPLACEMENT", this->movementPreviewActive);
     this->drawToolbarButton(this->buttonStopCheckRect, "STOP CHECK DEPLACEMENT", this->movementPreviewActive);
     this->drawToolbarButton(this->buttonSaveAnchorRect, "EXPORT SHIP_ANCHOR", false);
@@ -1432,7 +2222,7 @@ void EditorMapAnchorShipScene::drawHud(void) const
     SDL_snprintf(
         line2,
         sizeof(line2),
-        "Sprite %d/8 | Anchor=(%.4f, %.4f) | Ocean=%s | Guides=%s | Zoom=%.2fx | Fleches=decalage texture | Clique=point d'ancre",
+        "Sprite %d/8 | Anchor=(%.4f, %.4f) | Ocean=%s | Guides=%s | Zoom=%.2fx | Fleches=placement sur tuile | Clique=point d'ancre",
         this->selectedSpriteIndex + 1,
         anchor.x,
         anchor.y,
@@ -1468,8 +2258,9 @@ bool EditorMapAnchorShipScene::handleToolbarClick(float x, float y)
             this->movementPreviewShip.setPositionTile(
                 this->movementPreviewCurrentTile.x,
                 this->movementPreviewCurrentTile.y);
-            this->clickMarker.hide();
             this->restoreCameraZoomAfterCheck();
+            this->syncStaticPreviewShipToSelectedSprite();
+            this->showPersistentAnchorTileMarker();
             this->statusMessage = "Check deplacement arrete manuellement.";
         }
         else
@@ -1492,6 +2283,10 @@ bool EditorMapAnchorShipScene::handleToolbarClick(float x, float y)
         {
             this->selectedSpriteIndex = kShipSpriteCount - 1;
         }
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
+        }
         return true;
     }
 
@@ -1502,6 +2297,10 @@ bool EditorMapAnchorShipScene::handleToolbarClick(float x, float y)
         {
             this->selectedSpriteIndex = 0;
         }
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
+        }
         return true;
     }
 
@@ -1511,6 +2310,15 @@ bool EditorMapAnchorShipScene::handleToolbarClick(float x, float y)
         this->statusMessage = this->showAnchorGuides
             ? "Guides anchor affiches."
             : "Guides anchor masques.";
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->buttonToggleIsoGridRect))
+    {
+        this->previewIsoGridVisible = !this->previewIsoGridVisible;
+        this->statusMessage = this->previewIsoGridVisible
+            ? "Grille isometrique 50x50 affichee."
+            : "Grille isometrique 50x50 masquee.";
         return true;
     }
 
@@ -1530,6 +2338,10 @@ bool EditorMapAnchorShipScene::handleToolbarClick(float x, float y)
     {
         this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)] = SDL_FPoint{0.5f, 0.5f};
         this->movementPreviewShip.setDrawAnchorForSprite(this->selectedSpriteIndex, 0.5f, 0.5f);
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
+        }
         this->statusMessage =
             "Ancre reset sprite " + std::to_string(this->selectedSpriteIndex + 1) + ".";
         return true;
@@ -1567,6 +2379,7 @@ bool EditorMapAnchorShipScene::setCurrentAnchorFromClick(float x, float y)
     const float ny = std::clamp((y - drawRect.y) / (std::max)(drawRect.h, 1.0f), 0.0f, 1.0f);
     this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)] = SDL_FPoint{nx, ny};
     this->movementPreviewShip.setDrawAnchorForSprite(this->selectedSpriteIndex, nx, ny);
+    this->syncStaticPreviewShipToSelectedSprite();
 
     char status[256] = {};
     SDL_snprintf(
@@ -1668,6 +2481,8 @@ void EditorMapAnchorShipScene::load(void)
     this->movementPreviewCurrentTile = this->movementPreviewBaseTile;
     this->movementPreviewShip.setPositionTileInt(centerTile.x, centerTile.y);
     this->movementPreviewShip.setSpeedTilesPerSecond(4.0f);
+    this->showPersistentAnchorTileMarker();
+    this->beginShipFolderBatchScan();
 
     this->applySelectedOceanColor();
 
@@ -1686,11 +2501,17 @@ void EditorMapAnchorShipScene::update(double dt)
 
     map.update();
     this->updateToolbarLayout();
+    this->processShipFolderBatchScan();
+    this->handleShipListPanelScrollDrag();
     this->processPendingFolderRequest();
     this->updateMovementPreview(dt);
     this->clickMarker.update(dt);
     this->applyPendingOceanColorStep();
     GetOceanShader().update(dt);
+    if (!this->movementPreviewActive)
+    {
+        this->syncStaticPreviewShipToSelectedSprite();
+    }
     camera.update(map, map.rect);
 }
 
@@ -1706,6 +2527,7 @@ void EditorMapAnchorShipScene::draw(void)
         GetOceanShader().draw(map.rect);
     }
 
+    this->drawPreviewIsoGrid();
     this->clickMarker.draw(map);
     this->drawShipAnchorPreview();
     WorldRenderClip::end(renderer);
@@ -1743,12 +2565,25 @@ void EditorMapAnchorShipScene::keypressed(
         return;
     }
 
+    if (!isrepeat && scancode == SDL_SCANCODE_G)
+    {
+        this->previewIsoGridVisible = !this->previewIsoGridVisible;
+        this->statusMessage = this->previewIsoGridVisible
+            ? "Grille isometrique 50x50 affichee."
+            : "Grille isometrique 50x50 masquee.";
+        return;
+    }
+
     if (!isrepeat && scancode == SDL_SCANCODE_LEFTBRACKET)
     {
         this->selectedSpriteIndex -= 1;
         if (this->selectedSpriteIndex < 0)
         {
             this->selectedSpriteIndex = kShipSpriteCount - 1;
+        }
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
         }
         return;
     }
@@ -1759,6 +2594,10 @@ void EditorMapAnchorShipScene::keypressed(
         if (this->selectedSpriteIndex >= kShipSpriteCount)
         {
             this->selectedSpriteIndex = 0;
+        }
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
         }
         return;
     }
@@ -1779,6 +2618,10 @@ void EditorMapAnchorShipScene::keypressed(
     {
         this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)] = SDL_FPoint{0.5f, 0.5f};
         this->movementPreviewShip.setDrawAnchorForSprite(this->selectedSpriteIndex, 0.5f, 0.5f);
+        if (!this->movementPreviewActive)
+        {
+            this->syncStaticPreviewShipToSelectedSprite();
+        }
         this->statusMessage =
             "Ancre reset sprite " + std::to_string(this->selectedSpriteIndex + 1) + ".";
         return;
@@ -1852,27 +2695,33 @@ void EditorMapAnchorShipScene::keypressed(
     float ny = this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)].y;
     bool movedAnchor = false;
 
-    if (scancode == SDL_SCANCODE_LEFT)
+    const bool leftDown =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_LEFT) || scancode == SDL_SCANCODE_LEFT;
+    const bool rightDown =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_RIGHT) || scancode == SDL_SCANCODE_RIGHT;
+    const bool upDown =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_UP) || scancode == SDL_SCANCODE_UP;
+    const bool downDown =
+        rc2d_keyboard_isScancodeDown((RC2D_Scancode)SDL_SCANCODE_DOWN) || scancode == SDL_SCANCODE_DOWN;
+
+    if (leftDown && !rightDown)
     {
-        // Texture vers la gauche -> anchor vers la droite ecran (x normalise augmente).
         nx += anchorStep;
         movedAnchor = true;
     }
-    else if (scancode == SDL_SCANCODE_RIGHT)
+    else if (rightDown && !leftDown)
     {
-        // Texture vers la droite -> anchor vers la gauche ecran (x normalise diminue).
         nx -= anchorStep;
         movedAnchor = true;
     }
-    else if (scancode == SDL_SCANCODE_UP)
+
+    if (upDown && !downDown)
     {
-        // Texture vers le haut -> anchor vers le bas ecran (y normalise augmente).
         ny += anchorStep;
         movedAnchor = true;
     }
-    else if (scancode == SDL_SCANCODE_DOWN)
+    else if (downDown && !upDown)
     {
-        // Texture vers le bas -> anchor vers le haut ecran (y normalise diminue).
         ny -= anchorStep;
         movedAnchor = true;
     }
@@ -1883,12 +2732,13 @@ void EditorMapAnchorShipScene::keypressed(
         ny = std::clamp(ny, 0.0f, 1.0f);
         this->spriteAnchors[static_cast<size_t>(this->selectedSpriteIndex)] = SDL_FPoint{nx, ny};
         this->movementPreviewShip.setDrawAnchorForSprite(this->selectedSpriteIndex, nx, ny);
+        this->syncStaticPreviewShipToSelectedSprite();
 
         char status[256] = {};
         SDL_snprintf(
             status,
             sizeof(status),
-            "Decalage texture sprite %d (anchor runtime: %.5f, %.5f) | pas=%.5f",
+            "Placement sprite %d ajuste sur la tuile (anchor runtime: %.5f, %.5f) | pas=%.5f",
             this->selectedSpriteIndex + 1,
             nx,
             ny,
@@ -1908,6 +2758,16 @@ void EditorMapAnchorShipScene::mousepressed(float x, float y, RC2D_MouseButton b
         return;
     }
 
+    int clickedShipIndex = -1;
+    if (this->handleShipListPanelClick(x, y, &clickedShipIndex))
+    {
+        if (clickedShipIndex >= 0)
+        {
+            (void)this->selectImportedShipAtIndex(clickedShipIndex);
+        }
+        return;
+    }
+
     if (this->handleToolbarClick(x, y))
     {
         return;
@@ -1920,6 +2780,37 @@ void EditorMapAnchorShipScene::mousepressed(float x, float y, RC2D_MouseButton b
     }
 
     this->setCurrentAnchorFromClick(x, y);
+}
+
+void EditorMapAnchorShipScene::mousewheelmoved(
+    RC2D_MouseWheelDirection direction,
+    float x,
+    float y,
+    Sint32 integer_x,
+    Sint32 integer_y,
+    float mouse_x,
+    float mouse_y,
+    SDL_MouseID mouseID)
+{
+    (void)x;
+    (void)y;
+    (void)integer_x;
+    (void)integer_y;
+    (void)mouseID;
+
+    if (!this->pointInRect(mouse_x, mouse_y, this->shipListRect))
+    {
+        return;
+    }
+
+    const int delta = (direction == RC2D_SCROLL_UP) ? 1 : ((direction == RC2D_SCROLL_DOWN) ? -1 : 0);
+    if (delta == 0)
+    {
+        return;
+    }
+
+    this->shipListScrollOffset -= delta;
+    this->clampShipListScrollOffset(&this->shipListScrollOffset, static_cast<int>(this->importedShips.size()));
 }
 
 #endif // GAME_ENV_DEV
