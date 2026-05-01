@@ -72,7 +72,7 @@ static std::vector<std::string> titleAssetCache_scanAssetFiles(
 static const std::vector<float>& titleAssetCache_getKnownFontSizes(const std::string& normalizedPath)
 {
     static const std::vector<float> kTradeWindsSizes = {15.0f, 18.0f};
-    static const std::vector<float> kSegoeRegularSizes = {13.0f, 14.0f};
+    static const std::vector<float> kSegoeRegularSizes = {13.0f, 14.0f, 17.0f, 18.0f, 20.0f, 24.0f};
     static const std::vector<float> kSegoeSemiboldSizes = {14.0f, 20.0f, 24.0f};
     static const std::vector<float> kDefaultSizes = {16.0f};
 

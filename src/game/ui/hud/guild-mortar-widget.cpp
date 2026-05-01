@@ -15,7 +15,7 @@
 static constexpr float kRefW = 760.0f;
 static constexpr float kRefH = 527.0f;
 
-static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 240};
+static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 255};
 static constexpr RC2D_Color kPanelSoftFill = RC2D_Color{12, 12, 14, 224};
 static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
 static constexpr RC2D_Color kGold = RC2D_Color{184, 132, 30, 250};
@@ -348,9 +348,9 @@ GuildMortarWidget::~GuildMortarWidget(void)
 
 void GuildMortarWidget::load(void)
 {
-    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 18.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 18.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
-    this->valueFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 17.0f);
+    this->valueFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 17.0f);
     this->goldIcon = LoadStorageImage("assets/images/ui-scene-game/money-gold.png", RC2D_STORAGE_TITLE);
     this->rubiesIcon = LoadStorageImage("assets/images/ui-scene-game/money-rubies.png", RC2D_STORAGE_TITLE);
     this->pearlsIcon = LoadStorageImage("assets/images/ui-scene-game/money_pearls.png", RC2D_STORAGE_TITLE);

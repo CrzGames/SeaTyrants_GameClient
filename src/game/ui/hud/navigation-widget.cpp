@@ -18,7 +18,7 @@ namespace {
 constexpr float kWidgetWidth = 178.0f;
 constexpr float kWidgetHeight = 126.0f;
 constexpr double kCursorBlinkPeriod = 0.55;
-constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 240};
+constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 255};
 constexpr RC2D_Color kPanelBorder = RC2D_Color{184, 132, 30, 250};
 constexpr RC2D_Color kInnerBorder = RC2D_Color{211, 214, 220, 232};
 constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
@@ -171,7 +171,7 @@ NavigationWidget::~NavigationWidget(void)
 
 void NavigationWidget::load(void)
 {
-    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 17.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 17.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
     this->controlIcons.load();
 

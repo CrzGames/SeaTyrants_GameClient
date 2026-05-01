@@ -174,7 +174,7 @@ ExperienceBarWidget::~ExperienceBarWidget(void)
 void ExperienceBarWidget::load(void)
 {
     this->labelFont = OpenStorageFont(
-        "assets/fonts/SegoeUI-Semibold.ttf",
+        "assets/fonts/SegoeUI-Regular.ttf",
         RC2D_STORAGE_TITLE,
         13.0f);
     this->currentExperiencePoints = 0;

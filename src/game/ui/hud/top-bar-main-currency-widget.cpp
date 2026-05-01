@@ -153,7 +153,7 @@ void TopBarMainCurrencyWidget::load(void)
         "assets/images/ui-scene-game/money-gold.png",
         RC2D_STORAGE_TITLE);
     this->amountFont = OpenStorageFont(
-        "assets/fonts/SegoeUI-Semibold.ttf",
+        "assets/fonts/SegoeUI-Regular.ttf",
         RC2D_STORAGE_TITLE,
         12.0f);
 }

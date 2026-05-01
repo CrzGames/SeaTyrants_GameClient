@@ -9,7 +9,7 @@
 static constexpr float kRefW = 277.0f;
 static constexpr float kRefH = 226.0f;
 
-static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 240};
+static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 255};
 static constexpr RC2D_Color kGold = RC2D_Color{184, 132, 30, 250};
 static constexpr RC2D_Color kSilver = RC2D_Color{211, 214, 220, 232};
 static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
@@ -190,7 +190,7 @@ ParamsMinimapWidget::~ParamsMinimapWidget(void)
 void ParamsMinimapWidget::load(void)
 {
     // Police titre identique au style des autres fenetres HUD.
-    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 20.0f);
     // Police des lignes de menu (plus petite que le titre).
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     this->checkboxValidIcon = LoadStorageImage(

@@ -42,7 +42,7 @@ static constexpr float kBoardingLootRowGap = 6.0f;
 static constexpr float kBoardingLootSidePad = 10.0f;
 static constexpr float kBoardingLootIconSize = 38.0f;
 
-static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 242};
+static constexpr RC2D_Color kPanelFill = RC2D_Color{4, 9, 20, 255};
 static constexpr RC2D_Color kGold = RC2D_Color{184, 132, 30, 250};
 static constexpr RC2D_Color kSilver = RC2D_Color{211, 214, 220, 232};
 static constexpr RC2D_Color kHeaderFill = RC2D_Color{67, 8, 8, 234};
@@ -3278,8 +3278,8 @@ void AccountManagementWidget::clearAllFocus(void)
 
 void AccountManagementWidget::load(void)
 {
-    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 20.0f);
-    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 14.0f);
+    this->titleFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 20.0f);
+    this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 14.0f);
     this->smallFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 13.0f);
     this->controlIcons.load();
     this->storageDropdownArrowImage =

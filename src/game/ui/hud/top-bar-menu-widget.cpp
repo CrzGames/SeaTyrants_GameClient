@@ -115,7 +115,7 @@ void TopBarMenuWidget::load(void)
         "assets/images/ui-scene-game/top-bar-menu.png",
         RC2D_STORAGE_TITLE);
     this->tooltipFont = OpenStorageFont(
-        "assets/fonts/SegoeUI-Semibold.ttf",
+        "assets/fonts/SegoeUI-Regular.ttf",
         RC2D_STORAGE_TITLE,
         13.0f);
     if (this->topBarMenuUiImage.sdl_texture == nullptr)

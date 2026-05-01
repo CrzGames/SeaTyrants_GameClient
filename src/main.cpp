@@ -48,8 +48,8 @@ const RC2D_EngineConfig* rc2d_engine_setup(int argc, char* argv[])
 #endif // NDEBUG
     config->gpuOptions->preferLowPower = false;
     config->gpuOptions->driver = RC2D_GPU_DRIVER_DEFAULT;
-    config->windowWidth = 800;
-    config->windowHeight = 600;
+    config->windowWidth = 1280;
+    config->windowHeight = 720;
     config->logicalWidth = 1920;
     config->logicalHeight = 1080;
     config->callbacks->rc2d_draw = rc2d_draw;

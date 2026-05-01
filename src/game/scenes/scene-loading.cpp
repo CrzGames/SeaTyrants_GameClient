@@ -221,7 +221,7 @@ void LoadingScene::load(void)
     this->backgroundImage = LoadStorageImage(
         "assets/images/ui-scene-loading/background.png",
         RC2D_STORAGE_TITLE);
-    this->headingFont = OpenStorageFont("assets/fonts/SegoeUI-Semibold.ttf", RC2D_STORAGE_TITLE, 24.0f);
+    this->headingFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 24.0f);
     this->bodyFont = OpenStorageFont("assets/fonts/SegoeUI-Regular.ttf", RC2D_STORAGE_TITLE, 18.0f);
 
     GetTitleAssetCache().beginFullPreload();
