@@ -1211,9 +1211,37 @@ bool EditorMapAnchorShipScene::loadAnchorsFromJsonIfPresent(const std::string& f
     return loadedAnyAnchor;
 }
 
+std::string EditorMapAnchorShipScene::resolveShipAnchorJsonExportFolder(void) const
+{
+    if (this->selectedImportedShipIndex >= 0 &&
+        this->selectedImportedShipIndex < static_cast<int>(this->importedShips.size()))
+    {
+        return this->importedShips[static_cast<size_t>(this->selectedImportedShipIndex)].folderAbsolutePath;
+    }
+    if (!this->loadedShipFolderAbsolute.empty())
+    {
+        const std::filesystem::path loaded(this->loadedShipFolderAbsolute);
+        const std::string leaf = loaded.filename().string();
+        if (!leaf.empty())
+        {
+            std::error_code ec;
+            const std::filesystem::path candidate =
+                std::filesystem::path("assets") / "images" / "ships" / leaf;
+            if (std::filesystem::is_directory(candidate, ec))
+            {
+                return normalizePathSlashes(
+                    std::filesystem::weakly_canonical(std::filesystem::absolute(candidate)).string());
+            }
+        }
+        return this->loadedShipFolderAbsolute;
+    }
+    return {};
+}
+
 bool EditorMapAnchorShipScene::saveAnchorsToJson(void)
 {
-    if (this->loadedShipFolderAbsolute.empty())
+    const std::string exportFolder = this->resolveShipAnchorJsonExportFolder();
+    if (exportFolder.empty())
     {
         this->statusMessage = "Aucun dossier navire charge.";
         return false;
@@ -1252,8 +1280,7 @@ bool EditorMapAnchorShipScene::saveAnchorsToJson(void)
         return false;
     }
 
-    const std::filesystem::path outputPath =
-        std::filesystem::path(this->loadedShipFolderAbsolute) / "ship_anchor.json";
+    const std::filesystem::path outputPath = std::filesystem::path(exportFolder) / "ship_anchor.json";
 
     std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
     if (!output.is_open())

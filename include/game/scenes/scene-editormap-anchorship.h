@@ -142,6 +142,11 @@ private:
      *  @return true si ecriture reussie.
      */
     bool saveAnchorsToJson(void);
+    /**
+     * @brief Dossier absolu cible pour ship_anchor.json (liste navire assets, sinon chemin charge,
+     *        sinon assets/images/ships/<nom> si ce dossier existe).
+     */
+    std::string resolveShipAnchorJsonExportFolder(void) const;
     /** @brief Lance le check auto deplacement 8 directions. */
     void startMovementPreviewCheck(void);
     /** @brief Repositionne le marqueur persistant sur la tuile de reference. */

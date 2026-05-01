@@ -7962,7 +7962,15 @@ void EditorMapVfxScene::openExportFolderDialog(void)
     options.num_filters = static_cast<int>(std::size(kFolderFilters));
     options.default_location = nullptr;
     options.allow_many = false;
-    options.title = "Choisir le dossier d'export";
+    if (this->pendingExportMode == EditorMode::LOOSE_SPRITES)
+    {
+        options.title =
+            "Dossier parent d'export (ex: assets/images/vfx ou assets/images/ships/nom-navire)";
+    }
+    else
+    {
+        options.title = "Choisir le dossier d'export JSON VFX";
+    }
     options.accept_label = "Exporter";
     options.cancel_label = "Annuler";
     rc2d_filedialog_openFolder(&EditorMapVfxScene::onExportFolderDialogResult, this, &options);
@@ -10551,7 +10559,8 @@ bool EditorMapVfxScene::handleLooseExportNameInputKey(
         }
         this->pendingLooseExportAnimationName = animationSlug;
         this->looseExportNamePopupVisible = false;
-        this->exportLooseFolderScaledToFolder("assets/images/vfx", animationSlug);
+        this->openExportFolderDialog();
+        this->statusMessage = "Choisis le dossier parent d'export dans l'explorateur.";
         return true;
     }
     if (scancode == SDL_SCANCODE_BACKSPACE && !this->looseExportNameInput.empty() && !isrepeat)
