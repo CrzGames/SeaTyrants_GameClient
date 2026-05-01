@@ -1,0 +1,237 @@
+{
+	"gui":	{
+		"width":	512,
+		"height":	264
+	},
+	"cases":	[{
+			"x":	14,
+			"y":	13.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"1/1",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	true,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"right",
+					"targetMapName":	"2/1"
+				}]
+		}, {
+			"x":	115,
+			"y":	13.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"2/1",
+			"type":	"map-ville",
+			"color":	{
+				"name":	"red",
+				"hex":	"#C43E2E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"1/1"
+				}, {
+					"side":	"right",
+					"targetMapName":	"3/1"
+				}, {
+					"side":	"bottom",
+					"targetMapName":	"2/2"
+				}]
+		}, {
+			"x":	216,
+			"y":	13.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"3/1",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"2/1"
+				}, {
+					"side":	"right",
+					"targetMapName":	"4/1"
+				}, {
+					"side":	"bottom",
+					"targetMapName":	"3/2"
+				}]
+		}, {
+			"x":	317,
+			"y":	13.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"4/1",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"3/1"
+				}, {
+					"side":	"right",
+					"targetMapName":	"5/1"
+				}, {
+					"side":	"bottom",
+					"targetMapName":	"4/2"
+				}]
+		}, {
+			"x":	418,
+			"y":	13.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"5/1",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"4/1"
+				}]
+		}, {
+			"x":	115,
+			"y":	98.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"2/2",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"right",
+					"targetMapName":	"3/2"
+				}, {
+					"side":	"top",
+					"targetMapName":	"2/1"
+				}]
+		}, {
+			"x":	216,
+			"y":	98.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"3/2",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"2/2"
+				}, {
+					"side":	"right",
+					"targetMapName":	"4/2"
+				}, {
+					"side":	"top",
+					"targetMapName":	"3/1"
+				}]
+		}, {
+			"x":	317,
+			"y":	98.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"4/2",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"3/2"
+				}, {
+					"side":	"top",
+					"targetMapName":	"4/1"
+				}]
+		}, {
+			"x":	165.5,
+			"y":	183.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"2/3",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"right",
+					"targetMapName":	"3/3"
+				}]
+		}, {
+			"x":	266.5,
+			"y":	183.5,
+			"width":	80,
+			"height":	67,
+			"mapName":	"3/3",
+			"type":	"map-normal",
+			"color":	{
+				"name":	"orange",
+				"hex":	"#B8841E"
+			},
+			"guildTag":	{
+				"enabled":	false,
+				"maxChars":	3,
+				"heightRatio":	0.22
+			},
+			"links":	[{
+					"side":	"left",
+					"targetMapName":	"2/3"
+				}]
+		}]
+}

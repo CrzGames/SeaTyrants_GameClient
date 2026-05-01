@@ -77,6 +77,26 @@ constexpr RC2D_Color kAssetPanelBorderColor = RC2D_Color{135, 150, 168, 220};
 constexpr RC2D_Color kAssetRowFillColor = RC2D_Color{32, 40, 50, 210};
 constexpr RC2D_Color kAssetRowSelectedFillColor = RC2D_Color{86, 130, 174, 220};
 constexpr RC2D_Color kAssetRowBorderColor = RC2D_Color{115, 128, 146, 210};
+constexpr RC2D_Color kHudWindowPanelFill = RC2D_Color{4, 9, 20, 240};
+constexpr RC2D_Color kHudWindowHeaderFill = RC2D_Color{67, 8, 8, 234};
+constexpr RC2D_Color kHudWindowGold = RC2D_Color{184, 132, 30, 250};
+constexpr RC2D_Color kHudWindowSilver = RC2D_Color{211, 214, 220, 232};
+constexpr RC2D_Color kHudWindowFieldFill = RC2D_Color{12, 12, 14, 236};
+constexpr RC2D_Color kWorldMapCaseFill = RC2D_Color{24, 31, 40, 236};
+constexpr RC2D_Color kWorldMapCaseBorder = RC2D_Color{184, 132, 30, 244};
+constexpr RC2D_Color kWorldMapCityBorder = RC2D_Color{196, 62, 46, 244};
+constexpr RC2D_Color kWorldMapCaseSelectedBorder = RC2D_Color{140, 198, 255, 252};
+constexpr RC2D_Color kWorldMapCaseText = RC2D_Color{217, 200, 134, 255};
+constexpr RC2D_Color kWorldMapGuildText = RC2D_Color{215, 224, 235, 255};
+constexpr RC2D_Color kWorldMapGuildFill = RC2D_Color{56, 19, 19, 228};
+constexpr RC2D_Color kWorldMapCanvasFill = RC2D_Color{9, 24, 36, 228};
+constexpr float kWorldMapCanvasWidth = 960.0f;
+constexpr float kWorldMapCanvasHeight = 640.0f;
+constexpr float kWorldMapCaseMinWidth = 80.0f;
+constexpr float kWorldMapCaseMinHeight = 67.0f;
+constexpr float kWorldMapCaseFixedWidth = 80.0f;
+constexpr float kWorldMapCaseFixedHeight = 67.0f;
+constexpr size_t kWorldMapTextMaxLength = 64U;
 constexpr float kAssetListScrollBarWidth = 10.0f;
 constexpr int kAssetListVisibleRows = 10;
 // Minimap editeur: l'export PNG reprend la taille visible du rectangle ecran.
@@ -189,6 +209,43 @@ static std::string normalizePathSlashes(const std::string& path)
     std::string normalized = path;
     std::replace(normalized.begin(), normalized.end(), '\\', '/');
     return normalized;
+}
+
+static std::string sanitizeFileComponent(const std::string& rawValue, const char* fallbackValue)
+{
+    std::string result;
+    result.reserve(rawValue.size());
+    for (const char c : rawValue)
+    {
+        const bool isAsciiLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const bool isDigit = (c >= '0' && c <= '9');
+        if (isAsciiLetter || isDigit)
+        {
+            result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            continue;
+        }
+        if (c == ' ' || c == '-' || c == '_')
+        {
+            if (!result.empty() && result.back() != '_')
+            {
+                result.push_back('_');
+            }
+        }
+    }
+
+    while (!result.empty() && result.back() == '_')
+    {
+        result.pop_back();
+    }
+
+    if (!result.empty())
+    {
+        return result;
+    }
+
+    return (fallbackValue != nullptr && fallbackValue[0] != '\0')
+        ? std::string(fallbackValue)
+        : std::string("worldmap_layout");
 }
 
 static std::string extractFileName(const std::string& path)
@@ -382,10 +439,19 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       pendingMapImportDialogCanceled(false),
       pendingMapImportAbsolutePath(),
       pendingMapImportMutex{},
+      pendingWorldMapImportDialogCompleted(false),
+      pendingWorldMapImportDialogCanceled(false),
+      pendingWorldMapImportAbsolutePath(),
+      pendingWorldMapImportMutex{},
+      pendingWorldMapExportDialogCompleted(false),
+      pendingWorldMapExportDialogCanceled(false),
+      pendingWorldMapExportAbsolutePath(),
+      pendingWorldMapExportMutex{},
       buttonImportRect{},
       buttonImportMapRect{},
       buttonImportShipRect{},
       buttonExportRect{},
+      buttonCreateWorldMapRect{},
       buttonUndoRect{},
       buttonRedoRect{},
       buttonToolBlockRect{},
@@ -446,7 +512,77 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       mortarDisplayPickerVisible(false),
       miniMapDragActive(false),
       miniMapDragOffsetX(0.0f),
-      miniMapDragOffsetY(0.0f)
+      miniMapDragOffsetY(0.0f),
+      worldMapCases{},
+      worldMapLinks{},
+      selectedWorldMapCaseIndex(-1),
+      worldMapLinkModeEnabled(false),
+      pendingWorldMapLinkSourceIndex(-1),
+      selectedWorldMapLinkSide(WorldMapLinkSide::RIGHT),
+      worldMapEditorVisible(false),
+      worldMapFocusedTextField(WorldMapTextField::NONE),
+      worldMapWindowDragging(false),
+      worldMapWindowDragOffsetX(0.0f),
+      worldMapWindowDragOffsetY(0.0f),
+      worldMapWindowOffset{0.0f, 0.0f},
+      worldMapCaseDragging(false),
+      worldMapCaseDragOffsetX(0.0f),
+      worldMapCaseDragOffsetY(0.0f),
+      worldMapCaseSnapGuideVerticalVisible(false),
+      worldMapCaseSnapGuideHorizontalVisible(false),
+      worldMapCaseSnapGuideVerticalX(0.0f),
+      worldMapCaseSnapGuideHorizontalY(0.0f),
+      worldMapCaseSpacingGuideHorizontalVisible(false),
+      worldMapCaseSpacingGuideVerticalVisible(false),
+      worldMapCaseSpacingGuideHorizontalRectA{},
+      worldMapCaseSpacingGuideHorizontalRectB{},
+      worldMapCaseSpacingGuideVerticalRectA{},
+      worldMapCaseSpacingGuideVerticalRectB{},
+      worldMapCaseResizing(false),
+      worldMapCaseResizeStartMouse{0.0f, 0.0f},
+      worldMapCaseResizeStartRect{0.0f, 0.0f, 0.0f, 0.0f},
+      worldMapCanvasScrollX(0.0f),
+      worldMapCanvasScrollY(0.0f),
+      worldMapCanvasVirtualWidth(0.0f),
+      worldMapCanvasVirtualHeight(0.0f),
+      worldMapEditorRect{},
+      worldMapEditorHeaderRect{},
+      worldMapEditorCanvasRect{},
+      worldMapAddCaseRect{},
+      worldMapDeleteCaseRect{},
+      worldMapToggleGuildRect{},
+      worldMapCaseTypeRect{},
+      worldMapLinkModeRect{},
+      worldMapLinkSideRect{},
+      worldMapPreviewLockRect{},
+      worldMapImportRect{},
+      worldMapExportRect{},
+      worldMapResetRect{},
+      worldMapCloseRect{},
+      worldMapMapNameInputRect{},
+      worldMapPreviewWidthInputRect{},
+      worldMapPreviewHeightInputRect{},
+      worldMapAutoLayoutInputRect{},
+      worldMapAutoGenerateRect{},
+      worldMapCaseResizeHandleRect{},
+      worldMapPreviewWindowRect{},
+      worldMapPreviewHeaderRect{},
+      worldMapPreviewViewportRect{},
+      worldMapPreviewResizeCornerRect{},
+      worldMapPreviewResizeHandleRect{},
+      worldMapPreviewHeightResizing(false),
+      worldMapPreviewCornerResizing(false),
+      worldMapPreviewPreferredWidth(0.0f),
+      worldMapPreviewPreferredHeight(0.0f),
+      worldMapPreviewResizeStartMouseX(0.0f),
+      worldMapPreviewResizeStartMouseY(0.0f),
+      worldMapPreviewResizeStartWidth(0.0f),
+      worldMapPreviewResizeStartHeight(0.0f),
+      worldMapPreviewWidthInput(),
+      worldMapPreviewHeightInput(),
+      worldMapAutoLayoutInput("5-3-2"),
+      worldMapPreviewInteractionLocked(false),
+      editorTextInputEnabled(false)
 {
 }
 
@@ -554,10 +690,23 @@ void EditorMapCreateMapScene::resetEditorState(void)
         std::lock_guard<std::mutex> lock(this->pendingMapImportMutex);
         this->pendingMapImportAbsolutePath.clear();
     }
+    this->pendingWorldMapImportDialogCompleted = false;
+    this->pendingWorldMapImportDialogCanceled = false;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapImportMutex);
+        this->pendingWorldMapImportAbsolutePath.clear();
+    }
+    this->pendingWorldMapExportDialogCompleted = false;
+    this->pendingWorldMapExportDialogCanceled = false;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapExportMutex);
+        this->pendingWorldMapExportAbsolutePath.clear();
+    }
     this->buttonImportRect = SDL_FRect{};
     this->buttonImportMapRect = SDL_FRect{};
     this->buttonImportShipRect = SDL_FRect{};
     this->buttonExportRect = SDL_FRect{};
+    this->buttonCreateWorldMapRect = SDL_FRect{};
     this->buttonUndoRect = SDL_FRect{};
     this->buttonRedoRect = SDL_FRect{};
     this->buttonToolBlockRect = SDL_FRect{};
@@ -617,6 +766,76 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->miniMapDragActive = false;
     this->miniMapDragOffsetX = 0.0f;
     this->miniMapDragOffsetY = 0.0f;
+    this->worldMapCases.clear();
+    this->worldMapLinks.clear();
+    this->selectedWorldMapCaseIndex = -1;
+    this->worldMapLinkModeEnabled = false;
+    this->pendingWorldMapLinkSourceIndex = -1;
+    this->selectedWorldMapLinkSide = WorldMapLinkSide::RIGHT;
+    this->worldMapEditorVisible = false;
+    this->worldMapFocusedTextField = WorldMapTextField::NONE;
+    this->worldMapWindowDragging = false;
+    this->worldMapWindowDragOffsetX = 0.0f;
+    this->worldMapWindowDragOffsetY = 0.0f;
+    this->worldMapWindowOffset = SDL_FPoint{0.0f, 0.0f};
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseDragOffsetX = 0.0f;
+    this->worldMapCaseDragOffsetY = 0.0f;
+    this->worldMapCaseSnapGuideVerticalVisible = false;
+    this->worldMapCaseSnapGuideHorizontalVisible = false;
+    this->worldMapCaseSnapGuideVerticalX = 0.0f;
+    this->worldMapCaseSnapGuideHorizontalY = 0.0f;
+    this->worldMapCaseSpacingGuideHorizontalVisible = false;
+    this->worldMapCaseSpacingGuideVerticalVisible = false;
+    this->worldMapCaseSpacingGuideHorizontalRectA = SDL_FRect{};
+    this->worldMapCaseSpacingGuideHorizontalRectB = SDL_FRect{};
+    this->worldMapCaseSpacingGuideVerticalRectA = SDL_FRect{};
+    this->worldMapCaseSpacingGuideVerticalRectB = SDL_FRect{};
+    this->worldMapCaseResizing = false;
+    this->worldMapCaseResizeStartMouse = SDL_FPoint{0.0f, 0.0f};
+    this->worldMapCaseResizeStartRect = SDL_FRect{0.0f, 0.0f, 0.0f, 0.0f};
+    this->worldMapCanvasScrollX = 0.0f;
+    this->worldMapCanvasScrollY = 0.0f;
+    this->worldMapCanvasVirtualWidth = 0.0f;
+    this->worldMapCanvasVirtualHeight = 0.0f;
+    this->worldMapEditorRect = SDL_FRect{};
+    this->worldMapEditorHeaderRect = SDL_FRect{};
+    this->worldMapEditorCanvasRect = SDL_FRect{};
+    this->worldMapAddCaseRect = SDL_FRect{};
+    this->worldMapDeleteCaseRect = SDL_FRect{};
+    this->worldMapToggleGuildRect = SDL_FRect{};
+    this->worldMapCaseTypeRect = SDL_FRect{};
+    this->worldMapLinkModeRect = SDL_FRect{};
+    this->worldMapLinkSideRect = SDL_FRect{};
+    this->worldMapPreviewLockRect = SDL_FRect{};
+    this->worldMapImportRect = SDL_FRect{};
+    this->worldMapExportRect = SDL_FRect{};
+    this->worldMapResetRect = SDL_FRect{};
+    this->worldMapCloseRect = SDL_FRect{};
+    this->worldMapMapNameInputRect = SDL_FRect{};
+    this->worldMapPreviewWidthInputRect = SDL_FRect{};
+    this->worldMapPreviewHeightInputRect = SDL_FRect{};
+    this->worldMapAutoLayoutInputRect = SDL_FRect{};
+    this->worldMapAutoGenerateRect = SDL_FRect{};
+    this->worldMapCaseResizeHandleRect = SDL_FRect{};
+    this->worldMapPreviewWindowRect = SDL_FRect{};
+    this->worldMapPreviewHeaderRect = SDL_FRect{};
+    this->worldMapPreviewViewportRect = SDL_FRect{};
+    this->worldMapPreviewResizeCornerRect = SDL_FRect{};
+    this->worldMapPreviewResizeHandleRect = SDL_FRect{};
+    this->worldMapPreviewHeightResizing = false;
+    this->worldMapPreviewCornerResizing = false;
+    this->worldMapPreviewPreferredWidth = 0.0f;
+    this->worldMapPreviewPreferredHeight = 0.0f;
+    this->worldMapPreviewResizeStartMouseX = 0.0f;
+    this->worldMapPreviewResizeStartMouseY = 0.0f;
+    this->worldMapPreviewResizeStartWidth = 0.0f;
+    this->worldMapPreviewResizeStartHeight = 0.0f;
+    this->worldMapPreviewWidthInput.clear();
+    this->worldMapPreviewHeightInput.clear();
+    this->worldMapAutoLayoutInput = "5-3-2";
+    this->worldMapPreviewInteractionLocked = false;
+    this->editorTextInputEnabled = false;
 }
 
 void EditorMapCreateMapScene::unloadImportedAssets(void)
@@ -4496,11 +4715,13 @@ bool EditorMapCreateMapScene::handleMapNameInputKey(
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
         this->mapNameInputFocused = false;
+        this->syncEditorTextInputState();
         return true;
     }
     if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_KP_ENTER)
     {
         this->mapNameInputFocused = false;
+        this->syncEditorTextInputState();
         this->statusMessage = "Nom map valide.";
         return true;
     }
@@ -4514,76 +4735,1898 @@ bool EditorMapCreateMapScene::handleMapNameInputKey(
         this->mapNameInput.clear();
         return true;
     }
+    (void)key;
+    (void)keycode;
+    (void)mod;
+    return true;
+}
 
-    auto appendIfRoom = [this](char c) -> bool {
-        if (this->mapNameInput.size() >= 64U)
+bool EditorMapCreateMapScene::isWorldMapCaseSelectionValid(void) const
+{
+    return this->selectedWorldMapCaseIndex >= 0 &&
+        this->selectedWorldMapCaseIndex < static_cast<int>(this->worldMapCases.size());
+}
+
+SDL_FRect EditorMapCreateMapScene::getWorldMapCaseLocalRect(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(this->worldMapCases.size()))
+    {
+        return SDL_FRect{};
+    }
+
+    const WorldMapCase& worldMapCase = this->worldMapCases[static_cast<size_t>(index)];
+    return SDL_FRect{
+        worldMapCase.x,
+        worldMapCase.y,
+        worldMapCase.width,
+        worldMapCase.height
+    };
+}
+
+SDL_FRect EditorMapCreateMapScene::getWorldMapCaseScreenRect(int index) const
+{
+    SDL_FRect localRect = this->getWorldMapCaseLocalRect(index);
+    localRect.x += this->worldMapEditorCanvasRect.x - this->worldMapCanvasScrollX;
+    localRect.y += this->worldMapEditorCanvasRect.y - this->worldMapCanvasScrollY;
+    return localRect;
+}
+
+void EditorMapCreateMapScene::commitWorldMapPreviewDimensionInputs(void)
+{
+    auto parsePositiveDimension = [](const std::string& rawValue, float* outValue) -> bool {
+        if (outValue == nullptr)
         {
-            return true;
+            return false;
         }
-        this->mapNameInput.push_back(c);
+        const std::string trimmed = trimAscii(rawValue);
+        if (trimmed.empty())
+        {
+            return false;
+        }
+
+        char* endPtr = nullptr;
+        const long parsedValue = std::strtol(trimmed.c_str(), &endPtr, 10);
+        if (endPtr == nullptr || *endPtr != '\0' || parsedValue <= 0)
+        {
+            return false;
+        }
+
+        *outValue = static_cast<float>(parsedValue);
         return true;
     };
 
-    // Force la prise en charge des caracteres selon scancode,
-    // utile sur certains layouts clavier ou "key" est vide/different.
-    const bool shiftDown = ((mod & SDL_KMOD_SHIFT) != 0);
+    float requestedWidth = this->worldMapPreviewPreferredWidth;
+    float requestedHeight = this->worldMapPreviewPreferredHeight;
+    const bool hasWidth = parsePositiveDimension(this->worldMapPreviewWidthInput, &requestedWidth);
+    const bool hasHeight = parsePositiveDimension(this->worldMapPreviewHeightInput, &requestedHeight);
 
-    if (keycode == SDLK_MINUS || keycode == SDLK_KP_MINUS || keycode == SDLK_UNDERSCORE ||
-        scancode == SDL_SCANCODE_MINUS || scancode == SDL_SCANCODE_KP_MINUS ||
-        // AZERTY: '-' souvent sur la touche '6' (sans shift)
-        (scancode == SDL_SCANCODE_6 && !shiftDown))
+    if (hasWidth)
     {
-        return appendIfRoom('-');
+        this->worldMapPreviewPreferredWidth = requestedWidth;
     }
-    if (keycode == SDLK_SLASH || keycode == SDLK_KP_DIVIDE || keycode == SDLK_QUESTION ||
-        scancode == SDL_SCANCODE_SLASH || scancode == SDL_SCANCODE_KP_DIVIDE ||
-        // AZERTY: '/' peut passer par la touche ponctuation avec shift.
-        ((scancode == SDL_SCANCODE_PERIOD ||
-          scancode == SDL_SCANCODE_COMMA ||
-          scancode == SDL_SCANCODE_SEMICOLON ||
-          scancode == SDL_SCANCODE_APOSTROPHE) && shiftDown))
+    if (hasHeight)
     {
-        return appendIfRoom('/');
+        this->worldMapPreviewPreferredHeight = requestedHeight;
     }
+}
 
-    if (key == nullptr || key[0] == '\0')
+int EditorMapCreateMapScene::findWorldMapCaseIndexAtPoint(float x, float y) const
+{
+    for (int i = static_cast<int>(this->worldMapCases.size()) - 1; i >= 0; --i)
     {
-        return true;
+        if (this->pointInRect(x, y, this->getWorldMapCaseScreenRect(i)))
+        {
+            return i;
+        }
     }
 
-    std::string keyNameLower = key;
-    std::transform(
-        keyNameLower.begin(),
-        keyNameLower.end(),
-        keyNameLower.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (keyNameLower.find("minus") != std::string::npos)
+    return -1;
+}
+
+bool EditorMapCreateMapScene::measureWorldMapTextSize(const std::string& text, int* outWidth, int* outHeight) const
+{
+    if (outWidth == nullptr || outHeight == nullptr)
     {
-        return appendIfRoom('-');
+        return false;
     }
-    if (keyNameLower.find("slash") != std::string::npos || keyNameLower.find("divide") != std::string::npos)
+
+    *outWidth = 0;
+    *outHeight = 0;
+    if (this->overlayFont.sdl_font == nullptr)
     {
-        return appendIfRoom('/');
+        return false;
     }
-    if (std::strlen(key) != 1U)
+
+    const std::string measuredText = text.empty() ? std::string(" ") : text;
+    return rc2d_graphics_getStringSize(
+        const_cast<RC2D_Font*>(&this->overlayFont),
+        measuredText.c_str(),
+        measuredText.size(),
+        outWidth,
+        outHeight);
+}
+
+bool EditorMapCreateMapScene::tryParseWorldMapAutoLayout(std::vector<int>* outRowCounts) const
+{
+    if (outRowCounts == nullptr)
+    {
+        return false;
+    }
+
+    outRowCounts->clear();
+    std::string numberBuffer;
+    const auto flushNumber = [&]() {
+        if (numberBuffer.empty())
+        {
+            return;
+        }
+
+        const int rowCount = std::atoi(numberBuffer.c_str());
+        if (rowCount > 0)
+        {
+            outRowCounts->push_back(rowCount);
+        }
+        numberBuffer.clear();
+    };
+
+    for (const char rawChar : this->worldMapAutoLayoutInput)
+    {
+        if (rawChar >= '0' && rawChar <= '9')
+        {
+            if (numberBuffer.size() < 3U)
+            {
+                numberBuffer.push_back(rawChar);
+            }
+            continue;
+        }
+
+        if (rawChar == '-' || rawChar == ',' || rawChar == ';' || rawChar == '/' ||
+            rawChar == 'x' || rawChar == 'X' || std::isspace(static_cast<unsigned char>(rawChar)))
+        {
+            flushNumber();
+        }
+    }
+    flushNumber();
+
+    return !outRowCounts->empty();
+}
+
+void EditorMapCreateMapScene::generateWorldMapAutoLayout(void)
+{
+    std::vector<int> rowCounts;
+    if (!this->tryParseWorldMapAutoLayout(&rowCounts))
+    {
+        this->statusMessage = "Schema auto invalide. Exemple: 5-3-2.";
+        return;
+    }
+
+    const int maxColumns = *std::max_element(rowCounts.begin(), rowCounts.end());
+    if (maxColumns <= 0)
+    {
+        this->statusMessage = "Schema auto invalide. Exemple: 5-3-2.";
+        return;
+    }
+
+    constexpr float kAutoMarginX = 14.0f;
+    constexpr float kAutoMarginY = 13.5f;
+    constexpr float kAutoGapX = 21.0f;
+    constexpr float kAutoGapY = 18.0f;
+    const float columnStride = kWorldMapCaseFixedWidth + kAutoGapX;
+    const float rowStride = kWorldMapCaseFixedHeight + kAutoGapY;
+    const float computedWidth =
+        (kAutoMarginX * 2.0f) +
+        (static_cast<float>(maxColumns) * kWorldMapCaseFixedWidth) +
+        (static_cast<float>((std::max)(maxColumns - 1, 0)) * kAutoGapX);
+    const float computedHeight =
+        (kAutoMarginY * 2.0f) +
+        (static_cast<float>(rowCounts.size()) * kWorldMapCaseFixedHeight) +
+        (static_cast<float>((std::max)(static_cast<int>(rowCounts.size()) - 1, 0)) * kAutoGapY);
+
+    this->worldMapPreviewPreferredWidth = (std::max)(computedWidth, 64.0f);
+    this->worldMapPreviewPreferredHeight = (std::max)(computedHeight, 64.0f);
+    this->worldMapCanvasVirtualWidth = this->worldMapPreviewPreferredWidth;
+    this->worldMapCanvasVirtualHeight = this->worldMapPreviewPreferredHeight;
+    this->worldMapCases.clear();
+    this->worldMapLinks.clear();
+    this->pendingWorldMapLinkSourceIndex = -1;
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseResizing = false;
+    this->worldMapPreviewHeightResizing = false;
+    this->worldMapPreviewCornerResizing = false;
+
+    std::vector<std::vector<int>> rowCaseIndices;
+    rowCaseIndices.reserve(rowCounts.size());
+
+    for (size_t rowIndex = 0; rowIndex < rowCounts.size(); ++rowIndex)
+    {
+        const int rowCount = rowCounts[rowIndex];
+        const float rowOffsetColumns = (static_cast<float>(maxColumns - rowCount) * 0.5f);
+        const float rowStartX = kAutoMarginX + (rowOffsetColumns * columnStride);
+        const float rowY = kAutoMarginY + (static_cast<float>(rowIndex) * rowStride);
+        const int firstLogicalColumn = 1 + ((maxColumns - rowCount) / 2);
+
+        rowCaseIndices.emplace_back();
+        for (int columnIndex = 0; columnIndex < rowCount; ++columnIndex)
+        {
+            WorldMapCase worldMapCase{};
+            worldMapCase.x = rowStartX + (static_cast<float>(columnIndex) * columnStride);
+            worldMapCase.y = rowY;
+            worldMapCase.width = kWorldMapCaseFixedWidth;
+            worldMapCase.height = kWorldMapCaseFixedHeight;
+            worldMapCase.mapName =
+                std::to_string(firstLogicalColumn + columnIndex) + "/" + std::to_string(static_cast<int>(rowIndex) + 1);
+            worldMapCase.showGuildName = false;
+            worldMapCase.isCity = false;
+            this->clampWorldMapCaseToCanvas(worldMapCase);
+            this->worldMapCases.push_back(worldMapCase);
+            rowCaseIndices.back().push_back(static_cast<int>(this->worldMapCases.size()) - 1);
+        }
+    }
+
+    for (const std::vector<int>& rowIndices : rowCaseIndices)
+    {
+        for (size_t i = 0; i + 1 < rowIndices.size(); ++i)
+        {
+            this->worldMapLinks.push_back(WorldMapLink{rowIndices[i], rowIndices[i + 1], WorldMapLinkSide::RIGHT});
+            this->worldMapLinks.push_back(WorldMapLink{rowIndices[i + 1], rowIndices[i], WorldMapLinkSide::LEFT});
+        }
+    }
+
+    constexpr float kVerticalLinkTolerance = 10.0f;
+    for (size_t rowIndex = 1; rowIndex < rowCaseIndices.size(); ++rowIndex)
+    {
+        const std::vector<int>& previousRow = rowCaseIndices[rowIndex - 1];
+        const std::vector<int>& currentRow = rowCaseIndices[rowIndex];
+        for (const int currentCaseIndex : currentRow)
+        {
+            const WorldMapCase& currentCase = this->worldMapCases[static_cast<size_t>(currentCaseIndex)];
+            const float currentCenterX = currentCase.x + (currentCase.width * 0.5f);
+            for (const int previousCaseIndex : previousRow)
+            {
+                const WorldMapCase& previousCase = this->worldMapCases[static_cast<size_t>(previousCaseIndex)];
+                const float previousCenterX = previousCase.x + (previousCase.width * 0.5f);
+                if (std::fabs(previousCenterX - currentCenterX) <= kVerticalLinkTolerance)
+                {
+                    this->worldMapLinks.push_back(
+                        WorldMapLink{previousCaseIndex, currentCaseIndex, WorldMapLinkSide::BOTTOM});
+                    this->worldMapLinks.push_back(
+                        WorldMapLink{currentCaseIndex, previousCaseIndex, WorldMapLinkSide::TOP});
+                    break;
+                }
+            }
+        }
+    }
+
+    this->selectedWorldMapCaseIndex = this->worldMapCases.empty() ? -1 : 0;
+    this->worldMapFocusedTextField =
+        this->worldMapCases.empty() ? WorldMapTextField::NONE : WorldMapTextField::MAP_NAME;
+    this->updateWorldMapEditorLayout();
+    this->syncEditorTextInputState();
+    this->statusMessage =
+        "Generation auto terminee: " +
+        std::to_string(this->worldMapCases.size()) +
+        " cases creees et reliees.";
+}
+
+SDL_FPoint EditorMapCreateMapScene::getWorldMapCaseMinimumSize(const std::string& mapName, bool showGuildName) const
+{
+    const std::string displayMapName = trimAscii(mapName).empty() ? std::string("MAP") : mapName;
+    int mapTextWidth = 0;
+    int mapTextHeight = 0;
+    int guildTagWidth = 0;
+    int guildTagHeight = 0;
+    (void)this->measureWorldMapTextSize(displayMapName, &mapTextWidth, &mapTextHeight);
+    if (showGuildName)
+    {
+        (void)this->measureWorldMapTextSize("[TAG]", &guildTagWidth, &guildTagHeight);
+    }
+
+    const float horizontalPadding = 18.0f;
+    const float topPadding = showGuildName ? 8.0f : 9.0f;
+    const float tagGap = showGuildName ? 6.0f : 0.0f;
+    const float bottomPadding = 9.0f;
+    const float contentWidth = static_cast<float>((std::max)(mapTextWidth, guildTagWidth));
+    const float contentHeight =
+        static_cast<float>(mapTextHeight) +
+        (showGuildName ? static_cast<float>(guildTagHeight) + tagGap : 0.0f);
+
+    return SDL_FPoint{
+        (std::max)(kWorldMapCaseMinWidth, contentWidth + (horizontalPadding * 2.0f)),
+        (std::max)(kWorldMapCaseMinHeight, topPadding + contentHeight + bottomPadding)
+    };
+}
+
+float EditorMapCreateMapScene::getWorldMapCanvasMaxScrollY(void) const
+{
+    return 0.0f;
+}
+
+float EditorMapCreateMapScene::getWorldMapCanvasMaxScrollX(void) const
+{
+    return 0.0f;
+}
+
+float EditorMapCreateMapScene::getWorldMapCanvasUsedWidth(void) const
+{
+    float usedWidth = this->worldMapEditorCanvasRect.w;
+    for (const WorldMapCase& worldMapCase : this->worldMapCases)
+    {
+        usedWidth = (std::max)(usedWidth, worldMapCase.x + worldMapCase.width);
+    }
+
+    return usedWidth;
+}
+
+float EditorMapCreateMapScene::getWorldMapCanvasUsedHeight(void) const
+{
+    float usedHeight = this->worldMapEditorCanvasRect.h;
+    for (const WorldMapCase& worldMapCase : this->worldMapCases)
+    {
+        usedHeight = (std::max)(usedHeight, worldMapCase.y + worldMapCase.height);
+    }
+
+    return usedHeight;
+}
+
+void EditorMapCreateMapScene::clampWorldMapCanvasScrollX(void)
+{
+    this->worldMapCanvasScrollX = 0.0f;
+}
+
+void EditorMapCreateMapScene::clampWorldMapCanvasScroll(void)
+{
+    this->worldMapCanvasScrollX = 0.0f;
+    this->worldMapCanvasScrollY = 0.0f;
+}
+
+void EditorMapCreateMapScene::ensureWorldMapCaseVisible(int index)
+{
+    (void)index;
+    this->worldMapCanvasScrollX = 0.0f;
+    this->worldMapCanvasScrollY = 0.0f;
+}
+
+void EditorMapCreateMapScene::clampWorldMapCaseToCanvas(WorldMapCase& worldMapCase)
+{
+    const float canvasWidth = (std::max)(this->worldMapCanvasVirtualWidth, 1.0f);
+    const float canvasHeight = (std::max)(this->worldMapCanvasVirtualHeight, 1.0f);
+    worldMapCase.width = (std::min)(canvasWidth, kWorldMapCaseFixedWidth);
+    worldMapCase.height = (std::min)(canvasHeight, kWorldMapCaseFixedHeight);
+    worldMapCase.x = std::clamp(worldMapCase.x, 0.0f, (std::max)(canvasWidth - worldMapCase.width, 0.0f));
+    worldMapCase.y = std::clamp(worldMapCase.y, 0.0f, (std::max)(canvasHeight - worldMapCase.height, 0.0f));
+}
+
+void EditorMapCreateMapScene::addWorldMapCase(void)
+{
+    WorldMapCase worldMapCase{};
+    worldMapCase.mapName = "1/1";
+    worldMapCase.showGuildName = false;
+    worldMapCase.isCity = false;
+
+    if (this->isWorldMapCaseSelectionValid())
+    {
+        const WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        worldMapCase.x = selectedCase.x + 18.0f;
+        worldMapCase.y = selectedCase.y + 18.0f;
+        worldMapCase.width = selectedCase.width;
+        worldMapCase.height = selectedCase.height;
+        worldMapCase.mapName = selectedCase.mapName.empty() ? std::string("1/1") : selectedCase.mapName;
+        worldMapCase.showGuildName = selectedCase.showGuildName;
+        worldMapCase.isCity = selectedCase.isCity;
+    }
+    else
+    {
+        worldMapCase.x =
+            this->worldMapCanvasScrollX +
+            32.0f +
+            (static_cast<float>(this->worldMapCases.size() % 4U) * 110.0f);
+        worldMapCase.y =
+            this->worldMapCanvasScrollY +
+            32.0f +
+            (static_cast<float>((this->worldMapCases.size() / 4U) % 4U) * 110.0f);
+    }
+
+    this->clampWorldMapCaseToCanvas(worldMapCase);
+    this->worldMapCases.push_back(worldMapCase);
+    this->selectedWorldMapCaseIndex = static_cast<int>(this->worldMapCases.size()) - 1;
+    this->worldMapFocusedTextField = WorldMapTextField::MAP_NAME;
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseResizing = false;
+    this->ensureWorldMapCaseVisible(this->selectedWorldMapCaseIndex);
+    this->syncEditorTextInputState();
+    this->statusMessage = "Case carte du monde ajoutee.";
+}
+
+void EditorMapCreateMapScene::deleteSelectedWorldMapCase(void)
+{
+    if (!this->isWorldMapCaseSelectionValid())
+    {
+        this->statusMessage = "Selectionne d'abord une case carte du monde.";
+        return;
+    }
+
+    const int removedIndex = this->selectedWorldMapCaseIndex;
+    this->worldMapCases.erase(this->worldMapCases.begin() + this->selectedWorldMapCaseIndex);
+    this->worldMapLinks.erase(
+        std::remove_if(
+            this->worldMapLinks.begin(),
+            this->worldMapLinks.end(),
+            [removedIndex](const WorldMapLink& link) {
+                return link.fromCaseIndex == removedIndex || link.toCaseIndex == removedIndex;
+            }),
+        this->worldMapLinks.end());
+    for (WorldMapLink& link : this->worldMapLinks)
+    {
+        if (link.fromCaseIndex > removedIndex)
+        {
+            --link.fromCaseIndex;
+        }
+        if (link.toCaseIndex > removedIndex)
+        {
+            --link.toCaseIndex;
+        }
+    }
+    if (this->pendingWorldMapLinkSourceIndex == removedIndex)
+    {
+        this->pendingWorldMapLinkSourceIndex = -1;
+    }
+    else if (this->pendingWorldMapLinkSourceIndex > removedIndex)
+    {
+        --this->pendingWorldMapLinkSourceIndex;
+    }
+    if (this->worldMapCases.empty())
+    {
+        this->selectedWorldMapCaseIndex = -1;
+        this->worldMapFocusedTextField = WorldMapTextField::NONE;
+    }
+    else
+    {
+        this->selectedWorldMapCaseIndex =
+            (std::min)(this->selectedWorldMapCaseIndex, static_cast<int>(this->worldMapCases.size()) - 1);
+        this->worldMapFocusedTextField = WorldMapTextField::MAP_NAME;
+    }
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseResizing = false;
+    this->syncEditorTextInputState();
+    this->statusMessage = "Case carte du monde supprimee.";
+}
+
+void EditorMapCreateMapScene::toggleWorldMapEditor(void)
+{
+    this->worldMapEditorVisible = !this->worldMapEditorVisible;
+    this->worldMapFocusedTextField = WorldMapTextField::NONE;
+    this->worldMapWindowDragging = false;
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseResizing = false;
+    this->worldMapPreviewHeightResizing = false;
+    this->worldMapPreviewCornerResizing = false;
+    this->updateWorldMapEditorLayout();
+    this->syncEditorTextInputState();
+
+    if (this->worldMapEditorVisible && this->worldMapCases.empty())
+    {
+        this->addWorldMapCase();
+    }
+
+    this->updateWorldMapEditorLayout();
+    this->statusMessage = this->worldMapEditorVisible
+        ? "Createur carte du monde ouvert."
+        : "Createur carte du monde ferme.";
+}
+
+void EditorMapCreateMapScene::updateWorldMapEditorLayout(void)
+{
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
+    const float editorWidth = std::clamp(gameScreenRect.w - 56.0f, 1200.0f, 1820.0f);
+    const float editorHeight = std::clamp(gameScreenRect.h - 56.0f, 820.0f, 1020.0f);
+    const float baseX = gameScreenRect.x + ((gameScreenRect.w - editorWidth) * 0.5f);
+    const float baseY = gameScreenRect.y + ((gameScreenRect.h - editorHeight) * 0.5f);
+    float editorX = baseX + this->worldMapWindowOffset.x;
+    float editorY = baseY + this->worldMapWindowOffset.y;
+    const float minEditorX = gameScreenRect.x + 8.0f;
+    const float minEditorY = gameScreenRect.y + 8.0f;
+    const float maxEditorX = (std::max)(minEditorX, gameScreenRect.x + gameScreenRect.w - editorWidth - 8.0f);
+    const float maxEditorY = (std::max)(minEditorY, gameScreenRect.y + gameScreenRect.h - editorHeight - 8.0f);
+
+    editorX = std::clamp(editorX, minEditorX, maxEditorX);
+    editorY = std::clamp(editorY, minEditorY, maxEditorY);
+    this->worldMapWindowOffset = SDL_FPoint{editorX - baseX, editorY - baseY};
+
+    this->worldMapEditorRect = SDL_FRect{editorX, editorY, editorWidth, editorHeight};
+    this->worldMapEditorHeaderRect = SDL_FRect{
+        this->worldMapEditorRect.x + 6.0f,
+        this->worldMapEditorRect.y + 6.0f,
+        this->worldMapEditorRect.w - 12.0f,
+        34.0f
+    };
+    this->worldMapCloseRect = SDL_FRect{
+        this->worldMapEditorRect.x + this->worldMapEditorRect.w - 42.0f,
+        this->worldMapEditorHeaderRect.y + 6.0f,
+        24.0f,
+        22.0f
+    };
+    const float topButtonsY = this->worldMapEditorHeaderRect.y + this->worldMapEditorHeaderRect.h + 12.0f;
+    const float contentLeft = this->worldMapEditorRect.x + 22.0f;
+    const float contentRight = this->worldMapEditorRect.x + this->worldMapEditorRect.w - 22.0f;
+    const float contentTop = topButtonsY;
+    const float contentBottom = this->worldMapEditorRect.y + this->worldMapEditorRect.h - 22.0f;
+    const float sidePanelWidth = std::clamp(this->worldMapEditorRect.w * 0.25f, 300.0f, 360.0f);
+    const float previewGap = 22.0f;
+    if (this->worldMapPreviewPreferredWidth <= 0.0f)
+    {
+        this->worldMapPreviewPreferredWidth = kWorldMapCanvasWidth;
+    }
+    if (this->worldMapPreviewPreferredHeight <= 0.0f)
+    {
+        this->worldMapPreviewPreferredHeight = kWorldMapCanvasHeight;
+    }
+    this->worldMapPreviewPreferredWidth = std::clamp(this->worldMapPreviewPreferredWidth, 64.0f, 8192.0f);
+    this->worldMapPreviewPreferredHeight = std::clamp(this->worldMapPreviewPreferredHeight, 64.0f, 8192.0f);
+    const float previewViewportMaxWidth = (std::max)(420.0f, contentRight - (contentLeft + sidePanelWidth + previewGap + 32.0f));
+    const float previewViewportMaxHeight = (std::max)(280.0f, contentBottom - (contentTop + 40.0f + 54.0f + 20.0f));
+    const float previewViewportWidth = std::clamp(this->worldMapPreviewPreferredWidth, 64.0f, previewViewportMaxWidth);
+    const float previewViewportHeight = std::clamp(this->worldMapPreviewPreferredHeight, 64.0f, previewViewportMaxHeight);
+    const float previewWindowWidth = previewViewportWidth + 32.0f;
+    const float previewWindowHeight = previewViewportHeight + 86.0f;
+    const float previewWindowX = contentLeft + sidePanelWidth + previewGap;
+    const float previewWindowY = contentTop + 50.0f;
+    this->worldMapCanvasVirtualWidth = this->worldMapPreviewPreferredWidth;
+    this->worldMapCanvasVirtualHeight = this->worldMapPreviewPreferredHeight;
+
+    this->worldMapAddCaseRect = SDL_FRect{
+        contentLeft,
+        topButtonsY,
+        132.0f,
+        24.0f
+    };
+    this->worldMapDeleteCaseRect = SDL_FRect{
+        this->worldMapAddCaseRect.x + this->worldMapAddCaseRect.w + 8.0f,
+        this->worldMapAddCaseRect.y,
+        sidePanelWidth - this->worldMapAddCaseRect.w - 8.0f,
+        24.0f
+    };
+    this->worldMapToggleGuildRect = SDL_FRect{
+        contentLeft,
+        this->worldMapAddCaseRect.y + this->worldMapAddCaseRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapCaseTypeRect = SDL_FRect{
+        contentLeft,
+        this->worldMapToggleGuildRect.y + this->worldMapToggleGuildRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapLinkModeRect = SDL_FRect{
+        contentLeft,
+        this->worldMapCaseTypeRect.y + this->worldMapCaseTypeRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapLinkSideRect = SDL_FRect{
+        contentLeft,
+        this->worldMapLinkModeRect.y + this->worldMapLinkModeRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapPreviewLockRect = SDL_FRect{
+        contentLeft,
+        this->worldMapLinkSideRect.y + this->worldMapLinkSideRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapImportRect = SDL_FRect{
+        contentLeft,
+        this->worldMapPreviewLockRect.y + this->worldMapPreviewLockRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapExportRect = SDL_FRect{
+        contentLeft,
+        this->worldMapImportRect.y + this->worldMapImportRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapResetRect = SDL_FRect{
+        contentLeft,
+        this->worldMapExportRect.y + this->worldMapExportRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapPreviewWindowRect = SDL_FRect{
+        previewWindowX,
+        previewWindowY,
+        previewWindowWidth,
+        previewWindowHeight
+    };
+    this->worldMapPreviewHeaderRect = SDL_FRect{
+        this->worldMapPreviewWindowRect.x + 6.0f,
+        this->worldMapPreviewWindowRect.y + 6.0f,
+        this->worldMapPreviewWindowRect.w - 12.0f,
+        28.0f
+    };
+    this->worldMapPreviewViewportRect = SDL_FRect{
+        this->worldMapPreviewWindowRect.x + 16.0f,
+        this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + 26.0f,
+        previewViewportWidth,
+        previewViewportHeight
+    };
+    this->worldMapEditorCanvasRect = SDL_FRect{
+        this->worldMapPreviewViewportRect.x + 4.0f,
+        this->worldMapPreviewViewportRect.y + 4.0f,
+        this->worldMapPreviewViewportRect.w - 8.0f,
+        this->worldMapPreviewViewportRect.h - 8.0f
+    };
+    this->worldMapPreviewWidthInputRect = SDL_FRect{
+        contentLeft,
+        this->worldMapResetRect.y + this->worldMapResetRect.h + 22.0f,
+        sidePanelWidth,
+        26.0f
+    };
+    this->worldMapPreviewHeightInputRect = SDL_FRect{
+        contentLeft,
+        this->worldMapPreviewWidthInputRect.y + this->worldMapPreviewWidthInputRect.h + 28.0f,
+        sidePanelWidth,
+        26.0f
+    };
+    this->worldMapAutoLayoutInputRect = SDL_FRect{
+        contentLeft,
+        this->worldMapPreviewHeightInputRect.y + this->worldMapPreviewHeightInputRect.h + 28.0f,
+        sidePanelWidth,
+        30.0f
+    };
+    this->worldMapAutoGenerateRect = SDL_FRect{
+        contentLeft,
+        this->worldMapAutoLayoutInputRect.y + this->worldMapAutoLayoutInputRect.h + 10.0f,
+        sidePanelWidth,
+        24.0f
+    };
+    this->worldMapPreviewResizeCornerRect = SDL_FRect{
+        this->worldMapPreviewWindowRect.x + this->worldMapPreviewWindowRect.w - 26.0f,
+        this->worldMapPreviewWindowRect.y + this->worldMapPreviewWindowRect.h - 26.0f,
+        18.0f,
+        18.0f
+    };
+    this->worldMapPreviewResizeHandleRect = SDL_FRect{};
+    this->worldMapMapNameInputRect = SDL_FRect{
+        contentLeft,
+        this->worldMapAutoGenerateRect.y + this->worldMapAutoGenerateRect.h + 42.0f,
+        sidePanelWidth,
+        30.0f
+    };
+    for (WorldMapCase& worldMapCase : this->worldMapCases)
+    {
+        this->clampWorldMapCaseToCanvas(worldMapCase);
+    }
+    this->clampWorldMapCanvasScroll();
+    if (this->worldMapFocusedTextField != WorldMapTextField::PREVIEW_WIDTH)
+    {
+        this->worldMapPreviewWidthInput = std::to_string(static_cast<int>(std::lround(this->worldMapPreviewPreferredWidth)));
+    }
+    if (this->worldMapFocusedTextField != WorldMapTextField::PREVIEW_HEIGHT)
+    {
+        this->worldMapPreviewHeightInput = std::to_string(static_cast<int>(std::lround(this->worldMapPreviewPreferredHeight)));
+    }
+
+    if (this->isWorldMapCaseSelectionValid())
+    {
+        WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        this->clampWorldMapCaseToCanvas(selectedCase);
+        this->ensureWorldMapCaseVisible(this->selectedWorldMapCaseIndex);
+        const SDL_FRect selectedRect = this->getWorldMapCaseScreenRect(this->selectedWorldMapCaseIndex);
+        const bool selectedVisible =
+            selectedRect.x < (this->worldMapEditorCanvasRect.x + this->worldMapEditorCanvasRect.w) &&
+            selectedRect.y < (this->worldMapEditorCanvasRect.y + this->worldMapEditorCanvasRect.h) &&
+            (selectedRect.x + selectedRect.w) > this->worldMapEditorCanvasRect.x &&
+            (selectedRect.y + selectedRect.h) > this->worldMapEditorCanvasRect.y;
+        (void)selectedVisible;
+        this->worldMapCaseResizeHandleRect = SDL_FRect{};
+    }
+    else
+    {
+        this->worldMapCaseResizeHandleRect = SDL_FRect{};
+    }
+}
+
+std::string* EditorMapCreateMapScene::getWorldMapFocusedTextBuffer(void)
+{
+    switch (this->worldMapFocusedTextField)
+    {
+        case WorldMapTextField::MAP_NAME:
+            if (!this->isWorldMapCaseSelectionValid())
+            {
+                return nullptr;
+            }
+            return &this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)].mapName;
+        case WorldMapTextField::AUTO_LAYOUT:
+            return &this->worldMapAutoLayoutInput;
+        case WorldMapTextField::PREVIEW_WIDTH:
+        case WorldMapTextField::PREVIEW_HEIGHT:
+            return nullptr;
+        case WorldMapTextField::NONE:
+        default:
+            break;
+    }
+
+    return nullptr;
+}
+
+void EditorMapCreateMapScene::syncEditorTextInputState(void)
+{
+    const bool shouldEnableTextInput =
+        this->mapNameInputFocused ||
+        this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME ||
+        this->worldMapFocusedTextField == WorldMapTextField::AUTO_LAYOUT;
+    if (shouldEnableTextInput == this->editorTextInputEnabled)
+    {
+        return;
+    }
+
+    rc2d_keyboard_setTextInput(shouldEnableTextInput);
+    this->editorTextInputEnabled = shouldEnableTextInput;
+}
+
+bool EditorMapCreateMapScene::handleWorldMapEditorKey(
+    const char* key,
+    SDL_Scancode scancode,
+    SDL_Keycode keycode,
+    SDL_Keymod mod,
+    bool isrepeat)
+{
+    (void)key;
+    (void)keycode;
+    (void)mod;
+
+    if (!this->worldMapEditorVisible)
+    {
+        return false;
+    }
+
+    if (scancode == SDL_SCANCODE_ESCAPE && !isrepeat)
+    {
+        if (this->worldMapFocusedTextField != WorldMapTextField::NONE)
+        {
+            this->worldMapFocusedTextField = WorldMapTextField::NONE;
+        }
+        else
+        {
+            this->toggleWorldMapEditor();
+        }
+        return true;
+    }
+
+    std::string* focusedBuffer = this->getWorldMapFocusedTextBuffer();
+
+    if (focusedBuffer != nullptr)
+    {
+        if (!isrepeat && scancode == SDL_SCANCODE_TAB)
+        {
+            this->commitWorldMapPreviewDimensionInputs();
+            this->worldMapFocusedTextField =
+                this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME
+                    ? WorldMapTextField::AUTO_LAYOUT
+                    : WorldMapTextField::MAP_NAME;
+            this->syncEditorTextInputState();
+            return true;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_RETURN)
+        {
+            this->commitWorldMapPreviewDimensionInputs();
+            this->worldMapFocusedTextField = WorldMapTextField::NONE;
+            this->syncEditorTextInputState();
+            return true;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_BACKSPACE && !focusedBuffer->empty())
+        {
+            focusedBuffer->pop_back();
+            if (this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME)
+            {
+                WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+                this->clampWorldMapCaseToCanvas(selectedCase);
+            }
+            return true;
+        }
+        if (!isrepeat && scancode == SDL_SCANCODE_DELETE)
+        {
+            focusedBuffer->clear();
+            if (this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME)
+            {
+                WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+                this->clampWorldMapCaseToCanvas(selectedCase);
+            }
+            else if (this->worldMapFocusedTextField == WorldMapTextField::AUTO_LAYOUT)
+            {
+                this->worldMapAutoLayoutInput = "5-3-2";
+            }
+            return true;
+        }
+        return true;
+    }
+
+    if (!this->isWorldMapCaseSelectionValid())
+    {
+        if (!isrepeat && (scancode == SDL_SCANCODE_INSERT || scancode == SDL_SCANCODE_A))
+        {
+            this->addWorldMapCase();
+            return true;
+        }
+        return true;
+    }
+
+    if (!isrepeat && (scancode == SDL_SCANCODE_INSERT || scancode == SDL_SCANCODE_A))
+    {
+        this->addWorldMapCase();
+        return true;
+    }
+    if (!isrepeat && (scancode == SDL_SCANCODE_DELETE || scancode == SDL_SCANCODE_X))
+    {
+        this->deleteSelectedWorldMapCase();
+        return true;
+    }
+    if (!isrepeat && scancode == SDL_SCANCODE_TAB)
+    {
+        this->worldMapFocusedTextField = WorldMapTextField::MAP_NAME;
+        this->syncEditorTextInputState();
+        return true;
+    }
+
+    return true;
+}
+
+void EditorMapCreateMapScene::handleWorldMapEditorTextInput(const char* text)
+{
+    if (!this->worldMapEditorVisible || text == nullptr || text[0] == '\0')
+    {
+        return;
+    }
+
+    std::string* focusedBuffer = this->getWorldMapFocusedTextBuffer();
+    if (focusedBuffer == nullptr || focusedBuffer->size() >= kWorldMapTextMaxLength)
+    {
+        return;
+    }
+
+    if (this->worldMapFocusedTextField == WorldMapTextField::PREVIEW_WIDTH ||
+        this->worldMapFocusedTextField == WorldMapTextField::PREVIEW_HEIGHT)
+    {
+        for (const char* cursor = text; *cursor != '\0' && focusedBuffer->size() < 8U; ++cursor)
+        {
+            if (*cursor >= '0' && *cursor <= '9')
+            {
+                focusedBuffer->push_back(*cursor);
+            }
+        }
+        this->commitWorldMapPreviewDimensionInputs();
+        return;
+    }
+
+    if (this->worldMapFocusedTextField == WorldMapTextField::AUTO_LAYOUT)
+    {
+        for (const char* cursor = text; *cursor != '\0' && focusedBuffer->size() < kWorldMapTextMaxLength; ++cursor)
+        {
+            if (*cursor >= '0' && *cursor <= '9')
+            {
+                focusedBuffer->push_back(*cursor);
+                continue;
+            }
+
+            if (*cursor == '-' || *cursor == ',' || *cursor == ';' || *cursor == '/' ||
+                *cursor == 'x' || *cursor == 'X' || std::isspace(static_cast<unsigned char>(*cursor)))
+            {
+                if (!focusedBuffer->empty() && focusedBuffer->back() != '-')
+                {
+                    focusedBuffer->push_back('-');
+                }
+            }
+        }
+        return;
+    }
+
+    const size_t remaining = kWorldMapTextMaxLength - focusedBuffer->size();
+    focusedBuffer->append(text, (std::min)(remaining, std::strlen(text)));
+    if (this->isWorldMapCaseSelectionValid())
+    {
+        WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        this->clampWorldMapCaseToCanvas(selectedCase);
+    }
+}
+
+bool EditorMapCreateMapScene::handleWorldMapEditorClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->worldMapEditorVisible)
+    {
+        return false;
+    }
+
+    const WorldMapTextField previousFocusedField = this->worldMapFocusedTextField;
+    if (previousFocusedField == WorldMapTextField::PREVIEW_WIDTH ||
+        previousFocusedField == WorldMapTextField::PREVIEW_HEIGHT)
+    {
+        this->commitWorldMapPreviewDimensionInputs();
+    }
+    this->worldMapFocusedTextField = WorldMapTextField::NONE;
+
+    if (!this->pointInRect(x, y, this->worldMapEditorRect))
+    {
+        this->syncEditorTextInputState();
+        return true;
+    }
+
+    if (button != RC2D_MOUSE_BUTTON_LEFT)
     {
         return true;
     }
-    const char c = key[0];
-    const bool printable =
-        (c >= 'a' && c <= 'z') ||
-        (c >= 'A' && c <= 'Z') ||
-        (c >= '0' && c <= '9') ||
-        c == '_' || c == '-' || c == '/' || c == ' ';
-    if (!printable)
+
+    if (this->pointInRect(x, y, this->worldMapCloseRect))
     {
+        this->toggleWorldMapEditor();
         return true;
     }
-    if (this->mapNameInput.size() >= 64U)
+    if (this->pointInRect(x, y, this->worldMapAddCaseRect))
     {
+        this->addWorldMapCase();
         return true;
     }
-    return appendIfRoom(c);
+    if (this->pointInRect(x, y, this->worldMapDeleteCaseRect))
+    {
+        this->deleteSelectedWorldMapCase();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapToggleGuildRect))
+    {
+        if (!this->isWorldMapCaseSelectionValid())
+        {
+            this->statusMessage = "Selectionne une case avant d'activer le TAG GUILDE.";
+            return true;
+        }
+
+        WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        selectedCase.showGuildName = !selectedCase.showGuildName;
+        this->clampWorldMapCaseToCanvas(selectedCase);
+        this->statusMessage = selectedCase.showGuildName
+            ? "TAG GUILDE active pour la case."
+            : "TAG GUILDE masque pour la case.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapCaseTypeRect))
+    {
+        if (!this->isWorldMapCaseSelectionValid())
+        {
+            this->statusMessage = "Selectionne une case avant de changer son type.";
+            return true;
+        }
+
+        WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        selectedCase.isCity = !selectedCase.isCity;
+        this->statusMessage = selectedCase.isCity
+            ? "Type de case: VILLE."
+            : "Type de case: MAP NORMALE.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapLinkModeRect))
+    {
+        if (this->worldMapPreviewInteractionLocked)
+        {
+            this->statusMessage = "Desactive l'apercu final pour modifier les liaisons.";
+            return true;
+        }
+
+        this->worldMapLinkModeEnabled = !this->worldMapLinkModeEnabled;
+        this->pendingWorldMapLinkSourceIndex = -1;
+        this->statusMessage = this->worldMapLinkModeEnabled
+            ? "Mode liaison actif: clique une case source puis une case cible."
+            : "Mode liaison desactive.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapLinkSideRect))
+    {
+        if (this->worldMapPreviewInteractionLocked)
+        {
+            this->statusMessage = "Desactive l'apercu final pour choisir un cote de liaison.";
+            return true;
+        }
+
+        const int nextSide =
+            (static_cast<int>(this->selectedWorldMapLinkSide) + 1) % 4;
+        this->selectedWorldMapLinkSide = static_cast<WorldMapLinkSide>(nextSide);
+        const char* sideLabel = "DROITE";
+        switch (this->selectedWorldMapLinkSide)
+        {
+            case WorldMapLinkSide::LEFT:
+                sideLabel = "GAUCHE";
+                break;
+            case WorldMapLinkSide::TOP:
+                sideLabel = "HAUT";
+                break;
+            case WorldMapLinkSide::RIGHT:
+                sideLabel = "DROITE";
+                break;
+            case WorldMapLinkSide::BOTTOM:
+                sideLabel = "BAS";
+                break;
+        }
+        this->statusMessage = std::string("Cote de depart liaison: ") + sideLabel + ".";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapPreviewLockRect))
+    {
+        this->worldMapPreviewInteractionLocked = !this->worldMapPreviewInteractionLocked;
+        this->worldMapCaseDragging = false;
+        this->worldMapCaseResizing = false;
+        this->pendingWorldMapLinkSourceIndex = -1;
+        this->statusMessage = this->worldMapPreviewInteractionLocked
+            ? "Apercu final verrouille: edition masquee."
+            : "Edition GUI reactivee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapImportRect))
+    {
+        this->openImportWorldMapDialog();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapExportRect))
+    {
+        this->openExportWorldMapDialog();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapResetRect))
+    {
+        this->worldMapCases.clear();
+        this->worldMapLinks.clear();
+        this->selectedWorldMapCaseIndex = -1;
+        this->pendingWorldMapLinkSourceIndex = -1;
+        this->worldMapFocusedTextField = WorldMapTextField::NONE;
+        this->worldMapCaseDragging = false;
+        this->worldMapCaseResizing = false;
+        this->worldMapPreviewHeightResizing = false;
+        this->worldMapPreviewCornerResizing = false;
+        this->worldMapPreviewInteractionLocked = false;
+        this->worldMapLinkModeEnabled = false;
+        this->worldMapAutoLayoutInput = "5-3-2";
+        this->worldMapPreviewPreferredWidth = kWorldMapCanvasWidth;
+        this->worldMapPreviewPreferredHeight = kWorldMapCanvasHeight;
+        this->updateWorldMapEditorLayout();
+        this->syncEditorTextInputState();
+        this->statusMessage = "Carte du monde reinitialisee.";
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapMapNameInputRect) && this->isWorldMapCaseSelectionValid())
+    {
+        this->worldMapFocusedTextField = WorldMapTextField::MAP_NAME;
+        this->syncEditorTextInputState();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapAutoLayoutInputRect))
+    {
+        this->worldMapFocusedTextField = WorldMapTextField::AUTO_LAYOUT;
+        this->syncEditorTextInputState();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->worldMapAutoGenerateRect))
+    {
+        if (this->worldMapPreviewInteractionLocked)
+        {
+            this->statusMessage = "Desactive l'apercu final pour lancer la generation auto.";
+            return true;
+        }
+        this->generateWorldMapAutoLayout();
+        return true;
+    }
+    if (!this->worldMapPreviewInteractionLocked &&
+        this->pointInRect(x, y, this->worldMapPreviewResizeCornerRect))
+    {
+        this->worldMapCaseDragging = false;
+        this->worldMapCaseResizing = false;
+        this->worldMapPreviewHeightResizing = false;
+        this->worldMapPreviewCornerResizing = true;
+        this->worldMapPreviewResizeStartMouseX = x;
+        this->worldMapPreviewResizeStartMouseY = y;
+        this->worldMapPreviewResizeStartWidth = this->worldMapPreviewPreferredWidth;
+        this->worldMapPreviewResizeStartHeight = this->worldMapPreviewPreferredHeight;
+        this->syncEditorTextInputState();
+        return true;
+    }
+    const int clickedCaseIndex = this->findWorldMapCaseIndexAtPoint(x, y);
+    if (clickedCaseIndex >= 0)
+    {
+        this->selectedWorldMapCaseIndex = clickedCaseIndex;
+        this->ensureWorldMapCaseVisible(clickedCaseIndex);
+        if (!this->worldMapPreviewInteractionLocked && this->worldMapLinkModeEnabled)
+        {
+            if (this->pendingWorldMapLinkSourceIndex < 0)
+            {
+                this->pendingWorldMapLinkSourceIndex = clickedCaseIndex;
+                this->statusMessage =
+                    "Source de liaison selectionnee: clique maintenant la case cible.";
+            }
+            else if (this->pendingWorldMapLinkSourceIndex == clickedCaseIndex)
+            {
+                this->pendingWorldMapLinkSourceIndex = -1;
+                this->statusMessage = "Creation de liaison annulee pour cette case.";
+            }
+            else
+            {
+                const int sourceIndex = this->pendingWorldMapLinkSourceIndex;
+                this->worldMapLinks.erase(
+                    std::remove_if(
+                        this->worldMapLinks.begin(),
+                        this->worldMapLinks.end(),
+                        [sourceIndex, this](const WorldMapLink& link) {
+                            return link.fromCaseIndex == sourceIndex &&
+                                   link.fromSide == this->selectedWorldMapLinkSide;
+                        }),
+                    this->worldMapLinks.end());
+                this->worldMapLinks.push_back(
+                    WorldMapLink{sourceIndex, clickedCaseIndex, this->selectedWorldMapLinkSide});
+                this->pendingWorldMapLinkSourceIndex = -1;
+                const std::string fromName = trimAscii(this->worldMapCases[static_cast<size_t>(sourceIndex)].mapName);
+                const std::string toName = trimAscii(this->worldMapCases[static_cast<size_t>(clickedCaseIndex)].mapName);
+                this->statusMessage =
+                    "Liaison creee: " +
+                    (fromName.empty() ? std::string("MAP") : fromName) +
+                    " -> " +
+                    (toName.empty() ? std::string("MAP") : toName) +
+                    ".";
+            }
+            this->syncEditorTextInputState();
+            return true;
+        }
+        if (!this->worldMapPreviewInteractionLocked)
+        {
+            const SDL_FRect selectedRect = this->getWorldMapCaseScreenRect(clickedCaseIndex);
+            this->worldMapCaseDragging = true;
+            this->worldMapCaseResizing = false;
+            this->worldMapPreviewHeightResizing = false;
+            this->worldMapPreviewCornerResizing = false;
+            this->worldMapCaseDragOffsetX = x - selectedRect.x;
+            this->worldMapCaseDragOffsetY = y - selectedRect.y;
+        }
+        this->syncEditorTextInputState();
+        return true;
+    }
+    if (!this->worldMapPreviewInteractionLocked && this->pointInRect(x, y, this->worldMapEditorCanvasRect))
+    {
+        this->addWorldMapCase();
+        if (this->isWorldMapCaseSelectionValid())
+        {
+            WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+            selectedCase.x =
+                this->worldMapCanvasScrollX +
+                (x - this->worldMapEditorCanvasRect.x) -
+                (selectedCase.width * 0.5f);
+            selectedCase.y =
+                this->worldMapCanvasScrollY +
+                (y - this->worldMapEditorCanvasRect.y) -
+                (selectedCase.height * 0.5f);
+            this->clampWorldMapCaseToCanvas(selectedCase);
+            this->worldMapCaseDragging = true;
+            this->worldMapCaseResizing = false;
+            this->worldMapCaseDragOffsetX = x - this->getWorldMapCaseScreenRect(this->selectedWorldMapCaseIndex).x;
+            this->worldMapCaseDragOffsetY = y - this->getWorldMapCaseScreenRect(this->selectedWorldMapCaseIndex).y;
+            this->statusMessage = "Case creee directement dans l'apercu gameplay.";
+        }
+        this->syncEditorTextInputState();
+        return true;
+    }
+
+    if (this->pointInRect(x, y, this->worldMapEditorHeaderRect))
+    {
+        this->worldMapWindowDragging = true;
+        this->worldMapWindowDragOffsetX = x - this->worldMapEditorRect.x;
+        this->worldMapWindowDragOffsetY = y - this->worldMapEditorRect.y;
+        this->syncEditorTextInputState();
+        return true;
+    }
+
+    this->syncEditorTextInputState();
+    return true;
+}
+
+void EditorMapCreateMapScene::updateWorldMapEditorInteractions(void)
+{
+    if (!this->worldMapEditorVisible)
+    {
+        this->worldMapWindowDragging = false;
+        this->worldMapCaseDragging = false;
+        this->worldMapCaseResizing = false;
+        this->worldMapCaseSnapGuideVerticalVisible = false;
+        this->worldMapCaseSnapGuideHorizontalVisible = false;
+        this->worldMapCaseSpacingGuideHorizontalVisible = false;
+        this->worldMapCaseSpacingGuideVerticalVisible = false;
+        this->worldMapPreviewHeightResizing = false;
+        this->worldMapPreviewCornerResizing = false;
+        return;
+    }
+
+    if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+    {
+        this->worldMapWindowDragging = false;
+        this->worldMapCaseDragging = false;
+        this->worldMapCaseResizing = false;
+        this->worldMapCaseSnapGuideVerticalVisible = false;
+        this->worldMapCaseSnapGuideHorizontalVisible = false;
+        this->worldMapCaseSpacingGuideHorizontalVisible = false;
+        this->worldMapCaseSpacingGuideVerticalVisible = false;
+        this->worldMapPreviewHeightResizing = false;
+        this->worldMapPreviewCornerResizing = false;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!this->getMouseRenderPosition(&mouseX, &mouseY))
+    {
+        return;
+    }
+
+    const SDL_FRect gameScreenRect = GetGameScreen().rect;
+    const float editorWidth = this->worldMapEditorRect.w;
+    const float editorHeight = this->worldMapEditorRect.h;
+    const float baseX = gameScreenRect.x + ((gameScreenRect.w - editorWidth) * 0.5f);
+    const float baseY = gameScreenRect.y + ((gameScreenRect.h - editorHeight) * 0.5f);
+
+    if (this->worldMapWindowDragging)
+    {
+        this->worldMapWindowOffset = SDL_FPoint{
+            (mouseX - this->worldMapWindowDragOffsetX) - baseX,
+            (mouseY - this->worldMapWindowDragOffsetY) - baseY
+        };
+        return;
+    }
+
+    if (this->worldMapPreviewCornerResizing)
+    {
+        this->worldMapPreviewPreferredWidth =
+            (std::max)(64.0f, this->worldMapPreviewResizeStartWidth + (mouseX - this->worldMapPreviewResizeStartMouseX));
+        this->worldMapPreviewPreferredHeight =
+            (std::max)(64.0f, this->worldMapPreviewResizeStartHeight + (mouseY - this->worldMapPreviewResizeStartMouseY));
+        return;
+    }
+
+    if (!this->isWorldMapCaseSelectionValid())
+    {
+        return;
+    }
+
+    WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+    if (this->worldMapCaseDragging)
+    {
+        selectedCase.x = mouseX - this->worldMapEditorCanvasRect.x + this->worldMapCanvasScrollX - this->worldMapCaseDragOffsetX;
+        selectedCase.y = mouseY - this->worldMapEditorCanvasRect.y + this->worldMapCanvasScrollY - this->worldMapCaseDragOffsetY;
+
+        constexpr float kSnapThreshold = 6.0f;
+        float bestSnapDeltaX = kSnapThreshold + 1.0f;
+        float bestSnapDeltaY = kSnapThreshold + 1.0f;
+        bool hasSnapX = false;
+        bool hasSnapY = false;
+        float snapGuideX = 0.0f;
+        float snapGuideY = 0.0f;
+        bool spacingGuideHorizontalVisible = false;
+        bool spacingGuideVerticalVisible = false;
+        SDL_FRect spacingGuideHorizontalRectA{};
+        SDL_FRect spacingGuideHorizontalRectB{};
+        SDL_FRect spacingGuideVerticalRectA{};
+        SDL_FRect spacingGuideVerticalRectB{};
+        const float candidateLeft = selectedCase.x;
+        const float candidateCenterX = selectedCase.x + (selectedCase.width * 0.5f);
+        const float candidateRight = selectedCase.x + selectedCase.width;
+        const float candidateTop = selectedCase.y;
+        const float candidateCenterY = selectedCase.y + (selectedCase.height * 0.5f);
+        const float candidateBottom = selectedCase.y + selectedCase.height;
+
+        for (size_t i = 0; i < this->worldMapCases.size(); ++i)
+        {
+            if (static_cast<int>(i) == this->selectedWorldMapCaseIndex)
+            {
+                continue;
+            }
+
+            const WorldMapCase& otherCase = this->worldMapCases[i];
+            const float otherXs[3] = {
+                otherCase.x,
+                otherCase.x + (otherCase.width * 0.5f),
+                otherCase.x + otherCase.width
+            };
+            const float otherYs[3] = {
+                otherCase.y,
+                otherCase.y + (otherCase.height * 0.5f),
+                otherCase.y + otherCase.height
+            };
+            const float candidateXs[3] = {
+                candidateLeft,
+                candidateCenterX,
+                candidateRight
+            };
+            const float candidateYs[3] = {
+                candidateTop,
+                candidateCenterY,
+                candidateBottom
+            };
+
+            for (const float otherX : otherXs)
+            {
+                for (const float candidateX : candidateXs)
+                {
+                    const float deltaX = otherX - candidateX;
+                    if (std::fabs(deltaX) <= kSnapThreshold && std::fabs(deltaX) < std::fabs(bestSnapDeltaX))
+                    {
+                        bestSnapDeltaX = deltaX;
+                        hasSnapX = true;
+                        snapGuideX = otherX;
+                    }
+                }
+            }
+
+            for (const float otherY : otherYs)
+            {
+                for (const float candidateY : candidateYs)
+                {
+                    const float deltaY = otherY - candidateY;
+                    if (std::fabs(deltaY) <= kSnapThreshold && std::fabs(deltaY) < std::fabs(bestSnapDeltaY))
+                    {
+                        bestSnapDeltaY = deltaY;
+                        hasSnapY = true;
+                        snapGuideY = otherY;
+                    }
+                }
+            }
+        }
+
+        constexpr float kSpacingRowTolerance = 18.0f;
+        for (size_t leftIndex = 0; leftIndex < this->worldMapCases.size(); ++leftIndex)
+        {
+            if (static_cast<int>(leftIndex) == this->selectedWorldMapCaseIndex)
+            {
+                continue;
+            }
+            for (size_t rightIndex = 0; rightIndex < this->worldMapCases.size(); ++rightIndex)
+            {
+                if (rightIndex == leftIndex || static_cast<int>(rightIndex) == this->selectedWorldMapCaseIndex)
+                {
+                    continue;
+                }
+
+                const WorldMapCase& leftCase = this->worldMapCases[leftIndex];
+                const WorldMapCase& rightCase = this->worldMapCases[rightIndex];
+                if (leftCase.x >= rightCase.x)
+                {
+                    continue;
+                }
+
+                const float leftCenterY = leftCase.y + (leftCase.height * 0.5f);
+                const float rightCenterY = rightCase.y + (rightCase.height * 0.5f);
+                if (std::fabs(leftCenterY - candidateCenterY) > kSpacingRowTolerance ||
+                    std::fabs(rightCenterY - candidateCenterY) > kSpacingRowTolerance)
+                {
+                    continue;
+                }
+
+                const float totalGap = rightCase.x - (leftCase.x + leftCase.width) - selectedCase.width;
+                if (totalGap < 0.0f)
+                {
+                    continue;
+                }
+
+                const float targetX = leftCase.x + leftCase.width + (totalGap * 0.5f);
+                const float deltaX = targetX - selectedCase.x;
+                if (std::fabs(deltaX) <= kSnapThreshold && std::fabs(deltaX) < std::fabs(bestSnapDeltaX))
+                {
+                    bestSnapDeltaX = deltaX;
+                    hasSnapX = true;
+                    spacingGuideHorizontalVisible = true;
+                    spacingGuideHorizontalRectA = SDL_FRect{
+                        leftCase.x + leftCase.width,
+                        candidateCenterY - 1.0f,
+                        targetX - (leftCase.x + leftCase.width),
+                        2.0f
+                    };
+                    spacingGuideHorizontalRectB = SDL_FRect{
+                        targetX + selectedCase.width,
+                        candidateCenterY - 1.0f,
+                        rightCase.x - (targetX + selectedCase.width),
+                        2.0f
+                    };
+                }
+            }
+        }
+
+        constexpr float kSpacingColumnTolerance = 18.0f;
+        for (size_t topIndex = 0; topIndex < this->worldMapCases.size(); ++topIndex)
+        {
+            if (static_cast<int>(topIndex) == this->selectedWorldMapCaseIndex)
+            {
+                continue;
+            }
+            for (size_t bottomIndex = 0; bottomIndex < this->worldMapCases.size(); ++bottomIndex)
+            {
+                if (bottomIndex == topIndex || static_cast<int>(bottomIndex) == this->selectedWorldMapCaseIndex)
+                {
+                    continue;
+                }
+
+                const WorldMapCase& topCase = this->worldMapCases[topIndex];
+                const WorldMapCase& bottomCase = this->worldMapCases[bottomIndex];
+                if (topCase.y >= bottomCase.y)
+                {
+                    continue;
+                }
+
+                const float topCenterX = topCase.x + (topCase.width * 0.5f);
+                const float bottomCenterX = bottomCase.x + (bottomCase.width * 0.5f);
+                if (std::fabs(topCenterX - candidateCenterX) > kSpacingColumnTolerance ||
+                    std::fabs(bottomCenterX - candidateCenterX) > kSpacingColumnTolerance)
+                {
+                    continue;
+                }
+
+                const float totalGap = bottomCase.y - (topCase.y + topCase.height) - selectedCase.height;
+                if (totalGap < 0.0f)
+                {
+                    continue;
+                }
+
+                const float targetY = topCase.y + topCase.height + (totalGap * 0.5f);
+                const float deltaY = targetY - selectedCase.y;
+                if (std::fabs(deltaY) <= kSnapThreshold && std::fabs(deltaY) < std::fabs(bestSnapDeltaY))
+                {
+                    bestSnapDeltaY = deltaY;
+                    hasSnapY = true;
+                    spacingGuideVerticalVisible = true;
+                    spacingGuideVerticalRectA = SDL_FRect{
+                        candidateCenterX - 1.0f,
+                        topCase.y + topCase.height,
+                        2.0f,
+                        targetY - (topCase.y + topCase.height)
+                    };
+                    spacingGuideVerticalRectB = SDL_FRect{
+                        candidateCenterX - 1.0f,
+                        targetY + selectedCase.height,
+                        2.0f,
+                        bottomCase.y - (targetY + selectedCase.height)
+                    };
+                }
+            }
+        }
+
+        if (hasSnapX)
+        {
+            selectedCase.x += bestSnapDeltaX;
+        }
+        if (hasSnapY)
+        {
+            selectedCase.y += bestSnapDeltaY;
+        }
+        this->clampWorldMapCaseToCanvas(selectedCase);
+        this->worldMapCaseSnapGuideVerticalVisible = hasSnapX;
+        this->worldMapCaseSnapGuideHorizontalVisible = hasSnapY;
+        this->worldMapCaseSnapGuideVerticalX = snapGuideX;
+        this->worldMapCaseSnapGuideHorizontalY = snapGuideY;
+        this->worldMapCaseSpacingGuideHorizontalVisible = spacingGuideHorizontalVisible;
+        this->worldMapCaseSpacingGuideVerticalVisible = spacingGuideVerticalVisible;
+        this->worldMapCaseSpacingGuideHorizontalRectA = spacingGuideHorizontalRectA;
+        this->worldMapCaseSpacingGuideHorizontalRectB = spacingGuideHorizontalRectB;
+        this->worldMapCaseSpacingGuideVerticalRectA = spacingGuideVerticalRectA;
+        this->worldMapCaseSpacingGuideVerticalRectB = spacingGuideVerticalRectB;
+        this->ensureWorldMapCaseVisible(this->selectedWorldMapCaseIndex);
+        return;
+    }
+
+    this->worldMapCaseSnapGuideVerticalVisible = false;
+    this->worldMapCaseSnapGuideHorizontalVisible = false;
+    this->worldMapCaseSpacingGuideHorizontalVisible = false;
+    this->worldMapCaseSpacingGuideVerticalVisible = false;
+
+}
+
+void EditorMapCreateMapScene::openImportWorldMapDialog(void)
+{
+    RC2D_FileDialogOptions options{};
+    options.window = rc2d_window_getWindow();
+    options.filters = kMapImportFilters;
+    options.num_filters = static_cast<int>(std::size(kMapImportFilters));
+    options.default_location = nullptr;
+    options.allow_many = false;
+    options.title = "Importer worldmap.json";
+    options.accept_label = "Importer";
+    options.cancel_label = "Annuler";
+    rc2d_filedialog_openFile(&EditorMapCreateMapScene::onImportWorldMapDialogResult, this, &options);
+}
+
+void EditorMapCreateMapScene::processPendingWorldMapImportRequest(void)
+{
+    bool hasResult = false;
+    bool canceled = false;
+    std::string worldMapPath;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapImportMutex);
+        hasResult = this->pendingWorldMapImportDialogCompleted;
+        if (hasResult)
+        {
+            canceled = this->pendingWorldMapImportDialogCanceled;
+            worldMapPath.swap(this->pendingWorldMapImportAbsolutePath);
+            this->pendingWorldMapImportDialogCompleted = false;
+            this->pendingWorldMapImportDialogCanceled = false;
+        }
+    }
+
+    if (!hasResult)
+    {
+        return;
+    }
+    if (canceled || worldMapPath.empty())
+    {
+        this->statusMessage = "Import carte du monde annule.";
+        return;
+    }
+
+    this->importWorldMapFromAbsolutePath(worldMapPath.c_str());
+}
+
+bool EditorMapCreateMapScene::importWorldMapFromAbsolutePath(const char* absolutePath)
+{
+    if (absolutePath == nullptr || absolutePath[0] == '\0')
+    {
+        this->statusMessage = "Fichier world map invalide.";
+        return false;
+    }
+
+    std::ifstream input(absolutePath, std::ios::binary | std::ios::ate);
+    if (!input.is_open())
+    {
+        this->statusMessage = "Lecture world map impossible.";
+        return false;
+    }
+    const std::streamsize size = input.tellg();
+    if (size <= 0)
+    {
+        this->statusMessage = "World map JSON vide.";
+        return false;
+    }
+    input.seekg(0, std::ios::beg);
+    std::vector<char> bytes(static_cast<size_t>(size) + 1U, '\0');
+    if (!input.read(bytes.data(), size))
+    {
+        this->statusMessage = "Lecture world map JSON echouee.";
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(bytes.data());
+    if (root == nullptr)
+    {
+        this->statusMessage = "JSON world map invalide.";
+        return false;
+    }
+
+    const cJSON* guiItem = cJSON_GetObjectItemCaseSensitive(root, "gui");
+    const cJSON* guiWidth = cJSON_IsObject(guiItem) ? cJSON_GetObjectItemCaseSensitive(guiItem, "width") : nullptr;
+    const cJSON* guiHeight = cJSON_IsObject(guiItem) ? cJSON_GetObjectItemCaseSensitive(guiItem, "height") : nullptr;
+    if (cJSON_IsNumber(guiWidth))
+    {
+        this->worldMapPreviewPreferredWidth = static_cast<float>(guiWidth->valuedouble);
+    }
+    if (cJSON_IsNumber(guiHeight))
+    {
+        this->worldMapPreviewPreferredHeight = static_cast<float>(guiHeight->valuedouble);
+    }
+
+    std::vector<WorldMapCase> importedCases;
+    struct PendingImportedLink
+    {
+        int fromCaseIndex = -1;
+        std::string targetMapName;
+        WorldMapLinkSide fromSide = WorldMapLinkSide::RIGHT;
+    };
+    std::vector<PendingImportedLink> pendingLinks;
+
+    const cJSON* casesArray = cJSON_GetObjectItemCaseSensitive(root, "cases");
+    if (!cJSON_IsArray(casesArray))
+    {
+        cJSON_Delete(root);
+        this->statusMessage = "JSON world map sans tableau cases.";
+        return false;
+    }
+
+    cJSON* caseItem = nullptr;
+    cJSON_ArrayForEach(caseItem, casesArray)
+    {
+        if (!cJSON_IsObject(caseItem))
+        {
+            continue;
+        }
+
+        WorldMapCase importedCase{};
+        const cJSON* xItem = cJSON_GetObjectItemCaseSensitive(caseItem, "x");
+        const cJSON* yItem = cJSON_GetObjectItemCaseSensitive(caseItem, "y");
+        const cJSON* widthItem = cJSON_GetObjectItemCaseSensitive(caseItem, "width");
+        const cJSON* heightItem = cJSON_GetObjectItemCaseSensitive(caseItem, "height");
+        const cJSON* nameItem = cJSON_GetObjectItemCaseSensitive(caseItem, "mapName");
+        const cJSON* typeItem = cJSON_GetObjectItemCaseSensitive(caseItem, "type");
+        const cJSON* guildTagItem = cJSON_GetObjectItemCaseSensitive(caseItem, "guildTag");
+
+        importedCase.x = cJSON_IsNumber(xItem) ? static_cast<float>(xItem->valuedouble) : 0.0f;
+        importedCase.y = cJSON_IsNumber(yItem) ? static_cast<float>(yItem->valuedouble) : 0.0f;
+        importedCase.width = cJSON_IsNumber(widthItem) ? static_cast<float>(widthItem->valuedouble) : kWorldMapCaseFixedWidth;
+        importedCase.height = cJSON_IsNumber(heightItem) ? static_cast<float>(heightItem->valuedouble) : kWorldMapCaseFixedHeight;
+        importedCase.mapName = (cJSON_IsString(nameItem) && nameItem->valuestring != nullptr) ? nameItem->valuestring : "1/1";
+        importedCase.isCity =
+            cJSON_IsString(typeItem) &&
+            typeItem->valuestring != nullptr &&
+            std::strcmp(typeItem->valuestring, "map-ville") == 0;
+        if (cJSON_IsObject(guildTagItem))
+        {
+            const cJSON* enabledItem = cJSON_GetObjectItemCaseSensitive(guildTagItem, "enabled");
+            importedCase.showGuildName = cJSON_IsBool(enabledItem) ? cJSON_IsTrue(enabledItem) : false;
+        }
+        this->clampWorldMapCaseToCanvas(importedCase);
+        importedCases.push_back(importedCase);
+
+        const cJSON* linksArray = cJSON_GetObjectItemCaseSensitive(caseItem, "links");
+        if (!cJSON_IsArray(linksArray))
+        {
+            continue;
+        }
+
+        cJSON* linkItem = nullptr;
+        cJSON_ArrayForEach(linkItem, linksArray)
+        {
+            if (!cJSON_IsObject(linkItem))
+            {
+                continue;
+            }
+
+            const cJSON* sideItem = cJSON_GetObjectItemCaseSensitive(linkItem, "side");
+            const cJSON* targetItem = cJSON_GetObjectItemCaseSensitive(linkItem, "targetMapName");
+            if (!cJSON_IsString(targetItem) || targetItem->valuestring == nullptr)
+            {
+                continue;
+            }
+
+            WorldMapLinkSide linkSide = WorldMapLinkSide::RIGHT;
+            if (cJSON_IsString(sideItem) && sideItem->valuestring != nullptr)
+            {
+                if (std::strcmp(sideItem->valuestring, "left") == 0)
+                {
+                    linkSide = WorldMapLinkSide::LEFT;
+                }
+                else if (std::strcmp(sideItem->valuestring, "top") == 0)
+                {
+                    linkSide = WorldMapLinkSide::TOP;
+                }
+                else if (std::strcmp(sideItem->valuestring, "bottom") == 0)
+                {
+                    linkSide = WorldMapLinkSide::BOTTOM;
+                }
+            }
+
+            pendingLinks.push_back(
+                PendingImportedLink{
+                    static_cast<int>(importedCases.size()) - 1,
+                    trimAscii(targetItem->valuestring),
+                    linkSide});
+        }
+    }
+
+    cJSON_Delete(root);
+
+    if (importedCases.empty())
+    {
+        this->statusMessage = "Aucune case valide trouvee dans worldmap.json.";
+        return false;
+    }
+
+    this->worldMapCases = importedCases;
+    this->worldMapLinks.clear();
+    for (const PendingImportedLink& pendingLink : pendingLinks)
+    {
+        if (pendingLink.fromCaseIndex < 0 ||
+            pendingLink.fromCaseIndex >= static_cast<int>(this->worldMapCases.size()))
+        {
+            continue;
+        }
+
+        const auto targetIt = std::find_if(
+            this->worldMapCases.begin(),
+            this->worldMapCases.end(),
+            [&pendingLink](const WorldMapCase& worldMapCase) {
+                return trimAscii(worldMapCase.mapName) == pendingLink.targetMapName;
+            });
+        if (targetIt == this->worldMapCases.end())
+        {
+            continue;
+        }
+
+        const int targetIndex = static_cast<int>(std::distance(this->worldMapCases.begin(), targetIt));
+        this->worldMapLinks.push_back(
+            WorldMapLink{pendingLink.fromCaseIndex, targetIndex, pendingLink.fromSide});
+    }
+
+    this->selectedWorldMapCaseIndex = this->worldMapCases.empty() ? -1 : 0;
+    this->pendingWorldMapLinkSourceIndex = -1;
+    this->worldMapFocusedTextField =
+        this->worldMapCases.empty() ? WorldMapTextField::NONE : WorldMapTextField::MAP_NAME;
+    this->worldMapCaseDragging = false;
+    this->worldMapCaseResizing = false;
+    this->worldMapPreviewHeightResizing = false;
+    this->worldMapPreviewCornerResizing = false;
+    this->updateWorldMapEditorLayout();
+    this->syncEditorTextInputState();
+    this->statusMessage =
+        "World map importee: " +
+        std::to_string(this->worldMapCases.size()) +
+        " cases rechargees.";
+    return true;
+}
+
+void EditorMapCreateMapScene::openExportWorldMapDialog(void)
+{
+    if (this->worldMapCases.empty())
+    {
+        this->statusMessage = "Ajoute au moins une case avant l'export JSON.";
+        return;
+    }
+
+    RC2D_FileDialogOptions options{};
+    options.window = rc2d_window_getWindow();
+    options.filters = kShipFolderFilters;
+    options.num_filters = static_cast<int>(std::size(kShipFolderFilters));
+    options.default_location = nullptr;
+    options.allow_many = false;
+    options.title = "Choisir dossier d'export carte du monde";
+    options.accept_label = "Exporter";
+    options.cancel_label = "Annuler";
+    rc2d_filedialog_openFolder(&EditorMapCreateMapScene::onExportWorldMapDialogResult, this, &options);
+}
+
+void EditorMapCreateMapScene::processPendingWorldMapExportRequest(void)
+{
+    bool hasResult = false;
+    bool canceled = false;
+    std::string exportFolderPath;
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapExportMutex);
+        hasResult = this->pendingWorldMapExportDialogCompleted;
+        if (hasResult)
+        {
+            canceled = this->pendingWorldMapExportDialogCanceled;
+            exportFolderPath.swap(this->pendingWorldMapExportAbsolutePath);
+            this->pendingWorldMapExportDialogCompleted = false;
+            this->pendingWorldMapExportDialogCanceled = false;
+        }
+    }
+
+    if (!hasResult)
+    {
+        return;
+    }
+    if (canceled || exportFolderPath.empty())
+    {
+        this->statusMessage = "Export carte du monde annule.";
+        return;
+    }
+
+    const std::filesystem::path targetPath =
+        std::filesystem::path(exportFolderPath) / "worldmap.json";
+    this->exportWorldMapToAbsolutePath(targetPath.string().c_str());
+}
+
+bool EditorMapCreateMapScene::exportWorldMapToAbsolutePath(const char* absolutePath)
+{
+    if (absolutePath == nullptr || absolutePath[0] == '\0')
+    {
+        this->statusMessage = "Export carte du monde annule.";
+        return false;
+    }
+    if (this->worldMapCases.empty())
+    {
+        this->statusMessage = "Aucune case carte du monde a exporter.";
+        return false;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (root == nullptr)
+    {
+        this->statusMessage = "Echec allocation JSON carte du monde.";
+        return false;
+    }
+
+    cJSON* guiItem = cJSON_CreateObject();
+    cJSON_AddNumberToObject(guiItem, "width", static_cast<double>(this->worldMapCanvasVirtualWidth));
+    cJSON_AddNumberToObject(guiItem, "height", static_cast<double>(this->worldMapCanvasVirtualHeight));
+    cJSON_AddItemToObject(root, "gui", guiItem);
+
+    cJSON* casesArray = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "cases", casesArray);
+    for (size_t caseIndex = 0; caseIndex < this->worldMapCases.size(); ++caseIndex)
+    {
+        const WorldMapCase& worldMapCase = this->worldMapCases[caseIndex];
+        cJSON* caseItem = cJSON_CreateObject();
+        cJSON_AddNumberToObject(caseItem, "x", static_cast<double>(worldMapCase.x));
+        cJSON_AddNumberToObject(caseItem, "y", static_cast<double>(worldMapCase.y));
+        cJSON_AddNumberToObject(caseItem, "width", static_cast<double>(worldMapCase.width));
+        cJSON_AddNumberToObject(caseItem, "height", static_cast<double>(worldMapCase.height));
+        cJSON_AddStringToObject(caseItem, "mapName", trimAscii(worldMapCase.mapName).c_str());
+        cJSON_AddStringToObject(caseItem, "type", worldMapCase.isCity ? "map-ville" : "map-normal");
+        cJSON* colorItem = cJSON_CreateObject();
+        cJSON_AddStringToObject(colorItem, "name", worldMapCase.isCity ? "red" : "orange");
+        cJSON_AddStringToObject(colorItem, "hex", worldMapCase.isCity ? "#C43E2E" : "#B8841E");
+        cJSON_AddItemToObject(caseItem, "color", colorItem);
+        cJSON* guildTagItem = cJSON_CreateObject();
+        cJSON_AddBoolToObject(guildTagItem, "enabled", worldMapCase.showGuildName);
+        cJSON_AddNumberToObject(guildTagItem, "maxChars", 3);
+        cJSON_AddNumberToObject(guildTagItem, "heightRatio", 0.22);
+        cJSON_AddItemToObject(caseItem, "guildTag", guildTagItem);
+        cJSON* linksArray = cJSON_CreateArray();
+        for (const WorldMapLink& link : this->worldMapLinks)
+        {
+            if (link.fromCaseIndex != static_cast<int>(caseIndex) ||
+                link.toCaseIndex < 0 ||
+                link.toCaseIndex >= static_cast<int>(this->worldMapCases.size()))
+            {
+                continue;
+            }
+
+            const WorldMapCase& targetCase = this->worldMapCases[static_cast<size_t>(link.toCaseIndex)];
+            cJSON* linkItem = cJSON_CreateObject();
+            const char* sideValue = "right";
+            switch (link.fromSide)
+            {
+                case WorldMapLinkSide::LEFT:
+                    sideValue = "left";
+                    break;
+                case WorldMapLinkSide::TOP:
+                    sideValue = "top";
+                    break;
+                case WorldMapLinkSide::RIGHT:
+                    sideValue = "right";
+                    break;
+                case WorldMapLinkSide::BOTTOM:
+                    sideValue = "bottom";
+                    break;
+            }
+            cJSON_AddStringToObject(linkItem, "side", sideValue);
+            cJSON_AddStringToObject(linkItem, "targetMapName", trimAscii(targetCase.mapName).c_str());
+            cJSON_AddItemToArray(linksArray, linkItem);
+        }
+        if (cJSON_GetArraySize(linksArray) > 0)
+        {
+            cJSON_AddItemToObject(caseItem, "links", linksArray);
+        }
+        else
+        {
+            cJSON_Delete(linksArray);
+        }
+        cJSON_AddItemToArray(casesArray, caseItem);
+    }
+
+    char* jsonText = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (jsonText == nullptr)
+    {
+        this->statusMessage = "Echec serialisation JSON carte du monde.";
+        return false;
+    }
+
+    std::ofstream output(absolutePath, std::ios::binary | std::ios::trunc);
+    if (!output.is_open())
+    {
+        cJSON_free(jsonText);
+        this->statusMessage = "Impossible d'ouvrir le JSON carte du monde.";
+        return false;
+    }
+
+    output.write(jsonText, static_cast<std::streamsize>(std::strlen(jsonText)));
+    const bool writeOk = output.good();
+    output.close();
+    cJSON_free(jsonText);
+
+    if (!writeOk)
+    {
+        this->statusMessage = "Ecriture JSON carte du monde echouee.";
+        return false;
+    }
+
+    this->statusMessage = std::string("Carte du monde exportee: ") + absolutePath;
+    return true;
 }
 
 
@@ -5797,6 +7840,7 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
     setNextButton(&this->buttonImportRect, &x, row1Y, 160.0f);
     setNextButton(&this->buttonImportMapRect, &x, row1Y, 150.0f);
     setNextButton(&this->buttonExportRect, &x, row1Y, 138.0f);
+    setNextButton(&this->buttonCreateWorldMapRect, &x, row1Y, 222.0f);
     setNextButton(&this->buttonUndoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonRedoRect, &x, row1Y, 92.0f);
     setNextButton(&this->buttonToolBlockRect, &x, row1Y, 100.0f);
@@ -5887,10 +7931,11 @@ void EditorMapCreateMapScene::updateToolbarLayout(void)
         overflowX += rect->w + gap;
     };
 
-    const std::array<SDL_FRect*, 31> buttonsToClamp = {{
+    const std::array<SDL_FRect*, 32> buttonsToClamp = {{
         &this->buttonImportRect,
         &this->buttonImportMapRect,
         &this->buttonExportRect,
+        &this->buttonCreateWorldMapRect,
         &this->buttonUndoRect,
         &this->buttonRedoRect,
         &this->buttonToolBlockRect,
@@ -6097,6 +8142,503 @@ void EditorMapCreateMapScene::drawToolbarButton(const SDL_FRect& rect, const cha
     const float drawY = rect.y + ((rect.h - static_cast<float>(textH)) * 0.5f);
     rc2d_graphics_drawText(&text, drawX, drawY);
     rc2d_graphics_destroyText(&text);
+}
+
+void EditorMapCreateMapScene::drawWorldMapEditor(void) const
+{
+    if (!this->worldMapEditorVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    auto drawText = [this](const std::string& text, float x, float y, RC2D_Color color) {
+        if (text.empty())
+        {
+            return;
+        }
+        RC2D_Text renderedText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), text.c_str());
+        renderedText.color = color;
+        rc2d_graphics_setTextColor(&renderedText);
+        rc2d_graphics_drawText(&renderedText, std::round(x), std::round(y));
+        rc2d_graphics_destroyText(&renderedText);
+    };
+    auto drawCenteredText = [this](const std::string& text, const SDL_FRect& rect, RC2D_Color color) {
+        if (text.empty())
+        {
+            return;
+        }
+        RC2D_Text renderedText =
+            rc2d_graphics_createText(const_cast<RC2D_Font*>(&this->overlayFont), text.c_str());
+        renderedText.color = color;
+        rc2d_graphics_setTextColor(&renderedText);
+        int textW = 0;
+        int textH = 0;
+        rc2d_graphics_getTextSize(&renderedText, &textW, &textH);
+        const float drawX = rect.x + ((rect.w - static_cast<float>(textW)) * 0.5f);
+        const float drawY = rect.y + ((rect.h - static_cast<float>(textH)) * 0.5f);
+        rc2d_graphics_drawText(&renderedText, std::round(drawX), std::round(drawY));
+        rc2d_graphics_destroyText(&renderedText);
+    };
+    auto getLinkSideLabel = [](WorldMapLinkSide side) {
+        switch (side)
+        {
+            case WorldMapLinkSide::LEFT:
+                return "GAUCHE";
+            case WorldMapLinkSide::TOP:
+                return "HAUT";
+            case WorldMapLinkSide::RIGHT:
+                return "DROITE";
+            case WorldMapLinkSide::BOTTOM:
+                return "BAS";
+        }
+        return "DROITE";
+    };
+    auto drawImageFit = [](const RC2D_Image& image, const SDL_FRect& target, float padding) {
+        if (image.sdl_texture == nullptr)
+        {
+            return;
+        }
+
+        float texW = 0.0f;
+        float texH = 0.0f;
+        if (!SDL_GetTextureSize(image.sdl_texture, &texW, &texH) || texW <= 0.0f || texH <= 0.0f)
+        {
+            return;
+        }
+
+        const float maxWidth = (std::max)(1.0f, target.w - (padding * 2.0f));
+        const float maxHeight = (std::max)(1.0f, target.h - (padding * 2.0f));
+        const float scale = (std::min)(maxWidth / texW, maxHeight / texH);
+        rc2d_graphics_drawImage(
+            const_cast<RC2D_Image*>(&image),
+            std::round(target.x + ((target.w - (texW * scale)) * 0.5f)),
+            std::round(target.y + ((target.h - (texH * scale)) * 0.5f)),
+            0.0,
+            scale,
+            scale,
+            0.0f,
+            0.0f,
+            false,
+            false);
+    };
+    auto drawWorldMapCase = [&](const SDL_FRect& rect,
+                                const std::string& mapName,
+                                bool showGuildName,
+                                bool isCity,
+                                bool selected,
+                                float scale,
+                                bool accentBorders) {
+        const std::string displayMapName = trimAscii(mapName).empty() ? std::string("MAP") : mapName;
+        int mapTextHeight = 0;
+        int guildTagHeight = 0;
+        int ignoredTextWidth = 0;
+        (void)this->measureWorldMapTextSize(displayMapName, &ignoredTextWidth, &mapTextHeight);
+        if (showGuildName)
+        {
+            (void)this->measureWorldMapTextSize("[TAG]", &ignoredTextWidth, &guildTagHeight);
+        }
+
+        const float borderInset = accentBorders
+            ? (std::max)(2.0f, 2.0f * scale)
+            : (std::max)(1.0f, 1.0f * scale);
+        const float contentPaddingX = (std::max)(8.0f, 18.0f * scale);
+        const float topPadding = showGuildName ? (std::max)(4.0f, 8.0f * scale) : (std::max)(5.0f, 9.0f * scale);
+        const float tagGap = showGuildName ? (std::max)(3.0f, 6.0f * scale) : 0.0f;
+        const float bottomPadding = (std::max)(4.0f, 9.0f * scale);
+        const float tagHeight = showGuildName ? static_cast<float>(guildTagHeight) : 0.0f;
+        const float mapHeight = static_cast<float>(mapTextHeight);
+        const SDL_FRect innerRect{
+            rect.x + borderInset,
+            rect.y + borderInset,
+            rect.w - (borderInset * 2.0f),
+            rect.h - (borderInset * 2.0f)
+        };
+
+        rc2d_graphics_setColor(kWorldMapCaseFill);
+        rc2d_graphics_rectangle("fill", &rect);
+        const RC2D_Color baseBorderColor = isCity ? kWorldMapCityBorder : kWorldMapCaseBorder;
+        rc2d_graphics_setColor(
+            accentBorders
+                ? (selected ? kWorldMapCaseSelectedBorder : baseBorderColor)
+                : RC2D_Color{78, 90, 102, 190});
+        rc2d_graphics_rectangle("line", &rect);
+        if (accentBorders)
+        {
+            rc2d_graphics_setColor(RC2D_Color{90, 101, 114, 180});
+            rc2d_graphics_rectangle("line", &innerRect);
+        }
+
+        if (showGuildName)
+        {
+            const SDL_FRect guildTagRect{
+                rect.x + contentPaddingX,
+                rect.y + topPadding,
+                rect.w - (contentPaddingX * 2.0f),
+                tagHeight
+            };
+            drawCenteredText("[TAG]", guildTagRect, baseBorderColor);
+        }
+
+        const SDL_FRect mapTextRect{
+            rect.x + contentPaddingX,
+            rect.y + topPadding + (showGuildName ? (tagHeight + tagGap) : 0.0f),
+            rect.w - (contentPaddingX * 2.0f),
+            (std::max)(mapHeight, rect.h - topPadding - bottomPadding - (showGuildName ? (tagHeight + tagGap) : 0.0f))
+        };
+        drawCenteredText(
+            displayMapName,
+            mapTextRect,
+            kWorldMapCaseText);
+    };
+
+    const SDL_FRect outer = this->worldMapEditorRect;
+    const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
+    const SDL_FRect previewOuter = this->worldMapPreviewWindowRect;
+    const SDL_FRect previewInner = SDL_FRect{
+        previewOuter.x + 4.0f,
+        previewOuter.y + 4.0f,
+        previewOuter.w - 8.0f,
+        previewOuter.h - 8.0f
+    };
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    auto toClipRect = [](const SDL_FRect& rect) {
+        SDL_Rect clipRect{};
+        clipRect.x = static_cast<int>(std::floor(rect.x));
+        clipRect.y = static_cast<int>(std::floor(rect.y));
+        const int clipRight = static_cast<int>(std::ceil(rect.x + rect.w));
+        const int clipBottom = static_cast<int>(std::ceil(rect.y + rect.h));
+        clipRect.w = (std::max)(clipRight - clipRect.x, 1);
+        clipRect.h = (std::max)(clipBottom - clipRect.y, 1);
+        return clipRect;
+    };
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kHudWindowPanelFill);
+    rc2d_graphics_rectangle("fill", &outer);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &outer);
+    rc2d_graphics_setColor(kHudWindowSilver);
+    rc2d_graphics_rectangle("line", &inner);
+
+    rc2d_graphics_setColor(kHudWindowHeaderFill);
+    rc2d_graphics_rectangle("fill", &this->worldMapEditorHeaderRect);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &this->worldMapEditorHeaderRect);
+    rc2d_graphics_setColor(kHudWindowPanelFill);
+    rc2d_graphics_rectangle("fill", &previewOuter);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &previewOuter);
+    rc2d_graphics_setColor(kHudWindowSilver);
+    rc2d_graphics_rectangle("line", &previewInner);
+    rc2d_graphics_setColor(kHudWindowHeaderFill);
+    rc2d_graphics_rectangle("fill", &this->worldMapPreviewHeaderRect);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &this->worldMapPreviewHeaderRect);
+    rc2d_graphics_setColor(kHudWindowFieldFill);
+    rc2d_graphics_rectangle("fill", &this->worldMapPreviewViewportRect);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &this->worldMapPreviewViewportRect);
+
+    if (renderer != nullptr)
+    {
+        const SDL_Rect clipRect = toClipRect(this->worldMapEditorCanvasRect);
+        SDL_SetRenderClipRect(renderer, &clipRect);
+    }
+    const SDL_FRect logicalCanvasRect{
+        this->worldMapEditorCanvasRect.x - this->worldMapCanvasScrollX,
+        this->worldMapEditorCanvasRect.y - this->worldMapCanvasScrollY,
+        this->worldMapCanvasVirtualWidth,
+        this->worldMapCanvasVirtualHeight
+    };
+    rc2d_graphics_setColor(kHudWindowFieldFill);
+    rc2d_graphics_rectangle("fill", &logicalCanvasRect);
+
+    auto getLinkAnchor = [](const SDL_FRect& rect, WorldMapLinkSide side) {
+        switch (side)
+        {
+            case WorldMapLinkSide::LEFT:
+                return SDL_FPoint{rect.x, rect.y + (rect.h * 0.5f)};
+            case WorldMapLinkSide::TOP:
+                return SDL_FPoint{rect.x + (rect.w * 0.5f), rect.y};
+            case WorldMapLinkSide::RIGHT:
+                return SDL_FPoint{rect.x + rect.w, rect.y + (rect.h * 0.5f)};
+            case WorldMapLinkSide::BOTTOM:
+                return SDL_FPoint{rect.x + (rect.w * 0.5f), rect.y + rect.h};
+        }
+        return SDL_FPoint{rect.x + rect.w, rect.y + (rect.h * 0.5f)};
+    };
+    auto getOppositeLinkSide = [](WorldMapLinkSide side) {
+        switch (side)
+        {
+            case WorldMapLinkSide::LEFT:
+                return WorldMapLinkSide::RIGHT;
+            case WorldMapLinkSide::TOP:
+                return WorldMapLinkSide::BOTTOM;
+            case WorldMapLinkSide::RIGHT:
+                return WorldMapLinkSide::LEFT;
+            case WorldMapLinkSide::BOTTOM:
+                return WorldMapLinkSide::TOP;
+        }
+        return WorldMapLinkSide::LEFT;
+    };
+
+    for (const WorldMapLink& link : this->worldMapLinks)
+    {
+        if (link.fromCaseIndex < 0 ||
+            link.toCaseIndex < 0 ||
+            link.fromCaseIndex >= static_cast<int>(this->worldMapCases.size()) ||
+            link.toCaseIndex >= static_cast<int>(this->worldMapCases.size()))
+        {
+            continue;
+        }
+
+        const WorldMapCase& fromCase = this->worldMapCases[static_cast<size_t>(link.fromCaseIndex)];
+        const WorldMapCase& toCase = this->worldMapCases[static_cast<size_t>(link.toCaseIndex)];
+        const SDL_FRect fromRect{
+            this->worldMapEditorCanvasRect.x + fromCase.x - this->worldMapCanvasScrollX,
+            this->worldMapEditorCanvasRect.y + fromCase.y - this->worldMapCanvasScrollY,
+            fromCase.width,
+            fromCase.height
+        };
+        const SDL_FRect toRect{
+            this->worldMapEditorCanvasRect.x + toCase.x - this->worldMapCanvasScrollX,
+            this->worldMapEditorCanvasRect.y + toCase.y - this->worldMapCanvasScrollY,
+            toCase.width,
+            toCase.height
+        };
+        const SDL_FPoint start = getLinkAnchor(fromRect, link.fromSide);
+        const SDL_FPoint end = getLinkAnchor(toRect, getOppositeLinkSide(link.fromSide));
+        const RC2D_Color lineColor = fromCase.isCity ? kWorldMapCityBorder : kWorldMapCaseBorder;
+
+        rc2d_graphics_setColor(lineColor);
+        if (link.fromSide == WorldMapLinkSide::LEFT || link.fromSide == WorldMapLinkSide::RIGHT)
+        {
+            const float bendX = std::round((start.x + end.x) * 0.5f);
+            rc2d_graphics_line(start.x, start.y, bendX, start.y);
+            rc2d_graphics_line(bendX, start.y, bendX, end.y);
+            rc2d_graphics_line(bendX, end.y, end.x, end.y);
+        }
+        else
+        {
+            const float bendY = std::round((start.y + end.y) * 0.5f);
+            rc2d_graphics_line(start.x, start.y, start.x, bendY);
+            rc2d_graphics_line(start.x, bendY, end.x, bendY);
+            rc2d_graphics_line(end.x, bendY, end.x, end.y);
+        }
+
+        const SDL_FRect startDot{start.x - 2.0f, start.y - 2.0f, 4.0f, 4.0f};
+        const SDL_FRect endDot{end.x - 2.0f, end.y - 2.0f, 4.0f, 4.0f};
+        rc2d_graphics_rectangle("fill", &startDot);
+        rc2d_graphics_rectangle("fill", &endDot);
+    }
+
+    for (size_t i = 0; i < this->worldMapCases.size(); ++i)
+    {
+        const WorldMapCase& worldMapCase = this->worldMapCases[i];
+        const SDL_FRect caseRect = SDL_FRect{
+            this->worldMapEditorCanvasRect.x + worldMapCase.x - this->worldMapCanvasScrollX,
+            this->worldMapEditorCanvasRect.y + worldMapCase.y - this->worldMapCanvasScrollY,
+            worldMapCase.width,
+            worldMapCase.height
+        };
+        drawWorldMapCase(
+            caseRect,
+            worldMapCase.mapName,
+            worldMapCase.showGuildName,
+            worldMapCase.isCity,
+            !this->worldMapPreviewInteractionLocked &&
+                static_cast<int>(i) == this->selectedWorldMapCaseIndex,
+            1.0f,
+            true);
+    }
+    if (this->worldMapCaseSnapGuideVerticalVisible)
+    {
+        SDL_FRect guideRect{
+            this->worldMapEditorCanvasRect.x + this->worldMapCaseSnapGuideVerticalX,
+            this->worldMapEditorCanvasRect.y,
+            1.0f,
+            this->worldMapEditorCanvasRect.h
+        };
+        rc2d_graphics_setColor(RC2D_Color{140, 198, 255, 235});
+        rc2d_graphics_rectangle("fill", &guideRect);
+    }
+    if (this->worldMapCaseSnapGuideHorizontalVisible)
+    {
+        SDL_FRect guideRect{
+            this->worldMapEditorCanvasRect.x,
+            this->worldMapEditorCanvasRect.y + this->worldMapCaseSnapGuideHorizontalY,
+            this->worldMapEditorCanvasRect.w,
+            1.0f
+        };
+        rc2d_graphics_setColor(RC2D_Color{140, 198, 255, 235});
+        rc2d_graphics_rectangle("fill", &guideRect);
+    }
+    if (this->worldMapCaseSpacingGuideHorizontalVisible)
+    {
+        SDL_FRect guideRectA = this->worldMapCaseSpacingGuideHorizontalRectA;
+        SDL_FRect guideRectB = this->worldMapCaseSpacingGuideHorizontalRectB;
+        guideRectA.x += this->worldMapEditorCanvasRect.x;
+        guideRectA.y += this->worldMapEditorCanvasRect.y;
+        guideRectB.x += this->worldMapEditorCanvasRect.x;
+        guideRectB.y += this->worldMapEditorCanvasRect.y;
+        rc2d_graphics_setColor(RC2D_Color{120, 255, 214, 235});
+        rc2d_graphics_rectangle("fill", &guideRectA);
+        rc2d_graphics_rectangle("fill", &guideRectB);
+    }
+    if (this->worldMapCaseSpacingGuideVerticalVisible)
+    {
+        SDL_FRect guideRectA = this->worldMapCaseSpacingGuideVerticalRectA;
+        SDL_FRect guideRectB = this->worldMapCaseSpacingGuideVerticalRectB;
+        guideRectA.x += this->worldMapEditorCanvasRect.x;
+        guideRectA.y += this->worldMapEditorCanvasRect.y;
+        guideRectB.x += this->worldMapEditorCanvasRect.x;
+        guideRectB.y += this->worldMapEditorCanvasRect.y;
+        rc2d_graphics_setColor(RC2D_Color{120, 255, 214, 235});
+        rc2d_graphics_rectangle("fill", &guideRectA);
+        rc2d_graphics_rectangle("fill", &guideRectB);
+    }
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    drawText("Createur carte du monde", this->worldMapEditorHeaderRect.x + 10.0f, this->worldMapEditorHeaderRect.y + 8.0f, RC2D_Color{217, 200, 134, 255});
+    drawText("GUI gameplay", this->worldMapPreviewHeaderRect.x + 10.0f, this->worldMapPreviewHeaderRect.y + 6.0f, RC2D_Color{217, 200, 134, 255});
+    const float legendY = this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + 6.0f;
+    SDL_FRect cityDot{this->worldMapPreviewHeaderRect.x + 10.0f, legendY + 4.0f, 10.0f, 10.0f};
+    SDL_FRect mapDot{this->worldMapPreviewHeaderRect.x + 146.0f, legendY + 4.0f, 10.0f, 10.0f};
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(kWorldMapCityBorder);
+    rc2d_graphics_rectangle("fill", &cityDot);
+    rc2d_graphics_setColor(kWorldMapCaseBorder);
+    rc2d_graphics_rectangle("fill", &mapDot);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+    drawText("= Map ville", cityDot.x + cityDot.w + 6.0f, legendY, RC2D_Color{217, 200, 134, 255});
+    drawText("= Map normal", mapDot.x + mapDot.w + 6.0f, legendY, RC2D_Color{217, 200, 134, 255});
+    drawText(
+        "Clic vide = nouvelle case, molette = scroll.",
+        this->worldMapPreviewWindowRect.x,
+        this->worldMapPreviewWindowRect.y - 20.0f,
+        kHudTextColor);
+
+    this->drawToolbarButton(this->worldMapAddCaseRect, "AJOUTER CASE", false);
+    this->drawToolbarButton(this->worldMapDeleteCaseRect, "SUPPRIMER CASE", this->isWorldMapCaseSelectionValid());
+    const bool guildEnabled =
+        this->isWorldMapCaseSelectionValid() &&
+        this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)].showGuildName;
+    this->drawToolbarButton(
+        this->worldMapToggleGuildRect,
+        guildEnabled ? "TAG GUILDE: ON" : "TAG GUILDE: OFF",
+        guildEnabled);
+    const bool cityEnabled =
+        this->isWorldMapCaseSelectionValid() &&
+        this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)].isCity;
+    this->drawToolbarButton(
+        this->worldMapCaseTypeRect,
+        cityEnabled ? "TYPE: MAP VILLE" : "TYPE: MAP NORMALE",
+        cityEnabled);
+    this->drawToolbarButton(
+        this->worldMapLinkModeRect,
+        this->worldMapLinkModeEnabled ? "LIAISON: ON" : "LIAISON: OFF",
+        this->worldMapLinkModeEnabled);
+    const std::string linkSideButtonLabel = std::string("LIAISON DEPART : ") + getLinkSideLabel(this->selectedWorldMapLinkSide);
+    this->drawToolbarButton(
+        this->worldMapLinkSideRect,
+        linkSideButtonLabel.c_str(),
+        this->worldMapLinkModeEnabled);
+    this->drawToolbarButton(
+        this->worldMapPreviewLockRect,
+        this->worldMapPreviewInteractionLocked ? "APERCU FINAL: ON" : "APERCU FINAL: OFF",
+        this->worldMapPreviewInteractionLocked);
+    this->drawToolbarButton(this->worldMapImportRect, "IMPORTER JSON", false);
+    this->drawToolbarButton(this->worldMapExportRect, "EXPORT JSON", false);
+    this->drawToolbarButton(this->worldMapResetRect, "RESET TOUT", false);
+    this->drawToolbarButton(this->worldMapAutoGenerateRect, "GENERER AUTO", false);
+    this->drawToolbarButton(this->worldMapCloseRect, "X", false);
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(
+        this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME
+            ? RC2D_Color{58, 88, 122, 210}
+            : RC2D_Color{28, 38, 50, 205});
+    rc2d_graphics_rectangle("fill", &this->worldMapMapNameInputRect);
+    rc2d_graphics_setColor(RC2D_Color{170, 198, 225, 235});
+    rc2d_graphics_rectangle("line", &this->worldMapMapNameInputRect);
+    rc2d_graphics_setColor(
+        RC2D_Color{28, 38, 50, 205});
+    rc2d_graphics_rectangle("fill", &this->worldMapPreviewWidthInputRect);
+    rc2d_graphics_setColor(RC2D_Color{170, 198, 225, 235});
+    rc2d_graphics_rectangle("line", &this->worldMapPreviewWidthInputRect);
+    rc2d_graphics_setColor(
+        RC2D_Color{28, 38, 50, 205});
+    rc2d_graphics_rectangle("fill", &this->worldMapPreviewHeightInputRect);
+    rc2d_graphics_setColor(RC2D_Color{170, 198, 225, 235});
+    rc2d_graphics_rectangle("line", &this->worldMapPreviewHeightInputRect);
+    rc2d_graphics_setColor(
+        this->worldMapFocusedTextField == WorldMapTextField::AUTO_LAYOUT
+            ? RC2D_Color{58, 88, 122, 210}
+            : RC2D_Color{28, 38, 50, 205});
+    rc2d_graphics_rectangle("fill", &this->worldMapAutoLayoutInputRect);
+    rc2d_graphics_setColor(RC2D_Color{170, 198, 225, 235});
+    rc2d_graphics_rectangle("line", &this->worldMapAutoLayoutInputRect);
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+    std::string mapNameValue = "<aucune case selectionnee>";
+    std::string caseInfo = "Aucune case selectionnee";
+    std::string linkInfo = "Mode liaison: OFF";
+    std::string autoLayoutValue = this->worldMapAutoLayoutInput.empty() ? std::string("5-3-2") : this->worldMapAutoLayoutInput;
+    if (this->isWorldMapCaseSelectionValid())
+    {
+        const WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        mapNameValue = selectedCase.mapName;
+        caseInfo =
+            "Case " + std::to_string(this->selectedWorldMapCaseIndex + 1) +
+            " | X:" + std::to_string(static_cast<int>(std::lround(selectedCase.x))) +
+            " Y:" + std::to_string(static_cast<int>(std::lround(selectedCase.y))) +
+            " | W:" + std::to_string(static_cast<int>(std::lround(selectedCase.width))) +
+            " H:" + std::to_string(static_cast<int>(std::lround(selectedCase.height)));
+    }
+    if (this->worldMapLinkModeEnabled)
+    {
+        linkInfo = "Mode liaison: clique une source puis une cible.";
+        if (this->pendingWorldMapLinkSourceIndex >= 0 &&
+            this->pendingWorldMapLinkSourceIndex < static_cast<int>(this->worldMapCases.size()))
+        {
+            const std::string pendingName = trimAscii(
+                this->worldMapCases[static_cast<size_t>(this->pendingWorldMapLinkSourceIndex)].mapName);
+            linkInfo =
+                "Source liaison: " +
+                (pendingName.empty() ? std::string("MAP") : pendingName) +
+                " | Cote: " +
+                getLinkSideLabel(this->selectedWorldMapLinkSide);
+        }
+    }
+    if (this->worldMapFocusedTextField == WorldMapTextField::MAP_NAME)
+    {
+        mapNameValue += "_";
+    }
+    if (this->worldMapFocusedTextField == WorldMapTextField::AUTO_LAYOUT)
+    {
+        autoLayoutValue += "_";
+    }
+    const std::string previewWidthValue = std::to_string(static_cast<int>(std::lround(this->worldMapPreviewPreferredWidth))) + " px";
+    const std::string previewHeightValue = std::to_string(static_cast<int>(std::lround(this->worldMapPreviewPreferredHeight))) + " px";
+
+    drawText("NOM MAP", this->worldMapMapNameInputRect.x, this->worldMapMapNameInputRect.y - 18.0f, kHudTextColor);
+    drawText(mapNameValue, this->worldMapMapNameInputRect.x + 6.0f, this->worldMapMapNameInputRect.y + 6.0f, RC2D_Color{235, 245, 255, 250});
+    drawText("LARGEUR", this->worldMapPreviewWidthInputRect.x, this->worldMapPreviewWidthInputRect.y - 18.0f, kHudTextColor);
+    drawText(previewWidthValue, this->worldMapPreviewWidthInputRect.x + 6.0f, this->worldMapPreviewWidthInputRect.y + 4.0f, RC2D_Color{235, 245, 255, 250});
+    drawText("HAUTEUR", this->worldMapPreviewHeightInputRect.x, this->worldMapPreviewHeightInputRect.y - 18.0f, kHudTextColor);
+    drawText(previewHeightValue, this->worldMapPreviewHeightInputRect.x + 6.0f, this->worldMapPreviewHeightInputRect.y + 4.0f, RC2D_Color{235, 245, 255, 250});
+    drawText("MODELE LIGNES", this->worldMapAutoLayoutInputRect.x, this->worldMapAutoLayoutInputRect.y - 18.0f, kHudTextColor);
+    drawText(autoLayoutValue, this->worldMapAutoLayoutInputRect.x + 6.0f, this->worldMapAutoLayoutInputRect.y + 6.0f, RC2D_Color{235, 245, 255, 250});
+    drawImageFit(this->worldMapScaleIcon, this->worldMapPreviewResizeCornerRect, 1.0f);
+    drawText("Ex: 5-3-2 = 5 cases, puis 3, puis 2.", this->worldMapAutoGenerateRect.x, this->worldMapAutoGenerateRect.y + this->worldMapAutoGenerateRect.h + 8.0f, kHudStatusColor);
+    drawText(caseInfo, this->worldMapMapNameInputRect.x, this->worldMapMapNameInputRect.y + this->worldMapMapNameInputRect.h + 12.0f, kHudStatusColor);
+    drawText(linkInfo, this->worldMapMapNameInputRect.x, this->worldMapMapNameInputRect.y + this->worldMapMapNameInputRect.h + 30.0f, kHudTextColor);
 }
 
 int EditorMapCreateMapScene::getAssetListMaxScrollOffset(void) const
@@ -7924,6 +10466,11 @@ bool EditorMapCreateMapScene::isPointOverBlockingEditorUi(float x, float y) cons
         return true;
     }
 
+    if (this->worldMapEditorVisible)
+    {
+        return true;
+    }
+
     if (this->showBottomRightLists &&
         (this->pointInRect(x, y, this->assetListRect) ||
          this->pointInRect(x, y, this->shipListRect)))
@@ -7931,11 +10478,12 @@ bool EditorMapCreateMapScene::isPointOverBlockingEditorUi(float x, float y) cons
         return true;
     }
 
-    const std::array<const SDL_FRect*, 31> toolbarRects = {{
+    const std::array<const SDL_FRect*, 32> toolbarRects = {{
         &this->buttonImportRect,
         &this->buttonImportMapRect,
         &this->buttonImportShipRect,
         &this->buttonExportRect,
+        &this->buttonCreateWorldMapRect,
         &this->buttonUndoRect,
         &this->buttonRedoRect,
         &this->buttonToolBlockRect,
@@ -8027,6 +10575,11 @@ bool EditorMapCreateMapScene::handleToolbarClick(float x, float y)
     if (this->pointInRect(x, y, this->buttonExportRect))
     {
         this->openExportMapDialog();
+        return true;
+    }
+    if (this->pointInRect(x, y, this->buttonCreateWorldMapRect))
+    {
+        this->toggleWorldMapEditor();
         return true;
     }
     if (this->pointInRect(x, y, this->buttonUndoRect))
@@ -8489,6 +11042,7 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         this->showBottomRightLists);
     this->drawToolbarButton(this->buttonImportMapRect, "IMPORTER MAP", false);
     this->drawToolbarButton(this->buttonExportRect, "EXPORTER MAP", false);
+    this->drawToolbarButton(this->buttonCreateWorldMapRect, "CREER CARTEDUMONDE", this->worldMapEditorVisible);
     this->drawToolbarButton(this->buttonUndoRect, "Annuler", this->canUndoHistory());
     this->drawToolbarButton(this->buttonRedoRect, "Refaire", this->canRedoHistory());
     this->drawToolbarButton(
@@ -8650,6 +11204,9 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
         selectedPlacedAssetActive ? "ON" : "OFF",
         selectedClickGuiInfo.label,
         selectedClickTileCount);
+    std::string worldMapSummary =
+        "WorldMapCases:" + std::to_string(static_cast<int>(this->worldMapCases.size())) +
+        " | WorldMapEditor:" + (this->worldMapEditorVisible ? std::string("ON") : std::string("OFF"));
     const Map& map = GetCurrentMap();
     const SDL_FRect gameScreenRect = GetGameScreen().rect;
     drawLine(line0, gameScreenRect.x + 14.0f, gameScreenRect.y + 5.0f, kHudTextColor);
@@ -8673,11 +11230,12 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     SDL_snprintf(
         lineBottom,
         sizeof(lineBottom),
-        "%s | %s | %s | %s",
+        "%s | %s | %s | %s | %s",
         line2,
         line1,
         line3,
-        line4);
+        line4,
+        worldMapSummary.c_str());
     drawLine(lineBottom, 14.0f, map.rect.y + map.rect.h - 20.0f, kHudTextColor);
     this->drawMiniMap();
     if (this->showBottomRightLists)
@@ -8700,6 +11258,10 @@ void EditorMapCreateMapScene::drawEditorHud(void) const
     if (this->mortarDisplayPickerVisible)
     {
         this->drawMortarDisplayPickerPopup();
+    }
+    if (this->worldMapEditorVisible)
+    {
+        this->drawWorldMapEditor();
     }
 }
 void EditorMapCreateMapScene::onImportAssetDialogResult(void* userdata, const char* const* filelist, int filter_index)
@@ -8799,6 +11361,54 @@ void EditorMapCreateMapScene::onExportMapDialogResult(void* userdata, const char
     scene->exportMapToFolder(filelist[0]);
 }
 
+void EditorMapCreateMapScene::onImportWorldMapDialogResult(void* userdata, const char* const* filelist, int filter_index)
+{
+    (void)filter_index;
+
+    EditorMapCreateMapScene* scene = static_cast<EditorMapCreateMapScene*>(userdata);
+    if (scene == nullptr || scene != EditorMapCreateMapScene::activeInstance)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(scene->pendingWorldMapImportMutex);
+    scene->pendingWorldMapImportDialogCompleted = true;
+    scene->pendingWorldMapImportAbsolutePath.clear();
+
+    if (filelist == nullptr || filelist[0] == nullptr)
+    {
+        scene->pendingWorldMapImportDialogCanceled = true;
+        return;
+    }
+
+    scene->pendingWorldMapImportDialogCanceled = false;
+    scene->pendingWorldMapImportAbsolutePath = filelist[0];
+}
+
+void EditorMapCreateMapScene::onExportWorldMapDialogResult(void* userdata, const char* const* filelist, int filter_index)
+{
+    (void)filter_index;
+
+    EditorMapCreateMapScene* scene = static_cast<EditorMapCreateMapScene*>(userdata);
+    if (scene == nullptr || scene != EditorMapCreateMapScene::activeInstance)
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(scene->pendingWorldMapExportMutex);
+    scene->pendingWorldMapExportDialogCompleted = true;
+    scene->pendingWorldMapExportAbsolutePath.clear();
+
+    if (filelist == nullptr || filelist[0] == nullptr)
+    {
+        scene->pendingWorldMapExportDialogCanceled = true;
+        return;
+    }
+
+    scene->pendingWorldMapExportDialogCanceled = false;
+    scene->pendingWorldMapExportAbsolutePath = filelist[0];
+}
+
 void EditorMapCreateMapScene::unload(void)
 {
     EditorMapSceneLayout::popBottomToolbarPlayfieldMargins();
@@ -8816,6 +11426,11 @@ void EditorMapCreateMapScene::unload(void)
     this->testShipLoaded = false;
     this->testShipSpawned = false;
     this->testShipCameraFollowEnabled = false;
+    if (this->editorTextInputEnabled)
+    {
+        rc2d_keyboard_setTextInput(false);
+        this->editorTextInputEnabled = false;
+    }
     {
         std::lock_guard<std::mutex> lock(this->pendingShipFolderMutex);
         this->pendingShipFolderDialogCompleted = false;
@@ -8828,7 +11443,20 @@ void EditorMapCreateMapScene::unload(void)
         this->pendingMapImportDialogCanceled = false;
         this->pendingMapImportAbsolutePath.clear();
     }
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapImportMutex);
+        this->pendingWorldMapImportDialogCompleted = false;
+        this->pendingWorldMapImportDialogCanceled = false;
+        this->pendingWorldMapImportAbsolutePath.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(this->pendingWorldMapExportMutex);
+        this->pendingWorldMapExportDialogCompleted = false;
+        this->pendingWorldMapExportDialogCanceled = false;
+        this->pendingWorldMapExportAbsolutePath.clear();
+    }
     this->unloadImportedAssets();
+    ResetStorageImageRef(&this->worldMapScaleIcon);
     ResetStorageFontRef(&this->overlayFont);
     this->backgroundWidget.unload();
 
@@ -8849,6 +11477,9 @@ void EditorMapCreateMapScene::load(void)
         "assets/fonts/TradeWinds-Regular.ttf",
         RC2D_STORAGE_TITLE,
         15.0f);
+    this->worldMapScaleIcon = LoadStorageImage(
+        "assets/images/ui-scene-game/icon-scale.png",
+        RC2D_STORAGE_TITLE);
     this->scrollBarOverlay.load();
 
     Map& map = GetCurrentMap();
@@ -8904,9 +11535,12 @@ void EditorMapCreateMapScene::update(double dt)
     this->processPendingImportRequests();
     this->processPendingShipFolderRequest();
     this->processPendingMapImportRequest();
+    this->processPendingWorldMapImportRequest();
+    this->processPendingWorldMapExportRequest();
 
     map.update();
     this->updateToolbarLayout();
+    this->updateWorldMapEditorLayout();
     this->clampAssetListScrollOffset();
     this->clampShipListScrollOffset();
     this->applyPendingOceanColorStep();
@@ -8934,12 +11568,14 @@ void EditorMapCreateMapScene::update(double dt)
         this->shipListScrollDragActive = false;
         this->shipListScrollDragGrabOffsetY = 0.0f;
     }
+    this->updateWorldMapEditorInteractions();
     this->handleSelectedPlacedAssetInteractionPaintFromMouse();
     this->updateTestShip(dt);
     camera.update(map, map.rect);
 
     this->updateHoveredTile();
     this->handleTilePaintFromMouseDrag();
+    this->syncEditorTextInputState();
 }
 
 void EditorMapCreateMapScene::draw(void)
@@ -8965,6 +11601,26 @@ void EditorMapCreateMapScene::draw(void)
     WorldRenderClip::end(renderer);
     this->drawEditorHud();
 }
+
+void EditorMapCreateMapScene::textinput(const RC2D_TextInputEventInfo* info)
+{
+    if (info == nullptr || info->text == nullptr || info->text[0] == '\0')
+    {
+        return;
+    }
+
+    if (this->mapNameInputFocused)
+    {
+        if (this->mapNameInput.size() < 64U)
+        {
+            const size_t remaining = 64U - this->mapNameInput.size();
+            this->mapNameInput.append(info->text, (std::min)(remaining, std::strlen(info->text)));
+        }
+        return;
+    }
+
+    this->handleWorldMapEditorTextInput(info->text);
+}
 // ---------------------------------------------------------------------------
 // Entrees utilisateur.
 // ---------------------------------------------------------------------------
@@ -8981,10 +11637,15 @@ void EditorMapCreateMapScene::keypressed(
     (void)keyboardID;
     Map& map = GetCurrentMap();
     Camera& camera = GetCamera();
+    if (this->handleWorldMapEditorKey(key, scancode, keycode, mod, isrepeat))
+    {
+        return;
+    }
     // Echap desactive dans l'editor pour eviter toute fermeture involontaire.
     if (scancode == SDL_SCANCODE_ESCAPE)
     {
         this->mapNameInputFocused = false;
+        this->syncEditorTextInputState();
         return;
     }
     if (this->handleMapNameInputKey(key, scancode, keycode, mod, isrepeat))
@@ -9231,7 +11892,13 @@ void EditorMapCreateMapScene::mousepressed(float x, float y, RC2D_MouseButton bu
     // RC2D convertit deja les events via SDL_ConvertEventToRenderCoordinates.
     const float renderX = x;
     const float renderY = y;
+    if (this->worldMapEditorVisible)
+    {
+        (void)this->handleWorldMapEditorClick(renderX, renderY, button);
+        return;
+    }
     this->mapNameInputFocused = this->pointInRect(renderX, renderY, this->mapNameInputRect);
+    this->syncEditorTextInputState();
     if (this->mapNameInputFocused)
     {
         return;
@@ -9440,6 +12107,18 @@ void EditorMapCreateMapScene::mousewheelmoved(
         (void)this->getMouseRenderPosition(&renderX, &renderY);
     }
     const int step = (std::max)(1, std::abs(delta));
+
+    if (this->worldMapEditorVisible)
+    {
+        if (this->pointInRect(renderX, renderY, this->worldMapPreviewWindowRect))
+        {
+            return;
+        }
+        if (this->pointInRect(renderX, renderY, this->worldMapEditorRect))
+        {
+            return;
+        }
+    }
 
     if (this->showBottomRightLists && this->pointInRect(renderX, renderY, this->shipListRect))
     {

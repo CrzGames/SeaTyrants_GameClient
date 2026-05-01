@@ -142,6 +142,33 @@ private:
         std::array<float, 3> anchorTileY = {{0.0f, 0.0f, 0.0f}}; /**< Ancres pixel perfect par niveau. */
         std::array<bool, 3> hasPlacement = {{false, false, false}}; /**< true si l'ancre du niveau est definie. */
     };
+    enum class WorldMapTextField {
+        NONE = 0, /**< Aucun champ texte selectionne. */
+        MAP_NAME = 1, /**< Texte principal de la case (nom map / coordonnee). */
+        PREVIEW_WIDTH = 2, /**< Largeur de la GUI carte du monde. */
+        PREVIEW_HEIGHT = 3, /**< Hauteur de la GUI carte du monde. */
+        AUTO_LAYOUT = 4 /**< Modele de lignes auto, ex: 5-3-2. */
+    };
+    struct WorldMapCase {
+        float x = 0.0f; /**< Position X dans le canvas local. */
+        float y = 0.0f; /**< Position Y dans le canvas local. */
+        float width = 96.0f; /**< Largeur de la case en pixels canvas. */
+        float height = 96.0f; /**< Hauteur de la case en pixels canvas. */
+        std::string mapName; /**< Texte principal affiche au centre. */
+        bool showGuildName = false; /**< true si un TAG GUILDE doit pouvoir etre affiche au-dessus. */
+        bool isCity = false; /**< true si la case represente une ville (rouge), sinon une map normale (orange). */
+    };
+    enum class WorldMapLinkSide {
+        LEFT = 0,
+        TOP = 1,
+        RIGHT = 2,
+        BOTTOM = 3
+    };
+    struct WorldMapLink {
+        int fromCaseIndex = -1; /**< Index de la case source. */
+        int toCaseIndex = -1; /**< Index de la case cible. */
+        WorldMapLinkSide fromSide = WorldMapLinkSide::RIGHT; /**< Cote source utilise pour sortir. */
+    };
 
     /**
      * @struct HistoryAction
@@ -178,6 +205,7 @@ private:
 
     BackgroundWidget backgroundWidget; /**< Fond UI (haut/bas) de la scene. */
     RC2D_Font overlayFont; /**< Police des overlays et boutons. */
+    RC2D_Image worldMapScaleIcon; /**< Icone de redimensionnement pour la GUI gameplay. */
     ScrollBarOverlay scrollBarOverlay; /**< Overlay scrollbar reutilise en mode editeur. */
 
     EditorMode editorMode; /**< Mode metier courant. */
@@ -266,11 +294,20 @@ private:
     bool pendingMapImportDialogCanceled; /**< true si import map annule. */
     std::string pendingMapImportAbsolutePath; /**< Chemin map JSON a importer. */
     mutable std::mutex pendingMapImportMutex; /**< Mutex callback import map -> thread scene. */
+    bool pendingWorldMapImportDialogCompleted; /**< true si callback import world map a publie un resultat. */
+    bool pendingWorldMapImportDialogCanceled; /**< true si import world map annule. */
+    std::string pendingWorldMapImportAbsolutePath; /**< Chemin worldmap.json a importer. */
+    mutable std::mutex pendingWorldMapImportMutex; /**< Mutex callback import world map -> thread scene. */
+    bool pendingWorldMapExportDialogCompleted; /**< true si callback export world map a publie un resultat. */
+    bool pendingWorldMapExportDialogCanceled; /**< true si export world map annule. */
+    std::string pendingWorldMapExportAbsolutePath; /**< Dossier cible du prochain export world map. */
+    mutable std::mutex pendingWorldMapExportMutex; /**< Mutex callback export world map -> thread scene. */
 
     SDL_FRect buttonImportRect; /**< Bouton "IMPORTER ASSETS". */
     SDL_FRect buttonImportMapRect; /**< Bouton "IMPORTER MAP JSON". */
     SDL_FRect buttonImportShipRect; /**< Bouton "IMPORTER NAVIRES". */
     SDL_FRect buttonExportRect; /**< Bouton "EXPORTER MAP". */
+    SDL_FRect buttonCreateWorldMapRect; /**< Bouton ouverture createur carte du monde. */
     SDL_FRect buttonUndoRect; /**< Bouton "Annuler". */
     SDL_FRect buttonRedoRect; /**< Bouton "Refaire". */
     SDL_FRect buttonToolBlockRect; /**< Bouton outil collision. */
@@ -332,6 +369,76 @@ private:
     bool miniMapDragActive; /**< true si drag minimap en cours. */
     float miniMapDragOffsetX; /**< Offset drag minimap en X. */
     float miniMapDragOffsetY; /**< Offset drag minimap en Y. */
+    std::vector<WorldMapCase> worldMapCases; /**< Cases de la GUI carte du monde a exporter. */
+    std::vector<WorldMapLink> worldMapLinks; /**< Liaisons entre cases de la carte du monde. */
+    int selectedWorldMapCaseIndex; /**< Index de la case actuellement selectionnee. */
+    bool worldMapLinkModeEnabled; /**< true si le mode creation de liaison est actif. */
+    int pendingWorldMapLinkSourceIndex; /**< Index source en attente pour la prochaine liaison. */
+    WorldMapLinkSide selectedWorldMapLinkSide; /**< Cote de sortie choisi pour la prochaine liaison. */
+    bool worldMapEditorVisible; /**< true si la popup d'edition carte du monde est ouverte. */
+    WorldMapTextField worldMapFocusedTextField; /**< Champ texte actuellement focus. */
+    bool worldMapWindowDragging; /**< true pendant le deplacement de la fenetre. */
+    float worldMapWindowDragOffsetX; /**< Offset souris/fenetre pendant le drag. */
+    float worldMapWindowDragOffsetY; /**< Offset souris/fenetre pendant le drag. */
+    SDL_FPoint worldMapWindowOffset; /**< Offset utilisateur applique a la fenetre carte du monde. */
+    bool worldMapCaseDragging; /**< true pendant le drag d'une case. */
+    float worldMapCaseDragOffsetX; /**< Offset souris/case en X pendant le drag. */
+    float worldMapCaseDragOffsetY; /**< Offset souris/case en Y pendant le drag. */
+    bool worldMapCaseSnapGuideVerticalVisible; /**< true si une aide verticale d'alignement est visible. */
+    bool worldMapCaseSnapGuideHorizontalVisible; /**< true si une aide horizontale d'alignement est visible. */
+    float worldMapCaseSnapGuideVerticalX; /**< Position X locale de l'aide verticale. */
+    float worldMapCaseSnapGuideHorizontalY; /**< Position Y locale de l'aide horizontale. */
+    bool worldMapCaseSpacingGuideHorizontalVisible; /**< true si une aide d'espacement horizontal egal est visible. */
+    bool worldMapCaseSpacingGuideVerticalVisible; /**< true si une aide d'espacement vertical egal est visible. */
+    SDL_FRect worldMapCaseSpacingGuideHorizontalRectA; /**< Premier segment horizontal d'aide d'espacement. */
+    SDL_FRect worldMapCaseSpacingGuideHorizontalRectB; /**< Second segment horizontal d'aide d'espacement. */
+    SDL_FRect worldMapCaseSpacingGuideVerticalRectA; /**< Premier segment vertical d'aide d'espacement. */
+    SDL_FRect worldMapCaseSpacingGuideVerticalRectB; /**< Second segment vertical d'aide d'espacement. */
+    bool worldMapCaseResizing; /**< true pendant le resize d'une case. */
+    SDL_FPoint worldMapCaseResizeStartMouse; /**< Position souris au debut du resize. */
+    SDL_FRect worldMapCaseResizeStartRect; /**< Rectangle local de la case au debut du resize. */
+    float worldMapCanvasScrollX; /**< Scroll horizontal courant dans le canvas gauche. */
+    float worldMapCanvasScrollY; /**< Scroll vertical courant dans le canvas gauche. */
+    float worldMapCanvasVirtualWidth; /**< Largeur logique totale du canvas gauche. */
+    float worldMapCanvasVirtualHeight; /**< Hauteur logique totale du canvas gauche. */
+    SDL_FRect worldMapEditorRect; /**< Fenetre globale carte du monde. */
+    SDL_FRect worldMapEditorHeaderRect; /**< Header drag de la fenetre carte du monde. */
+    SDL_FRect worldMapEditorCanvasRect; /**< Zone de placement des cases. */
+    SDL_FRect worldMapAddCaseRect; /**< Bouton ajout case. */
+    SDL_FRect worldMapDeleteCaseRect; /**< Bouton suppression case. */
+    SDL_FRect worldMapToggleGuildRect; /**< Bouton toggle texte guilde. */
+    SDL_FRect worldMapCaseTypeRect; /**< Bouton choix type ville/map normale. */
+    SDL_FRect worldMapLinkModeRect; /**< Bouton activation du mode liaison. */
+    SDL_FRect worldMapLinkSideRect; /**< Bouton choix du cote source de liaison. */
+    SDL_FRect worldMapPreviewLockRect; /**< Bouton verrouillage edition pour aperçu final. */
+    SDL_FRect worldMapImportRect; /**< Bouton import JSON carte du monde. */
+    SDL_FRect worldMapExportRect; /**< Bouton export JSON carte du monde. */
+    SDL_FRect worldMapResetRect; /**< Bouton reset complet carte du monde. */
+    SDL_FRect worldMapCloseRect; /**< Bouton fermeture popup carte du monde. */
+    SDL_FRect worldMapMapNameInputRect; /**< Input texte principal de la case selectionnee. */
+    SDL_FRect worldMapPreviewWidthInputRect; /**< Input largeur GUI a droite. */
+    SDL_FRect worldMapPreviewHeightInputRect; /**< Input hauteur GUI a droite. */
+    SDL_FRect worldMapAutoLayoutInputRect; /**< Input du modele de lignes auto. */
+    SDL_FRect worldMapAutoGenerateRect; /**< Bouton de generation auto. */
+    SDL_FRect worldMapCaseResizeHandleRect; /**< Handle de resize de la case selectionnee. */
+    SDL_FRect worldMapPreviewWindowRect; /**< Fenetre d'aperçu gameplay a droite. */
+    SDL_FRect worldMapPreviewHeaderRect; /**< Header de l'aperçu gameplay. */
+    SDL_FRect worldMapPreviewViewportRect; /**< Zone de rendu des cases dans l'aperçu. */
+    SDL_FRect worldMapPreviewResizeCornerRect; /**< Handle coin bas-droite pour resize largeur+hauteur. */
+    SDL_FRect worldMapPreviewResizeHandleRect; /**< Handle pour redimensionner la hauteur de l'aperçu. */
+    bool worldMapPreviewHeightResizing; /**< true pendant le resize vertical de l'aperçu. */
+    bool worldMapPreviewCornerResizing; /**< true pendant le resize largeur+hauteur de l'aperçu. */
+    float worldMapPreviewPreferredWidth; /**< Largeur cible retenue pour la fenetre d'aperçu. */
+    float worldMapPreviewPreferredHeight; /**< Hauteur cible retenue pour la fenetre d'aperçu. */
+    float worldMapPreviewResizeStartMouseX; /**< Souris X au debut du resize preview. */
+    float worldMapPreviewResizeStartMouseY; /**< Souris Y au debut du resize preview. */
+    float worldMapPreviewResizeStartWidth; /**< Largeur preview au debut du resize. */
+    float worldMapPreviewResizeStartHeight; /**< Hauteur preview au debut du resize. */
+    std::string worldMapPreviewWidthInput; /**< Buffer texte pour largeur GUI. */
+    std::string worldMapPreviewHeightInput; /**< Buffer texte pour hauteur GUI. */
+    std::string worldMapAutoLayoutInput; /**< Buffer texte du schema auto, ex: 5-3-2. */
+    bool worldMapPreviewInteractionLocked; /**< true si l'aperçu final verrouille edition/resize. */
+    bool editorTextInputEnabled; /**< Etat courant du SDL_StartTextInput/StopTextInput pour cette scene. */
 
     static EditorMapCreateMapScene* activeInstance; /**< Instance active pour callbacks async de file dialog. */
 
@@ -542,6 +649,78 @@ private:
      *  @return true si la touche est consommee.
      */
     bool handleMapNameInputKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    /** @brief Gere la saisie clavier de la popup carte du monde.
+     *  @return true si la touche est consommee.
+     */
+    bool handleWorldMapEditorKey(const char* key, SDL_Scancode scancode, SDL_Keycode keycode, SDL_Keymod mod, bool isrepeat);
+    /** @brief Traite le texte UTF-8 de la popup carte du monde. */
+    void handleWorldMapEditorTextInput(const char* text);
+    /** @brief Retourne true si une case carte du monde est selectionnee. */
+    bool isWorldMapCaseSelectionValid(void) const;
+    /** @brief Retourne le rect local de la case selectionnee. */
+    SDL_FRect getWorldMapCaseLocalRect(int index) const;
+    /** @brief Retourne le rect rendu de la case selectionnee. */
+    SDL_FRect getWorldMapCaseScreenRect(int index) const;
+    /** @brief Valide/applique les dimensions saisies pour la preview GUI. */
+    void commitWorldMapPreviewDimensionInputs(void);
+    /** @brief Retourne l'index de case sous un point rendu. */
+    int findWorldMapCaseIndexAtPoint(float x, float y) const;
+    /** @brief Mesure un texte avec la police overlay courante. */
+    bool measureWorldMapTextSize(const std::string& text, int* outWidth, int* outHeight) const;
+    /** @brief Parse le schema auto et retourne les tailles de lignes. */
+    bool tryParseWorldMapAutoLayout(std::vector<int>* outRowCounts) const;
+    /** @brief Genere automatiquement cases + liaisons depuis le schema auto. */
+    void generateWorldMapAutoLayout(void);
+    /** @brief Retourne la taille minimale utile d'une case selon son contenu texte. */
+    SDL_FPoint getWorldMapCaseMinimumSize(const std::string& mapName, bool showGuildName) const;
+    /** @brief Retourne le scroll horizontal max possible du canvas gauche. */
+    float getWorldMapCanvasMaxScrollX(void) const;
+    /** @brief Retourne le scroll vertical max possible du canvas gauche. */
+    float getWorldMapCanvasMaxScrollY(void) const;
+    /** @brief Recalcule la largeur utile de la carte du monde selon le contenu. */
+    float getWorldMapCanvasUsedWidth(void) const;
+    /** @brief Recalcule la hauteur utile de la carte du monde selon le contenu. */
+    float getWorldMapCanvasUsedHeight(void) const;
+    /** @brief Aligne le scroll horizontal dans les bornes valides. */
+    void clampWorldMapCanvasScrollX(void);
+    /** @brief Aligne le scroll vertical dans les bornes valides. */
+    void clampWorldMapCanvasScroll(void);
+    /** @brief Fait defiler la vue pour garder une case visible. */
+    void ensureWorldMapCaseVisible(int index);
+    /** @brief Aligne une case sur les limites du canvas. */
+    void clampWorldMapCaseToCanvas(WorldMapCase& worldMapCase);
+    /** @brief Ajoute une nouvelle case carte du monde. */
+    void addWorldMapCase(void);
+    /** @brief Supprime la case selectionnee. */
+    void deleteSelectedWorldMapCase(void);
+    /** @brief Ouvre ou ferme la popup createur carte du monde. */
+    void toggleWorldMapEditor(void);
+    /** @brief Recalcule les rects UI de la popup carte du monde. */
+    void updateWorldMapEditorLayout(void);
+    /** @brief Gere le drag/resize continus de la popup carte du monde. */
+    void updateWorldMapEditorInteractions(void);
+    /** @brief Dessine la popup carte du monde. */
+    void drawWorldMapEditor(void) const;
+    /** @brief Gere un clic dans la popup carte du monde.
+     *  @return true si le clic est consomme.
+     */
+    bool handleWorldMapEditorClick(float x, float y, RC2D_MouseButton button);
+    /** @brief Retourne le buffer texte actuellement focus dans la popup. */
+    std::string* getWorldMapFocusedTextBuffer(void);
+    /** @brief Synchronise l'activation SDL du text input selon les focus actifs. */
+    void syncEditorTextInputState(void);
+    /** @brief Ouvre le dialogue d'export JSON carte du monde. */
+    void openImportWorldMapDialog(void);
+    /** @brief Traite l'import world map publie par callback async. */
+    void processPendingWorldMapImportRequest(void);
+    /** @brief Importe les cases de la carte du monde depuis un JSON. */
+    bool importWorldMapFromAbsolutePath(const char* absolutePath);
+    /** @brief Ouvre le dialogue d'export JSON carte du monde. */
+    void openExportWorldMapDialog(void);
+    /** @brief Traite l'export world map publie par callback async. */
+    void processPendingWorldMapExportRequest(void);
+    /** @brief Exporte les cases de la carte du monde dans un JSON. */
+    bool exportWorldMapToAbsolutePath(const char* absolutePath);
     /** @brief Traite l'import dossier navire publie par callback async. */
     void processPendingShipFolderRequest(void);
     /** @brief Charge un navire test depuis un dossier absolu.
@@ -668,6 +847,10 @@ private:
     static void onImportShipFolderDialogResult(void* userdata, const char* const* filelist, int filter_index);
     /** @brief Callback async de resultat export dossier. */
     static void onExportMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
+    /** @brief Callback async de resultat import world map. */
+    static void onImportWorldMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
+    /** @brief Callback async de resultat export world map. */
+    static void onExportWorldMapDialogResult(void* userdata, const char* const* filelist, int filter_index);
 
 public:
     /** @brief Construit la scene editor map create map. */
@@ -685,6 +868,7 @@ public:
     void update(double dt) override;
     /** @brief Dessine la scene. */
     void draw(void) override;
+    void textinput(const RC2D_TextInputEventInfo* info) override;
     /** @brief Callback clavier.
      *  @param key Texte touche.
      *  @param scancode Scancode SDL.
