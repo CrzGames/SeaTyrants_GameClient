@@ -1,7 +1,7 @@
 #include "game/ui/hud/barre-action-widget.h"
 #include "game/assets/title-asset-cache.h"
 
-static constexpr float kHudWidgetScaleMin = 0.75f;
+static constexpr float kHudWidgetScaleMin = 0.50f;
 static constexpr float kHudWidgetScaleMax = 1.0f;
 static constexpr float kActionBarBottomMarginPercent = 0.002f;
 

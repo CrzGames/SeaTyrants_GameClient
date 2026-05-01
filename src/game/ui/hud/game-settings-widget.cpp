@@ -41,7 +41,8 @@ static constexpr float kMapFrameRowsTopOffset = 78.0f;
 static constexpr float kMapFrameRowHeight = 26.0f;
 static constexpr float kMapFrameRowGap = 6.0f;
 static constexpr int kMapFrameMarginMaxPct = 20;
-static constexpr float kHudScaleMinValue = 0.75f;
+static constexpr float kHudScaleMinValueDefault = 0.50f;
+static constexpr float kHudScaleMinValueBars = 0.75f;
 static constexpr float kHudScaleMaxValue = 1.0f;
 static constexpr float kHudScaleStepValue = 0.05f;
 static constexpr float kControlsViewportPadding = 12.0f;
@@ -407,31 +408,52 @@ static float clampf(float value, float minValue, float maxValue)
     return (std::max)(minValue, (std::min)(value, maxValue));
 }
 
-static float clampHudScaleValue(float value)
+static float getHudScaleMinValue(GameSettingsWidget::HudScaleTarget target)
 {
-    return clampf(value, kHudScaleMinValue, kHudScaleMaxValue);
+    switch (target)
+    {
+        case GameSettingsWidget::HudScaleTarget::EXPERIENCE_BAR:
+        case GameSettingsWidget::HudScaleTarget::HP_BAR:
+            return kHudScaleMinValueBars;
+        case GameSettingsWidget::HudScaleTarget::MINIMAP:
+        case GameSettingsWidget::HudScaleTarget::MAP_ZOOM:
+        case GameSettingsWidget::HudScaleTarget::CENTER_SHIP:
+        case GameSettingsWidget::HudScaleTarget::ACTION_BAR:
+        case GameSettingsWidget::HudScaleTarget::COUNT:
+        default:
+            return kHudScaleMinValueDefault;
+    }
 }
 
-static float snapHudScaleValue(float value)
+static float clampHudScaleValue(GameSettingsWidget::HudScaleTarget target, float value)
 {
-    const float clampedValue = clampHudScaleValue(value);
+    return clampf(value, getHudScaleMinValue(target), kHudScaleMaxValue);
+}
+
+static float snapHudScaleValue(GameSettingsWidget::HudScaleTarget target, float value)
+{
+    const float minValue = getHudScaleMinValue(target);
+    const float clampedValue = clampHudScaleValue(target, value);
     const float steppedValue =
-        kHudScaleMinValue +
-        (std::round((clampedValue - kHudScaleMinValue) / kHudScaleStepValue) * kHudScaleStepValue);
-    return clampHudScaleValue(steppedValue);
+        minValue +
+        (std::round((clampedValue - minValue) / kHudScaleStepValue) * kHudScaleStepValue);
+    return clampHudScaleValue(target, steppedValue);
 }
 
-static float hudScaleValueToNormalized(float value)
+static float hudScaleValueToNormalized(GameSettingsWidget::HudScaleTarget target, float value)
 {
-    const float clampedValue = clampHudScaleValue(value);
-    const float range = kHudScaleMaxValue - kHudScaleMinValue;
-    return (clampedValue - kHudScaleMinValue) / range;
+    const float minValue = getHudScaleMinValue(target);
+    const float clampedValue = clampHudScaleValue(target, value);
+    const float range = kHudScaleMaxValue - minValue;
+    return (range <= 0.0f) ? 0.0f : ((clampedValue - minValue) / range);
 }
 
-static float normalizedToHudScaleValue(float normalized)
+static float normalizedToHudScaleValue(GameSettingsWidget::HudScaleTarget target, float normalized)
 {
+    const float minValue = getHudScaleMinValue(target);
     return snapHudScaleValue(
-        kHudScaleMinValue + (clampf(normalized, 0.0f, 1.0f) * (kHudScaleMaxValue - kHudScaleMinValue)));
+        target,
+        minValue + (clampf(normalized, 0.0f, 1.0f) * (kHudScaleMaxValue - minValue)));
 }
 
 static float clampCameraScrollSpeed(float value)
@@ -494,9 +516,12 @@ static SDL_FRect getMapFrameMarginThumbRect(const SDL_FRect& trackRect, int marg
     };
 }
 
-static SDL_FRect getHudScaleThumbRect(const SDL_FRect& trackRect, float scaleValue)
+static SDL_FRect getHudScaleThumbRect(
+    const SDL_FRect& trackRect,
+    GameSettingsWidget::HudScaleTarget target,
+    float scaleValue)
 {
-    const float normalized = hudScaleValueToNormalized(scaleValue);
+    const float normalized = hudScaleValueToNormalized(target, scaleValue);
     const float thumbCenterX = trackRect.x + (trackRect.w * normalized);
     return SDL_FRect{
         thumbCenterX - (kHudScaleThumbWidth * 0.5f),
@@ -1996,7 +2021,8 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
         for (std::size_t index = 0; index < layout.hudScaleTracks.size(); ++index)
         {
             const SDL_FRect& trackRect = layout.hudScaleTracks[index];
-            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, this->hudScaleValues[index]);
+            const HudScaleTarget target = static_cast<HudScaleTarget>(index);
+            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, target, this->hudScaleValues[index]);
             if (!isPointInRect(x, y, trackRect) && !isPointInRect(x, y, thumbRect))
             {
                 continue;
@@ -2010,7 +2036,7 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
             this->widgetDragging = false;
             this->hudScaleDragging = true;
             this->mapFrameMarginDragging = false;
-            this->draggedHudScaleTarget = static_cast<HudScaleTarget>(index);
+            this->draggedHudScaleTarget = target;
             this->hudScaleDragGrabOffsetX = isPointInRect(x, y, thumbRect)
                                                 ? (x - thumbRect.x)
                                                 : (kHudScaleThumbWidth * 0.5f);
@@ -2968,7 +2994,8 @@ void GameSettingsWidget::draw(void) const
             const SDL_FRect& rowRect = layout.hudScaleRows[index];
             const SDL_FRect& trackRect = layout.hudScaleTracks[index];
             const SDL_FRect& visibilityButtonRect = layout.hudScaleVisibilityButtons[index];
-            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, self->hudScaleValues[index]);
+            const HudScaleTarget target = static_cast<HudScaleTarget>(index);
+            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, target, self->hudScaleValues[index]);
             const float thumbCenterX = thumbRect.x + (thumbRect.w * 0.5f);
             const SDL_FRect activeRect = SDL_FRect{
                 trackRect.x,
@@ -3918,7 +3945,8 @@ HudCursorType GameSettingsWidget::getDesiredCursor(float x, float y) const
         for (std::size_t index = 0; index < layout.hudScaleTracks.size(); ++index)
         {
             const SDL_FRect& trackRect = layout.hudScaleTracks[index];
-            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, this->hudScaleValues[index]);
+            const HudScaleTarget target = static_cast<HudScaleTarget>(index);
+            const SDL_FRect thumbRect = getHudScaleThumbRect(trackRect, target, this->hudScaleValues[index]);
             if (isPointInRect(x, y, trackRect) || isPointInRect(x, y, thumbRect))
             {
                 return HudCursorType::RESIZE_HORIZONTAL;
@@ -4573,7 +4601,7 @@ void GameSettingsWidget::applyHudScaleValue(HudScaleTarget target, float scale, 
         return;
     }
 
-    const float clampedScale = snapHudScaleValue(scale);
+    const float clampedScale = snapHudScaleValue(target, scale);
     const float previousScale = this->hudScaleValues[index];
     this->hudScaleValues[index] = clampedScale;
 
@@ -4621,7 +4649,7 @@ void GameSettingsWidget::updateDraggedHudScaleFromMouse(float mouseX)
         trackRect.x + trackRect.w - (kHudScaleThumbWidth * 0.5f));
     const float thumbCenterX = thumbLeft + (kHudScaleThumbWidth * 0.5f);
     const float normalized = (thumbCenterX - trackRect.x) / trackRect.w;
-    this->applyHudScaleValue(this->draggedHudScaleTarget, normalizedToHudScaleValue(normalized), true);
+    this->applyHudScaleValue(this->draggedHudScaleTarget, normalizedToHudScaleValue(this->draggedHudScaleTarget, normalized), true);
 }
 
 void GameSettingsWidget::applyControlActionScancode(ControlAction action, SDL_Scancode scancode)
