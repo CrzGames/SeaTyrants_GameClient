@@ -27,11 +27,13 @@
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/ui/hud/minimap-espion-button-widget.h"
 #include "game/ui/hud/minimap-params-button-widget.h"
+#include "game/ui/hud/minimap-worldmap-button-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/money-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/top-bar-main-currency-widget.h"
 #include "game/ui/hud/top-bar-menu-widget.h"
+#include "game/ui/hud/worldmap-widget.h"
 #include "game/ui/hud/zoom-widget.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
 #include "game/ui/overlay/sector-coordinate-overlay.h"
@@ -186,6 +188,19 @@ public:
     MinimapParamsButtonWidget& getMinimapParamsButtonWidget(void) { return this->minimapParamsButtonWidget; }
 
     /**
+     * @brief Retourne le bouton world map ancre sur la minimap.
+     */
+    MinimapWorldMapButtonWidget& getMinimapWorldMapButtonWidget(void) { return this->minimapWorldMapButtonWidget; }
+
+    /**
+     * @brief Retourne la fenetre gameplay de carte du monde.
+     *
+     * Cette API permet notamment au gameplay/reseau de mettre a jour les tags
+     * de guild par nom de map quand les donnees serveur arrivent.
+     */
+    WorldMapWidget& getWorldMapWidget(void) { return this->worldMapWidget; }
+
+    /**
      * @brief Retourne la barre d'action.
      */
     BarreActionWidget& getBarreActionWidget(void) { return this->barreActionWidget; }
@@ -299,15 +314,16 @@ private:
         ESPION = 1,             /**< Fenetre espion (recherche joueur). */
         MONEY = 2,              /**< Fenetre money / monnaies du joueur. */
         PARAMS_MINIMAP = 3,     /**< Fenetre des parametres minimap. */
-        GAME_SETTINGS = 4,      /**< Fenetre des parametres de jeu. */
-        ANNOUNCEMENTS = 5,      /**< Fenetre annonces serveur. */
-        LOG_BOOK = 6,           /**< Fenetre journal de bord. */
-        MARKETS_AND_BAZAR = 7,  /**< Fenetre marches + bazar. */
-        ACCOUNT_MANAGEMENT = 8, /**< Fenetre compte/apparence/navires. */
-        GUILD_MORTAR = 9,       /**< Fenetre de mortier de guilde. */
-        GUILD_TOWER = 10,       /**< Fenetre de Tower de guilde. */
-        CAPTCHA = 11,           /**< Verification captcha (reseau). */
-        LEADERBOARD = 12        /**< Fenetre classements (lien site). */
+        WORLD_MAP = 4,          /**< Fenetre gameplay de carte du monde. */
+        GAME_SETTINGS = 5,      /**< Fenetre des parametres de jeu. */
+        ANNOUNCEMENTS = 6,      /**< Fenetre annonces serveur. */
+        LOG_BOOK = 7,           /**< Fenetre journal de bord. */
+        MARKETS_AND_BAZAR = 8,  /**< Fenetre marches + bazar. */
+        ACCOUNT_MANAGEMENT = 9, /**< Fenetre compte/apparence/navires. */
+        GUILD_MORTAR = 10,      /**< Fenetre de mortier de guilde. */
+        GUILD_TOWER = 11,       /**< Fenetre de Tower de guilde. */
+        CAPTCHA = 12,           /**< Verification captcha (reseau). */
+        LEADERBOARD = 13        /**< Fenetre classements (lien site). */
     };
 
     /**
@@ -331,6 +347,7 @@ private:
     MinimapWidget minimapWidget;                           /**< Widget minimap. */
     MinimapEspionButtonWidget minimapEspionButtonWidget;   /**< Bouton espion ancre sur la minimap. */
     MinimapParamsButtonWidget minimapParamsButtonWidget;   /**< Bouton params minimap ancre sur la minimap. */
+    MinimapWorldMapButtonWidget minimapWorldMapButtonWidget; /**< Bouton world map ancre sur la minimap. */
     BarreActionWidget barreActionWidget;                   /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget;         /**< Widget bouton centrer navire. */
     ZoomWidget zoomWidget;                                 /**< Widget de zoom (barre + slider). */
@@ -340,6 +357,7 @@ private:
     EspionSearchPlayerWidget espionSearchPlayerWidget;     /**< Fenetre "Espion" de recherche joueur. */
     MoneyWidget moneyWidget;                               /**< Fenetre "Money" des monnaies du joueur. */
     ParamsMinimapWidget paramsMinimapWidget;               /**< Fenetre de parametres de la minimap. */
+    WorldMapWidget worldMapWidget;                         /**< Fenetre gameplay de carte du monde. */
     GameSettingsWidget gameSettingsWidget;                 /**< Fenetre "Parametres" du client. */
     AnnouncementsWidget announcementsWidget;               /**< Fenetre "Announcements". */
     LogBookWidget logBookWidget;                           /**< Fenetre "Journal de bord". */
@@ -407,6 +425,7 @@ private:
     bool prevEspionVisible;             /**< Etat visible precedent de la fenetre espion. */
     bool prevMoneyVisible;              /**< Etat visible precedent de la fenetre money. */
     bool prevParamsMiniMapVisible;      /**< Etat visible precedent de la fenetre ParamsMiniMap. */
+    bool prevWorldMapVisible;           /**< Etat visible precedent de la fenetre carte du monde. */
     bool prevGameSettingsVisible;       /**< Etat visible precedent de la fenetre parametres. */
     bool prevAnnouncementsVisible;      /**< Etat visible precedent de la fenetre announcements. */
     bool prevLogBookVisible;            /**< Etat visible precedent de la fenetre journal de bord. */

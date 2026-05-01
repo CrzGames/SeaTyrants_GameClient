@@ -21,7 +21,8 @@ public:
     enum class Tooltip : int {
         NONE = 0,
         ESPION = 1,
-        PARAMS_MINIMAP = 2
+        PARAMS_MINIMAP = 2,
+        WORLD_MAP = 3
     };
 
     MinimapWidget(void);
