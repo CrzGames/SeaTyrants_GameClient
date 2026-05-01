@@ -469,6 +469,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       minimapWidget{},
       minimapEspionButtonWidget{},
       minimapParamsButtonWidget{},
+      minimapNavigationButtonWidget{},
       minimapWorldMapButtonWidget{},
       barreActionWidget{},
       centerShipButtonWidget{},
@@ -477,6 +478,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       experienceBarWidget{},
       chatWidget{},
       espionSearchPlayerWidget{},
+      navigationWidget{},
       moneyWidget{},
       paramsMinimapWidget{},
       worldMapWidget{},
@@ -526,6 +528,7 @@ IngameHudOverlay::IngameHudOverlay(void)
       hoveredMinimapTooltipMouseY(0.0f),
       prevChatVisible(false),
       prevEspionVisible(false),
+      prevNavigationVisible(false),
       prevMoneyVisible(false),
       prevParamsMiniMapVisible(false),
       prevWorldMapVisible(false),
@@ -569,6 +572,8 @@ bool IngameHudOverlay::isWindowLayerVisible(WindowLayer layer) const
             return this->chatWidget.isVisible();
         case WindowLayer::ESPION:
             return this->espionSearchPlayerWidget.isVisible();
+        case WindowLayer::NAVIGATION:
+            return this->navigationWidget.isVisible();
         case WindowLayer::MONEY:
             return this->moneyWidget.isVisible();
         case WindowLayer::PARAMS_MINIMAP:
@@ -1040,6 +1045,7 @@ SDL_FRect IngameHudOverlay::getHudConfiguratorTargetRect(GameSettingsWidget::Hud
             SDL_FRect minimapRect = this->minimapWidget.getCurrentRect();
             minimapRect = unionRects(minimapRect, this->minimapEspionButtonWidget.getCurrentRect(this->minimapWidget));
             minimapRect = unionRects(minimapRect, this->minimapParamsButtonWidget.getCurrentRect(this->minimapWidget));
+            minimapRect = unionRects(minimapRect, this->minimapNavigationButtonWidget.getCurrentRect(this->minimapWidget));
             minimapRect = unionRects(minimapRect, this->minimapWorldMapButtonWidget.getCurrentRect(this->minimapWidget));
             return minimapRect;
         }
@@ -1172,6 +1178,8 @@ HudCursorType IngameHudOverlay::getWindowLayerDesiredCursor(WindowLayer layer, f
             return this->chatWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::ESPION:
             return this->espionSearchPlayerWidget.getDesiredCursor(mouseX, mouseY);
+        case WindowLayer::NAVIGATION:
+            return this->navigationWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::MONEY:
             return this->moneyWidget.getDesiredCursor(mouseX, mouseY);
         case WindowLayer::PARAMS_MINIMAP:
@@ -1231,6 +1239,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
 {
     const bool chatVisible = this->chatWidget.isVisible();
     const bool espionVisible = this->espionSearchPlayerWidget.isVisible();
+    const bool navigationVisible = this->navigationWidget.isVisible();
     const bool moneyVisible = this->moneyWidget.isVisible();
     const bool paramsVisible = this->paramsMinimapWidget.isVisible();
     const bool worldMapVisible = this->worldMapWidget.isVisible();
@@ -1251,6 +1260,10 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
     if (espionVisible && !this->prevEspionVisible)
     {
         this->bringWindowToFront(WindowLayer::ESPION);
+    }
+    if (navigationVisible && !this->prevNavigationVisible)
+    {
+        this->bringWindowToFront(WindowLayer::NAVIGATION);
     }
     if (moneyVisible && !this->prevMoneyVisible)
     {
@@ -1303,6 +1316,7 @@ void IngameHudOverlay::syncWindowOrderOnOpen(void)
 
     this->prevChatVisible = chatVisible;
     this->prevEspionVisible = espionVisible;
+    this->prevNavigationVisible = navigationVisible;
     this->prevMoneyVisible = moneyVisible;
     this->prevParamsMiniMapVisible = paramsVisible;
     this->prevWorldMapVisible = worldMapVisible;
@@ -1751,6 +1765,7 @@ void IngameHudOverlay::load(void)
     this->windowDrawOrder = {
         WindowLayer::CHAT,
         WindowLayer::ESPION,
+        WindowLayer::NAVIGATION,
         WindowLayer::MONEY,
         WindowLayer::PARAMS_MINIMAP,
         WindowLayer::WORLD_MAP,
@@ -1772,6 +1787,7 @@ void IngameHudOverlay::load(void)
     this->minimapWidget.load();
     this->minimapEspionButtonWidget.load();
     this->minimapParamsButtonWidget.load();
+    this->minimapNavigationButtonWidget.load();
     this->minimapWorldMapButtonWidget.load();
     this->barreActionWidget.load();
     this->centerShipButtonWidget.load();
@@ -1790,6 +1806,7 @@ void IngameHudOverlay::load(void)
 
     this->chatWidget.load();
     this->espionSearchPlayerWidget.load();
+    this->navigationWidget.load();
     this->moneyWidget.load();
     this->paramsMinimapWidget.load();
     this->worldMapWidget.load();
@@ -1889,6 +1906,7 @@ void IngameHudOverlay::load(void)
 
     this->prevChatVisible = this->chatWidget.isVisible();
     this->prevEspionVisible = this->espionSearchPlayerWidget.isVisible();
+    this->prevNavigationVisible = this->navigationWidget.isVisible();
     this->prevMoneyVisible = this->moneyWidget.isVisible();
     this->prevParamsMiniMapVisible = this->paramsMinimapWidget.isVisible();
     this->prevWorldMapVisible = this->worldMapWidget.isVisible();
@@ -1926,6 +1944,7 @@ void IngameHudOverlay::unload(void)
     this->worldMapWidget.unload();
     this->paramsMinimapWidget.unload();
     this->moneyWidget.unload();
+    this->navigationWidget.unload();
     this->espionSearchPlayerWidget.unload();
     this->chatWidget.unload();
     this->experienceBarWidget.unload();
@@ -1934,6 +1953,7 @@ void IngameHudOverlay::unload(void)
     this->centerShipButtonWidget.unload();
     this->barreActionWidget.unload();
     this->minimapWorldMapButtonWidget.unload();
+    this->minimapNavigationButtonWidget.unload();
     this->minimapParamsButtonWidget.unload();
     this->minimapEspionButtonWidget.unload();
     this->minimapWidget.unload();
@@ -1968,6 +1988,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
                 break;
             case WindowLayer::ESPION:
                 this->espionSearchPlayerWidget.update(dt);
+                break;
+            case WindowLayer::NAVIGATION:
+                this->navigationWidget.update(dt);
                 break;
             case WindowLayer::MONEY:
                 this->moneyWidget.update(dt);
@@ -2032,6 +2055,9 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
     const bool minimapParamsHovered =
         minimapVisible &&
         this->minimapParamsButtonWidget.containsPoint(mouseX, mouseY, this->minimapWidget);
+    const bool minimapNavigationHovered =
+        minimapVisible &&
+        this->minimapNavigationButtonWidget.containsPoint(mouseX, mouseY, this->minimapWidget);
     const bool minimapWorldMapHovered =
         minimapVisible &&
         this->minimapWorldMapButtonWidget.containsPoint(mouseX, mouseY, this->minimapWidget);
@@ -2042,6 +2068,10 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
     const HudCursorType minimapParamsCursor =
         minimapVisible
             ? this->minimapParamsButtonWidget.getDesiredCursor(mouseX, mouseY, this->minimapWidget)
+            : HudCursorType::NONE;
+    const HudCursorType minimapNavigationCursor =
+        minimapVisible
+            ? this->minimapNavigationButtonWidget.getDesiredCursor(mouseX, mouseY, this->minimapWidget)
             : HudCursorType::NONE;
     const HudCursorType minimapWorldMapCursor =
         minimapVisible
@@ -2059,6 +2089,10 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
     else if (minimapParamsHovered)
     {
         this->hoveredMinimapTooltip = MinimapWidget::Tooltip::PARAMS_MINIMAP;
+    }
+    else if (minimapNavigationHovered)
+    {
+        this->hoveredMinimapTooltip = MinimapWidget::Tooltip::NAVIGATION;
     }
     else if (minimapWorldMapHovered)
     {
@@ -2104,6 +2138,10 @@ void IngameHudOverlay::update(double dt, Camera& camera, Map& map)
                 else if (minimapParamsCursor != HudCursorType::NONE)
                 {
                     desiredCursor = minimapParamsCursor;
+                }
+                else if (minimapNavigationCursor != HudCursorType::NONE)
+                {
+                    desiredCursor = minimapNavigationCursor;
                 }
                 else if (minimapWorldMapCursor != HudCursorType::NONE)
                 {
@@ -2180,6 +2218,7 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
     {
         this->minimapWidget.draw(map);
         this->minimapParamsButtonWidget.draw(this->minimapWidget);
+        this->minimapNavigationButtonWidget.draw(this->minimapWidget);
         this->minimapWorldMapButtonWidget.draw(this->minimapWidget);
         this->minimapEspionButtonWidget.draw(this->minimapWidget);
         if (!this->hudConfiguratorMode)
@@ -2217,6 +2256,9 @@ void IngameHudOverlay::drawWidgets(const Map& map, const Player& player)
                 break;
             case WindowLayer::ESPION:
                 this->espionSearchPlayerWidget.draw();
+                break;
+            case WindowLayer::NAVIGATION:
+                this->navigationWidget.draw();
                 break;
             case WindowLayer::MONEY:
                 this->moneyWidget.draw();
@@ -2282,6 +2324,9 @@ void IngameHudOverlay::drawHoveredMinimapTooltip(void) const
             break;
         case MinimapWidget::Tooltip::PARAMS_MINIMAP:
             label = "Params minimap";
+            break;
+        case MinimapWidget::Tooltip::NAVIGATION:
+            label = "Navigation";
             break;
         case MinimapWidget::Tooltip::WORLD_MAP:
             label = "Carte du monde";
@@ -2352,6 +2397,9 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             case WindowLayer::CHAT:
                 consumed = this->chatWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
+            case WindowLayer::NAVIGATION:
+                consumed = this->navigationWidget.mousepressed(x, y, button, clicks, mouseID);
+                break;
             case WindowLayer::ESPION:
                 consumed = this->espionSearchPlayerWidget.mousepressed(x, y, button, clicks, mouseID);
                 break;
@@ -2411,6 +2459,16 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
 
         if (layer == WindowLayer::CHAT)
         {
+            this->navigationWidget.clearFocus();
+            this->espionSearchPlayerWidget.clearFocus();
+            this->marketsAndBazarWidget.clearFocus();
+            this->accountManagementWidget.clearFocus();
+            this->gameSettingsWidget.clearFocus();
+            this->captchaWidget.clearFocus();
+        }
+        else if (layer == WindowLayer::NAVIGATION)
+        {
+            this->chatWidget.clearFocus();
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
@@ -2420,6 +2478,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         else if (layer == WindowLayer::ESPION)
         {
             this->chatWidget.clearFocus();
+            this->navigationWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
@@ -2429,6 +2488,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         {
             this->chatWidget.clearFocus();
             this->espionSearchPlayerWidget.clearFocus();
+            this->navigationWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
             this->captchaWidget.clearFocus();
@@ -2438,6 +2498,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->chatWidget.clearFocus();
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
+            this->navigationWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
             this->captchaWidget.clearFocus();
         }
@@ -2447,6 +2508,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->espionSearchPlayerWidget.clearFocus();
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
+            this->navigationWidget.clearFocus();
             this->captchaWidget.clearFocus();
         }
         else if (layer == WindowLayer::CAPTCHA)
@@ -2456,6 +2518,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->marketsAndBazarWidget.clearFocus();
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
+            this->navigationWidget.clearFocus();
         }
         else
         {
@@ -2465,6 +2528,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->accountManagementWidget.clearFocus();
             this->gameSettingsWidget.clearFocus();
             this->captchaWidget.clearFocus();
+            this->navigationWidget.clearFocus();
         }
         return true;
     }
@@ -2474,6 +2538,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
     {
         this->handleTopBarAction(topBarAction);
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2495,6 +2560,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->bringWindowToFront(WindowLayer::ESPION);
         }
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2516,6 +2582,29 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->bringWindowToFront(WindowLayer::PARAMS_MINIMAP);
         }
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
+        this->espionSearchPlayerWidget.clearFocus();
+        this->marketsAndBazarWidget.clearFocus();
+        this->accountManagementWidget.clearFocus();
+        this->gameSettingsWidget.clearFocus();
+        this->captchaWidget.clearFocus();
+        return true;
+    }
+
+    if (this->isHudWidgetVisible(GameSettingsWidget::HudScaleTarget::MINIMAP) &&
+        this->minimapNavigationButtonWidget.mousepressed(x, y, button, this->minimapWidget))
+    {
+        if (this->navigationWidget.isVisible())
+        {
+            this->navigationWidget.hide();
+        }
+        else
+        {
+            this->navigationWidget.show();
+            this->bringWindowToFront(WindowLayer::NAVIGATION);
+        }
+        this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2537,6 +2626,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
             this->bringWindowToFront(WindowLayer::WORLD_MAP);
         }
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2549,6 +2639,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
         this->zoomWidget.mousepressed(x, y, button))
     {
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2560,6 +2651,7 @@ bool IngameHudOverlay::mousepressed(float x, float y, RC2D_MouseButton button, i
     if (button == RC2D_MOUSE_BUTTON_LEFT)
     {
         this->chatWidget.clearFocus();
+        this->navigationWidget.clearFocus();
         this->espionSearchPlayerWidget.clearFocus();
         this->marketsAndBazarWidget.clearFocus();
         this->accountManagementWidget.clearFocus();
@@ -2703,6 +2795,12 @@ bool IngameHudOverlay::keypressed(const char* key, SDL_Scancode scancode, SDL_Ke
         const WindowLayer layer = this->windowDrawOrder[static_cast<std::size_t>(i)];
         switch (layer)
         {
+            case WindowLayer::NAVIGATION:
+                if (this->navigationWidget.keypressed(key, scancode, keycode, mod, isrepeat))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::ESPION:
                 if (this->espionSearchPlayerWidget.keypressed(key, scancode, keycode, mod, isrepeat))
                 {
@@ -2770,6 +2868,12 @@ bool IngameHudOverlay::textinput(const RC2D_TextInputEventInfo* info)
         const WindowLayer layer = this->windowDrawOrder[static_cast<std::size_t>(i)];
         switch (layer)
         {
+            case WindowLayer::NAVIGATION:
+                if (this->navigationWidget.textinput(info->text))
+                {
+                    return true;
+                }
+                break;
             case WindowLayer::ESPION:
                 if (this->espionSearchPlayerWidget.textinput(info->text))
                 {
@@ -2828,6 +2932,10 @@ void IngameHudOverlay::syncPlatformTextInputState(void)
 bool IngameHudOverlay::isBlockingGameplayKeyboardInput(void) const
 {
     if (this->chatWidget.hasBlockingTextInputFocus())
+    {
+        return true;
+    }
+    if (this->navigationWidget.hasBlockingTextInputFocus())
     {
         return true;
     }

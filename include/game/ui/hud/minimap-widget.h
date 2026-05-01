@@ -22,7 +22,8 @@ public:
         NONE = 0,
         ESPION = 1,
         PARAMS_MINIMAP = 2,
-        WORLD_MAP = 3
+        WORLD_MAP = 3,
+        NAVIGATION = 4
     };
 
     MinimapWidget(void);

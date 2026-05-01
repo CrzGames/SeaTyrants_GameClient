@@ -26,10 +26,12 @@
 #include "game/ui/hud/log-book-widget.h"
 #include "game/ui/hud/markets-and-bazar-widget.h"
 #include "game/ui/hud/minimap-espion-button-widget.h"
+#include "game/ui/hud/minimap-navigation-button-widget.h"
 #include "game/ui/hud/minimap-params-button-widget.h"
 #include "game/ui/hud/minimap-worldmap-button-widget.h"
 #include "game/ui/hud/minimap-widget.h"
 #include "game/ui/hud/money-widget.h"
+#include "game/ui/hud/navigation-widget.h"
 #include "game/ui/hud/params-minimap-widget.h"
 #include "game/ui/hud/top-bar-main-currency-widget.h"
 #include "game/ui/hud/top-bar-menu-widget.h"
@@ -188,6 +190,11 @@ public:
     MinimapParamsButtonWidget& getMinimapParamsButtonWidget(void) { return this->minimapParamsButtonWidget; }
 
     /**
+     * @brief Retourne le bouton navigation ancre sur la minimap.
+     */
+    MinimapNavigationButtonWidget& getMinimapNavigationButtonWidget(void) { return this->minimapNavigationButtonWidget; }
+
+    /**
      * @brief Retourne le bouton world map ancre sur la minimap.
      */
     MinimapWorldMapButtonWidget& getMinimapWorldMapButtonWidget(void) { return this->minimapWorldMapButtonWidget; }
@@ -236,6 +243,11 @@ public:
      * @brief Retourne la fenetre Espion.
      */
     EspionSearchPlayerWidget& getEspionSearchPlayerWidget(void) { return this->espionSearchPlayerWidget; }
+
+    /**
+     * @brief Retourne la fenetre de navigation rapide.
+     */
+    NavigationWidget& getNavigationWidget(void) { return this->navigationWidget; }
 
     /**
      * @brief Retourne la fenetre money pour l'alimenter depuis le gameplay.
@@ -312,18 +324,19 @@ private:
     enum class WindowLayer : int {
         CHAT = 0,               /**< Fenetre chat. */
         ESPION = 1,             /**< Fenetre espion (recherche joueur). */
-        MONEY = 2,              /**< Fenetre money / monnaies du joueur. */
-        PARAMS_MINIMAP = 3,     /**< Fenetre des parametres minimap. */
-        WORLD_MAP = 4,          /**< Fenetre gameplay de carte du monde. */
-        GAME_SETTINGS = 5,      /**< Fenetre des parametres de jeu. */
-        ANNOUNCEMENTS = 6,      /**< Fenetre annonces serveur. */
-        LOG_BOOK = 7,           /**< Fenetre journal de bord. */
-        MARKETS_AND_BAZAR = 8,  /**< Fenetre marches + bazar. */
-        ACCOUNT_MANAGEMENT = 9, /**< Fenetre compte/apparence/navires. */
-        GUILD_MORTAR = 10,      /**< Fenetre de mortier de guilde. */
-        GUILD_TOWER = 11,       /**< Fenetre de Tower de guilde. */
-        CAPTCHA = 12,           /**< Verification captcha (reseau). */
-        LEADERBOARD = 13        /**< Fenetre classements (lien site). */
+        NAVIGATION = 2,         /**< Fenetre navigation rapide par secteur. */
+        MONEY = 3,              /**< Fenetre money / monnaies du joueur. */
+        PARAMS_MINIMAP = 4,     /**< Fenetre des parametres minimap. */
+        WORLD_MAP = 5,          /**< Fenetre gameplay de carte du monde. */
+        GAME_SETTINGS = 6,      /**< Fenetre des parametres de jeu. */
+        ANNOUNCEMENTS = 7,      /**< Fenetre annonces serveur. */
+        LOG_BOOK = 8,           /**< Fenetre journal de bord. */
+        MARKETS_AND_BAZAR = 9,  /**< Fenetre marches + bazar. */
+        ACCOUNT_MANAGEMENT = 10, /**< Fenetre compte/apparence/navires. */
+        GUILD_MORTAR = 11,      /**< Fenetre de mortier de guilde. */
+        GUILD_TOWER = 12,       /**< Fenetre de Tower de guilde. */
+        CAPTCHA = 13,           /**< Verification captcha (reseau). */
+        LEADERBOARD = 14        /**< Fenetre classements (lien site). */
     };
 
     /**
@@ -347,6 +360,7 @@ private:
     MinimapWidget minimapWidget;                           /**< Widget minimap. */
     MinimapEspionButtonWidget minimapEspionButtonWidget;   /**< Bouton espion ancre sur la minimap. */
     MinimapParamsButtonWidget minimapParamsButtonWidget;   /**< Bouton params minimap ancre sur la minimap. */
+    MinimapNavigationButtonWidget minimapNavigationButtonWidget; /**< Bouton navigation ancre sur la minimap. */
     MinimapWorldMapButtonWidget minimapWorldMapButtonWidget; /**< Bouton world map ancre sur la minimap. */
     BarreActionWidget barreActionWidget;                   /**< Barre d'action en bas-centre. */
     CenterShipButtonWidget centerShipButtonWidget;         /**< Widget bouton centrer navire. */
@@ -355,6 +369,7 @@ private:
     ExperienceBarWidget experienceBarWidget;               /**< Barre d'XP affichee sous la barre HP. */
     ChatWidget chatWidget;                                 /**< Fenetre chat interactive. */
     EspionSearchPlayerWidget espionSearchPlayerWidget;     /**< Fenetre "Espion" de recherche joueur. */
+    NavigationWidget navigationWidget;                     /**< Fenetre "Navigation" par coordonnee secteur. */
     MoneyWidget moneyWidget;                               /**< Fenetre "Money" des monnaies du joueur. */
     ParamsMinimapWidget paramsMinimapWidget;               /**< Fenetre de parametres de la minimap. */
     WorldMapWidget worldMapWidget;                         /**< Fenetre gameplay de carte du monde. */
@@ -423,6 +438,7 @@ private:
      */
     bool prevChatVisible;               /**< Etat visible precedent du chat. */
     bool prevEspionVisible;             /**< Etat visible precedent de la fenetre espion. */
+    bool prevNavigationVisible;         /**< Etat visible precedent de la fenetre navigation. */
     bool prevMoneyVisible;              /**< Etat visible precedent de la fenetre money. */
     bool prevParamsMiniMapVisible;      /**< Etat visible precedent de la fenetre ParamsMiniMap. */
     bool prevWorldMapVisible;           /**< Etat visible precedent de la fenetre carte du monde. */
