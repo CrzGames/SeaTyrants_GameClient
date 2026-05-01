@@ -16,6 +16,7 @@
 #include "game/ui/hud/background-widget.h"
 #include "game/ui/overlay/tile-click-marker-overlay.h"
 #include "game/ui/overlay/scroll-bar-overlay.h"
+#include "game/world/worldmap-definition.h"
 
 /**
  * @class EditorMapCreateMapScene
@@ -156,7 +157,7 @@ private:
         float height = 96.0f; /**< Hauteur de la case en pixels canvas. */
         std::string mapName; /**< Texte principal affiche au centre. */
         bool showGuildName = false; /**< true si un TAG GUILDE doit pouvoir etre affiche au-dessus. */
-        bool isCity = false; /**< true si la case represente une ville (rouge), sinon une map normale (orange). */
+        WorldMapDefinition::ZoneType zoneType = WorldMapDefinition::ZoneType::TERRESTRIAL; /**< Type de zone rendu dans la case. */
     };
     enum class WorldMapLinkSide {
         LEFT = 0,
@@ -371,6 +372,7 @@ private:
     float miniMapDragOffsetY; /**< Offset drag minimap en Y. */
     std::vector<WorldMapCase> worldMapCases; /**< Cases de la GUI carte du monde a exporter. */
     std::vector<WorldMapLink> worldMapLinks; /**< Liaisons entre cases de la carte du monde. */
+    WorldMapDefinition::LegendVisibility worldMapLegendVisibility; /**< Controle quels items de legende sont visibles dans le HUD. */
     int selectedWorldMapCaseIndex; /**< Index de la case actuellement selectionnee. */
     bool worldMapLinkModeEnabled; /**< true si le mode creation de liaison est actif. */
     int pendingWorldMapLinkSourceIndex; /**< Index source en attente pour la prochaine liaison. */
@@ -407,7 +409,8 @@ private:
     SDL_FRect worldMapAddCaseRect; /**< Bouton ajout case. */
     SDL_FRect worldMapDeleteCaseRect; /**< Bouton suppression case. */
     SDL_FRect worldMapToggleGuildRect; /**< Bouton toggle texte guilde. */
-    SDL_FRect worldMapCaseTypeRect; /**< Bouton choix type ville/map normale. */
+    SDL_FRect worldMapCaseTypeRect; /**< Bouton cycle du type de zone de la case selectionnee. */
+    std::array<SDL_FRect, WorldMapDefinition::kZoneTypeCount> worldMapLegendToggleRects; /**< Checkboxes des items de legende exportes dans le JSON. */
     SDL_FRect worldMapLinkModeRect; /**< Bouton activation du mode liaison. */
     SDL_FRect worldMapLinkSideRect; /**< Bouton choix du cote source de liaison. */
     SDL_FRect worldMapPreviewLockRect; /**< Bouton verrouillage edition pour aperçu final. */

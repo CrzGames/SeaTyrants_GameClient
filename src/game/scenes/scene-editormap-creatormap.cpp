@@ -83,8 +83,6 @@ constexpr RC2D_Color kHudWindowGold = RC2D_Color{184, 132, 30, 250};
 constexpr RC2D_Color kHudWindowSilver = RC2D_Color{211, 214, 220, 232};
 constexpr RC2D_Color kHudWindowFieldFill = RC2D_Color{12, 12, 14, 236};
 constexpr RC2D_Color kWorldMapCaseFill = RC2D_Color{24, 31, 40, 236};
-constexpr RC2D_Color kWorldMapCaseBorder = RC2D_Color{184, 132, 30, 244};
-constexpr RC2D_Color kWorldMapCityBorder = RC2D_Color{196, 62, 46, 244};
 constexpr RC2D_Color kWorldMapCaseSelectedBorder = RC2D_Color{140, 198, 255, 252};
 constexpr RC2D_Color kWorldMapCaseText = RC2D_Color{217, 200, 134, 255};
 constexpr RC2D_Color kWorldMapGuildText = RC2D_Color{215, 224, 235, 255};
@@ -97,6 +95,12 @@ constexpr float kWorldMapCaseMinHeight = 67.0f;
 constexpr float kWorldMapCaseFixedWidth = 80.0f;
 constexpr float kWorldMapCaseFixedHeight = 67.0f;
 constexpr size_t kWorldMapTextMaxLength = 64U;
+constexpr float kWorldMapPreviewLegendDotSize = 10.0f;
+constexpr float kWorldMapPreviewLegendItemGap = 18.0f;
+constexpr float kWorldMapPreviewLegendRowGap = 6.0f;
+constexpr float kWorldMapPreviewLegendPaddingX = 10.0f;
+constexpr float kWorldMapPreviewLegendPaddingY = 4.0f;
+constexpr float kWorldMapPreviewLegendMinHeight = 20.0f;
 constexpr float kAssetListScrollBarWidth = 10.0f;
 constexpr int kAssetListVisibleRows = 10;
 // Minimap editeur: l'export PNG reprend la taille visible du rectangle ecran.
@@ -368,6 +372,68 @@ static float miniMapNormalizedToSectorCenter(float normalizedValue, int sectorCo
     return std::clamp((normalizedValue * span) - 0.5f, 0.0f, maxSectorCenter);
 }
 
+static float computeWorldMapPreviewLegendHeight(
+    RC2D_Font* font,
+    const WorldMapDefinition::LegendVisibility& legendVisibility,
+    float availableWidth)
+{
+    const float contentWidth = (std::max)(1.0f, availableWidth - (kWorldMapPreviewLegendPaddingX * 2.0f));
+    if (font == nullptr || font->sdl_font == nullptr)
+    {
+        return kWorldMapPreviewLegendMinHeight;
+    }
+
+    if (!WorldMapDefinition::hasAnyLegendVisible(legendVisibility))
+    {
+        RC2D_Text text = rc2d_graphics_createText(font, "Legende masquee.");
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&text, &textWidth, &textHeight);
+        rc2d_graphics_destroyText(&text);
+        return (std::max)(kWorldMapPreviewLegendMinHeight, (kWorldMapPreviewLegendPaddingY * 2.0f) + static_cast<float>(textHeight));
+    }
+
+    float usedHeight = 0.0f;
+    float rowWidth = 0.0f;
+    float rowHeight = 0.0f;
+    bool hasRow = false;
+    for (const WorldMapDefinition::ZoneType zoneType : WorldMapDefinition::getZoneOrder())
+    {
+        if (!WorldMapDefinition::isLegendVisible(legendVisibility, zoneType))
+        {
+            continue;
+        }
+
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(zoneType);
+        RC2D_Text text = rc2d_graphics_createText(font, zoneVisual.legendLabel);
+        int textWidth = 0;
+        int textHeight = 0;
+        rc2d_graphics_getTextSize(&text, &textWidth, &textHeight);
+        rc2d_graphics_destroyText(&text);
+        const float itemHeight = (std::max)(kWorldMapPreviewLegendDotSize, static_cast<float>(textHeight));
+        const float itemWidth = kWorldMapPreviewLegendDotSize + 6.0f + static_cast<float>(textWidth) + kWorldMapPreviewLegendItemGap;
+        if (hasRow && (rowWidth + itemWidth) > contentWidth)
+        {
+            usedHeight += rowHeight + kWorldMapPreviewLegendRowGap;
+            rowWidth = 0.0f;
+            rowHeight = 0.0f;
+            hasRow = false;
+        }
+
+        rowWidth += itemWidth;
+        rowHeight = hasRow ? (std::max)(rowHeight, itemHeight) : itemHeight;
+        hasRow = true;
+    }
+
+    if (hasRow)
+    {
+        usedHeight += rowHeight;
+    }
+
+    return (std::max)(kWorldMapPreviewLegendMinHeight, (kWorldMapPreviewLegendPaddingY * 2.0f) + usedHeight);
+}
+
 EditorMapCreateMapScene* EditorMapCreateMapScene::activeInstance = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -515,6 +581,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       miniMapDragOffsetY(0.0f),
       worldMapCases{},
       worldMapLinks{},
+      worldMapLegendVisibility{},
       selectedWorldMapCaseIndex(-1),
       worldMapLinkModeEnabled(false),
       pendingWorldMapLinkSourceIndex(-1),
@@ -552,6 +619,7 @@ EditorMapCreateMapScene::EditorMapCreateMapScene(void)
       worldMapDeleteCaseRect{},
       worldMapToggleGuildRect{},
       worldMapCaseTypeRect{},
+      worldMapLegendToggleRects{},
       worldMapLinkModeRect{},
       worldMapLinkSideRect{},
       worldMapPreviewLockRect{},
@@ -768,6 +836,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->miniMapDragOffsetY = 0.0f;
     this->worldMapCases.clear();
     this->worldMapLinks.clear();
+    this->worldMapLegendVisibility = WorldMapDefinition::LegendVisibility{};
     this->selectedWorldMapCaseIndex = -1;
     this->worldMapLinkModeEnabled = false;
     this->pendingWorldMapLinkSourceIndex = -1;
@@ -805,6 +874,7 @@ void EditorMapCreateMapScene::resetEditorState(void)
     this->worldMapDeleteCaseRect = SDL_FRect{};
     this->worldMapToggleGuildRect = SDL_FRect{};
     this->worldMapCaseTypeRect = SDL_FRect{};
+    this->worldMapLegendToggleRects = {};
     this->worldMapLinkModeRect = SDL_FRect{};
     this->worldMapLinkSideRect = SDL_FRect{};
     this->worldMapPreviewLockRect = SDL_FRect{};
@@ -4956,7 +5026,7 @@ void EditorMapCreateMapScene::generateWorldMapAutoLayout(void)
             worldMapCase.mapName =
                 std::to_string(firstLogicalColumn + columnIndex) + "/" + std::to_string(static_cast<int>(rowIndex) + 1);
             worldMapCase.showGuildName = false;
-            worldMapCase.isCity = false;
+            worldMapCase.zoneType = WorldMapDefinition::ZoneType::TERRESTRIAL;
             this->clampWorldMapCaseToCanvas(worldMapCase);
             this->worldMapCases.push_back(worldMapCase);
             rowCaseIndices.back().push_back(static_cast<int>(this->worldMapCases.size()) - 1);
@@ -5101,7 +5171,7 @@ void EditorMapCreateMapScene::addWorldMapCase(void)
     WorldMapCase worldMapCase{};
     worldMapCase.mapName = "1/1";
     worldMapCase.showGuildName = false;
-    worldMapCase.isCity = false;
+    worldMapCase.zoneType = WorldMapDefinition::ZoneType::TERRESTRIAL;
 
     if (this->isWorldMapCaseSelectionValid())
     {
@@ -5112,7 +5182,7 @@ void EditorMapCreateMapScene::addWorldMapCase(void)
         worldMapCase.height = selectedCase.height;
         worldMapCase.mapName = selectedCase.mapName.empty() ? std::string("1/1") : selectedCase.mapName;
         worldMapCase.showGuildName = selectedCase.showGuildName;
-        worldMapCase.isCity = selectedCase.isCity;
+        worldMapCase.zoneType = selectedCase.zoneType;
     }
     else
     {
@@ -5252,6 +5322,10 @@ void EditorMapCreateMapScene::updateWorldMapEditorLayout(void)
     const float contentBottom = this->worldMapEditorRect.y + this->worldMapEditorRect.h - 22.0f;
     const float sidePanelWidth = std::clamp(this->worldMapEditorRect.w * 0.25f, 300.0f, 360.0f);
     const float previewGap = 22.0f;
+    constexpr float kWorldMapPreviewWindowTopOffset = 50.0f;
+    constexpr float kWorldMapPreviewWindowChromeWidth = 32.0f;
+    constexpr float kWorldMapPreviewLegendGapTop = 8.0f;
+    constexpr float kWorldMapPreviewLegendGapBottom = 8.0f;
     if (this->worldMapPreviewPreferredWidth <= 0.0f)
     {
         this->worldMapPreviewPreferredWidth = kWorldMapCanvasWidth;
@@ -5262,14 +5336,19 @@ void EditorMapCreateMapScene::updateWorldMapEditorLayout(void)
     }
     this->worldMapPreviewPreferredWidth = std::clamp(this->worldMapPreviewPreferredWidth, 64.0f, 8192.0f);
     this->worldMapPreviewPreferredHeight = std::clamp(this->worldMapPreviewPreferredHeight, 64.0f, 8192.0f);
-    const float previewViewportMaxWidth = (std::max)(420.0f, contentRight - (contentLeft + sidePanelWidth + previewGap + 32.0f));
-    const float previewViewportMaxHeight = (std::max)(280.0f, contentBottom - (contentTop + 40.0f + 54.0f + 20.0f));
+    const float previewViewportMaxWidth = (std::max)(420.0f, contentRight - (contentLeft + sidePanelWidth + previewGap + kWorldMapPreviewWindowChromeWidth));
     const float previewViewportWidth = std::clamp(this->worldMapPreviewPreferredWidth, 64.0f, previewViewportMaxWidth);
+    const float previewLegendHeight =
+        computeWorldMapPreviewLegendHeight(&this->overlayFont, this->worldMapLegendVisibility, previewViewportWidth);
+    const float previewWindowChromeHeight =
+        6.0f + 28.0f + kWorldMapPreviewLegendGapTop + previewLegendHeight + kWorldMapPreviewLegendGapBottom + 16.0f;
+    const float previewViewportMaxHeight =
+        (std::max)(280.0f, contentBottom - (contentTop + kWorldMapPreviewWindowTopOffset) - previewWindowChromeHeight);
     const float previewViewportHeight = std::clamp(this->worldMapPreviewPreferredHeight, 64.0f, previewViewportMaxHeight);
-    const float previewWindowWidth = previewViewportWidth + 32.0f;
-    const float previewWindowHeight = previewViewportHeight + 86.0f;
+    const float previewWindowWidth = previewViewportWidth + kWorldMapPreviewWindowChromeWidth;
+    const float previewWindowHeight = previewViewportHeight + previewWindowChromeHeight;
     const float previewWindowX = contentLeft + sidePanelWidth + previewGap;
-    const float previewWindowY = contentTop + 50.0f;
+    const float previewWindowY = contentTop + kWorldMapPreviewWindowTopOffset;
     this->worldMapCanvasVirtualWidth = this->worldMapPreviewPreferredWidth;
     this->worldMapCanvasVirtualHeight = this->worldMapPreviewPreferredHeight;
 
@@ -5297,9 +5376,21 @@ void EditorMapCreateMapScene::updateWorldMapEditorLayout(void)
         sidePanelWidth,
         24.0f
     };
+    const float worldMapLegendToggleStartY = this->worldMapCaseTypeRect.y + this->worldMapCaseTypeRect.h + 18.0f;
+    constexpr float kWorldMapLegendToggleRowHeight = 22.0f;
+    constexpr float kWorldMapLegendToggleRowGap = 6.0f;
+    for (size_t zoneIndex = 0; zoneIndex < this->worldMapLegendToggleRects.size(); ++zoneIndex)
+    {
+        this->worldMapLegendToggleRects[zoneIndex] = SDL_FRect{
+            contentLeft,
+            worldMapLegendToggleStartY + (static_cast<float>(zoneIndex) * (kWorldMapLegendToggleRowHeight + kWorldMapLegendToggleRowGap)),
+            sidePanelWidth,
+            kWorldMapLegendToggleRowHeight
+        };
+    }
     this->worldMapLinkModeRect = SDL_FRect{
         contentLeft,
-        this->worldMapCaseTypeRect.y + this->worldMapCaseTypeRect.h + 10.0f,
+        this->worldMapLegendToggleRects.back().y + this->worldMapLegendToggleRects.back().h + 12.0f,
         sidePanelWidth,
         24.0f
     };
@@ -5347,7 +5438,7 @@ void EditorMapCreateMapScene::updateWorldMapEditorLayout(void)
     };
     this->worldMapPreviewViewportRect = SDL_FRect{
         this->worldMapPreviewWindowRect.x + 16.0f,
-        this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + 26.0f,
+        this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + kWorldMapPreviewLegendGapTop + previewLegendHeight + kWorldMapPreviewLegendGapBottom,
         previewViewportWidth,
         previewViewportHeight
     };
@@ -5697,10 +5788,30 @@ bool EditorMapCreateMapScene::handleWorldMapEditorClick(float x, float y, RC2D_M
         }
 
         WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
-        selectedCase.isCity = !selectedCase.isCity;
-        this->statusMessage = selectedCase.isCity
-            ? "Type de case: VILLE."
-            : "Type de case: MAP NORMALE.";
+        selectedCase.zoneType = WorldMapDefinition::getNextZoneType(selectedCase.zoneType);
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(selectedCase.zoneType);
+        this->statusMessage = std::string("Type de case: ") + zoneVisual.typeButtonLabel + ".";
+        return true;
+    }
+    for (size_t zoneIndex = 0; zoneIndex < this->worldMapLegendToggleRects.size(); ++zoneIndex)
+    {
+        if (!this->pointInRect(x, y, this->worldMapLegendToggleRects[zoneIndex]))
+        {
+            continue;
+        }
+
+        const WorldMapDefinition::ZoneType zoneType =
+            WorldMapDefinition::getZoneOrder()[zoneIndex];
+        const bool visible =
+            !WorldMapDefinition::isLegendVisible(this->worldMapLegendVisibility, zoneType);
+        WorldMapDefinition::setLegendVisible(&this->worldMapLegendVisibility, zoneType, visible);
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(zoneType);
+        this->statusMessage =
+            std::string("Legende ") +
+            zoneVisual.legendLabel +
+            (visible ? " affichee." : " masquee.");
         return true;
     }
     if (this->pointInRect(x, y, this->worldMapLinkModeRect))
@@ -5785,6 +5896,7 @@ bool EditorMapCreateMapScene::handleWorldMapEditorClick(float x, float y, RC2D_M
         this->worldMapAutoLayoutInput = "5-3-2";
         this->worldMapPreviewPreferredWidth = kWorldMapCanvasWidth;
         this->worldMapPreviewPreferredHeight = kWorldMapCanvasHeight;
+        this->worldMapLegendVisibility = WorldMapDefinition::LegendVisibility{};
         this->updateWorldMapEditorLayout();
         this->syncEditorTextInputState();
         this->statusMessage = "Carte du monde reinitialisee.";
@@ -6309,6 +6421,39 @@ bool EditorMapCreateMapScene::importWorldMapFromAbsolutePath(const char* absolut
         this->worldMapPreviewPreferredHeight = static_cast<float>(guiHeight->valuedouble);
     }
 
+    WorldMapDefinition::LegendVisibility importedLegendVisibility{};
+    bool hasExplicitLegendVisibility = false;
+    const cJSON* legendItem = cJSON_GetObjectItemCaseSensitive(root, "legend");
+    if (cJSON_IsObject(legendItem))
+    {
+        hasExplicitLegendVisibility = true;
+        const cJSON* showTerrestrialItem = cJSON_GetObjectItemCaseSensitive(legendItem, "showTerrestrialZone");
+        const cJSON* showCityItem = cJSON_GetObjectItemCaseSensitive(legendItem, "showCity");
+        const cJSON* showNordicItem = cJSON_GetObjectItemCaseSensitive(legendItem, "showNordicZone");
+        const cJSON* showCelestialItem = cJSON_GetObjectItemCaseSensitive(legendItem, "showCelestialZone");
+        const cJSON* showVolcanicItem = cJSON_GetObjectItemCaseSensitive(legendItem, "showVolcanicZone");
+        if (cJSON_IsBool(showTerrestrialItem))
+        {
+            importedLegendVisibility.showTerrestrial = cJSON_IsTrue(showTerrestrialItem);
+        }
+        if (cJSON_IsBool(showCityItem))
+        {
+            importedLegendVisibility.showCity = cJSON_IsTrue(showCityItem);
+        }
+        if (cJSON_IsBool(showNordicItem))
+        {
+            importedLegendVisibility.showNordic = cJSON_IsTrue(showNordicItem);
+        }
+        if (cJSON_IsBool(showCelestialItem))
+        {
+            importedLegendVisibility.showCelestial = cJSON_IsTrue(showCelestialItem);
+        }
+        if (cJSON_IsBool(showVolcanicItem))
+        {
+            importedLegendVisibility.showVolcanic = cJSON_IsTrue(showVolcanicItem);
+        }
+    }
+
     std::vector<WorldMapCase> importedCases;
     struct PendingImportedLink
     {
@@ -6348,14 +6493,18 @@ bool EditorMapCreateMapScene::importWorldMapFromAbsolutePath(const char* absolut
         importedCase.width = cJSON_IsNumber(widthItem) ? static_cast<float>(widthItem->valuedouble) : kWorldMapCaseFixedWidth;
         importedCase.height = cJSON_IsNumber(heightItem) ? static_cast<float>(heightItem->valuedouble) : kWorldMapCaseFixedHeight;
         importedCase.mapName = (cJSON_IsString(nameItem) && nameItem->valuestring != nullptr) ? nameItem->valuestring : "1/1";
-        importedCase.isCity =
-            cJSON_IsString(typeItem) &&
-            typeItem->valuestring != nullptr &&
-            std::strcmp(typeItem->valuestring, "map-ville") == 0;
+        importedCase.zoneType =
+            cJSON_IsString(typeItem) && typeItem->valuestring != nullptr
+                ? WorldMapDefinition::parseZoneTypeId(typeItem->valuestring)
+                : WorldMapDefinition::ZoneType::TERRESTRIAL;
         if (cJSON_IsObject(guildTagItem))
         {
             const cJSON* enabledItem = cJSON_GetObjectItemCaseSensitive(guildTagItem, "enabled");
             importedCase.showGuildName = cJSON_IsBool(enabledItem) ? cJSON_IsTrue(enabledItem) : false;
+        }
+        if (!hasExplicitLegendVisibility)
+        {
+            WorldMapDefinition::enableLegendForZone(&importedLegendVisibility, importedCase.zoneType);
         }
         this->clampWorldMapCaseToCanvas(importedCase);
         importedCases.push_back(importedCase);
@@ -6416,6 +6565,7 @@ bool EditorMapCreateMapScene::importWorldMapFromAbsolutePath(const char* absolut
 
     this->worldMapCases = importedCases;
     this->worldMapLinks.clear();
+    this->worldMapLegendVisibility = importedLegendVisibility;
     for (const PendingImportedLink& pendingLink : pendingLinks)
     {
         if (pendingLink.fromCaseIndex < 0 ||
@@ -6534,21 +6684,31 @@ bool EditorMapCreateMapScene::exportWorldMapToAbsolutePath(const char* absoluteP
     cJSON_AddNumberToObject(guiItem, "height", static_cast<double>(this->worldMapCanvasVirtualHeight));
     cJSON_AddItemToObject(root, "gui", guiItem);
 
+    cJSON* legendItem = cJSON_CreateObject();
+    cJSON_AddBoolToObject(legendItem, "showTerrestrialZone", this->worldMapLegendVisibility.showTerrestrial);
+    cJSON_AddBoolToObject(legendItem, "showCity", this->worldMapLegendVisibility.showCity);
+    cJSON_AddBoolToObject(legendItem, "showNordicZone", this->worldMapLegendVisibility.showNordic);
+    cJSON_AddBoolToObject(legendItem, "showCelestialZone", this->worldMapLegendVisibility.showCelestial);
+    cJSON_AddBoolToObject(legendItem, "showVolcanicZone", this->worldMapLegendVisibility.showVolcanic);
+    cJSON_AddItemToObject(root, "legend", legendItem);
+
     cJSON* casesArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "cases", casesArray);
     for (size_t caseIndex = 0; caseIndex < this->worldMapCases.size(); ++caseIndex)
     {
         const WorldMapCase& worldMapCase = this->worldMapCases[caseIndex];
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(worldMapCase.zoneType);
         cJSON* caseItem = cJSON_CreateObject();
         cJSON_AddNumberToObject(caseItem, "x", static_cast<double>(worldMapCase.x));
         cJSON_AddNumberToObject(caseItem, "y", static_cast<double>(worldMapCase.y));
         cJSON_AddNumberToObject(caseItem, "width", static_cast<double>(worldMapCase.width));
         cJSON_AddNumberToObject(caseItem, "height", static_cast<double>(worldMapCase.height));
         cJSON_AddStringToObject(caseItem, "mapName", trimAscii(worldMapCase.mapName).c_str());
-        cJSON_AddStringToObject(caseItem, "type", worldMapCase.isCity ? "map-ville" : "map-normal");
+        cJSON_AddStringToObject(caseItem, "type", zoneVisual.typeId);
         cJSON* colorItem = cJSON_CreateObject();
-        cJSON_AddStringToObject(colorItem, "name", worldMapCase.isCity ? "red" : "orange");
-        cJSON_AddStringToObject(colorItem, "hex", worldMapCase.isCity ? "#C43E2E" : "#B8841E");
+        cJSON_AddStringToObject(colorItem, "name", zoneVisual.colorName);
+        cJSON_AddStringToObject(colorItem, "hex", zoneVisual.colorHex);
         cJSON_AddItemToObject(caseItem, "color", colorItem);
         cJSON* guildTagItem = cJSON_CreateObject();
         cJSON_AddBoolToObject(guildTagItem, "enabled", worldMapCase.showGuildName);
@@ -8225,7 +8385,7 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
     auto drawWorldMapCase = [&](const SDL_FRect& rect,
                                 const std::string& mapName,
                                 bool showGuildName,
-                                bool isCity,
+                                WorldMapDefinition::ZoneType zoneType,
                                 bool selected,
                                 float scale,
                                 bool accentBorders) {
@@ -8257,7 +8417,8 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
 
         rc2d_graphics_setColor(kWorldMapCaseFill);
         rc2d_graphics_rectangle("fill", &rect);
-        const RC2D_Color baseBorderColor = isCity ? kWorldMapCityBorder : kWorldMapCaseBorder;
+        const RC2D_Color baseBorderColor =
+            WorldMapDefinition::getZoneVisual(zoneType).borderColor;
         rc2d_graphics_setColor(
             accentBorders
                 ? (selected ? kWorldMapCaseSelectedBorder : baseBorderColor)
@@ -8291,6 +8452,104 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
             mapTextRect,
             kWorldMapCaseText);
     };
+    auto drawLegendEntries = [&](const SDL_FRect& rect) {
+        if (!WorldMapDefinition::hasAnyLegendVisible(this->worldMapLegendVisibility))
+        {
+            drawText("Legende masquee.", rect.x + 10.0f, rect.y + 4.0f, kHudTextColor);
+            return;
+        }
+
+        constexpr float kLegendDotSize = 10.0f;
+        constexpr float kLegendItemGap = 18.0f;
+        constexpr float kLegendRowGap = 6.0f;
+        constexpr float kLegendHorizontalPadding = 10.0f;
+        float cursorX = rect.x + kLegendHorizontalPadding;
+        float cursorY = rect.y + 4.0f;
+
+        for (const WorldMapDefinition::ZoneType zoneType : WorldMapDefinition::getZoneOrder())
+        {
+            if (!WorldMapDefinition::isLegendVisible(this->worldMapLegendVisibility, zoneType))
+            {
+                continue;
+            }
+
+            const WorldMapDefinition::ZoneVisual zoneVisual =
+                WorldMapDefinition::getZoneVisual(zoneType);
+            int textWidth = 0;
+            int textHeight = 0;
+            (void)this->measureWorldMapTextSize(zoneVisual.legendLabel, &textWidth, &textHeight);
+            const float rowHeight = (std::max)(kLegendDotSize, static_cast<float>(textHeight));
+            const float itemWidth = kLegendDotSize + 6.0f + static_cast<float>(textWidth) + kLegendItemGap;
+            if (cursorX > (rect.x + kLegendHorizontalPadding) &&
+                (cursorX + itemWidth) > (rect.x + rect.w - kLegendHorizontalPadding))
+            {
+                cursorX = rect.x + kLegendHorizontalPadding;
+                cursorY += rowHeight + kLegendRowGap;
+            }
+
+            const SDL_FRect dotRect{
+                cursorX,
+                cursorY + ((rowHeight - kLegendDotSize) * 0.5f),
+                kLegendDotSize,
+                kLegendDotSize
+            };
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            rc2d_graphics_setColor(zoneVisual.borderColor);
+            rc2d_graphics_rectangle("fill", &dotRect);
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+            drawText(
+                zoneVisual.legendLabel,
+                dotRect.x + dotRect.w + 6.0f,
+                cursorY + ((rowHeight - static_cast<float>(textHeight)) * 0.5f),
+                RC2D_Color{217, 200, 134, 255});
+            cursorX += itemWidth;
+        }
+    };
+    auto drawLegendToggle = [&](const SDL_FRect& rect, WorldMapDefinition::ZoneType zoneType) {
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(zoneType);
+        const bool checked =
+            WorldMapDefinition::isLegendVisible(this->worldMapLegendVisibility, zoneType);
+        const SDL_FRect checkboxRect{
+            rect.x + 8.0f,
+            rect.y + ((rect.h - 14.0f) * 0.5f),
+            14.0f,
+            14.0f
+        };
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+        rc2d_graphics_setColor(checked ? RC2D_Color{56, 74, 94, 215} : RC2D_Color{28, 38, 50, 205});
+        rc2d_graphics_rectangle("fill", &rect);
+        rc2d_graphics_setColor(checked ? RC2D_Color{160, 215, 255, 235} : RC2D_Color{140, 150, 165, 220});
+        rc2d_graphics_rectangle("line", &rect);
+        rc2d_graphics_setColor(RC2D_Color{20, 24, 30, 235});
+        rc2d_graphics_rectangle("fill", &checkboxRect);
+        rc2d_graphics_setColor(checked ? zoneVisual.borderColor : RC2D_Color{140, 150, 165, 220});
+        rc2d_graphics_rectangle("line", &checkboxRect);
+        if (checked)
+        {
+            rc2d_graphics_line(
+                checkboxRect.x + 2.5f,
+                checkboxRect.y + 7.5f,
+                checkboxRect.x + 5.5f,
+                checkboxRect.y + 10.5f);
+            rc2d_graphics_line(
+                checkboxRect.x + 5.5f,
+                checkboxRect.y + 10.5f,
+                checkboxRect.x + 11.0f,
+                checkboxRect.y + 3.0f);
+        }
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+
+        int textWidth = 0;
+        int textHeight = 0;
+        (void)this->measureWorldMapTextSize(zoneVisual.legendLabel, &textWidth, &textHeight);
+        drawText(
+            zoneVisual.legendLabel,
+            checkboxRect.x + checkboxRect.w + 8.0f,
+            rect.y + ((rect.h - static_cast<float>(textHeight)) * 0.5f),
+            checked ? RC2D_Color{235, 242, 250, 250} : kHudTextColor);
+    };
 
     const SDL_FRect outer = this->worldMapEditorRect;
     const SDL_FRect inner = SDL_FRect{outer.x + 4.0f, outer.y + 4.0f, outer.w - 8.0f, outer.h - 8.0f};
@@ -8300,6 +8559,12 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
         previewOuter.y + 4.0f,
         previewOuter.w - 8.0f,
         previewOuter.h - 8.0f
+    };
+    const SDL_FRect previewLegendRect{
+        this->worldMapPreviewViewportRect.x,
+        this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + 8.0f,
+        this->worldMapPreviewViewportRect.w,
+        this->worldMapPreviewViewportRect.y - (this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h) - 16.0f
     };
     SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
     auto toClipRect = [](const SDL_FRect& rect) {
@@ -8335,6 +8600,10 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
     rc2d_graphics_rectangle("fill", &this->worldMapPreviewHeaderRect);
     rc2d_graphics_setColor(kHudWindowGold);
     rc2d_graphics_rectangle("line", &this->worldMapPreviewHeaderRect);
+    rc2d_graphics_setColor(kHudWindowFieldFill);
+    rc2d_graphics_rectangle("fill", &previewLegendRect);
+    rc2d_graphics_setColor(kHudWindowGold);
+    rc2d_graphics_rectangle("line", &previewLegendRect);
     rc2d_graphics_setColor(kHudWindowFieldFill);
     rc2d_graphics_rectangle("fill", &this->worldMapPreviewViewportRect);
     rc2d_graphics_setColor(kHudWindowGold);
@@ -8409,7 +8678,7 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
         };
         const SDL_FPoint start = getLinkAnchor(fromRect, link.fromSide);
         const SDL_FPoint end = getLinkAnchor(toRect, getOppositeLinkSide(link.fromSide));
-        const RC2D_Color lineColor = fromCase.isCity ? kWorldMapCityBorder : kWorldMapCaseBorder;
+        const RC2D_Color lineColor = WorldMapDefinition::getNeutralLinkColor();
 
         rc2d_graphics_setColor(lineColor);
         if (link.fromSide == WorldMapLinkSide::LEFT || link.fromSide == WorldMapLinkSide::RIGHT)
@@ -8446,7 +8715,7 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
             caseRect,
             worldMapCase.mapName,
             worldMapCase.showGuildName,
-            worldMapCase.isCity,
+            worldMapCase.zoneType,
             !this->worldMapPreviewInteractionLocked &&
                 static_cast<int>(i) == this->selectedWorldMapCaseIndex,
             1.0f,
@@ -8507,17 +8776,7 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
 
     drawText("Createur carte du monde", this->worldMapEditorHeaderRect.x + 10.0f, this->worldMapEditorHeaderRect.y + 8.0f, RC2D_Color{217, 200, 134, 255});
     drawText("GUI gameplay", this->worldMapPreviewHeaderRect.x + 10.0f, this->worldMapPreviewHeaderRect.y + 6.0f, RC2D_Color{217, 200, 134, 255});
-    const float legendY = this->worldMapPreviewHeaderRect.y + this->worldMapPreviewHeaderRect.h + 6.0f;
-    SDL_FRect cityDot{this->worldMapPreviewHeaderRect.x + 10.0f, legendY + 4.0f, 10.0f, 10.0f};
-    SDL_FRect mapDot{this->worldMapPreviewHeaderRect.x + 146.0f, legendY + 4.0f, 10.0f, 10.0f};
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
-    rc2d_graphics_setColor(kWorldMapCityBorder);
-    rc2d_graphics_rectangle("fill", &cityDot);
-    rc2d_graphics_setColor(kWorldMapCaseBorder);
-    rc2d_graphics_rectangle("fill", &mapDot);
-    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
-    drawText("= Map ville", cityDot.x + cityDot.w + 6.0f, legendY, RC2D_Color{217, 200, 134, 255});
-    drawText("= Map normal", mapDot.x + mapDot.w + 6.0f, legendY, RC2D_Color{217, 200, 134, 255});
+    drawLegendEntries(previewLegendRect);
     drawText(
         "Clic vide = nouvelle case, molette = scroll.",
         this->worldMapPreviewWindowRect.x,
@@ -8533,13 +8792,27 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
         this->worldMapToggleGuildRect,
         guildEnabled ? "TAG GUILDE: ON" : "TAG GUILDE: OFF",
         guildEnabled);
-    const bool cityEnabled =
-        this->isWorldMapCaseSelectionValid() &&
-        this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)].isCity;
+    std::string zoneTypeButtonLabel = "TYPE: AUCUNE CASE";
+    bool zoneTypeButtonActive = false;
+    if (this->isWorldMapCaseSelectionValid())
+    {
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(
+                this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)].zoneType);
+        zoneTypeButtonLabel = std::string("TYPE: ") + zoneVisual.typeButtonLabel;
+        zoneTypeButtonActive = true;
+    }
     this->drawToolbarButton(
         this->worldMapCaseTypeRect,
-        cityEnabled ? "TYPE: MAP VILLE" : "TYPE: MAP NORMALE",
-        cityEnabled);
+        zoneTypeButtonLabel.c_str(),
+        zoneTypeButtonActive);
+    drawText("LEGENDE HUD", this->worldMapLegendToggleRects.front().x, this->worldMapLegendToggleRects.front().y - 18.0f, kHudTextColor);
+    for (size_t zoneIndex = 0; zoneIndex < this->worldMapLegendToggleRects.size(); ++zoneIndex)
+    {
+        drawLegendToggle(
+            this->worldMapLegendToggleRects[zoneIndex],
+            WorldMapDefinition::getZoneOrder()[zoneIndex]);
+    }
     this->drawToolbarButton(
         this->worldMapLinkModeRect,
         this->worldMapLinkModeEnabled ? "LIAISON: ON" : "LIAISON: OFF",
@@ -8593,13 +8866,16 @@ void EditorMapCreateMapScene::drawWorldMapEditor(void) const
     if (this->isWorldMapCaseSelectionValid())
     {
         const WorldMapCase& selectedCase = this->worldMapCases[static_cast<size_t>(this->selectedWorldMapCaseIndex)];
+        const WorldMapDefinition::ZoneVisual zoneVisual =
+            WorldMapDefinition::getZoneVisual(selectedCase.zoneType);
         mapNameValue = selectedCase.mapName;
         caseInfo =
             "Case " + std::to_string(this->selectedWorldMapCaseIndex + 1) +
             " | X:" + std::to_string(static_cast<int>(std::lround(selectedCase.x))) +
             " Y:" + std::to_string(static_cast<int>(std::lround(selectedCase.y))) +
             " | W:" + std::to_string(static_cast<int>(std::lround(selectedCase.width))) +
-            " H:" + std::to_string(static_cast<int>(std::lround(selectedCase.height)));
+            " H:" + std::to_string(static_cast<int>(std::lround(selectedCase.height))) +
+            " | " + zoneVisual.typeButtonLabel;
     }
     if (this->worldMapLinkModeEnabled)
     {

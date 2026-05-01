@@ -8,6 +8,7 @@
 
 #include "game/ui/hud/hud-cursor.h"
 #include "game/ui/hud/window-control-icons.h"
+#include "game/world/worldmap-definition.h"
 
 /**
  * @brief Widget gameplay dedie a l'affichage de la carte du monde.
@@ -157,7 +158,7 @@ private:
         bool showGuildTag = false;   /**< true si la case reserve une ligne pour le tag. */
         int guildTagMaxChars = 3;    /**< Limite de caracteres d'affichage du tag. */
         float guildTagHeightRatio = 0.22f; /**< Ratio legacy exporte par l'editeur. */
-        bool isCity = false;         /**< true pour une map ville, false pour une map normale. */
+        WorldMapDefinition::ZoneType zoneType = WorldMapDefinition::ZoneType::TERRESTRIAL; /**< Type de zone rendu pour la case. */
     };
 
     /**
@@ -221,7 +222,7 @@ private:
     SDL_FRect widgetRect;           /**< Rectangle global courant du widget. */
     SDL_FRect headerRect;           /**< Header draggable. */
     SDL_FRect closeButtonRect;      /**< Bouton fermer. */
-    SDL_FRect legendRect;           /**< Zone de legende map ville / map normale. */
+    SDL_FRect legendRect;           /**< Zone de legende des types de zones visibles. */
     SDL_FRect viewportRect;         /**< Zone visible contenant la GUI world map. */
     bool visible;                   /**< Etat visible de la fenetre. */
     bool widgetDragging;            /**< true pendant un drag du header. */
@@ -236,5 +237,6 @@ private:
     std::string loadedStoragePath;  /**< Dernier chemin JSON charge. */
     std::vector<MapCase> mapCases;  /**< Cases logiques de la carte du monde. */
     std::vector<MapLink> mapLinks;  /**< Liaisons logiques entre cases. */
+    WorldMapDefinition::LegendVisibility legendVisibility; /**< Controle les items de legende affiches dans le HUD. */
     std::map<std::string, std::string> guildTagsByMapName; /**< Overrides runtime des tags de guild. */
 };
