@@ -107,9 +107,9 @@ private:
     /**
      * @brief Etats des options de filtrage minimap.
      */
-    bool showPlayers; /**< Etat de la case "Afficher les joueurs". */
+    bool showPlayers; /**< Etat de la case "Afficher les navires des joueurs". */
     bool showMonsters; /**< Etat de la case "Afficher les monstres". */
-    bool showShips; /**< Etat de la case "Afficher les navires". */
+    bool showShips; /**< Etat de la case "Afficher les navires des npcs". */
     bool showTreasures; /**< Etat de la case "Afficher les tresors". */
 
     /**

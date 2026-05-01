@@ -422,9 +422,9 @@ void ParamsMinimapWidget::draw(void) const
     self->controlIcons.drawCloseButton(closeButtonCentered, kHeaderFill, kGold);
 
     // Libelles des options.
-    drawLeftCenteredY(&self->bodyFont, "Afficher les joueurs", rowPlayers, rowPlayers.x, kTextWhite);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les navires des joueurs", rowPlayers, rowPlayers.x, kTextWhite);
     drawLeftCenteredY(&self->bodyFont, "Afficher les monstres", rowMonsters, rowMonsters.x, kTextWhite);
-    drawLeftCenteredY(&self->bodyFont, "Afficher les navires", rowShips, rowShips.x, kTextWhite);
+    drawLeftCenteredY(&self->bodyFont, "Afficher les navires des npcs", rowShips, rowShips.x, kTextWhite);
     drawLeftCenteredY(&self->bodyFont, "Afficher les tresors", rowTreasures, rowTreasures.x, kTextWhite);
 
     // Cases a cocher selon les etats booleens.
