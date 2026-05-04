@@ -18957,7 +18957,7 @@ void EditorMapVfxScene::update(double dt)
         }
     }
 
-    GetOceanShader().update(dt, true);
+    GetOceanShader().update(dt);
     if (this->editorMode == EditorMode::LOOSE_SPRITES &&
         this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
     {
