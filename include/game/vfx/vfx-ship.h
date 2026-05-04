@@ -340,7 +340,7 @@ public:
      *
      * Exemple:
      * - shipFolderPath = `assets/images/ships/ship-elite27`
-     * - vfxFolderPath = `assets/images/vfx/vfx-cannon`
+     * - vfxFolderPath = `assets/images/vfxship/vfx-cannon`
      * - config derivee = `assets/images/ships/ship-elite27/fx-cannon_ship-elite27.json`
      *
      * @param shipFolderPath Dossier du ship.

@@ -80,10 +80,13 @@ public:
 
     /**
      * @brief Modes de fenetre proposes dans l'onglet graphiques.
+     *
+     * Alignes sur @ref RC2D_FullscreenType (RC2D_window) : fenetre maximisee, exclusif, borderless.
      */
     enum class GraphicsWindowMode : int {
-        MAXIMIZED_WINDOW = 0, /**< Fenetre maximisee. */
-        FULLSCREEN = 1        /**< Plein ecran exclusif. */
+        MAXIMIZED_WINDOW = 0,      /**< Fenetre maximisee (non plein ecran RC2D). */
+        FULLSCREEN_EXCLUSIVE = 1, /**< Plein ecran exclusif (resolution d'affichage). */
+        FULLSCREEN_BORDERLESS = 2  /**< Plein ecran sans bordure (desktop / borderless). */
     };
 
     /**
@@ -371,6 +374,11 @@ public:
      * @param preset Nouvelle valeur a appliquer (@ref SalvoBulletPreset).
      */
     void setSalvoBulletPreset(SalvoBulletPreset preset);
+
+    /**
+     * @brief Nombre de boulets par salve pour le gameplay (1, 5 ou 10 selon le preset HUD).
+     */
+    int getSalvoBulletCount(void) const;
 
     /**
      * @brief Retourne les marges % (gauche, droite, bas) reservees hors zone map / ocean.

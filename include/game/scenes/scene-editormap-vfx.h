@@ -964,6 +964,7 @@ private:
         SDL_Keymod mod,
         bool isrepeat);
     bool handleShipVfxShipDuplicatePopupMouseWheel(int delta, float mouseX, float mouseY);
+    float resolveCurrentPagePreviewSpawnTimeSeconds(void) const;
     ShipVfxInstance duplicateShipVfxInstanceFreshId(const ShipVfxInstance& src);
     void remapTrailConeForShipDirectionChange(ShipVfxInstance& inst, int srcDirectionIndex4, int tgtDirectionIndex4);
     bool duplicateVfxInstanceAtIndexInCurrentPage(int instanceIndex);

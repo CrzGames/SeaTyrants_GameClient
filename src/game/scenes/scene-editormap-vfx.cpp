@@ -2343,7 +2343,7 @@ void EditorMapVfxScene::autoImportAssetsFromDefaultFolders(void)
     }
 
     this->importShipsFromRootFolderAbsolutePath("assets/images/ships");
-    this->importSfxFromRootFolderAbsolutePath("assets/images/vfx");
+    this->importSfxFromRootFolderAbsolutePath("assets/images/vfxship");
 
     // Remappe la selection apres tri/ajouts pour garder le meme ship/vfx actif.
     const int remappedShipIndex = findImportedShipIndexByPathKey(activeShipPathKey);
@@ -4471,13 +4471,28 @@ EditorMapVfxScene::ShipVfxInstance EditorMapVfxScene::duplicateShipVfxInstanceFr
 {
     ShipVfxInstance duplicate = src;
     duplicate.instanceId = this->nextVfxInstanceId++;
-    duplicate.previewSpawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    duplicate.previewSpawnTimeSeconds =
+        (std::isfinite(src.previewSpawnTimeSeconds) && src.previewSpawnTimeSeconds >= 0.0f)
+            ? src.previewSpawnTimeSeconds
+            : this->resolveCurrentPagePreviewSpawnTimeSeconds();
     // Runtime-only accumulators reset; toutes les proprietes editor/gameplay restent copiees.
     duplicate.motionTrailIdleSpawnAccSec = 0.0f;
     duplicate.motionTrailIdleRingSalvoPiecesRemaining = 0;
     duplicate.motionTrailIdleRingSalvoStaggerAccSec = 0.0f;
     duplicate.motionTrailDistanceAcc = 0.0f;
     return duplicate;
+}
+
+float EditorMapVfxScene::resolveCurrentPagePreviewSpawnTimeSeconds(void) const
+{
+    for (const ShipVfxInstance& instance : this->currentShipVfxLayers())
+    {
+        if (std::isfinite(instance.previewSpawnTimeSeconds) && instance.previewSpawnTimeSeconds >= 0.0f)
+        {
+            return instance.previewSpawnTimeSeconds;
+        }
+    }
+    return static_cast<float>(SDL_GetTicks()) * 0.001f;
 }
 
 void EditorMapVfxScene::remapTrailConeForShipDirectionChange(
@@ -7965,7 +7980,7 @@ void EditorMapVfxScene::openExportFolderDialog(void)
     if (this->pendingExportMode == EditorMode::LOOSE_SPRITES)
     {
         options.title =
-            "Dossier parent d'export (ex: assets/images/vfx ou assets/images/ships/nom-navire)";
+            "Dossier parent d'export (ex: assets/images/vfxship ou assets/images/ships/nom-navire)";
     }
     else
     {
@@ -9044,7 +9059,8 @@ bool EditorMapVfxScene::importSfxFromRootFolderAbsolutePath(const char* rootFold
 
     if (addedCount <= 0 && this->importedSfx.empty())
     {
-        this->statusMessage = "Aucun VFX valide detecte dans assets/images/vfx.";
+        this->statusMessage =
+            std::string("Aucun VFX valide detecte dans ") + normalizePathSlashes(rootFolderAbsolutePath) + ".";
         return false;
     }
 
@@ -9563,7 +9579,7 @@ void EditorMapVfxScene::spawnSelectedSfxAtShipCenter(void)
     }
 
     const ImportedSfx& imported = this->importedSfx[static_cast<size_t>(this->selectedSfxIndex)];
-    const float previewSpawnTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const float previewSpawnTimeSeconds = this->resolveCurrentPagePreviewSpawnTimeSeconds();
     ShipVfxInstance instance{};
     instance.instanceId = this->nextVfxInstanceId++;
     int sourceInstanceNumber = 1;
@@ -18777,7 +18793,7 @@ void EditorMapVfxScene::load(void)
     this->loadLooseReferencePreviewAssets();
     this->applySelectedOceanColor();
     this->autoImportAssetsFromDefaultFolders();
-    this->statusMessage = "Editor VFX charge. Scan assets/images/ships et assets/images/vfx termine.";
+    this->statusMessage = "Editor VFX charge. Scan assets/images/ships et assets/images/vfxship termine.";
 
     RC2D_log(RC2D_LOG_INFO, "EditorMapVfxScene: loaded");
 }
@@ -18941,7 +18957,7 @@ void EditorMapVfxScene::update(double dt)
         }
     }
 
-    GetOceanShader().update(dt);
+    GetOceanShader().update(dt, true);
     if (this->editorMode == EditorMode::LOOSE_SPRITES &&
         this->loosePreviewMode == LoosePreviewMode::PLACEMENT_PREVIEW)
     {

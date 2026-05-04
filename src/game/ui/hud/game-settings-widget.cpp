@@ -156,7 +156,7 @@ struct GameSettingsLayout {
     SDL_FRect graphicsWindowModeRow;
     SDL_FRect graphicsWindowModeButton;
     SDL_FRect graphicsWindowModeDropdown;
-    std::array<SDL_FRect, 2> graphicsWindowModeOptions;
+    std::array<SDL_FRect, 3> graphicsWindowModeOptions;
     SDL_FRect graphicsPresentationModeRow;
     SDL_FRect graphicsPresentationModeButton;
     SDL_FRect graphicsPresentationModeDropdown;
@@ -309,11 +309,31 @@ static const char* getGraphicsWindowModeLabel(GameSettingsWidget::GraphicsWindow
 {
     switch (mode)
     {
-        case GameSettingsWidget::GraphicsWindowMode::FULLSCREEN:
-            return "FullScreen";
+        case GameSettingsWidget::GraphicsWindowMode::FULLSCREEN_EXCLUSIVE:
+            return "FullScreen Exclusif";
+        case GameSettingsWidget::GraphicsWindowMode::FULLSCREEN_BORDERLESS:
+            return "FullScreen Borderless";
         case GameSettingsWidget::GraphicsWindowMode::MAXIMIZED_WINDOW:
         default:
             return "Maximized Window";
+    }
+}
+
+/**
+ * @brief Index de ligne du menu deroulant mode fenetre (0..2) -> mode logique.
+ */
+static GameSettingsWidget::GraphicsWindowMode getGraphicsWindowModeForOptionIndex(std::size_t index)
+{
+    switch (index)
+    {
+        case 0U:
+            return GameSettingsWidget::GraphicsWindowMode::MAXIMIZED_WINDOW;
+        case 1U:
+            return GameSettingsWidget::GraphicsWindowMode::FULLSCREEN_EXCLUSIVE;
+        case 2U:
+            return GameSettingsWidget::GraphicsWindowMode::FULLSCREEN_BORDERLESS;
+        default:
+            return GameSettingsWidget::GraphicsWindowMode::MAXIMIZED_WINDOW;
     }
 }
 
@@ -1302,7 +1322,7 @@ static GameSettingsLayout buildLayout(const SDL_FRect& outer, int languageOption
         layout.graphicsWindowModeButton.x,
         layout.graphicsWindowModeButton.y + layout.graphicsWindowModeButton.h + 4.0f,
         layout.graphicsWindowModeButton.w,
-        8.0f + (2.0f * kGraphicsOptionRowHeight)
+        8.0f + (3.0f * kGraphicsOptionRowHeight)
     };
     for (std::size_t index = 0; index < layout.graphicsWindowModeOptions.size(); ++index)
     {
@@ -2290,12 +2310,13 @@ bool GameSettingsWidget::mousepressed(float x, float y, RC2D_MouseButton button,
                     continue;
                 }
 
-                this->applyGraphicsWindowMode(
-                    index == 0U
-                        ? GraphicsWindowMode::MAXIMIZED_WINDOW
-                        : GraphicsWindowMode::FULLSCREEN);
+                this->applyGraphicsWindowMode(getGraphicsWindowModeForOptionIndex(index));
                 this->graphicsWindowModeDropdownOpen = false;
                 this->graphicsPresentationModeDropdownOpen = false;
+                if (this->onUserSettingsChanged)
+                {
+                    this->onUserSettingsChanged();
+                }
                 return true;
             }
 
@@ -3694,10 +3715,7 @@ void GameSettingsWidget::draw(void) const
             const GraphicsWindowMode currentMode = self->getGraphicsWindowMode();
             for (std::size_t index = 0; index < layout.graphicsWindowModeOptions.size(); ++index)
             {
-                const GraphicsWindowMode mode =
-                    index == 0U
-                        ? GraphicsWindowMode::MAXIMIZED_WINDOW
-                        : GraphicsWindowMode::FULLSCREEN;
+                const GraphicsWindowMode mode = getGraphicsWindowModeForOptionIndex(index);
                 const bool selected = mode == currentMode;
                 const SDL_FRect optionRect = offsetRect(layout.graphicsWindowModeOptions[index], 0.0f, -scrollY);
                 const bool hovered = isPointInRect(mouseX, mouseY, optionRect);
@@ -4324,6 +4342,21 @@ void GameSettingsWidget::setSalvoBulletPreset(SalvoBulletPreset preset)
     }
 }
 
+int GameSettingsWidget::getSalvoBulletCount(void) const
+{
+    switch (this->graphicsSalvoBulletPreset)
+    {
+    case SalvoBulletPreset::LOW:
+        return 1;
+    case SalvoBulletPreset::NORMAL:
+        return 5;
+    case SalvoBulletPreset::HIGH:
+        return 10;
+    default:
+        return 5;
+    }
+}
+
 MapPlayfieldFrameMarginsPercent GameSettingsWidget::getMapPlayfieldFrameMarginsPercent(void) const
 {
     MapPlayfieldFrameMarginsPercent margins{};
@@ -4884,24 +4917,40 @@ void GameSettingsWidget::updateDraggedCameraScrollSpeedFromMouse(float mouseX)
 GameSettingsWidget::GraphicsWindowMode GameSettingsWidget::getGraphicsWindowMode(void) const
 {
     const RC2D_FullscreenInfo fullscreenInfo = rc2d_window_getFullscreen();
-    if (fullscreenInfo.is_fullscreen)
+    if (!fullscreenInfo.is_fullscreen)
     {
-        return GraphicsWindowMode::FULLSCREEN;
+        return GraphicsWindowMode::MAXIMIZED_WINDOW;
     }
 
-    return GraphicsWindowMode::MAXIMIZED_WINDOW;
+    if (fullscreenInfo.type == RC2D_FULLSCREEN_BORDERLESS)
+    {
+        return GraphicsWindowMode::FULLSCREEN_BORDERLESS;
+    }
+
+    if (fullscreenInfo.type == RC2D_FULLSCREEN_EXCLUSIVE)
+    {
+        return GraphicsWindowMode::FULLSCREEN_EXCLUSIVE;
+    }
+
+    return GraphicsWindowMode::FULLSCREEN_EXCLUSIVE;
 }
 
 void GameSettingsWidget::applyGraphicsWindowMode(GraphicsWindowMode mode)
 {
-    if (mode == GraphicsWindowMode::FULLSCREEN)
+    if (mode == GraphicsWindowMode::MAXIMIZED_WINDOW)
     {
-        rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
+        rc2d_window_setFullscreen(false, RC2D_FULLSCREEN_NONE, true);
+        rc2d_window_maximize();
         return;
     }
 
-    rc2d_window_setFullscreen(false, RC2D_FULLSCREEN_NONE, true);
-    rc2d_window_maximize();
+    if (mode == GraphicsWindowMode::FULLSCREEN_BORDERLESS)
+    {
+        rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_BORDERLESS, true);
+        return;
+    }
+
+    rc2d_window_setFullscreen(true, RC2D_FULLSCREEN_EXCLUSIVE, true);
 }
 
 RC2D_LogicalPresentationMode GameSettingsWidget::getGraphicsPresentationMode(void) const

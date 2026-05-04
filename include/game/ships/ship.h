@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <RC2D/RC2D.h>
@@ -87,6 +88,8 @@ private:
     DiagonalDirection directionB; /**< Direction visuelle secondaire. */
     float drawScale; /**< Multiplicateur d'echelle visuelle au rendu (1.0 = taille native). */
     Uint8 drawAlpha; /**< Alpha global applique au rendu du navire (255 = opaque). */
+
+    std::string spritesFolderPath; /**< Dernier dossier atlas charge (loadSpritesFromFolder), normalise. */
 
     // ---- Helpers direction / sprite ----
 
@@ -212,6 +215,11 @@ public:
      * @brief Decharge les sprites du navire.
      */
     void unloadSprites(void);
+
+    /**
+     * @brief Dossier atlas navire courant (vide si aucun sprite charge).
+     */
+    const std::string& getSpritesFolderPath(void) const;
 
     /**
      * @brief Retourne l'etat de chargement des sprites.

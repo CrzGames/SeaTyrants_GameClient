@@ -176,6 +176,65 @@ static std::string resolveSpritesheetJsonPathFallback(const std::string& vfxFold
 }
 
 /**
+ * @brief Slugifie un nom pour les fichiers exportes par l'editeur.
+ */
+static std::string makeConfigSlug(const std::string& rawName, const char* prefixToTrim = nullptr)
+{
+    const std::string trimmed = trimAscii(rawName);
+    if (trimmed.empty())
+    {
+        return {};
+    }
+
+    std::string slug;
+    slug.reserve(trimmed.size());
+    bool previousWasDash = false;
+    for (char c : trimmed)
+    {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (std::isalnum(uc))
+        {
+            slug.push_back(static_cast<char>(std::tolower(uc)));
+            previousWasDash = false;
+            continue;
+        }
+
+        if (c == ' ' || c == '_' || c == '-')
+        {
+            if (!slug.empty() && !previousWasDash)
+            {
+                slug.push_back('-');
+                previousWasDash = true;
+            }
+        }
+    }
+
+    while (!slug.empty() && slug.front() == '-')
+    {
+        slug.erase(slug.begin());
+    }
+    while (!slug.empty() && slug.back() == '-')
+    {
+        slug.pop_back();
+    }
+
+    if (prefixToTrim != nullptr && prefixToTrim[0] != '\0')
+    {
+        const std::string prefix = toLowerAscii(prefixToTrim);
+        if (slug.rfind(prefix, 0U) == 0U)
+        {
+            slug.erase(0, prefix.size());
+        }
+        while (!slug.empty() && slug.front() == '-')
+        {
+            slug.erase(slug.begin());
+        }
+    }
+
+    return slug;
+}
+
+/**
  * @brief Resout le chemin image de spritesheet.
  */
 static std::string resolveSpritesheetImagePath(
@@ -1363,11 +1422,7 @@ bool VFXShip::loadFromFolders(const char* rawShipFolderPath, const char* rawVfxF
     }
 
     // 3) Deriver le slug vfx de nom de fichier export (fx-<slug>_ship-<ship>.json).
-    std::string vfxSlug = vfxFolderName;
-    if (toLowerAscii(vfxSlug).rfind("vfx-", 0U) == 0U)
-    {
-        vfxSlug.erase(0, 4);
-    }
+    std::string vfxSlug = makeConfigSlug(vfxFolderName, "vfx-");
     if (vfxSlug.empty())
     {
         RC2D_log(
@@ -1377,16 +1432,33 @@ bool VFXShip::loadFromFolders(const char* rawShipFolderPath, const char* rawVfxF
         return false;
     }
 
-    // 4) Construire le chemin config gameplay du ship.
-    const std::string gameplayConfigJsonPath =
+    // 4) Construire les chemins config gameplay du ship.
+    const std::string shipSlug = makeConfigSlug(shipFolderName);
+    const std::string gameplayConfigJsonPathSlug =
+        shipFolderPathNormalized + "/fx-" + vfxSlug + "_" + shipSlug + ".json";
+    const std::string gameplayConfigJsonPathRaw =
         shipFolderPathNormalized + "/fx-" + vfxSlug + "_" + shipFolderName + ".json";
+
+    std::string gameplayConfigJsonPath = gameplayConfigJsonPathSlug;
 
     // 5) Lire le JSON gameplay (storage TITLE fixe par convention projet).
     std::string configText;
     if (!readTextFileFromStorage(gameplayConfigJsonPath.c_str(), &configText))
     {
-        RC2D_log(RC2D_LOG_WARN, "VFXShip: JSON config introuvable: %s", gameplayConfigJsonPath.c_str());
-        return false;
+        if (gameplayConfigJsonPathRaw != gameplayConfigJsonPath &&
+            readTextFileFromStorage(gameplayConfigJsonPathRaw.c_str(), &configText))
+        {
+            gameplayConfigJsonPath = gameplayConfigJsonPathRaw;
+        }
+        else
+        {
+            RC2D_log(
+                RC2D_LOG_WARN,
+                "VFXShip: JSON config introuvable: %s (fallback raw: %s)",
+                gameplayConfigJsonPath.c_str(),
+                gameplayConfigJsonPathRaw.c_str());
+            return false;
+        }
     }
 
     // 6) Parser la racine JSON.

@@ -799,6 +799,14 @@ bool Ship::loadSpritesFromFolder(const char* folderPath, RC2D_StorageKind storag
     // Si le fichier n'existe pas ou est invalide, les anchors restent a (0.5, 0.5).
     this->loadAnchorsFromJson(folderPath, storageKind);
 
+    std::string normalized = folderPath;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    while (normalized.size() > 1U && normalized.back() == '/')
+    {
+        normalized.pop_back();
+    }
+    this->spritesFolderPath = normalized;
+
     this->spritesLoaded = true;
     return true;
 }
@@ -822,6 +830,12 @@ void Ship::unloadSprites(void)
 
     this->spritesLoaded = false;
     this->spritesStorageKind = RC2D_STORAGE_TITLE;
+    this->spritesFolderPath.clear();
+}
+
+const std::string& Ship::getSpritesFolderPath(void) const
+{
+    return this->spritesFolderPath;
 }
 
 bool Ship::loadAnchorsFromJson(const char* folderPath, RC2D_StorageKind storageKind)
