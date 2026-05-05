@@ -14,6 +14,7 @@
 #include "game/shaders/fog-of-war-shader.h"
 #include "game/shaders/ocean-shader.h"
 #include "game/state.h"
+#include "game/combat/maritime-cannon-salvo.h"
 #include "network/state.h"
 
 class IngameHudOverlay;
@@ -113,3 +114,9 @@ ClientLanguageState& GetClientLanguageState();
  * @return Reference mutable vers l'overlay HUD gameplay.
  */
 IngameHudOverlay& GetIngameHudOverlay();
+
+/**
+ * @brief Acces global au systeme de salves de canons maritimes.
+ * @return Reference mutable vers le systeme runtime.
+ */
+MaritimeCannonSalvoSystem& GetMaritimeCannonSalvoSystem();

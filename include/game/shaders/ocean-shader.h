@@ -182,8 +182,9 @@ public:
     /**
      * @brief Met a jour le temps et les uniforms oceaniques.
      * @param dt Delta time en secondes.
+     * @param wakeTrailsEnabled Option graphique: sillage anime sous les navires.
      */
-    void update(double dt);
+    void update(double dt, bool wakeTrailsEnabled);
 
     /**
      * @brief Dessine l'ocean sur le rectangle de destination.

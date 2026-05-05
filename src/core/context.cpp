@@ -18,6 +18,7 @@ static FogOfWarShader g_fogOfWarShader;
 static TitleAssetCache g_titleAssetCache;
 static ClientLanguageState g_clientLanguageState;
 static IngameHudOverlay g_ingameHudOverlay;
+static MaritimeCannonSalvoSystem g_maritimeCannonSalvoSystem;
 
 GameState& GetGameState()
 {
@@ -97,4 +98,9 @@ ClientLanguageState& GetClientLanguageState()
 IngameHudOverlay& GetIngameHudOverlay()
 {
     return g_ingameHudOverlay;
+}
+
+MaritimeCannonSalvoSystem& GetMaritimeCannonSalvoSystem()
+{
+    return g_maritimeCannonSalvoSystem;
 }

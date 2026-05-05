@@ -808,8 +808,10 @@ bool OceanShader::load(WaterColor color)
     return true;
 }
 
-void OceanShader::update(double dt)
+void OceanShader::update(double dt, bool wakeTrailsEnabled)
 {
+    this->setWakeTrailsEnabled(wakeTrailsEnabled);
+
     // Ignore l'update si le module n'est pas pret.
     if (!isReady())
     {
@@ -861,6 +863,11 @@ void OceanShader::update(double dt)
 
 void OceanShader::draw(const SDL_FRect& visibleRect)
 {
+    if (!this->isReady())
+    {
+        return;
+    }
+
     // Draw ocean:
     // - active le mode wrap pour le tiling
     // - dessine avec shader si possible

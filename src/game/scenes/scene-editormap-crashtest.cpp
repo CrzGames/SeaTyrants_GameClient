@@ -1215,7 +1215,7 @@ void EditorMapCrashTestScene::update(double dt)
     map.update();
     this->updateToolbarLayout();
     this->applyPendingOceanColorStep();
-    GetOceanShader().update(dt);
+    GetOceanShader().update(dt, true);
 
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
     (void)GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect);

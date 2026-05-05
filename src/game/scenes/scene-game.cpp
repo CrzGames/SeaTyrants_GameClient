@@ -1,507 +1,221 @@
 #include "game/scenes/scene-game.h"
 
 #include "core/context.h"
+#include "game/state.h"
 #include "game/controllers/gameplay-camera-controller.h"
 #include "game/render/world-render-clip.h"
 #include "game/controllers/gameplay-shader-controller.h"
 #include "game/ui/ingame-hud-overlay.h"
+#include "game/ui/hud/game-settings-widget.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
+// Intervalle de temps entre deux salves demo envoyees a l'autre joueur.
+constexpr float kDemoSalvoIntervalSec = 4.0f;
+constexpr std::uint32_t kDemoIlluminatedSalvoEntryId = 1U;
+
+// ---------------------------------------------------------------------------
+// Constructeur
+// ---------------------------------------------------------------------------
+
 GameScene::GameScene(void)
     : shipAutoFollowEnabled(true),
-      playerShipFolderPath{},
-      playerExperiencePointsCurrent(0)
-      //playerVfxFolderPath("assets/images/vfx/vfx-speedwhitedeux"),
-      //shipVfx{}
+      demoSalvoTimerSec(0.0f)
 {
 }
 
-void GameScene::setExperiencePointsCurrent(int points)
-{
-    this->playerExperiencePointsCurrent = (std::max)(0, points);
-}
-
-void GameScene::populateMoneyDemoData(void)
-{
-    IngameHudOverlay& hudOverlay = GetIngameHudOverlay();
-
-    hudOverlay.getMoneyWidget().setCurrencyEntries(
-        std::vector<MoneyWidget::CurrencyEntry>{
-            {MoneyWidget::CurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000},
-            {MoneyWidget::CurrencyType::RUBIES, "assets/images/ui-scene-game/money-rubies.png", 3500}
-        });
-    hudOverlay.getTopBarMainCurrencyWidget().setGoldAmount(125000000);
-    hudOverlay.getTopBarMainCurrencyWidget().setRubiesAmount(525000000);
-}
-
-void GameScene::populateGuildMortarData(void)
-{
-    GuildMortarWidget& guildMortarWidget = GetIngameHudOverlay().getGuildMortarWidget();
-    guildMortarWidget.setMortarLevels(
-        std::vector<GuildMortarWidget::MortarLevelEntry>{
-            {"Mortier I", 2500, 5.0f, 12, 50000, 0, 180, 35},
-            {"Mortier II", 4200, 4.5f, 14, 85000, 0, 260, 55},
-            {"Mortier III", 6100, 4.0f, 16, 120000, 0, 340, 80},
-            {"Mortier IV", 7500, 4.0f, 18, 150000, 0, 480, 120}
-        });
-    guildMortarWidget.setSelectedMortarLevelIndex(2);
-    guildMortarWidget.setMortarEnabled(false);
-    guildMortarWidget.setTreasuryGoldAmount(3147765460LL);
-    guildMortarWidget.setTreasuryRubiesAmount(396083);
-    guildMortarWidget.setTreasuryPearlsAmount(820450);
-    guildMortarWidget.setTreasuryCrystalsAmount(40320);
-}
-
-void GameScene::populateGuildTowerData(void)
-{
-    GuildTowerWidget& guildTowerWidget = GetIngameHudOverlay().getGuildTowerWidget();
-    guildTowerWidget.setTowerLevels(
-        std::vector<GuildTowerWidget::TowerLevelEntry>{
-            {"Aedan", 1, 1800, 2.8f, 11, 65000, 65000, 30, 1200, 15000, 85000, 120, 0, 0},
-            {"Cadoc", 2, 2400, 2.5f, 13, 82000, 54750, 75, 1750, 18000, 125000, 180, 45, 0},
-            {"Bran", 3, 3180, 2.2f, 15, 104000, 91000, 150, 2450, 22000, 190000, 250, 70, 18},
-            {"Dagonet", 1, 1760, 2.9f, 10, 62000, 45200, 25, 1100, 14200, 79000, 90, 0, 0},
-            {"Edern", 2, 2360, 2.5f, 13, 80000, 80000, 70, 1680, 17600, 118000, 170, 40, 0},
-            {"Fintan", 4, 4020, 1.9f, 18, 132000, 118500, 240, 3300, 28000, 0, 0, 0, 0},
-            {"Geraint", 1, 1820, 2.7f, 11, 66000, 52500, 30, 1250, 15400, 87000, 130, 0, 0},
-            {"Hoel", 2, 2480, 2.4f, 14, 84500, 84500, 90, 1820, 18600, 128000, 185, 42, 0},
-            {"Isolde", 3, 3260, 2.1f, 15, 108000, 73000, 160, 2520, 22800, 198000, 270, 75, 20},
-            {"Judicael", 2, 2420, 2.5f, 13, 82500, 60100, 75, 1760, 18100, 123000, 176, 44, 0},
-            {"Kael", 1, 1740, 3.0f, 10, 61000, 38900, 22, 1020, 13800, 76000, 85, 0, 0},
-            {"Maelor", 4, 4100, 1.8f, 18, 136000, 136000, 260, 3460, 29200, 0, 0, 0, 0}
-        });
-    guildTowerWidget.setSelectedTowerLevelIndex(1);
-    guildTowerWidget.setTreasuryGoldAmount(3147765460LL);
-    guildTowerWidget.setTreasuryRubiesAmount(396083);
-    guildTowerWidget.setTreasuryPearlsAmount(820450);
-    guildTowerWidget.setTreasuryCrystalsAmount(40320);
-}
-
-void GameScene::populateAccountManagementDemoData(void)
-{
-    using EliteShipsTabShipEntry = AccountManagementWidget::EliteShipsTabShipEntry;
-    using SpecialShipsTabShipEntry = AccountManagementWidget::SpecialShipsTabShipEntry;
-    using ShipManagementTabOptionEntry = AccountManagementWidget::ShipManagementTabOptionEntry;
-    using AppearanceTabOptionEntry = AccountManagementWidget::AppearanceTabOptionEntry;
-    using StorageTabItemEntry = AccountManagementWidget::StorageTabItemEntry;
-    using StorageTabEquipmentCategory = AccountManagementWidget::StorageTabEquipmentCategory;
-    using StorageTabEquipmentOptionEntry = AccountManagementWidget::StorageTabEquipmentOptionEntry;
-    using StorageTabCannonStatsDisplay = AccountManagementWidget::StorageTabCannonStatsDisplay;
-    using ForgeTabCannonEntry = AccountManagementWidget::ForgeTabCannonEntry;
-    using ForgeTabCannonStatsDisplay = AccountManagementWidget::ForgeTabCannonStatsDisplay;
-    using ForgeTabCannonUpgradeEntry = AccountManagementWidget::ForgeTabCannonUpgradeEntry;
-    using AccountTabEliteProgressData = AccountManagementWidget::AccountTabEliteProgressData;
-    using BoardingLootCurrencyEntry = AccountManagementWidget::BoardingLootCurrencyEntry;
-    using BoardingLootCurrencyType = AccountManagementWidget::BoardingLootCurrencyType;
-
-    // Exemple de flux d'alimentation:
-    // 1. le gameplay choisit le dossier du navire reel a charger en scene,
-    // 2. il injecte ensuite les images d'apercu et les listes dans le widget.
-    this->playerShipFolderPath = "assets/images/ships/bateau elite 4";
-
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPlayerIdentifier("1985");
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPirateSince("01.02.2024");
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPlayerLevel(10);
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabExperiencePointsCurrent(this->playerExperiencePointsCurrent);
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabEliteProgressData(
-        AccountTabEliteProgressData{
-            4250000,
-            5000000,
-            true
-        });
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabCombatPointsCurrent(1460);
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabPremiumSince("06.04.2026");
-    GetIngameHudOverlay().getAccountManagementWidget().setAccountTabProfileName(".Crows");
-
-    static constexpr const char* kEliteDemoAssetPaths[4] = {
-        "assets/images/ships/bateau elite 1",
-        "assets/images/ships/bateau elite 2",
-        "assets/images/ships/bateau elite 3",
-        "assets/images/ships/bateau elite 4"
-    };
-    static constexpr const char* kSpecialDemoNames[3] = {"Boreas", "Fly dutchman", "Morgan Boucanier"};
-    static constexpr const char* kSpecialDemoAssetPaths[3] = {
-        "assets/images/ships/Boreas (1)",
-        "assets/images/ships/Fly dutchman (1)",
-        "assets/images/ships/Morgan Boucanier (1)"
-    };
-
-    std::vector<EliteShipsTabShipEntry> eliteDemoShips{
-        {"Elite 1", kEliteDemoAssetPaths[0]},
-        {"Elite 2", kEliteDemoAssetPaths[1]},
-        {"Elite 3", kEliteDemoAssetPaths[2]},
-        {"Elite 4", kEliteDemoAssetPaths[3]},
-    };
-    for (int i = 0; i < 25; ++i)
-    {
-        eliteDemoShips.push_back(
-            {std::string("Elite ") + std::to_string(5 + i), kEliteDemoAssetPaths[static_cast<std::size_t>(i % 4)]});
-    }
-    GetIngameHudOverlay().getAccountManagementWidget().setEliteShipsTabAcquiredShips(eliteDemoShips);
-
-    std::vector<SpecialShipsTabShipEntry> specialDemoShips{
-        {kSpecialDemoNames[0], kSpecialDemoAssetPaths[0]},
-        {kSpecialDemoNames[1], kSpecialDemoAssetPaths[1]},
-        {kSpecialDemoNames[2], kSpecialDemoAssetPaths[2]},
-    };
-    for (int i = 0; i < 25; ++i)
-    {
-        const std::size_t slot = static_cast<std::size_t>(i % 3);
-        specialDemoShips.push_back(
-            {std::string(kSpecialDemoNames[slot]) + " +" + std::to_string(i + 1), kSpecialDemoAssetPaths[slot]});
-    }
-    GetIngameHudOverlay().getAccountManagementWidget().setSpecialShipsTabAcquiredShips(specialDemoShips);
-
-    // Icones reparties sur les nombreuses lignes demo (scrollbars pickers 7 lignes max, effets 5).
-    static constexpr const char* kDemoPickerIcons[10] = {
-        "assets/images/ships/bateau elite 4",
-        "assets/images/ships/bateau elite 3",
-        "assets/images/ships/bateau elite 2",
-        "assets/images/ships/bateau elite 5",
-        "assets/images/ships/bateau elite 7",
-        "assets/images/ammo/bazar-marche/ammo-rep-icon.png",
-        "assets/images/ammo/bazar-marche/ammo-creux-icon.png",
-        "assets/images/ammo/bazar-marche/ammo-explo-icon.png",
-        "assets/images/ammo/bazar-marche/ammo-illu-icon.png",
-        "assets/images/ammo/bazar-marche/ammo-shrapnel-icon.png"};
-    static constexpr const char* kDemoVfxSpeedIcons[6] = {
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/2.png",
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/6.png",
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/10.png",
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/14.png",
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/20.png",
-        "assets/images/vfx/vfx-speedwhitedeux/vfx-speedwhitedeux-sprites/30.png"};
-    static constexpr const char* kDemoCannonIcons[4] = {
-        "assets/images/cannons/10-livres.png",
-        "assets/images/cannons/20-livres.png",
-        "assets/images/cannons/30-livres.png",
-        "assets/images/cannons/40-livres.png"};
-
-    auto pushNumberedShipBonuses = [&]() {
-        std::vector<ShipManagementTabOptionEntry> v{
-            {"Bateau elite 4", kDemoPickerIcons[0]},
-            {"Bateau elite 3", kDemoPickerIcons[1]},
-            {"Bateau elite 2", kDemoPickerIcons[2]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Bonus navire demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setShipManagementTabBonusOptions(pushNumberedShipBonuses());
-
-    auto pushNumberedShipStyles = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Bateau elite 4", kDemoPickerIcons[0]},
-            {"Bateau elite 5", kDemoPickerIcons[3]},
-            {"Bateau elite 7", kDemoPickerIcons[4]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Style navire demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabShipStyleOptions(pushNumberedShipStyles());
-
-    auto pushNumberedRepair = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Reparation par defaut", kDemoPickerIcons[5]},
-            {"Reparation emeraude", kDemoPickerIcons[6]},
-            {"Reparation abyssale", kDemoPickerIcons[7]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Reparation variante ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabRepairStyleOptions(pushNumberedRepair());
-
-    auto pushNumberedSpeed = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Vitesse blanche", kDemoVfxSpeedIcons[0]},
-            {"Vitesse tempete", kDemoVfxSpeedIcons[2]},
-            {"Vitesse neon", kDemoVfxSpeedIcons[5]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Vitesse demo ") + std::to_string(i),
-                 kDemoVfxSpeedIcons[static_cast<std::size_t>(i) % 6U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabSpeedStyleOptions(pushNumberedSpeed());
-
-    auto pushNumberedImpact = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Impact standard", kDemoPickerIcons[7]},
-            {"Impact royal", kDemoPickerIcons[8]},
-            {"Impact titan", kDemoPickerIcons[9]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Impact demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabProjectileImpactStyleOptions(pushNumberedImpact());
-
-    auto pushNumberedRocket = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Fusee comete", kDemoPickerIcons[7]},
-            {"Fusee oracle", kDemoPickerIcons[6]},
-            {"Fusee solaire", kDemoPickerIcons[5]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Fusee demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabRocketStyleOptions(pushNumberedRocket());
-
-    auto pushNumberedProjectile = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Boulet lourd", kDemoPickerIcons[7]},
-            {"Boulet arc", kDemoPickerIcons[8]},
-            {"Boulet obsidienne", kDemoPickerIcons[9]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Projectile demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabProjectileStyleOptions(pushNumberedProjectile());
-
-    auto pushNumberedMoveClick = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Clic tempete", kDemoPickerIcons[5]},
-            {"Clic royal", kDemoPickerIcons[8]},
-            {"Clic aurore", kDemoPickerIcons[6]}};
-        for (int i = 4; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Clic deplacement demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabMoveClickStyleOptions(pushNumberedMoveClick());
-
-    auto pushNumberedEmotes = [&]() {
-        std::vector<AppearanceTabOptionEntry> v{
-            {"Hello", kDemoPickerIcons[8]},
-            {"Attack", kDemoPickerIcons[7]},
-            {"Laugh", kDemoPickerIcons[6]},
-            {"Lets go", kDemoPickerIcons[9]},
-            {"Support", kDemoPickerIcons[5]},
-            {"Bravo", kDemoPickerIcons[8]}};
-        for (int i = 7; i <= 28; ++i)
-        {
-            v.push_back(
-                {std::string("Emote demo ") + std::to_string(i),
-                 kDemoPickerIcons[static_cast<std::size_t>(i) % 10U]});
-        }
-        return v;
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setAppearanceTabEmoteOptions(pushNumberedEmotes());
-
-    auto pushNumberedStorage = [&]() {
-        return std::vector<StorageTabEquipmentOptionEntry>{
-            {StorageTabEquipmentCategory::CANNONS, "Cannons", kDemoCannonIcons[0], 24},
-            {StorageTabEquipmentCategory::SAILS, "Voiles", kDemoVfxSpeedIcons[1], 1}};
-    };
-    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquipmentCategoryOptions(pushNumberedStorage());
-    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabWarehouseItems(
-        std::vector<StorageTabItemEntry>{
-            {StorageTabEquipmentCategory::CANNONS, "Canons 10 livres", kDemoCannonIcons[0], 32, 0, StorageTabCannonStatsDisplay{"+10%", "+2%", "+1%", "+4", "2,4/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 24, 1, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 30 livres", kDemoCannonIcons[2], 16, 2, StorageTabCannonStatsDisplay{"+30%", "+7%", "+3%", "+6", "1,8/s"}},
-            {StorageTabEquipmentCategory::CANNONS, "Canons 40 livres", kDemoCannonIcons[3], 8, 3, StorageTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"}},
-            {StorageTabEquipmentCategory::SAILS, "Voiles tempete", kDemoVfxSpeedIcons[1], 2, 0, StorageTabCannonStatsDisplay{}}});
-    GetIngameHudOverlay().getAccountManagementWidget().setStorageTabEquippedItems(
-        std::vector<StorageTabItemEntry>{
-            {StorageTabEquipmentCategory::CANNONS, "Canons 20 livres", kDemoCannonIcons[1], 12, 1, StorageTabCannonStatsDisplay{"+20%", "+4%", "+2%", "+5", "2,1/s"}},
-            {StorageTabEquipmentCategory::SAILS, "Voiles standards", kDemoVfxSpeedIcons[2], 1, 0, StorageTabCannonStatsDisplay{}}});
-    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabCannons(
-        std::vector<ForgeTabCannonEntry>{
-            {
-                "Canons 40 livres",
-                kDemoCannonIcons[3],
-                18,
-                0,
-                ForgeTabCannonStatsDisplay{"+40%", "+10%", "+4%", "+7", "1,5/s"},
-                std::vector<ForgeTabCannonUpgradeEntry>{
-                    {1, 4, 12, 2, ForgeTabCannonStatsDisplay{"+44%", "+12%", "+5%", "+8", "1,4/s"}},
-                    {2, 8, 20, 4, ForgeTabCannonStatsDisplay{"+49%", "+14%", "+6%", "+8", "1,3/s"}},
-                    {3, 14, 34, 7, ForgeTabCannonStatsDisplay{"+55%", "+18%", "+8%", "+9", "1,2/s"}}
-                }
-            },
-            {
-                "Canons 50 livres",
-                kDemoCannonIcons[2],
-                10,
-                1,
-                ForgeTabCannonStatsDisplay{"+52%", "+13%", "+5%", "+8", "1,4/s"},
-                std::vector<ForgeTabCannonUpgradeEntry>{
-                    {2, 10, 24, 5, ForgeTabCannonStatsDisplay{"+58%", "+16%", "+7%", "+9", "1,3/s"}},
-                    {3, 16, 38, 8, ForgeTabCannonStatsDisplay{"+64%", "+20%", "+9%", "+10", "1,2/s"}}
-                }
-            },
-            {
-                "Canons 60 livres",
-                kDemoCannonIcons[1],
-                6,
-                2,
-                ForgeTabCannonStatsDisplay{"+65%", "+18%", "+8%", "+10", "1,2/s"},
-                std::vector<ForgeTabCannonUpgradeEntry>{
-                    {3, 18, 42, 9, ForgeTabCannonStatsDisplay{"+72%", "+22%", "+10%", "+11", "1,1/s"}},
-                    {4, 26, 58, 14, ForgeTabCannonStatsDisplay{"+80%", "+27%", "+12%", "+12", "1,0/s"}}
-                }
-            }
-        });
-    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryRubiesAmount(3500);
-    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryPearlsAmount(820);
-    GetIngameHudOverlay().getAccountManagementWidget().setForgeTabTreasuryCrystalsAmount(40);
-    GetIngameHudOverlay().getAccountManagementWidget().setBoardingLootManagementTabCurrencies(
-        std::vector<BoardingLootCurrencyEntry>{
-            {BoardingLootCurrencyType::GOLD, "assets/images/ui-scene-game/money-gold.png", 1250000, 0, 0, true},
-            {BoardingLootCurrencyType::PERLES, "assets/images/ui-scene-game/money_pearls.png", 820, 4500, 50, false},
-            {BoardingLootCurrencyType::CRISTAUX, "assets/images/ui-scene-game/money_crystals.png", 40, 320, 50, false}});
-}
-
-void GameScene::syncHudStatusWidgets(const Player& player)
-{
-    GetIngameHudOverlay().getHpBarWidget().setMaxHp(player.getHpMax());
-    GetIngameHudOverlay().getHpBarWidget().setCurrentHp(player.getHpCurrent());
-    GetIngameHudOverlay().getExperienceBarWidget().setCurrentExperiencePoints(this->playerExperiencePointsCurrent);
-}
+// ---------------------------------------------------------------------------
+// Spawn joueur + premiere pose camera
+// ---------------------------------------------------------------------------
 
 void GameScene::initializePlayerSpawnAndCamera(void)
 {
+    // Grille monde.
     Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
-    Camera& camera = GetCamera();
-    const std::string& shipFolderPath = this->playerShipFolderPath;
 
-    // Load le navire du joueur.
-    if (!player.loadShip(shipFolderPath.c_str()))
+    // Etat runtime (monstres, npcs, joueurs, VFX coque GameState, projectiles internes a la salve).
+    GameState& gameState = GetGameState();
+
+    // Camera + zoom pour le gameplay.
+    Camera& camera = GetCamera();
+
+    // Charge les sprites du navire du joueur depuis le dossier configure.
+    if (!gameState.player.loadShip("assets/images/ships/bateau elite 10"))
     {
         RC2D_log(
             RC2D_LOG_ERROR,
             "GameScene: echec chargement navire '%s'",
-            shipFolderPath.c_str());
+            "assets/images/ships/bateau elite 10");
     }
 
-    // Load le VFX ship du navire du joueur.
-    /*if (!this->shipVfx.loadFromFolders(this->playerShipFolderPath.c_str(), this->playerVfxFolderPath.c_str()))
-    {
-        RC2D_log(
-            RC2D_LOG_ERROR,
-            "GameScene: echec chargement VFXShip (shipFolder='%s', vfxFolder='%s')",
-            this->playerShipFolderPath.c_str(),
-            this->playerVfxFolderPath.c_str());
-        return;
-    }*/
+    // Place le joueur local sur une tuile de depart (secteur 30-AE).
+    gameState.player.spawnOnSector(map, 30, 30);
 
-    // Spawn au secteur 30-AE (centre approximatif).
-    player.spawnOnSector(map, 30, 30);
+    // Premiere frame: centre la vue sur le navire du joueur.
+    GameplayCameraController::centerOnPlayer(camera, map, map.rect, gameState.player);
 
-    // Centre la camera sur le joueur au debut.
-    GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
+    // Reactive le suivi auto: le joueur n'a pas encore deplace la camera a la main.
     this->shipAutoFollowEnabled = true;
+
+    // Met à jour immediatement la camera (position + zoom) sur la map.
     camera.update(map, map.rect);
 }
 
+// ---------------------------------------------------------------------------
+// Decharge la scene: GPU, VFX gameplay (GameState), tracking salve, navires, HUD
+// ---------------------------------------------------------------------------
+
 void GameScene::unload(void)
 {
-    // Recupere les references aux systemes et objets necessaires.
-    Player& player = GetGameState().player;
+    // Etat runtime (monstres, npcs, joueurs, VFX coque GameState, projectiles internes a la salve).
+    GameState& gameState = GetGameState();
 
-    // Libere les ressources du jeu.
+    // Libere les ressources GPU des shaders de la couche gameplay (eau, fog, etc.).
     GameplayShaderController::unloadAll();
-    //this->shipVfx.unload();
-    player.unload();
+
+    // Clear les vfx ships.
+    gameState.clearGameplayVfx();
+
+    // Clear le suivi de salve maritime et les boulets en vol.
+    GetMaritimeCannonSalvoSystem().clear();
+
+    // Unload le navire du joueur local.
+    gameState.player.unload();
+
+    // Unload les navires des joueurs distants, npcs et monstres.
+    for (Player& otherPlayer : gameState.otherPlayers)
+    {
+        otherPlayer.unload();
+    }
+    for (Player& npc : gameState.npcs)
+    {
+        npc.unload();
+    }
+    for (Player& monster : gameState.monsters)
+    {
+        monster.unload();
+    }
+
+    // Vide les listes de joueurs distants, npcs et monstres.
+    gameState.otherPlayers.clear();
+    gameState.npcs.clear();
+    gameState.monsters.clear();
+
+    // Ferme / decharge les textures et etats des widgets HUD.
     GetIngameHudOverlay().unload();
+
 }
+
+// ---------------------------------------------------------------------------
+// Charge la scene: joueur, shaders, HUD, navire, camera, monde secondaire
+// ---------------------------------------------------------------------------
 
 void GameScene::load(void)
 {
-    // Recupere les references aux systemes et objets necessaires.
-    Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
+    // Map affichee dans le game screen.
+    Map& map = GetCurrentMap(); 
 
-    // Configure le joueur.
-    player.load();
+    // Etat runtime (monstres, npcs, joueurs, VFX coque GameState, projectiles internes a la salve).
+    GameState& gameState = GetGameState();
 
-    // Charge les shaders de gameplay.
+    // Initialise l'etat logique du Player.
+    gameState.player.load();
+
+    // Charge et prepare les shaders de la couche gameplay (eau, fog, etc.).
     GameplayShaderController::loadAll();
 
-    // Charge les ressources HUD (interface utilisateur).
+    // Construit l'arborescence HUD (widgets, themes, liens entree clavier).
     GetIngameHudOverlay().load();
-    GetIngameHudOverlay().getCaptchaWidget().publishCaptchaChallenge("A7K9"); // texte serveur
-    this->syncHudStatusWidgets(player);
-    this->populateMoneyDemoData();
-    this->populateAccountManagementDemoData();
-    this->populateGuildMortarData();
-    this->populateGuildTowerData();
 
-    // Met a jour le rectangle map (zone monde) a partir du game screen.
+    MaritimeCannonSalvoSystem& salvoSystem = GetMaritimeCannonSalvoSystem();
+    (void)MaritimeCannonSalvoSystem::loadProjectileTrajectoryTuningsFromFile();
+    salvoSystem.clearSalvoEntries();
+    MaritimeCannonSalvoSystem::SalvoEntry demoSalvoEntry{};
+    demoSalvoEntry.entryId = kDemoIlluminatedSalvoEntryId;
+    demoSalvoEntry.debugName = "demo_illuminated_round";
+    demoSalvoEntry.projectileVfxClassicFolder = "assets/images/vfxclassic/vfx-ammo-explo";
+    demoSalvoEntry.illuminatedProjectile.enabled = true;
+    demoSalvoEntry.startActionVfxShipFolderForAttacker = "assets/images/vfxship/vfx-cannon";
+    MaritimeCannonSalvoSystem::SalvoEntry::EndActionVfxShipFolderForTarget demoImpactVfx{};
+    demoImpactVfx.vfxShipFolder = "assets/images/vfxship/vfx-hitsimple";
+    demoSalvoEntry.endActionVfxShipFoldersForTarget.push_back(demoImpactVfx);
+    salvoSystem.addSalvoEntry(demoSalvoEntry);
+
+    // Recalcule map.rect a partir de la taille de la zone de rendu gameplay.
     map.update();
 
-    // Initialise le spawn joueur + camera de depart.
+    // 1er joueur de test: spawn dans le secteur central, avec le navire configure pour le joueur.
     this->initializePlayerSpawnAndCamera();
 
+    // 2eme joueur de test: spawn dans un secteur voisin, avec un navire different.
+    gameState.otherPlayers.clear();
+    gameState.otherPlayers.emplace_back();
+    Player& enemy = gameState.otherPlayers.back();
+    enemy.load();
+    enemy.loadShip("assets/images/ships/bateau elite 10");
+    enemy.spawnOnSector(map, 33, 30);
 }
+
+// ---------------------------------------------------------------------------
+// Mise a jour logique: map, ocean, navires, salve, visibilite, HUD, camera
+// ---------------------------------------------------------------------------
 
 void GameScene::update(double dt)
 {
-    // Recupere les references aux systemes et objets necessaires.
+    // Contextes principaux pour la logique gameplay: map, joueurs, shaders, camera, HUD.
     Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
+    GameState& gameState = GetGameState();
     OceanShader& oceanShader = GetOceanShader();
     Camera& camera = GetCamera();
     GameSettingsWidget& gameSettings = GetIngameHudOverlay().getGameSettingsWidget();
 
-    // Met a jour le rectangle map (zone monde) a partir du game screen.
+    // Synchronise le rectangle map avec le game screen (redimensionnement fenetre / UI).
     map.update();
 
-    // Applique les options graphiques qui pilotent les passes animees.
-    oceanShader.setWakeTrailsEnabled(gameSettings.getShipWakeTrailsEnabled());
+    // Met a jour l'ocean: temps, uniforms, et prise en compte de l'option sillage (wake) via le 2e parametre.
+    oceanShader.update(dt, gameSettings.getShipWakeTrailsEnabled());
 
-    // Met a jour le shader ocean.
-    oceanShader.update(dt);
-
-    // Met a jour le joueur (deplacement, animation, etc).
-    // + synchronisation avec le shader ocean pour les effets de wake.
+    // Collecte des points de sillage sur cette frame: debute l'enregistrement.
     oceanShader.beginWakeFrame(dt);
-    player.update(dt, map);
+    // Deplace / anime le joueur; le navire emet des points de wake consommes par l'ocean.
+    gameState.player.update(dt, map);
+    // Idem pour chaque autre Player (NPC / joueurs distants cote client).
+    for (Player& otherPlayer : gameState.otherPlayers)
+    {
+        otherPlayer.update(dt, map);
+    }
+    // Finalise la passe wake: envoie les points au shader ocean pour ce frame.
     oceanShader.endWakeFrame(map, map.rect);
 
-    // Met a jour les VFX ship du navire du joueur.
-    //this->shipVfx.update(dt, player.getShip(), nullptr);
+    // Demo: salve maritime du joueur local vers le premier autre joueur toutes les N secondes.
+    if (!gameState.otherPlayers.empty())
+    {
+        const MaritimeCannonSalvoSystem::SalvoEntry* demoSalvoEntry =
+            GetMaritimeCannonSalvoSystem().findSalvoEntryById(kDemoIlluminatedSalvoEntryId);
+        this->demoSalvoTimerSec += static_cast<float>(dt);
+        while (demoSalvoEntry != nullptr && this->demoSalvoTimerSec >= kDemoSalvoIntervalSec)
+        {
+            this->demoSalvoTimerSec -= kDemoSalvoIntervalSec;
+            GetMaritimeCannonSalvoSystem().fireSalvo(
+                gameState.player.getShip(),
+                gameState.otherPlayers[0].getShip(),
+                *demoSalvoEntry);
+        }
+    }
 
-    // Met a jour les shaders de visibilite (nuages + fog).
-    GameplayShaderController::updateVisibility(dt, player, gameSettings.getFogOfWarEnabled());
+    // Deplace les projectiles de salve, met a jour VFX muzzle, nettoie les entrees finies.
+    GetMaritimeCannonSalvoSystem().update(dt);
 
-    this->syncHudStatusWidgets(player);
+    // Anime nuages / masques de visibilite; le fog est pilote par l'option (mais l'update reste ici).
+    GameplayShaderController::updateVisibility(dt, gameState.player, gameSettings.getFogOfWarEnabled());
 
-    // Met a jour tout le HUD (widgets + overlays monde).
+    // Met a jour tout le HUD (minimap, chat, reglages, etc.) selon la camera et la map.
     GetIngameHudOverlay().update(dt, camera, map);
 
-    // Deplacement camera continu : ignore tant qu'un champ texte HUD a le focus (ZQSD, fleches, etc.).
+    // Tant qu'aucun champ texte ne monopolise le clavier, le defilement camera via le clavier est actif.
     if (!GetIngameHudOverlay().isBlockingGameplayKeyboardInput())
     {
         if (GameplayCameraController::updateKeyboardScroll(
@@ -515,70 +229,123 @@ void GameScene::update(double dt)
                 GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CAMERA_MOVE_RIGHT),
                 GetIngameHudOverlay().getGameSettingsWidget().getCameraScrollSpeedSectors()))
         {
-            // L'utilisateur prend le controle manuel de la camera.
+            // L'utilisateur deplace la carte a la main: on coupe le suivi du navire.
             this->shipAutoFollowEnabled = false;
         }
     }
 
-    // Tant qu'aucun controle camera manuel n'est utilise,
-    // la camera suit en permanence le navire.
+    // Si le suivi auto est encore actif, recolle la camera au joueur chaque frame.
     if (this->shipAutoFollowEnabled)
     {
-        GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
+        GameplayCameraController::centerOnPlayer(camera, map, map.rect, gameState.player);
     }
 
-    // Applique la camera finale (zoom + position) sur la map.
+    // Applique zoom et translation finaux de la camera pour les draws suivants.
     camera.update(map, map.rect);
 }
 
+// ---------------------------------------------------------------------------
+// Rendu carte: ocean, fog, marqueurs, VFX salve (sous / au-dessus), joueurs, UI carte
+// ---------------------------------------------------------------------------
+
 void GameScene::draw(void)
 {
-    // Recupere les references aux systemes et objets necessaires.
     Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
+    GameState& gameState = GetGameState();
     OceanShader& oceanShader = GetOceanShader();
     FogOfWarShader& fogOfWarShader = GetFogOfWarShader();
     GameSettingsWidget& gameSettings = GetIngameHudOverlay().getGameSettingsWidget();
 
-    // Dessine le fond UI en premier (coordonnees logiques absolues).
+    // Panneaux / fonds UI.
     GetIngameHudOverlay().drawBackgroundWidget();
 
-    // Clip strict du rendu gameplay dans la zone map.
+    // Restreint le SDL renderer a la zone map (le reste = UI full window).
     SDL_Renderer* renderer = WorldRenderClip::begin(map.rect);
 
-    // Dessine l'ocean.
-    if (oceanShader.isReady())
-    {
-        oceanShader.draw(map.rect);
-    }
+    // Shader d'ocean.
+    oceanShader.draw(map.rect);
 
-    // Dessine le fog-of-war au-dessus de l'ocean.
-    if (gameSettings.getFogOfWarEnabled() && fogOfWarShader.isReady())
-    {
-        fogOfWarShader.draw(map.rect);
-    }
+    // Brouillard de guerre.
+    fogOfWarShader.draw(map.rect, gameSettings.getFogOfWarEnabled());
 
-    // Dessine le marqueur de clic.
+    // Clic sur tuile: affiche un marqueur de selection de tuile.
     GetIngameHudOverlay().drawTileClickMarkerOverlay(map);
 
-    // Dessine les VFX ship derriere le ship.
-    //this->shipVfx.draw(map, player.getShip(), true);
+    // Re-synchronise les VFX navire avec leur contexte runtime courant avant le rendu
+    // pour que TARGET_RELATIVE_AB dispose toujours du navire de reference.
+    for (GameplayVfxShipSlot& slot : gameState.vfxShips)
+    {
+        Ship* anchorShip =
+            (slot.anchorRole == GameplayVfxShipAnchorRole::ATTACKER)
+                ? slot.attackerShip
+                : slot.targetShip;
+        if (anchorShip == nullptr)
+        {
+            continue;
+        }
 
-    // Dessine le joueur.
-    player.draw(map);
+        const SDL_FPoint* targetTile = nullptr;
+        SDL_FPoint relativeTargetTile{};
+        Ship* relativeShip =
+            (slot.anchorRole == GameplayVfxShipAnchorRole::ATTACKER)
+                ? slot.targetShip
+                : slot.attackerShip;
+        if (relativeShip != nullptr)
+        {
+            relativeTargetTile = relativeShip->getPositionTile();
+            targetTile = &relativeTargetTile;
+        }
 
-    // Dessine les VFX ship devant le ship.
-    //this->shipVfx.draw(map, player.getShip(), false);
+        slot.vfx.update(0.0, *anchorShip, targetTile);
+    }
 
-    // Dessine les barres de scroll par-dessus tout.
+    // VFX navire (ex. flash canon): derriere les coques, depuis GameState (alimente par la salve au tir).
+    for (const GameplayVfxShipSlot& slot : gameState.vfxShips)
+    {
+        Ship* anchorShip =
+            (slot.anchorRole == GameplayVfxShipAnchorRole::ATTACKER)
+                ? slot.attackerShip
+                : slot.targetShip;
+        if (anchorShip != nullptr)
+        {
+            slot.vfx.draw(map, *anchorShip, true);
+        }
+    }
+
+    for (const Player& otherPlayer : gameState.otherPlayers)
+    {
+        otherPlayer.draw(map);
+    }
+    gameState.player.draw(map);
+
+    for (const GameplayVfxShipSlot& slot : gameState.vfxShips)
+    {
+        Ship* anchorShip =
+            (slot.anchorRole == GameplayVfxShipAnchorRole::ATTACKER)
+                ? slot.attackerShip
+                : slot.targetShip;
+        if (anchorShip != nullptr)
+        {
+            slot.vfx.draw(map, *anchorShip, false);
+        }
+    }
+
+    // Boulets (spritesheets internes a MaritimeCannonSalvoSystem), au-dessus des navires.
+    GetMaritimeCannonSalvoSystem().drawSalvoProjectiles();
+
+    // Barres de defilement des panneaux qui se superposent a la zone map.
     GetIngameHudOverlay().drawScrollBarOverlay(map);
 
-    // Fin du clip monde: l'overlay/UI peut dessiner librement.
+    // Leve le clip: le HUD global (texte, fenetres) dessine en coordonnees ecran libres.
     WorldRenderClip::end(renderer);
 
-    // Dessine les elements d'interface.
-    GetIngameHudOverlay().drawWidgets(map, player);
+    // Widgets principaux (minimap, tchat, etc.); le Player sert pour le contexte d'affichage.
+    GetIngameHudOverlay().drawWidgets(map, gameState.player);
 }
+
+// ---------------------------------------------------------------------------
+// Clavier: priorite UI, raccourcis camera / minimap
+// ---------------------------------------------------------------------------
 
 void GameScene::keypressed(
     const char* key,
@@ -588,48 +355,58 @@ void GameScene::keypressed(
     bool isrepeat,
     SDL_KeyboardID keyboardID)
 {
-    // Recupere les references aux systemes et objets necessaires.
-    Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
-    Camera& camera = GetCamera();
-    bool cameraChanged = false;
+    (void)key;        // Conserve la signature RC2D; l'UI peut consommer le caractere.
+    (void)keycode;    // Idem.
+    (void)mod;        // Modificateurs (Ctrl, etc.) laisses au widget actif.
+    (void)keyboardID; // Multi-claviers: non utilise ici.
+    // isrepeat: utilise plus bas pour eviter de toggler la minimap en maintien de touche.
 
-    // Priorite au chat HUD: si la touche est consommee par l'UI, on stop ici.
+    Map& map = GetCurrentMap();
+    GameState& gameState = GetGameState();
+    Camera& camera = GetCamera();
+    bool cameraChanged = false; // Sert a n'appeler camera.update qu'en cas de changement.
+
+    // Le chat / champs texte consomment d'abord la touche.
     if (GetIngameHudOverlay().keypressed(key, scancode, keycode, mod, isrepeat))
     {
         GetIngameHudOverlay().syncPlatformTextInputState();
         return;
     }
 
+    // Aligne l'etat plateforme (IME) avec le HUD.
     GetIngameHudOverlay().syncPlatformTextInputState();
 
-    // Champ texte HUD actif : ne pas declencher recentrage camera / raccourcis lies aux touches.
+    // Tant qu'un widget texte bloque le gameplay, on n'applique pas les raccourcis monde.
     if (GetIngameHudOverlay().isBlockingGameplayKeyboardInput())
     {
         return;
     }
 
-    // La touche configuree recentre la camera sur le joueur et reactive le suivi auto.
+    // Raccourci: recentrer la camera sur le navire et reactiver le suivi auto.
     if (scancode == GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::CENTER_CAMERA_ON_SHIP))
     {
-        GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
+        GameplayCameraController::centerOnPlayer(camera, map, map.rect, gameState.player);
         this->shipAutoFollowEnabled = true;
         cameraChanged = true;
     }
 
-    // Affiche/masque la minimap selon la touche configuree.
+    // Raccourci: afficher / masquer la minimap (pas sur repetition de touche).
     if (!isrepeat &&
         scancode == GetIngameHudOverlay().getGameSettingsWidget().getControlActionScancode(GameSettingsWidget::ControlAction::TOGGLE_MINIMAP))
     {
         GetIngameHudOverlay().toggleHudWidgetVisibility(GameSettingsWidget::HudScaleTarget::MINIMAP);
     }
 
-    // Applique la camera si elle a ete modifiee.
+    // Si la camera a bouge, applique immediatement pour ce frame.
     if (cameraChanged)
     {
         camera.update(map, map.rect);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Texte compose (IME / chat): delegue au HUD
+// ---------------------------------------------------------------------------
 
 void GameScene::textinput(const RC2D_TextInputEventInfo* info)
 {
@@ -641,15 +418,21 @@ void GameScene::textinput(const RC2D_TextInputEventInfo* info)
     (void)GetIngameHudOverlay().textinput(info);
 }
 
+// ---------------------------------------------------------------------------
+// Souris: HUD d'abord, puis bouton centre-navire, scroll map, ordres de mouvement
+// ---------------------------------------------------------------------------
+
 void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clicks, SDL_MouseID mouseID)
 {
-    // Recupere les references aux systemes et objets necessaires.
+    (void)clicks;   // Nombre de clics: le HUD peut en tenir compte en interne.
+    (void)mouseID; // Multi-souris: non utilise pour la logique gameplay ici.
+
     Map& map = GetCurrentMap();
-    Player& player = GetGameState().player;
+    GameState& gameState = GetGameState();
     Camera& camera = GetCamera();
     IngameHudOverlay& hudOverlay = GetIngameHudOverlay();
 
-    // Priorite au chat HUD: clic consomme => pas de propagation gameplay.
+    // Si un widget consomme le clic (bouton, chat, etc.), ne pas envoyer d'ordre au monde.
     const bool hudConsumed = hudOverlay.mousepressed(x, y, button, clicks, mouseID);
     hudOverlay.syncPlatformTextInputState();
     if (hudConsumed)
@@ -657,50 +440,59 @@ void GameScene::mousepressed(float x, float y, RC2D_MouseButton button, int clic
         return;
     }
 
+    // Bouton UI "centrer sur le navire": meme effet que le raccourci clavier.
     if (hudOverlay.centerShipButtonMousepressed(x, y, button))
     {
-        GameplayCameraController::centerOnPlayer(camera, map, map.rect, player);
+        GameplayCameraController::centerOnPlayer(camera, map, map.rect, gameState.player);
         this->shipAutoFollowEnabled = true;
         camera.update(map, map.rect);
         return;
     }
 
-    // Si le clic tombe sur une barre de scroll, on ne le propage pas au reste.
+    // Clic sur une scrollbar de panneau au-dessus de la map: desactive le suivi camera.
     if (hudOverlay.handleMapOverlayMousePressed(x, y, button, camera, map))
     {
         this->shipAutoFollowEnabled = false;
         return;
     }
 
-    // Seuls les clics gauche sont traites pour le gameplay.
-    if (button != RC2D_MOUSE_BUTTON_LEFT)
+    // Seuls le clic gauche et droit declenchent des ordres sur la carte.
+    if (button != RC2D_MOUSE_BUTTON_LEFT && button != RC2D_MOUSE_BUTTON_RIGHT)
     {
         return;
     }
 
-    // Ignore les clics en dehors de la zone map (GUI en haut/bas).
+    // Hors du rectangle map: bandeaux UI (pas de conversion tuile).
     if (x < map.rect.x || x > (map.rect.x + map.rect.w) ||
         y < map.rect.y || y > (map.rect.y + map.rect.h))
     {
         return;
     }
 
-    // Convertit les coordonnees de clic en coordonnees de tuile.
+    // Conversion pixel -> tuile la plus proche du clic.
     const SDL_Point tile = map.screenToTileNearest(x, y);
-    // Verifie que la tuile est dans la map et traversable.
+    // Tuile invalide ou obstacle: pas d'ordre de deplacement.
     if (!map.isInside(tile.x, tile.y) || map.isTileBlocked(tile.x, tile.y))
     {
         return;
     }
-    else
-    {
-        // Deplace le joueur vers la tuile cliquee.
-        player.moveToTile(map, tile.x, tile.y);
 
-        // Affiche le marqueur de clic sur la tuile cliquee.
+    // Clic gauche: deplace le joueur; notifie le HUD pour certains widgets (ex: clic tuile).
+    if (button == RC2D_MOUSE_BUTTON_LEFT)
+    {
+        gameState.player.moveToTile(map, tile.x, tile.y);
         GetIngameHudOverlay().notifyMapTileClicked(tile.x, tile.y);
     }
+    // Clic droit: deplace le premier autre Player si present (demo / second slot).
+    else if (!gameState.otherPlayers.empty())
+    {
+        gameState.otherPlayers[0].moveToTile(map, tile.x, tile.y);
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Molette: delegue au HUD (chat scroll, listes); sinon aucun effet en scene.
+// ---------------------------------------------------------------------------
 
 void GameScene::mousewheelmoved(
     RC2D_MouseWheelDirection direction,
@@ -712,7 +504,6 @@ void GameScene::mousewheelmoved(
     float mouse_y,
     SDL_MouseID mouseID)
 {
-    // Priorite au chat HUD pour la molette (souris + trackpad).
     if (GetIngameHudOverlay().mousewheelmoved(direction, x, y, integer_x, integer_y, mouse_x, mouse_y, mouseID))
     {
         return;

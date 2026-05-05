@@ -442,8 +442,13 @@ void FogOfWarShader::update(
     this->uploadUniforms();
 }
 
-void FogOfWarShader::draw(const SDL_FRect& visibleRect)
+void FogOfWarShader::draw(const SDL_FRect& visibleRect, bool fogEnabled)
 {
+    if (!fogEnabled)
+    {
+        return;
+    }
+
     // Draw fog:
     // - active le state GPU
     // - dessine la texture masque sur le rect visible

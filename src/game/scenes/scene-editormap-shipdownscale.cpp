@@ -7138,7 +7138,7 @@ void EditorMapShipDownscaleScene::update(double dt)
     this->clampAssetListScrollOffset();
     this->clampShipListScrollOffset();
     this->applyPendingOceanColorStep();
-    GetOceanShader().update(dt);
+    GetOceanShader().update(dt, true);
     this->scrollBarOverlay.update(dt, camera, map, map.rect);
 
     if (GameplayCameraController::updateKeyboardScroll(dt, camera, map, map.rect))

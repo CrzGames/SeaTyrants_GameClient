@@ -1,0 +1,12 @@
+{
+	"fps":	1,
+	"animationTotalDurationMs":	null,
+	"image":	"vfx-ammo-illu-spritesheet.png",
+	"frames":	[{
+			"index":	0,
+			"x":	0,
+			"y":	0,
+			"w":	60,
+			"h":	60
+		}]
+}

@@ -2534,7 +2534,7 @@ void EditorMapAnchorShipScene::update(double dt)
     this->updateMovementPreview(dt);
     this->clickMarker.update(dt);
     this->applyPendingOceanColorStep();
-    GetOceanShader().update(dt);
+    GetOceanShader().update(dt, true);
     if (!this->movementPreviewActive)
     {
         this->syncStaticPreviewShipToSelectedSprite();

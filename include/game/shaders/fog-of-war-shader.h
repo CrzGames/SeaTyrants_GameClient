@@ -96,10 +96,11 @@ public:
         float viewFalloffTiles);
 
     /**
-     * @brief Dessine le fog sur le rectangle de destination.
+     * @brief Dessine le fog si @p fogEnabled et si le module est pret (no-op sinon).
      * @param visibleRect Rectangle visible cible.
+     * @param fogEnabled Option gameplay (brouillard de guerre).
      */
-    void draw(const SDL_FRect& visibleRect);
+    void draw(const SDL_FRect& visibleRect, bool fogEnabled);
 
     /**
      * @brief Indique si le module fog est pret.

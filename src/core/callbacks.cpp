@@ -22,6 +22,7 @@
 
 #if GAME_ENV_DEV
 #include "game/scenes/scene-editormap-anchorship.h"
+#include "game/scenes/scene-editormap-cannonsalvo.h"
 #include "game/scenes/scene-editormap-crashtest.h"
 #include "game/scenes/scene-editormap-creatormap.h"
 #include "game/scenes/scene-editormap-shipdownscale.h"
@@ -91,6 +92,7 @@ void rc2d_load(void)
     sceneManager.addScene("editormap-anchorship", new EditorMapAnchorShipScene());
     sceneManager.addScene("editormap-vfx", new EditorMapVfxScene());
     sceneManager.addScene("editormap-crashtest", new EditorMapCrashTestScene());
+    sceneManager.addScene("editormap-cannonsalvo", new EditorMapCannonSalvoScene());
 #endif
     sceneManager.addScene("splashscreen", new SplashScreenScene());
     sceneManager.addScene("loading", new LoadingScene(loadingNextSceneName));
@@ -201,6 +203,12 @@ void rc2d_keypressed(const char *key, SDL_Scancode scancode, SDL_Keycode keycode
     if (!isrepeat && scancode == SDL_SCANCODE_F8)
     {
         sceneManager.changeScene("editormap-shipdownscale");
+        return;
+    }
+
+    if (!isrepeat && scancode == SDL_SCANCODE_F7)
+    {
+        sceneManager.changeScene("editormap-cannonsalvo");
         return;
     }
 
