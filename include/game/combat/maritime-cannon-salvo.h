@@ -303,6 +303,18 @@ private:
         float launchForwardOffsetTiles = 0.0f;
         float launchSideOffsetTiles = 0.0f;
         bool launchStartResolved = false;
+        /**
+         * Frame inertiel "soft" capture au lancement:
+         * on autorise le point de depart a suivre l'attaquant uniquement selon l'axe
+         * du tir initial (projection), pour eviter les zigzags quand le navire tourne.
+         */
+        float launchAttackerTileX = 0.0f;
+        float launchAttackerTileY = 0.0f;
+        float launchAxisDirX = 0.0f; // vecteur unitaire
+        float launchAxisDirY = 0.0f; // vecteur unitaire
+        bool launchAxisResolved = false;
+        /** Longueur de corde (P0->P2) capturee au lancement, sert a stabiliser l'amplitude de courbure. */
+        float launchChordLenTiles = 0.0f;
         /** Indice lateral dans la salve (ex: -2..2 pour 5 boulets), pour ecarter les trajectoires. */
         float lateralSlot;
         std::uint8_t salvoBallCount;

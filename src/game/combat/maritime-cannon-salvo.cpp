@@ -1785,6 +1785,37 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
             b.tileX = launchTile.x;
             b.tileY = launchTile.y;
             b.launchStartResolved = true;
+
+            // Capture un axe de tir initial pour "suivre" l'attaquant sans zigzag:
+            // on ne prend que la composante de deplacement de l'attaquant dans l'axe du tir.
+            if (b.attacker != nullptr)
+            {
+                const SDL_FPoint attackerTile = b.attacker->getPositionTile();
+                b.launchAttackerTileX = attackerTile.x;
+                b.launchAttackerTileY = attackerTile.y;
+            }
+            else
+            {
+                b.launchAttackerTileX = b.startTileX;
+                b.launchAttackerTileY = b.startTileY;
+            }
+
+            const float chordDx = (aimX - b.startTileX);
+            const float chordDy = (aimY - b.startTileY);
+            const float chordLen = std::sqrt(chordDx * chordDx + chordDy * chordDy);
+            b.launchChordLenTiles = chordLen;
+            if (chordLen > 1.0e-5f)
+            {
+                b.launchAxisDirX = chordDx / chordLen;
+                b.launchAxisDirY = chordDy / chordLen;
+                b.launchAxisResolved = true;
+            }
+            else
+            {
+                b.launchAxisDirX = 0.0f;
+                b.launchAxisDirY = 0.0f;
+                b.launchAxisResolved = false;
+            }
         }
 
         if (b.ageSec >= b.launchDelaySec + b.flightDurationSec)
@@ -1810,29 +1841,39 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         const SDL_FPoint tgt = b.target->getPositionTile();
         const float p2x = tgt.x + b.impactTileOffX;
         const float p2y = tgt.y + b.impactTileOffY;
-        const SDL_FPoint liveStartTile = resolveProjectileStartTileForAim(
-            b.attacker,
-            b.startTileX,
-            b.startTileY,
-            p2x,
-            p2y,
-            b.launchForwardOffsetTiles,
-            b.launchSideOffsetTiles);
-        b.startTileX = liveStartTile.x;
-        b.startTileY = liveStartTile.y;
-        const float p0x = liveStartTile.x;
-        const float p0y = liveStartTile.y;
+        // Point de depart: base figee au lancement, plus un suivi "soft" de l'attaquant
+        // uniquement dans l'axe du tir initial (pas de composante laterale => pas de zigzag).
+        float p0x = b.startTileX;
+        float p0y = b.startTileY;
+        if (b.launchAxisResolved && b.attacker != nullptr)
+        {
+            const SDL_FPoint attackerNow = b.attacker->getPositionTile();
+            const float dx = attackerNow.x - b.launchAttackerTileX;
+            const float dy = attackerNow.y - b.launchAttackerTileY;
+            const float adv = dx * b.launchAxisDirX + dy * b.launchAxisDirY; // projection
+            p0x += b.launchAxisDirX * adv;
+            p0y += b.launchAxisDirY * adv;
+        }
         float p1x = 0.0f;
         float p1y = 0.0f;
-        quadBezierMidControl(
-            p0x,
-            p0y,
-            p2x,
-            p2y,
-            b.bezierBowChordFraction,
-            b.arcSide,
-            &p1x,
-            &p1y);
+        // Point de controle:
+        // - le "cote" et les subtilites par quadrant viennent de quadBezierMidControl()
+        // - mais on stabilise l'amplitude avec la longueur capturee au lancement.
+        const float chordDx = p2x - p0x;
+        const float chordDy = p2y - p0y;
+        const float chordLen = std::sqrt(chordDx * chordDx + chordDy * chordDy);
+        const float refLen =
+            (std::isfinite(b.launchChordLenTiles) && b.launchChordLenTiles > 0.0f)
+            ? b.launchChordLenTiles
+            : chordLen;
+        float bowFraction = b.bezierBowChordFraction;
+        if (std::isfinite(refLen) && refLen > 1.0e-5f && chordLen > 1.0e-5f)
+        {
+            // quadBezierMidControl utilise (bowFraction * chordLen) comme amplitude.
+            // On veut (bezierBowChordFraction * refLen) => donc on scale la fraction.
+            bowFraction = b.bezierBowChordFraction * (refLen / chordLen);
+        }
+        quadBezierMidControl(p0x, p0y, p2x, p2y, bowFraction, b.arcSide, &p1x, &p1y);
 
         const float denom = b.flightDurationSec;
         float u = 1.0f;
