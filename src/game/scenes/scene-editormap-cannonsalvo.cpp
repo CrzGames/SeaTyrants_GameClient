@@ -31,7 +31,7 @@ namespace
 {
 constexpr int kSliderCount = 17;
 constexpr int kTrajectorySliderCount = 12;
-constexpr int kTrailSliderCount = 21;
+constexpr int kTrailSliderCount = 22;
 constexpr int kManualTrailSliderCount = 5;
 constexpr int kLayerButtonCount = 3;
 constexpr int kPageButtonCount = 3;
@@ -188,6 +188,7 @@ constexpr std::array<const char*, kAngleSectorButtonCount> kAngleSectorLabels = 
 
 constexpr std::array<SliderSpec, kTrailSliderCount> kTrailSliderSpecs = {{
     {"Longueur max tuiles", 0.15f, 32.0f, 0.15f},
+    {"Vitesse decoupe impact", 0.10f, 4.0f, 0.05f},
     {"Largeur tete px", 1.0f, 256.0f, 2.0f},
     {"Largeur fin px", 0.0f, 256.0f, 2.0f},
     {"Courbe largeur", 0.2f, 4.0f, 0.05f},
@@ -212,6 +213,7 @@ constexpr std::array<SliderSpec, kTrailSliderCount> kTrailSliderSpecs = {{
 
 constexpr std::array<HelpEntry, kTrailSliderCount> kTrailSliderHelp = {{
     {"Longueur max tuiles", "Longueur maximale conservee derriere le boulet. La trainee grandit avec la distance parcourue puis se coupe a cette valeur pour eviter une trainée trop longue."},
+    {"Vitesse decoupe impact", "Multiplie la vitesse de disparition du trail quand la tete touche la cible. 1.0 = normal, plus petit = plus lent, plus grand = plus rapide."},
     {"Largeur tete px", "Largeur du ribbon juste derriere le boulet. C'est la partie la plus visible du trail et celle qui donne le poids du projectile."},
     {"Largeur fin px", "Largeur au bout de la trainee. Baisse-la pour obtenir une fin plus fine et plus elegante, monte-la pour garder une trainée epaisse plus longtemps."},
     {"Courbe largeur", "Controle la vitesse a laquelle la largeur retrecit entre la tete et la fin. Valeur faible = transition douce, valeur forte = la fin devient fine plus vite."},
@@ -241,13 +243,13 @@ static const HelpEntry& getTrailSliderHelpEntry(int sliderIndex)
         return kTrailSliderHelp[0];
     }
 
-    if (sliderIndex == 16)
-    {
-        return kTrailSliderHelp[static_cast<size_t>(17)];
-    }
     if (sliderIndex == 17)
     {
-        return kTrailSliderHelp[static_cast<size_t>(16)];
+        return kTrailSliderHelp[static_cast<size_t>(18)];
+    }
+    if (sliderIndex == 18)
+    {
+        return kTrailSliderHelp[static_cast<size_t>(17)];
     }
     return kTrailSliderHelp[static_cast<size_t>(sliderIndex)];
 }
@@ -1363,44 +1365,46 @@ static float getTrailSliderValue(
         case 0:
             return config.maxLengthTiles;
         case 1:
-            return config.headWidthPixels;
+            return config.impactConsumeSpeedMultiplier;
         case 2:
-            return config.tailWidthPixels;
+            return config.headWidthPixels;
         case 3:
-            return config.widthExponent;
+            return config.tailWidthPixels;
         case 4:
-            return config.headOpacity;
+            return config.widthExponent;
         case 5:
-            return config.tailOpacity;
+            return config.headOpacity;
         case 6:
-            return config.opacityExponent;
+            return config.tailOpacity;
         case 7:
-            return config.headColorR;
+            return config.opacityExponent;
         case 8:
-            return config.headColorG;
+            return config.headColorR;
         case 9:
-            return config.headColorB;
+            return config.headColorG;
         case 10:
-            return config.tailColorR;
+            return config.headColorB;
         case 11:
-            return config.tailColorG;
+            return config.tailColorR;
         case 12:
-            return config.tailColorB;
+            return config.tailColorG;
         case 13:
-            return config.hideNearTargetTiles;
+            return config.tailColorB;
         case 14:
-            return config.headCoverTiles;
+            return config.hideNearTargetTiles;
         case 15:
-            return config.stampSpacingTiles;
+            return config.headCoverTiles;
         case 16:
-            return config.stampPhaseOffsetSeconds;
+            return config.stampSpacingTiles;
         case 17:
-            return config.stampScale;
+            return config.stampPhaseOffsetSeconds;
         case 18:
-            return config.stampHeadOpacity;
+            return config.stampScale;
         case 19:
-            return config.stampTailOpacity;
+            return config.stampHeadOpacity;
         case 20:
+            return config.stampTailOpacity;
+        case 21:
             return config.stampTintStrength;
         default:
             return 0.0f;
@@ -1423,63 +1427,66 @@ static void setTrailSliderValue(
             config->maxLengthTiles = value;
             break;
         case 1:
-            config->headWidthPixels = value;
+            config->impactConsumeSpeedMultiplier = value;
             break;
         case 2:
-            config->tailWidthPixels = value;
+            config->headWidthPixels = value;
             break;
         case 3:
-            config->widthExponent = value;
+            config->tailWidthPixels = value;
             break;
         case 4:
-            config->headOpacity = value;
+            config->widthExponent = value;
             break;
         case 5:
-            config->tailOpacity = value;
+            config->headOpacity = value;
             break;
         case 6:
-            config->opacityExponent = value;
+            config->tailOpacity = value;
             break;
         case 7:
-            config->headColorR = value;
+            config->opacityExponent = value;
             break;
         case 8:
-            config->headColorG = value;
+            config->headColorR = value;
             break;
         case 9:
-            config->headColorB = value;
+            config->headColorG = value;
             break;
         case 10:
-            config->tailColorR = value;
+            config->headColorB = value;
             break;
         case 11:
-            config->tailColorG = value;
+            config->tailColorR = value;
             break;
         case 12:
-            config->tailColorB = value;
+            config->tailColorG = value;
             break;
         case 13:
-            config->hideNearTargetTiles = value;
+            config->tailColorB = value;
             break;
         case 14:
-            config->headCoverTiles = value;
+            config->hideNearTargetTiles = value;
             break;
         case 15:
-            config->stampSpacingTiles = value;
+            config->headCoverTiles = value;
             break;
         case 16:
-            config->stampPhaseOffsetSeconds = value;
+            config->stampSpacingTiles = value;
             break;
         case 17:
-            config->stampScale = value;
+            config->stampPhaseOffsetSeconds = value;
             break;
         case 18:
-            config->stampHeadOpacity = value;
+            config->stampScale = value;
             break;
         case 19:
-            config->stampTailOpacity = value;
+            config->stampHeadOpacity = value;
             break;
         case 20:
+            config->stampTailOpacity = value;
+            break;
+        case 21:
             config->stampTintStrength = value;
             break;
         default:

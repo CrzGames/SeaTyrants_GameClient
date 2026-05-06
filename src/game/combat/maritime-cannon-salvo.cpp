@@ -665,6 +665,11 @@ MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig clampProjectileRibbonTrai
         (std::clamp)((std::isfinite(clamped.sampleStepTiles) ? clamped.sampleStepTiles : 0.22f), 0.02f, 2.0f);
     clamped.maxLengthTiles =
         (std::clamp)((std::isfinite(clamped.maxLengthTiles) ? clamped.maxLengthTiles : 6.5f), 0.15f, 32.0f);
+    clamped.impactConsumeSpeedMultiplier =
+        (std::clamp)(
+            (std::isfinite(clamped.impactConsumeSpeedMultiplier) ? clamped.impactConsumeSpeedMultiplier : 1.0f),
+            0.10f,
+            4.0f);
     clamped.headWidthPixels =
         (std::clamp)((std::isfinite(clamped.headWidthPixels) ? clamped.headWidthPixels : 24.0f), 1.0f, 256.0f);
     clamped.tailWidthPixels =
@@ -736,6 +741,8 @@ MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig readProjectileRibbonTrail
     MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig config = fallback;
     config.sampleStepTiles = readJsonFloat(object, "sampleStepTiles", config.sampleStepTiles);
     config.maxLengthTiles = readJsonFloat(object, "maxLengthTiles", config.maxLengthTiles);
+    config.impactConsumeSpeedMultiplier =
+        readJsonFloat(object, "impactConsumeSpeedMultiplier", config.impactConsumeSpeedMultiplier);
     config.headWidthPixels = readJsonFloat(object, "headWidthPixels", config.headWidthPixels);
     config.tailWidthPixels = readJsonFloat(object, "tailWidthPixels", config.tailWidthPixels);
     config.widthExponent = readJsonFloat(object, "widthExponent", config.widthExponent);
@@ -817,6 +824,7 @@ void addProjectileRibbonTrailConfigJson(
         clampProjectileRibbonTrailConfig(config);
     cJSON_AddNumberToObject(object, "sampleStepTiles", clamped.sampleStepTiles);
     cJSON_AddNumberToObject(object, "maxLengthTiles", clamped.maxLengthTiles);
+    cJSON_AddNumberToObject(object, "impactConsumeSpeedMultiplier", clamped.impactConsumeSpeedMultiplier);
     cJSON_AddNumberToObject(object, "headWidthPixels", clamped.headWidthPixels);
     cJSON_AddNumberToObject(object, "tailWidthPixels", clamped.tailWidthPixels);
     cJSON_AddNumberToObject(object, "widthExponent", clamped.widthExponent);
@@ -1754,6 +1762,7 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
 
         this->salvoProjectileVfx.push_back(std::move(projectile));
         ball.projectileVfxIndex = this->salvoProjectileVfx.size() - 1U;
+        ball.hasProjectileVfx = true;
 
         if (ball.ribbonTrailEnabled &&
             ball.ribbonTrailConfig.stampsEnabled &&
@@ -2080,6 +2089,31 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         b.hasRibbonTrailStampVfx = false;
         b.ribbonTrailStampVfxIndex = 0U;
     };
+    auto removeProjectileVfxForBall = [&](Cannonball& b) {
+        if (!b.hasProjectileVfx || this->salvoProjectileVfx.empty())
+        {
+            b.hasProjectileVfx = false;
+            b.projectileVfxIndex = 0U;
+            return;
+        }
+        if (b.projectileVfxIndex >= this->salvoProjectileVfx.size())
+        {
+            b.hasProjectileVfx = false;
+            b.projectileVfxIndex = 0U;
+            return;
+        }
+        this->salvoProjectileVfx[b.projectileVfxIndex].unload();
+        const std::size_t removedIndex = b.projectileVfxIndex;
+        const std::size_t lastIndex = this->salvoProjectileVfx.size() - 1U;
+        if (removedIndex != lastIndex)
+        {
+            this->salvoProjectileVfx[removedIndex] = std::move(this->salvoProjectileVfx[lastIndex]);
+            remapProjectileVfxIndexAfterSwap(lastIndex, removedIndex);
+        }
+        this->salvoProjectileVfx.pop_back();
+        b.hasProjectileVfx = false;
+        b.projectileVfxIndex = 0U;
+    };
 
     const float dtf =
         (std::isfinite(dt) && dt > 0.0) ? static_cast<float>(dt) : 0.0f;
@@ -2116,27 +2150,21 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
     for (size_t i = 0; i < this->cannonballs.size();)
     {
         Cannonball& b = this->cannonballs[i];
-        if (b.projectileVfxIndex >= this->salvoProjectileVfx.size() || b.target == nullptr)
+        if (b.target == nullptr)
         {
+            removeProjectileVfxForBall(b);
             removeRibbonTrailStampVfxForBall(b);
             this->cannonballs[i] = std::move(this->cannonballs.back());
             this->cannonballs.pop_back();
             continue;
         }
 
-        VFXClassic& vfx = this->salvoProjectileVfx[b.projectileVfxIndex];
-        if (!vfx.isLoaded())
+        if (b.hasProjectileVfx &&
+            (b.projectileVfxIndex >= this->salvoProjectileVfx.size() ||
+             !this->salvoProjectileVfx[b.projectileVfxIndex].isLoaded()))
         {
+            removeProjectileVfxForBall(b);
             removeRibbonTrailStampVfxForBall(b);
-            const std::size_t removedIndex = b.projectileVfxIndex;
-            const std::size_t lastIndex = this->salvoProjectileVfx.size() - 1U;
-            if (removedIndex != lastIndex)
-            {
-                this->salvoProjectileVfx[removedIndex] = std::move(this->salvoProjectileVfx[lastIndex]);
-                remapProjectileVfxIndexAfterSwap(lastIndex, removedIndex);
-            }
-            this->salvoProjectileVfx.pop_back();
-
             this->cannonballs[i] = std::move(this->cannonballs.back());
             this->cannonballs.pop_back();
             continue;
@@ -2217,19 +2245,36 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
 
         if (b.pendingRemovalAfterImpactFrame)
         {
-            this->scheduleTargetImpactVfxFromCannonball(b);
-            removeRibbonTrailStampVfxForBall(b);
-
-            vfx.unload();
-
-            const std::size_t removedIndex = b.projectileVfxIndex;
-            const std::size_t lastIndex = this->salvoProjectileVfx.size() - 1U;
-            if (removedIndex != lastIndex)
+            if (b.impactTrailHoldSecRemaining > 0.0f)
             {
-                this->salvoProjectileVfx[removedIndex] = std::move(this->salvoProjectileVfx[lastIndex]);
-                remapProjectileVfxIndexAfterSwap(lastIndex, removedIndex);
+                if (b.ribbonTrailEnabled && b.ribbonTrailNodes.size() > 1U)
+                {
+                    const ProjectileRibbonTrailConfig trailConfig =
+                        clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
+                    const float speedTilesPerSec =
+                        (b.flightDurationSec > 1.0e-4f && b.launchChordLenTiles > 1.0e-4f)
+                            ? (b.launchChordLenTiles / b.flightDurationSec)
+                            : 10.0f;
+                    const float consumeTiles = (std::max)(
+                        0.0f,
+                        speedTilesPerSec * trailConfig.impactConsumeSpeedMultiplier * dtf);
+                    this->consumeRibbonTrailFromHead(b, consumeTiles);
+                    if (b.ribbonTrailNodes.size() <= 1U)
+                    {
+                        b.impactTrailHoldSecRemaining = 0.0f;
+                    }
+                }
+                b.impactTrailHoldSecRemaining = (std::max)(0.0f, b.impactTrailHoldSecRemaining - dtf);
+                ++i;
+                continue;
             }
-            this->salvoProjectileVfx.pop_back();
+            if (!b.impactVfxScheduled)
+            {
+                this->scheduleTargetImpactVfxFromCannonball(b);
+                b.impactVfxScheduled = true;
+            }
+            removeProjectileVfxForBall(b);
+            removeRibbonTrailStampVfxForBall(b);
 
             this->cannonballs[i] = std::move(this->cannonballs.back());
             this->cannonballs.pop_back();
@@ -2308,7 +2353,11 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         b.tileX = baseX;
         b.tileY = baseY;
 
-        vfx.update(static_cast<double>(dtf));
+        if (b.hasProjectileVfx && b.projectileVfxIndex < this->salvoProjectileVfx.size())
+        {
+            VFXClassic& vfx = this->salvoProjectileVfx[b.projectileVfxIndex];
+            vfx.update(static_cast<double>(dtf));
+        }
         if (b.hasRibbonTrailStampVfx &&
             b.ribbonTrailStampVfxIndex < this->salvoRibbonTrailStampVfx.size())
         {
@@ -2327,6 +2376,25 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         }
         if (reachedImpactThisTick)
         {
+            removeProjectileVfxForBall(b);
+            if (!b.impactVfxScheduled)
+            {
+                this->scheduleTargetImpactVfxFromCannonball(b);
+                b.impactVfxScheduled = true;
+            }
+            if (b.ribbonTrailEnabled)
+            {
+                const ProjectileRibbonTrailConfig trailConfig =
+                    clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
+                const float speedTilesPerSec =
+                    (b.flightDurationSec > 1.0e-4f && b.launchChordLenTiles > 1.0e-4f)
+                        ? (b.launchChordLenTiles / b.flightDurationSec)
+                        : 10.0f;
+                const float holdSec =
+                    trailConfig.maxLengthTiles /
+                    (std::max)(0.10f, speedTilesPerSec * trailConfig.impactConsumeSpeedMultiplier);
+                b.impactTrailHoldSecRemaining = (std::clamp)(holdSec, 0.06f, 2.5f);
+            }
             b.pendingRemovalAfterImpactFrame = true;
         }
 
@@ -2509,6 +2577,49 @@ void MaritimeCannonSalvoSystem::trimRibbonTrailSamples(Cannonball& b)
     }
 }
 
+void MaritimeCannonSalvoSystem::consumeRibbonTrailFromHead(
+    Cannonball& b,
+    float consumeDistanceTiles)
+{
+    if (b.ribbonTrailNodes.size() <= 1U || consumeDistanceTiles <= 1.0e-6f)
+    {
+        return;
+    }
+
+    float remaining = consumeDistanceTiles;
+    while (remaining > 1.0e-6f && b.ribbonTrailNodes.size() > 1U)
+    {
+        const std::size_t headIndex = b.ribbonTrailNodes.size() - 1U;
+        const std::size_t prevIndex = headIndex - 1U;
+        RibbonTrailNode& head = b.ribbonTrailNodes[headIndex];
+        const RibbonTrailNode& prev = b.ribbonTrailNodes[prevIndex];
+
+        const float segDx = head.tileX - prev.tileX;
+        const float segDy = head.tileY - prev.tileY;
+        const float segLen = std::sqrt(segDx * segDx + segDy * segDy);
+        if (segLen <= 1.0e-6f)
+        {
+            b.ribbonTrailNodes.pop_back();
+            continue;
+        }
+
+        if (remaining >= segLen)
+        {
+            remaining -= segLen;
+            b.ribbonTrailNodes.pop_back();
+            continue;
+        }
+
+        const float keep = segLen - remaining;
+        const float t = keep / segLen;
+        head.tileX = prev.tileX + (segDx * t);
+        head.tileY = prev.tileY + (segDy * t);
+        head.lobFactor = prev.lobFactor + ((head.lobFactor - prev.lobFactor) * t);
+        remaining = 0.0f;
+        break;
+    }
+}
+
 void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
     const Cannonball& b,
     const Map& map,
@@ -2521,14 +2632,14 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
 
     const ProjectileRibbonTrailConfig config =
         clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
-    if (config.hideNearTargetTiles > 1.0e-4f && b.target != nullptr)
+    if (config.hideNearTargetTiles > 1.0e-4f)
     {
-        const SDL_FPoint targetTile = b.target->getPositionTile();
-        const float aimX = targetTile.x + b.impactTileOffX;
-        const float aimY = targetTile.y + b.impactTileOffY;
-        const float shotDx = aimX - b.startTileX;
-        const float shotDy = aimY - b.startTileY;
-        const float launchDistanceTiles = std::sqrt((shotDx * shotDx) + (shotDy * shotDy));
+        const float launchDistanceTiles =
+            (std::isfinite(b.launchChordLenTiles) && b.launchChordLenTiles > 1.0e-4f)
+                ? b.launchChordLenTiles
+                : std::sqrt(
+                      ((b.tileX - b.startTileX) * (b.tileX - b.startTileX)) +
+                      ((b.tileY - b.startTileY) * (b.tileY - b.startTileY)));
         if (launchDistanceTiles <= config.hideNearTargetTiles)
         {
             return;
@@ -2543,6 +2654,10 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
 
     std::vector<TrailDrawPoint> points;
     points.reserve(b.ribbonTrailNodes.size());
+    const float safeZoom =
+        (std::isfinite(zoomFactor) && zoomFactor > 1.0e-4f)
+            ? zoomFactor
+            : 1.0f;
     float accumulated = 0.0f;
     for (std::size_t idx = b.ribbonTrailNodes.size(); idx-- > 0U;)
     {
@@ -2565,7 +2680,7 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
         const float widthT = std::pow(trailT, config.widthExponent);
         const float alphaT = std::pow(trailT, config.opacityExponent);
         const float widthPixels =
-            (config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) * zoomFactor;
+            (config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) * safeZoom;
         const float alpha =
             config.headOpacity + ((config.tailOpacity - config.headOpacity) * alphaT);
         const auto mixColor = [&](float head, float tail) -> std::uint8_t {
@@ -2698,7 +2813,8 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
         }
     }
 
-    if (config.stampsEnabled &&
+    if (!b.pendingRemovalAfterImpactFrame &&
+        config.stampsEnabled &&
         b.hasRibbonTrailStampVfx &&
         b.ribbonTrailStampVfxIndex < this->salvoRibbonTrailStampVfx.size())
     {
@@ -2797,7 +2913,7 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
                 trailStampVfx.drawWithTintAlphaBlendPhaseOffset(
                     posX,
                     posY,
-                    config.stampScale * customStamp.scale * (std::max)(0.18f, widthRatio),
+                    config.stampScale * customStamp.scale * (std::max)(0.18f, widthRatio) * safeZoom,
                     rotDeg,
                     false,
                     false,
@@ -2884,7 +3000,7 @@ void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
             trailStampVfx.drawWithTintAlphaBlendPhaseOffset(
                 posX,
                 posY,
-                config.stampScale * (std::max)(0.18f, widthRatio),
+                config.stampScale * (std::max)(0.18f, widthRatio) * safeZoom,
                 rotDeg,
                 false,
                 false,
@@ -2903,7 +3019,7 @@ void MaritimeCannonSalvoSystem::drawSalvoProjectilesInternal(void) const
     const float drawScale = MaritimeCannonSalvoSystem::kDrawScale * zoomFactor;
     for (const Cannonball& b : this->cannonballs)
     {
-        if (b.projectileVfxIndex >= this->salvoProjectileVfx.size() || b.target == nullptr)
+        if (b.target == nullptr)
         {
             continue;
         }
@@ -2911,14 +3027,18 @@ void MaritimeCannonSalvoSystem::drawSalvoProjectilesInternal(void) const
         {
             continue;
         }
+        if (b.ribbonTrailEnabled)
+        {
+            this->drawRibbonTrailForCannonball(b, map, zoomFactor);
+        }
+        if (!b.hasProjectileVfx || b.projectileVfxIndex >= this->salvoProjectileVfx.size())
+        {
+            continue;
+        }
         const VFXClassic& vfx = this->salvoProjectileVfx[b.projectileVfxIndex];
         if (!vfx.isLoaded() || vfx.isFinished())
         {
             continue;
-        }
-        if (b.ribbonTrailEnabled)
-        {
-            this->drawRibbonTrailForCannonball(b, map, zoomFactor);
         }
         SDL_FPoint screen = map.tileToScreenCenterFloat(b.tileX, b.tileY);
         const float p0x = b.startTileX;

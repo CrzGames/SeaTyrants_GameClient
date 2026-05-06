@@ -84,6 +84,7 @@ public:
 
         float sampleStepTiles = 0.22f;      /**< Distance mini entre deux echantillons consecutifs. */
         float maxLengthTiles = 6.5f;        /**< Longueur max conservee derriere le boulet. */
+        float impactConsumeSpeedMultiplier = 1.0f; /**< Vitesse de "decoupe" du trail apres impact (1=normal). */
         float headWidthPixels = 24.0f;      /**< Largeur pres du boulet (zoom 100%). */
         float tailWidthPixels = 6.0f;       /**< Largeur en fin de trainée. */
         float widthExponent = 0.95f;        /**< Courbe de reduction de largeur le long du trail. */
@@ -382,6 +383,7 @@ private:
         };
 
         std::size_t projectileVfxIndex = 0U; /**< Index dans @ref salvoProjectileVfx. */
+        bool hasProjectileVfx = false; /**< True tant que le visuel boulet est encore present. */
         Ship* target;
         Ship* attacker;
         std::vector<ImpactVfxRequest> endImpactVfxRequests;
@@ -444,6 +446,8 @@ private:
         std::size_t ribbonTrailStampVfxIndex = 0U;
         ProjectileRibbonTrailConfig ribbonTrailConfig{};
         std::vector<RibbonTrailNode> ribbonTrailNodes{};
+        float impactTrailHoldSecRemaining = 0.0f;
+        bool impactVfxScheduled = false;
         bool pendingRemovalAfterImpactFrame = false;
     };
 
@@ -526,5 +530,6 @@ private:
         std::vector<GameplayVfxShipSlot>* vfxShipSlots);
     void appendRibbonTrailSample(Cannonball& b, float lobFactor);
     void trimRibbonTrailSamples(Cannonball& b);
+    void consumeRibbonTrailFromHead(Cannonball& b, float consumeDistanceTiles);
     void drawRibbonTrailForCannonball(const Cannonball& b, const Map& map, float zoomFactor) const;
 };
