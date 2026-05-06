@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "game/scenes/scene.h"
+#include "game/combat/maritime-cannon-salvo.h"
 #include "game/ships/ship.h"
 #include "game/state.h"
 #include "game/ui/hud/background-widget.h"
@@ -19,6 +20,14 @@
 
 class IlluminatedProjectileDebugPanel {
 public:
+    enum class DialogRequest {
+        NONE = 0,
+        GLOW_IMPORT_JSON,
+        GLOW_EXPORT_JSON,
+        TRAIL_IMPORT_JSON,
+        TRAIL_EXPORT_JSON
+    };
+
     IlluminatedProjectileDebugPanel(void);
     ~IlluminatedProjectileDebugPanel(void);
 
@@ -41,6 +50,12 @@ public:
     void toggleVisibility(void);
     void setVisible(bool visible);
     bool isVisible(void) const;
+    void setTrailPreviewSelection(
+        const char* projectileFolderPath,
+        const char* trailFolderPath,
+        bool projectileIlluminated,
+        bool trailEnabled);
+    DialogRequest consumeDialogRequest(void);
 
 private:
     bool loaded;
@@ -53,14 +68,30 @@ private:
     int selectedAngleSectorIndex;
     unsigned int trajectoryDebugMask;
     bool trajectoryCircleVisible;
+    bool trailScrollDragging;
     float sliderDragGrabOffsetX;
     float panelDragGrabOffsetX;
     float panelDragGrabOffsetY;
+    float trailScrollOffsetY;
+    float trailScrollDragGrabOffsetY;
     float statusMessageTimerSec;
     SDL_FPoint panelOffset;
     std::string statusMessage;
     RC2D_Font titleFont;
     RC2D_Font bodyFont;
+    VFXClassic previewProjectileVfx;
+    VFXClassic previewTrailVfx;
+    std::string previewProjectileFolderPath;
+    std::string previewTrailFolderPath;
+    std::string loadedPreviewProjectileFolderPath;
+    std::string loadedPreviewTrailFolderPath;
+    bool previewProjectileIlluminated;
+    bool previewTrailEnabled;
+    bool previewAssetsDirty;
+    float previewAnimTimerSec;
+    int selectedManualTrailStampIndex;
+    bool manualTrailStampDragActive;
+    DialogRequest pendingDialogRequest;
 };
 
 /**
@@ -71,8 +102,7 @@ class EditorMapCannonSalvoScene : public Scene {
 public:
     enum class ProjectileGlowMode {
         LIVE = 0,
-        DEFAULT_JSON,
-        JSON_FILE
+        DEFAULT_JSON
     };
 
     struct ListItem {
@@ -85,6 +115,11 @@ public:
         std::string illuminatedGlowConfigPath{};
         bool illuminatedGlowConfigInitialized = false;
         VFXClassic::IlluminatedProjectileGlowConfig illuminatedGlowConfig{};
+        bool ribbonTrailEnabled = false;
+        bool ribbonTrailConfigInitialized = false;
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig ribbonTrailConfig{};
+        std::string ribbonTrailConfigPath{};
+        std::string ribbonTrailVfxFolderPath{};
     };
 
 private:
@@ -93,6 +128,9 @@ private:
         PROJECTILE,
         PROJECTILE_GLOW_JSON,
         PROJECTILE_GLOW_JSON_EXPORT,
+        TRAIL_JSON_IMPORT,
+        TRAIL_JSON_EXPORT,
+        TRAIL,
         START_VFX,
         END_VFX
     };
@@ -109,23 +147,28 @@ private:
 
     std::vector<ListItem> shipOptions;
     std::vector<ListItem> projectileOptions;
+    std::vector<ListItem> trailOptions;
     std::vector<ListItem> startVfxOptions;
     std::vector<ListItem> endVfxOptions;
 
     int selectedShipIndex;
     int selectedProjectileIndex;
+    int selectedTrailIndex;
     int selectedStartVfxIndex;
     int focusedEndVfxIndex;
     int shipListScrollOffset;
     int projectileListScrollOffset;
+    int trailListScrollOffset;
     int startVfxListScrollOffset;
     int endVfxListScrollOffset;
     bool shipListScrollDragActive;
     bool projectileListScrollDragActive;
+    bool trailListScrollDragActive;
     bool startVfxListScrollDragActive;
     bool endVfxListScrollDragActive;
     float shipListScrollDragGrabOffsetY;
     float projectileListScrollDragGrabOffsetY;
+    float trailListScrollDragGrabOffsetY;
     float startVfxListScrollDragGrabOffsetY;
     float endVfxListScrollDragGrabOffsetY;
 
@@ -141,6 +184,8 @@ private:
     bool endDelayInputFocused;
     std::string endDelayInputBuffer;
     std::string statusMessage;
+    bool blockingPopupVisible;
+    std::string blockingPopupMessage;
 
     SDL_FRect buttonDebugPanelRect;
     SDL_FRect buttonListsVisibilityRect;
@@ -157,6 +202,7 @@ private:
     SDL_FRect buttonCadenceDownRect;
     SDL_FRect buttonCadenceUpRect;
     SDL_FRect buttonProjectileIlluminatedRect;
+    SDL_FRect buttonProjectileTrailRect;
     SDL_FRect buttonProjectileGlowModeRect;
     SDL_FRect buttonProjectileGlowImportRect;
     SDL_FRect buttonProjectileGlowExportRect;
@@ -164,9 +210,11 @@ private:
 
     SDL_FRect shipListRect;
     SDL_FRect projectileListRect;
+    SDL_FRect trailListRect;
     SDL_FRect startVfxListRect;
     SDL_FRect endVfxListRect;
     SDL_FRect projectileImportButtonRect;
+    SDL_FRect trailImportButtonRect;
     SDL_FRect startVfxImportButtonRect;
     SDL_FRect endVfxImportButtonRect;
     SDL_FRect miniMapRect;
@@ -185,9 +233,11 @@ private:
     void collectAssetLists(void);
     void collectShipFolders(void);
     void collectProjectileFolders(void);
+    void collectTrailFolders(void);
     void collectShipVfxFolders(void);
     bool selectShipAtIndex(int index);
     bool selectProjectileAtIndex(int index);
+    bool selectTrailAtIndex(int index);
     bool selectStartVfxAtIndex(int index);
     bool toggleEndVfxAtIndex(int index);
     void refreshEndDelayInputFromFocus(void);
@@ -204,8 +254,12 @@ private:
     void adjustShipsSpeed(float delta);
     bool syncSelectedProjectileGlowConfigFromPanel(void);
     bool applySelectedProjectileGlowConfigToPanel(bool showStatusMessage);
+    bool syncSelectedProjectileRibbonTrailConfigFromPanel(void);
+    bool applySelectedProjectileRibbonTrailConfigToPanel(bool showStatusMessage);
+    void refreshDebugPanelTrailPreview(void);
     bool exportSelectedProjectileGlowConfig(void);
     void toggleSelectedProjectileIlluminated(void);
+    void toggleSelectedProjectileRibbonTrail(void);
     void cycleSelectedProjectileGlowMode(void);
 
     void positionShipsForPreview(bool keepExistingPositions);
@@ -262,6 +316,9 @@ private:
     bool handleMiniMapClick(float x, float y, RC2D_MouseButton button);
     void handleMiniMapDragFromMouse(void);
     void drawMiniMap(void) const;
+    void showBlockingPopup(const std::string& message);
+    bool handleBlockingPopupClick(float x, float y, RC2D_MouseButton button);
+    void drawBlockingPopup(void) const;
 
     void openImportFolderDialog(ImportTarget target);
     void processPendingFolderRequest(void);

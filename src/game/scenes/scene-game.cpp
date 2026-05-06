@@ -130,18 +130,30 @@ void GameScene::load(void)
     // Construit l'arborescence HUD (widgets, themes, liens entree clavier).
     GetIngameHudOverlay().load();
 
+    // Récupére le système de salve maritime.
     MaritimeCannonSalvoSystem& salvoSystem = GetMaritimeCannonSalvoSystem();
+    
+    // Charge les réglages de trajectoire de boulets depuis un fichier JSON, pour les utiliser dans les salves.
     (void)MaritimeCannonSalvoSystem::loadProjectileTrajectoryTuningsFromFile();
+
+
+    // Configure une famille de salve de démonstration avec des réglages de VFX et trajectoire spécifiques, pour les tirs de test vers l'autre joueur.
     salvoSystem.clearSalvoEntries();
     MaritimeCannonSalvoSystem::SalvoEntry demoSalvoEntry{};
     demoSalvoEntry.entryId = kDemoIlluminatedSalvoEntryId;
     demoSalvoEntry.debugName = "demo_illuminated_round";
-    demoSalvoEntry.projectileVfxClassicFolder = "assets/images/vfxclassic/vfx-ammo-explo";
-    demoSalvoEntry.illuminatedProjectile.enabled = true;
-    demoSalvoEntry.startActionVfxShipFolderForAttacker = "assets/images/vfxship/vfx-cannon";
-    MaritimeCannonSalvoSystem::SalvoEntry::EndActionVfxShipFolderForTarget demoImpactVfx{};
+    demoSalvoEntry.projectileVfxClassicFolder = "assets/images/vfxclassic/vfx-ammo-shrapnel";
+    demoSalvoEntry.illuminatedProjectile.enabled = false;
+    demoSalvoEntry.illuminatedProjectile.glowConfigJsonPath = "assets/data/ammo-illu-shrapnel.json";
+    demoSalvoEntry.startActionVfxShipFolderPathForAttacker = "assets/images/vfxship/vfx-cannon";
+    MaritimeCannonSalvoSystem::SalvoEntry::EndActionVfxShipFolderPathForTarget demoImpactVfx{};
     demoImpactVfx.vfxShipFolder = "assets/images/vfxship/vfx-hitsimple";
-    demoSalvoEntry.endActionVfxShipFoldersForTarget.push_back(demoImpactVfx);
+    demoSalvoEntry.endActionVfxShipFoldersPathForTarget.push_back(demoImpactVfx);
+    MaritimeCannonSalvoSystem::SalvoEntry::RibbonTrailSettings demoRibbonTrailSettings{};
+    demoRibbonTrailSettings.enabled = true;
+    demoRibbonTrailSettings.vfxClassicFolderPath = "assets/images/vfxclassic/vfx-ammo-shrapnel";
+    demoRibbonTrailSettings.trailConfigJsonPath = "assets/data/ammo-trail-shrapnel.json";
+    demoSalvoEntry.ribbonTrail = demoRibbonTrailSettings;
     salvoSystem.addSalvoEntry(demoSalvoEntry);
 
     // Recalcule map.rect a partir de la taille de la zone de rendu gameplay.

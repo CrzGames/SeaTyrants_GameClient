@@ -48,6 +48,7 @@ private:
      * @return Duree d'un cycle complet.
      */
     float resolvedPlaybackPeriodSeconds(void) const;
+    int getCurrentFrameIndexWithPhaseOffset(float additionalPhaseOffsetSec) const;
 
     void drawInternal(
         float centerX,
@@ -58,7 +59,8 @@ private:
         bool flipVertical,
         const std::uint8_t* tintRgb,
         std::uint8_t alpha = 255,
-        int blendMode = 0) const;
+        int blendMode = 0,
+        float additionalPhaseOffsetSec = 0.0f) const;
 
 public:
     /**
@@ -276,6 +278,35 @@ public:
         std::uint8_t tintR,
         std::uint8_t tintG,
         std::uint8_t tintB) const;
+
+    /**
+     * @brief Variante generique avec teinte RGB optionnelle, alpha et blend SDL explicites.
+     *
+     * Si @p tintRgbOrNull vaut `nullptr`, aucun ColorMod n'est applique.
+     * `blendMode = 0` conserve le blend mode actuel de la texture.
+     */
+    void drawWithTintAlphaBlend(
+        float centerX,
+        float centerY,
+        float scale,
+        float rotationDeg,
+        bool flipHorizontal,
+        bool flipVertical,
+        const std::uint8_t* tintRgbOrNull,
+        std::uint8_t alpha,
+        int blendMode) const;
+
+    void drawWithTintAlphaBlendPhaseOffset(
+        float centerX,
+        float centerY,
+        float scale,
+        float rotationDeg,
+        bool flipHorizontal,
+        bool flipVertical,
+        const std::uint8_t* tintRgbOrNull,
+        std::uint8_t alpha,
+        int blendMode,
+        float phaseOffsetSec) const;
 
     /**
      * @brief Rendu "boulet illumine": halo radial colore (texture procedurale) puis spritesheet sans ColorMod (sprite tel quel).

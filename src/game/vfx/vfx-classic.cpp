@@ -850,6 +850,11 @@ const char* VFXClassic::getIlluminatedProjectileGlowConfigPath(void)
 
 int VFXClassic::getCurrentFrameIndex(void) const
 {
+    return this->getCurrentFrameIndexWithPhaseOffset(0.0f);
+}
+
+int VFXClassic::getCurrentFrameIndexWithPhaseOffset(float additionalPhaseOffsetSec) const
+{
     const int frameCount = static_cast<int>(this->frames.size());
     if (frameCount <= 0)
     {
@@ -865,7 +870,9 @@ int VFXClassic::getCurrentFrameIndex(void) const
     const float fps = (std::max)(this->defaultFps, 1.0f);
     const float sampleTime =
         clampClassicPlaybackSampleSeconds(this->playbackSeconds, this->animationTotalDurationMs);
-    float phase = std::fmod(sampleTime + this->framePhaseOffsetSec, periodSec);
+    const float totalPhaseOffset =
+        this->framePhaseOffsetSec + ((std::isfinite(additionalPhaseOffsetSec)) ? additionalPhaseOffsetSec : 0.0f);
+    float phase = std::fmod(sampleTime + totalPhaseOffset, periodSec);
     if (phase < 0.0f)
     {
         phase += periodSec;
@@ -906,6 +913,54 @@ void VFXClassic::drawWithRgbTint(
     this->drawInternal(centerX, centerY, scale, rotationDeg, flipHorizontal, flipVertical, rgb);
 }
 
+void VFXClassic::drawWithTintAlphaBlend(
+    float centerX,
+    float centerY,
+    float scale,
+    float rotationDeg,
+    bool flipHorizontal,
+    bool flipVertical,
+    const std::uint8_t* tintRgbOrNull,
+    std::uint8_t alpha,
+    int blendMode) const
+{
+    this->drawInternal(
+        centerX,
+        centerY,
+        scale,
+        rotationDeg,
+        flipHorizontal,
+        flipVertical,
+        tintRgbOrNull,
+        alpha,
+        blendMode);
+}
+
+void VFXClassic::drawWithTintAlphaBlendPhaseOffset(
+    float centerX,
+    float centerY,
+    float scale,
+    float rotationDeg,
+    bool flipHorizontal,
+    bool flipVertical,
+    const std::uint8_t* tintRgbOrNull,
+    std::uint8_t alpha,
+    int blendMode,
+    float phaseOffsetSec) const
+{
+    this->drawInternal(
+        centerX,
+        centerY,
+        scale,
+        rotationDeg,
+        flipHorizontal,
+        flipVertical,
+        tintRgbOrNull,
+        alpha,
+        blendMode,
+        phaseOffsetSec);
+}
+
 void VFXClassic::drawInternal(
     float centerX,
     float centerY,
@@ -915,14 +970,15 @@ void VFXClassic::drawInternal(
     bool flipVertical,
     const std::uint8_t* tintRgb,
     std::uint8_t alpha,
-    int blendMode) const
+    int blendMode,
+    float additionalPhaseOffsetSec) const
 {
     if (!this->isLoaded() || this->isFinished())
     {
         return;
     }
 
-    const int frameIndex = this->getCurrentFrameIndex();
+    const int frameIndex = this->getCurrentFrameIndexWithPhaseOffset(additionalPhaseOffsetSec);
     if (frameIndex < 0 || frameIndex >= static_cast<int>(this->frames.size()))
     {
         return;

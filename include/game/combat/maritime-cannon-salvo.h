@@ -10,6 +10,7 @@
 #include <vector>
 
 class GameState;
+class Map;
 struct GameplayVfxShipSlot;
 
 /**
@@ -66,6 +67,51 @@ public:
     };
 
     /**
+     * @brief Reglages runtime du ribbon trail des boulets.
+     *
+     * La trainée grandit naturellement avec la distance deja parcourue puis est
+     * coupee a @ref maxLengthTiles. Le mesh couleur et les spritesheets repetes
+     * le long du trail reutilisent la meme config.
+     */
+    struct ProjectileRibbonTrailConfig {
+        struct CustomStampPlacement {
+            float distanceFromHeadTiles = 0.0f;
+            float lateralOffsetPixels = 0.0f;
+            float scale = 1.0f;
+            float opacity = 1.0f;
+            float rotationOffsetDeg = 0.0f;
+        };
+
+        float sampleStepTiles = 0.22f;      /**< Distance mini entre deux echantillons consecutifs. */
+        float maxLengthTiles = 6.5f;        /**< Longueur max conservee derriere le boulet. */
+        float headWidthPixels = 24.0f;      /**< Largeur pres du boulet (zoom 100%). */
+        float tailWidthPixels = 6.0f;       /**< Largeur en fin de trainée. */
+        float widthExponent = 0.95f;        /**< Courbe de reduction de largeur le long du trail. */
+        float headOpacity = 0.42f;          /**< Opacite du mesh pres du boulet. */
+        float tailOpacity = 0.18f;          /**< Opacite du mesh en fin de trainée. */
+        float opacityExponent = 1.0f;       /**< Courbe d'opacite le long du trail. */
+        float headColorR = 118.0f;          /**< Couleur mesh pres du boulet. */
+        float headColorG = 96.0f;
+        float headColorB = 82.0f;
+        float tailColorR = 228.0f;          /**< Couleur mesh en fin de trainée. */
+        float tailColorG = 214.0f;
+        float tailColorB = 180.0f;
+        float hideNearTargetTiles = 0.0f;   /**< Masque le trail si la distance totale du tir est sous ce seuil. */
+        float headCoverTiles = 0.0f;        /**< Prolonge la tête du trail autour/devant le boulet. */
+        float stampSpacingTiles = 0.68f;    /**< Espacement des sprites trail le long du ribbon. */
+        float stampPhaseOffsetSeconds = 0.0f; /**< Decalage de phase ajoute entre les stamps successifs. */
+        float stampScale = 0.72f;           /**< Echelle de base des stamps trail. */
+        float stampHeadOpacity = 0.52f;     /**< Opacite du stamp pres du boulet. */
+        float stampTailOpacity = 0.16f;     /**< Opacite du stamp en fin de trainée. */
+        float stampTintStrength = 0.72f;    /**< 0=stamps blancs, 1=suivent entierement la couleur trail. */
+        bool meshEnabled = true;            /**< Active le ruban colore geometrique. */
+        bool stampsEnabled = true;          /**< Active les spritesheets repetees sur la trainée. */
+        bool manualStampsEnabled = false;
+        bool additiveStampBlend = false;    /**< True => blend additif pour les stamps trail. */
+        std::vector<CustomStampPlacement> customStamps{};
+    };
+
+    /**
      * @struct SalvoEntry
      * @brief Definition runtime d'une famille de salve maritime.
      *
@@ -79,7 +125,7 @@ public:
      * dans le systeme via @ref addSalvoEntry.
      */
     struct SalvoEntry {
-        struct EndActionVfxShipFolderForTarget {
+        struct EndActionVfxShipFolderPathForTarget {
             const char* vfxShipFolder = nullptr;
             std::uint32_t delayAfterImpactMs = 0U;
         };
@@ -104,6 +150,26 @@ public:
             const char* glowConfigJsonPath = nullptr;
         };
 
+        struct RibbonTrailSettings {
+            /**
+             * @brief Active la trainée ribbon sur les boulets de cette salve.
+             */
+            bool enabled = false;
+            /**
+             * @brief Spritesheet optionnelle repetee le long du trail.
+             *
+             * - `nullptr` / vide: mesh ribbon seul.
+             * - sinon: charge via @ref VFXClassic::loadFromFolder.
+             */
+            const char* vfxClassicFolderPath = nullptr;
+            /**
+             * @brief JSON optionnel pour surcharger la config trail runtime globale.
+             *
+             * Si nul/vide, la salve capture la config trail globale deja active.
+             */
+            const char* trailConfigJsonPath = nullptr;
+        };
+
         std::uint32_t entryId = 0U; /**< Identifiant stable de la famille de salve. */
         std::string debugName{};    /**< Nom debug lisible pour logs et outils. */
         /**
@@ -118,18 +184,20 @@ public:
         const char* projectileVfxClassicFolder = nullptr;
         /** Reglages illumines de cette salve. */
         IlluminatedProjectileSettings illuminatedProjectile{};
+        /** Reglages ribbon trail de cette salve. */
+        RibbonTrailSettings ribbonTrail{};
         /**
          * @brief Dossier du VFX ship joue sur l'attaquant au depart de la salve.
          *
          * - `nullptr` ou chaine vide: aucun VFX ship de depart.
          * - sinon, la valeur est transmise a @ref VFXShip::loadFromFolders avec:
          *   - `shipFolderPath = dossier sprites du navire attaquant`
-         *   - `vfxFolderPath = startActionVfxShipFolderForAttacker`
+         *   - `vfxFolderPath = startActionVfxShipFolderPathForAttacker`
          *
          * Le JSON ship/runtime attendu reste celui derive du couple
          * `(dossier ship attaquant, dossier VFX)`.
          */
-        const char* startActionVfxShipFolderForAttacker = nullptr;
+        const char* startActionVfxShipFolderPathForAttacker = nullptr;
         /**
          * @brief Liste des dossiers VFX ship joues sur la cible a l'impact.
          *
@@ -140,7 +208,7 @@ public:
          * Cela permet d'empiler plusieurs layers d'impact pour une meme salve,
          * avec un delai optionnel par layer.
          */
-        std::vector<EndActionVfxShipFolderForTarget> endActionVfxShipFoldersForTarget{};
+        std::vector<EndActionVfxShipFolderPathForTarget> endActionVfxShipFoldersPathForTarget{};
     };
 
     /** Preset client pour le premier type (chemins assets — pourront etre remplaces par des lignes BDD). */
@@ -244,6 +312,11 @@ public:
      * @return True si l'ecriture a reussi.
      */
     static bool exportProjectileTrajectoryTuningsToFile(void);
+    /**
+     * @brief Exporte les configs de trajectoire courantes vers un chemin JSON explicite.
+     * @return True si l'ecriture a reussi.
+     */
+    static bool exportProjectileTrajectoryTuningsToFile(const char* path);
 
     /**
      * @brief Chemin gameplay du fichier de config exporte / charge.
@@ -254,6 +327,33 @@ public:
      * @brief Reinitialise toutes les configs de trajectoire distance / angle.
      */
     static void resetProjectileTrajectoryTunings(void);
+
+    /**
+     * @brief Retourne la config ribbon trail par defaut.
+     */
+    static ProjectileRibbonTrailConfig getDefaultProjectileRibbonTrailConfig(void);
+
+    /**
+     * @brief Retourne la config ribbon trail runtime courante.
+     */
+    static ProjectileRibbonTrailConfig getProjectileRibbonTrailConfig(void);
+    /**
+     * @brief Lit une config ribbon trail depuis un JSON explicite (sans l'appliquer).
+     * @return True si le JSON est valide et la config extraite.
+     */
+    static bool readProjectileRibbonTrailConfigFromFile(
+        const char* path,
+        ProjectileRibbonTrailConfig* outConfig);
+
+    /**
+     * @brief Remplace la config ribbon trail runtime courante.
+     */
+    static void setProjectileRibbonTrailConfig(const ProjectileRibbonTrailConfig& config);
+
+    /**
+     * @brief Reinitialise le ribbon trail runtime a ses valeurs par defaut.
+     */
+    static void resetProjectileRibbonTrailConfig(void);
 
     /**
      * @brief Force le prochain chargement one-shot du fichier trajectoire gameplay.
@@ -269,6 +369,12 @@ public:
     static void invalidateIlluminatedProjectileGlowConfigFileCache(const char* glowConfigJsonPath);
 
 private:
+    struct RibbonTrailNode {
+        float tileX = 0.0f;
+        float tileY = 0.0f;
+        float lobFactor = 0.0f; /**< Facteur sin(PI*u) capture pour rejouer le lobe ecran au draw. */
+    };
+
     struct Cannonball {
         struct ImpactVfxRequest {
             std::string folderPath{};
@@ -332,6 +438,13 @@ private:
         bool hasIlluminatedGlowConfigOverride = false;
         /** Copie resolue au tir d'une config glow dediee a ce boulet/salve. */
         VFXClassic::IlluminatedProjectileGlowConfig illuminatedGlowConfigOverride{};
+        /** True si la salve capture un ribbon trail actif pour ce boulet. */
+        bool ribbonTrailEnabled = false;
+        bool hasRibbonTrailStampVfx = false;
+        std::size_t ribbonTrailStampVfxIndex = 0U;
+        ProjectileRibbonTrailConfig ribbonTrailConfig{};
+        std::vector<RibbonTrailNode> ribbonTrailNodes{};
+        bool pendingRemovalAfterImpactFrame = false;
     };
 
     struct MuzzleBurst {
@@ -366,6 +479,7 @@ private:
     std::vector<PendingTargetImpactBurst> pendingTargetImpactBursts; /**< VFX impact differes en attente. */
     std::vector<SalvoEntry> salvoEntries; /**< Catalogue runtime des familles de salves disponibles. */
     std::vector<VFXClassic> salvoProjectileVfx; /**< Lecteurs/runtime des spritesheets projectiles en vol. */
+    std::vector<VFXClassic> salvoRibbonTrailStampVfx; /**< Spritesheets trail repetees le long des ribbons. */
     std::mt19937 rng; /**< Generateur aleatoire utilise pour etaler et varier visuellement les salves. */
     /** Salve 1 boulet illumine: derniere couleur palette pour eviter deux fois la meme a la suite. */
     int lastIlluminatedSingleSalvoPaletteIdx = -1;
@@ -410,4 +524,7 @@ private:
         Ship& attackerShip,
         const char* endFolder,
         std::vector<GameplayVfxShipSlot>* vfxShipSlots);
+    void appendRibbonTrailSample(Cannonball& b, float lobFactor);
+    void trimRibbonTrailSamples(Cannonball& b);
+    void drawRibbonTrailForCannonball(const Cannonball& b, const Map& map, float zoomFactor) const;
 };

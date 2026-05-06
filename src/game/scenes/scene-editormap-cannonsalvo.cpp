@@ -31,13 +31,16 @@ namespace
 {
 constexpr int kSliderCount = 17;
 constexpr int kTrajectorySliderCount = 12;
+constexpr int kTrailSliderCount = 21;
+constexpr int kManualTrailSliderCount = 5;
 constexpr int kLayerButtonCount = 3;
-constexpr int kPageButtonCount = 2;
+constexpr int kPageButtonCount = 3;
 constexpr int kDistanceBandButtonCount = MaritimeCannonSalvoSystem::kProjectileTrajectoryDistanceBandCount;
 constexpr int kAngleSectorButtonCount = MaritimeCannonSalvoSystem::kProjectileTrajectoryAngleSectorCount;
 constexpr int kShipSpeedActiveSliderIndex = -2;
+constexpr int kManualTrailSliderIndexOffset = 100;
 
-constexpr float kPanelWidth = 720.0f;
+constexpr float kPanelWidth = 1360.0f;
 constexpr float kPanelHeight = 920.0f;
 constexpr float kPanelMargin = 16.0f;
 constexpr float kHeaderHeight = 34.0f;
@@ -48,6 +51,7 @@ constexpr float kSliderTrackHeight = 8.0f;
 constexpr float kSliderKnobWidth = 12.0f;
 constexpr float kSliderKnobHeight = 16.0f;
 constexpr float kButtonHeight = 28.0f;
+constexpr float kScrollBarWidth = 12.0f;
 constexpr float kHideButtonWidth = 104.0f;
 constexpr float kResetButtonWidth = 152.0f;
 constexpr float kLayerButtonWidth = 74.0f;
@@ -56,6 +60,7 @@ constexpr float kDistanceBandButtonWidth = 98.0f;
 constexpr float kAngleSectorButtonWidth = 70.0f;
 constexpr float kTrajectoryDebugButtonWidth = 58.0f;
 constexpr float kTrajectoryDebugButtonGap = 8.0f;
+constexpr float kManualStampSelectRadiusPx = 18.0f;
 constexpr int kDebugCurveSampleCount = 36;
 constexpr float kDebugMarkerSize = 6.0f;
 constexpr float kPi = 3.14159265358979323846f;
@@ -81,9 +86,20 @@ constexpr RC2D_Color kButtonFillSecondary = RC2D_Color{27, 35, 46, 238};
 constexpr RC2D_Color kButtonBorderMuted = RC2D_Color{150, 156, 166, 228};
 constexpr RC2D_Color kButtonActiveFill = RC2D_Color{86, 118, 68, 230};
 constexpr RC2D_Color kButtonActiveBorder = RC2D_Color{208, 225, 182, 240};
+constexpr RC2D_Color kPreviewFill = RC2D_Color{12, 21, 35, 236};
+constexpr RC2D_Color kPreviewBorder = RC2D_Color{111, 141, 168, 236};
+constexpr RC2D_Color kPreviewGrid = RC2D_Color{44, 58, 74, 170};
+constexpr RC2D_Color kHelpFill = RC2D_Color{16, 26, 41, 240};
+constexpr RC2D_Color kHelpBorder = RC2D_Color{171, 137, 58, 236};
+constexpr RC2D_Color kHelpAccent = RC2D_Color{232, 211, 152, 255};
 
 extern Ship* gActiveCannonSalvoAttackerShip;
 extern Ship* gActiveCannonSalvoTargetShip;
+extern bool gEditorGlowModeDefault;
+extern std::string gEditorGlowLiveSourcePath;
+extern bool gEditorGlowLiveClearSourceRequested;
+extern std::string gEditorTrailSourcePath;
+extern bool gEditorTrailClearSourceRequested;
 static bool tryGetTrajectoryPreviewShips(SDL_FPoint* outAttackerTile, SDL_FPoint* outTargetTile);
 
 struct SliderSpec
@@ -92,6 +108,12 @@ struct SliderSpec
     float minValue;
     float maxValue;
     float wheelStep;
+};
+
+struct HelpEntry
+{
+    const char* title;
+    const char* body;
 };
 
 constexpr std::array<SliderSpec, kSliderCount> kSliderSpecs = {{
@@ -145,6 +167,7 @@ constexpr std::array<const char*, kLayerButtonCount> kLayerLabels = {{
 constexpr std::array<const char*, kPageButtonCount> kPageLabels = {{
     "Glow",
     "Trajectoire",
+    "Trail",
 }};
 
 constexpr std::array<const char*, kDistanceBandButtonCount> kDistanceBandLabels = {{
@@ -161,6 +184,129 @@ constexpr std::array<const char*, kAngleSectorButtonCount> kAngleSectorLabels = 
     "181-250",
     "251-290",
     "291-0",
+}};
+
+constexpr std::array<SliderSpec, kTrailSliderCount> kTrailSliderSpecs = {{
+    {"Longueur max tuiles", 0.15f, 32.0f, 0.15f},
+    {"Largeur tete px", 1.0f, 256.0f, 2.0f},
+    {"Largeur fin px", 0.0f, 256.0f, 2.0f},
+    {"Courbe largeur", 0.2f, 4.0f, 0.05f},
+    {"Opacite tete", 0.0f, 1.0f, 0.02f},
+    {"Opacite fin", 0.0f, 1.0f, 0.02f},
+    {"Courbe opacite", 0.2f, 4.0f, 0.05f},
+    {"Tete rouge", 0.0f, 255.0f, 2.0f},
+    {"Tete vert", 0.0f, 255.0f, 2.0f},
+    {"Tete bleu", 0.0f, 255.0f, 2.0f},
+    {"Fin rouge", 0.0f, 255.0f, 2.0f},
+    {"Fin vert", 0.0f, 255.0f, 2.0f},
+    {"Fin bleu", 0.0f, 255.0f, 2.0f},
+    {"Distance min tir", 0.0f, 32.0f, 0.25f},
+    {"Enrobe boulet", 0.0f, 4.0f, 0.04f},
+    {"Spacing sprites", 0.05f, 4.0f, 0.04f},
+    {"Desync sprites", 0.0f, 2.0f, 0.02f},
+    {"Scale sprites", 0.05f, 6.0f, 0.05f},
+    {"Alpha sprites tete", 0.0f, 1.0f, 0.02f},
+    {"Alpha sprites fin", 0.0f, 1.0f, 0.02f},
+    {"Teinte sprites", 0.0f, 1.0f, 0.02f},
+}};
+
+constexpr std::array<HelpEntry, kTrailSliderCount> kTrailSliderHelp = {{
+    {"Longueur max tuiles", "Longueur maximale conservee derriere le boulet. La trainee grandit avec la distance parcourue puis se coupe a cette valeur pour eviter une trainée trop longue."},
+    {"Largeur tete px", "Largeur du ribbon juste derriere le boulet. C'est la partie la plus visible du trail et celle qui donne le poids du projectile."},
+    {"Largeur fin px", "Largeur au bout de la trainee. Baisse-la pour obtenir une fin plus fine et plus elegante, monte-la pour garder une trainée epaisse plus longtemps."},
+    {"Courbe largeur", "Controle la vitesse a laquelle la largeur retrecit entre la tete et la fin. Valeur faible = transition douce, valeur forte = la fin devient fine plus vite."},
+    {"Opacite tete", "Alpha du mesh pres du boulet. Sert a donner de la presence a la trainée au depart du projectile."},
+    {"Opacite fin", "Alpha du mesh tout au bout de la trainee. Pratique pour faire une extinction progressive au lieu d'une coupe visuelle trop nette."},
+    {"Courbe opacite", "Controle la facon dont l'opacite descend sur la longueur. Valeur haute = la trainée reste dense pres du boulet puis chute plus tard."},
+    {"Tete rouge", "Canal rouge de la couleur pres du boulet. Combine ce trio RGB avec les trois canaux de fin pour construire un degradé complet."},
+    {"Tete vert", "Canal vert de la couleur pres du boulet. Monte-le pour des teintes plus chaudes ou plus lumineuses."},
+    {"Tete bleu", "Canal bleu de la couleur pres du boulet. Monte-le pour refroidir la tete de la trainée."},
+    {"Fin rouge", "Canal rouge en fin de trainee. Utilise une fin plus claire ou plus desaturee pour faire un joli fondu aerien."},
+    {"Fin vert", "Canal vert en fin de trainee. Tres utile pour equilibrer la lumiere de la fin sans casser la teinte de tete."},
+    {"Fin bleu", "Canal bleu en fin de trainee. Aide a tirer le bout de trainée vers une fumee froide ou une poussiere plus pale."},
+    {"Distance min tir", "Le trail ne s'affiche que si la distance totale du tir au moment du depart depasse ce seuil. Exemple: seuil 10, tir a 15 tuiles = trail visible jusqu'a la cible; tir a 8 tuiles = pas de trail du tout. Mets 0 pour desactiver."},
+    {"Enrobe boulet", "Prolonge la tete du trail autour et legerement devant le boulet. Monte cette valeur si tu veux que le projectile soit visuellement dans la trainée plutot que juste en tete."},
+    {"Spacing sprites", "Distance entre chaque stamp spritesheet pose sur le ribbon. Plus bas = plus de sprites et une trainée plus riche. Plus haut = trainée plus aeree."},
+    {"Scale sprites", "Echelle globale des sprites poses sur la trainée. Sert a faire des rep repetes fins ou au contraire de grosses nappes animees."},
+    {"Desync sprites", "Ajoute un decalage de phase d'animation entre les stamps successifs. Monte cette valeur pour eviter que toutes les particules jouent exactement la meme frame au meme moment."},
+    {"Alpha sprites tete", "Opacite des stamps pres du boulet. Tu peux garder un mesh discret et faire porter le detail visuel par la spritesheet."},
+    {"Alpha sprites fin", "Opacite des stamps en fin de trainee. Mets-la bas pour que la queue disparaisse en douceur."},
+    {"Teinte sprites", "0 = sprites proches du blanc d'origine, 1 = sprites qui suivent fortement le degradé couleur du ribbon. Ideal pour marier texture et mesh."},
+}};
+
+static const HelpEntry& getTrailSliderHelpEntry(int sliderIndex)
+{
+    if (sliderIndex < 0 || sliderIndex >= kTrailSliderCount)
+    {
+        return kTrailSliderHelp[0];
+    }
+
+    if (sliderIndex == 16)
+    {
+        return kTrailSliderHelp[static_cast<size_t>(17)];
+    }
+    if (sliderIndex == 17)
+    {
+        return kTrailSliderHelp[static_cast<size_t>(16)];
+    }
+    return kTrailSliderHelp[static_cast<size_t>(sliderIndex)];
+}
+
+constexpr HelpEntry kTrailHelpDefault = {
+    "Aide trail",
+    "Survole un bouton ou un slider pour voir ce qu'il pilote exactement. La preview a droite montre le resultat en direct sans attendre un nouveau tir."
+};
+constexpr HelpEntry kTrailHelpTrailToggle = {
+    "Trail ON / OFF",
+    "Active ou coupe la trainée globale du preset courant. Le bouton principal force ensemble le mesh et les sprites, utile pour verifier rapidement le rendu avec ou sans trail."
+};
+constexpr HelpEntry kTrailHelpMeshToggle = {
+    "Mesh ON / OFF",
+    "Active le ruban geometrique colore. C'est lui qui donne la silhouette continue, la largeur et le degrade principal de la trainée."
+};
+constexpr HelpEntry kTrailHelpSpritesToggle = {
+    "Sprites ON / OFF",
+    "Active la pose repetee de la spritesheet le long du ribbon. Les sprites peuvent tourner et s'animer a plusieurs endroits en meme temps pour enrichir la trainée."
+};
+constexpr HelpEntry kTrailHelpBlendToggle = {
+    "Blend sprites",
+    "Choisit le blend des stamps trail. ADD renforce le cote lumineux et explosif, ALPHA garde un rendu plus mat et controle."
+};
+constexpr HelpEntry kTrailHelpImport = {
+    "Import JSON",
+    "Recharge la config trail depuis le fichier gameplay exporte. Pratique pour comparer un preset sauvegarde avec tes reglages live du moment."
+};
+constexpr HelpEntry kTrailHelpExport = {
+    "Export JSON",
+    "Sauvegarde les reglages trail actuels vers le JSON de trajectoire. Le runtime des salves pourra ainsi reutiliser le meme preset proprement."
+};
+constexpr HelpEntry kTrailHelpReset = {
+    "Reset trail",
+    "Remet les reglages ribbon trail par defaut. Ideal quand un preset est parti trop loin et qu'il faut repartir sur une base saine."
+};
+constexpr HelpEntry kTrailHelpHide = {
+    "Masquer panneau",
+    "Referme rapidement le panneau debug sans perdre les reglages deja appliques. Raccourci identique au bouton F2."
+};
+constexpr HelpEntry kTrailHelpPreview = {
+    "Preview live",
+    "Apercu embarque du boulet et de sa trainée actuelle. Le ruban grandit puis se coupe a la longueur max, et les sprites trail se repete/animent comme en jeu."
+};
+
+constexpr HelpEntry kTrailHelpManualPreview = {
+    "Placement manuel",
+    "Deuxieme preview en longueur maximale. Clique dans la courbe pour poser un sprite, deplace-le a la souris puis ajuste sa distance, son offset, sa taille, son opacite et sa rotation."
+};
+constexpr HelpEntry kTrailHelpManualMode = {
+    "Mode manuel",
+    "Quand il est actif, la couche sprites n'utilise plus le spacing automatique : seuls les stamps poses a la main sont rendus."
+};
+constexpr std::array<SliderSpec, kManualTrailSliderCount> kManualTrailSliderSpecs = {{
+    {"Distance", -1.0f, 32.0f, 0.05f},
+    {"Offset Y", -96.0f, 96.0f, 1.0f},
+    {"Scale", 0.05f, 6.0f, 0.05f},
+    {"Opacite", 0.0f, 1.0f, 0.02f},
+    {"Rotation", -180.0f, 180.0f, 2.0f},
 }};
 
 struct IlluminatedProjectileDebugPanelLayout
@@ -186,6 +332,30 @@ struct IlluminatedProjectileDebugPanelLayout
     SDL_FRect trajectoryResetSelectedButtonRect{};
     SDL_FRect trajectoryResetAllButtonRect{};
     SDL_FRect trajectoryCircleToggleButtonRect{};
+    std::array<SDL_FRect, kTrailSliderCount> trailRowRects{};
+    std::array<SDL_FRect, kTrailSliderCount> trailTrackRects{};
+    SDL_FRect trailEnableButtonRect{};
+    SDL_FRect trailMeshToggleButtonRect{};
+    SDL_FRect trailStampsToggleButtonRect{};
+    SDL_FRect trailBlendToggleButtonRect{};
+    SDL_FRect trailImportButtonRect{};
+    SDL_FRect trailExportButtonRect{};
+    SDL_FRect trailResetButtonRect{};
+    SDL_FRect trailFooterHideButtonRect{};
+    SDL_FRect trailPreviewRect{};
+    SDL_FRect trailManualModeButtonRect{};
+    SDL_FRect trailManualAddButtonRect{};
+    SDL_FRect trailManualDuplicateButtonRect{};
+    SDL_FRect trailManualDeleteButtonRect{};
+    SDL_FRect trailManualClearButtonRect{};
+    SDL_FRect trailManualPreviewRect{};
+    std::array<SDL_FRect, kManualTrailSliderCount> trailManualSliderRowRects{};
+    std::array<SDL_FRect, kManualTrailSliderCount> trailManualSliderTrackRects{};
+    SDL_FRect trailHelpRect{};
+    SDL_FRect trailControlsViewportRect{};
+    SDL_FRect trailScrollTrackRect{};
+    SDL_FRect trailScrollThumbRect{};
+    float trailScrollMaxOffset = 0.0f;
     SDL_FRect layerRowRect{};
     std::array<SDL_FRect, kLayerButtonCount> layerButtonRects{};
     SDL_FRect compactRowRect{};
@@ -215,6 +385,19 @@ static bool pointInRect(float x, float y, const SDL_FRect& rect)
         x <= (rect.x + rect.w) &&
         y >= rect.y &&
         y <= (rect.y + rect.h));
+}
+
+static bool rectsIntersect(const SDL_FRect& a, const SDL_FRect& b)
+{
+    return
+        a.w > 0.0f &&
+        a.h > 0.0f &&
+        b.w > 0.0f &&
+        b.h > 0.0f &&
+        a.x < (b.x + b.w) &&
+        (a.x + a.w) > b.x &&
+        a.y < (b.y + b.h) &&
+        (a.y + a.h) > b.y;
 }
 
 static SDL_FRect clampRectInside(const SDL_FRect& rect, const SDL_FRect& bounds)
@@ -368,7 +551,137 @@ static void fillAndOutlineRect(const SDL_FRect& rect, RC2D_Color fill, RC2D_Colo
     rc2d_graphics_rectangle("line", &rect);
 }
 
-static IlluminatedProjectileDebugPanelLayout buildLayout(const SDL_FPoint& panelOffset)
+static SDL_Rect toClipRect(const SDL_FRect& rect)
+{
+    SDL_Rect clipRect{};
+    clipRect.x = static_cast<int>(std::floor(rect.x));
+    clipRect.y = static_cast<int>(std::floor(rect.y));
+    const int clipRight = static_cast<int>(std::ceil(rect.x + rect.w));
+    const int clipBottom = static_cast<int>(std::ceil(rect.y + rect.h));
+    clipRect.w = (std::max)(clipRight - clipRect.x, 1);
+    clipRect.h = (std::max)(clipBottom - clipRect.y, 1);
+    return clipRect;
+}
+
+static std::vector<std::string> wrapTextLines(
+    RC2D_Font* font,
+    const std::string& text,
+    float maxWidth)
+{
+    std::vector<std::string> lines;
+    if (text.empty())
+    {
+        return lines;
+    }
+
+    std::size_t paragraphStart = 0U;
+    while (paragraphStart <= text.size())
+    {
+        const std::size_t paragraphEnd = text.find('\n', paragraphStart);
+        const std::string paragraph =
+            text.substr(paragraphStart, (paragraphEnd == std::string::npos) ? std::string::npos : (paragraphEnd - paragraphStart));
+        if (paragraph.empty())
+        {
+            lines.emplace_back();
+        }
+        else
+        {
+            std::string currentLine;
+            std::size_t wordStart = 0U;
+            while (wordStart < paragraph.size())
+            {
+                while (wordStart < paragraph.size() && paragraph[wordStart] == ' ')
+                {
+                    ++wordStart;
+                }
+                if (wordStart >= paragraph.size())
+                {
+                    break;
+                }
+
+                std::size_t wordEnd = paragraph.find(' ', wordStart);
+                if (wordEnd == std::string::npos)
+                {
+                    wordEnd = paragraph.size();
+                }
+                const std::string word = paragraph.substr(wordStart, wordEnd - wordStart);
+                const std::string candidate =
+                    currentLine.empty() ? word : (currentLine + " " + word);
+                if (!currentLine.empty() &&
+                    maxWidth > 0.0f &&
+                    measureTextWidth(font, candidate.c_str()) > maxWidth)
+                {
+                    lines.push_back(currentLine);
+                    currentLine = word;
+                }
+                else
+                {
+                    currentLine = candidate;
+                }
+                wordStart = wordEnd + 1U;
+            }
+
+            if (!currentLine.empty())
+            {
+                lines.push_back(currentLine);
+            }
+        }
+
+        if (paragraphEnd == std::string::npos)
+        {
+            break;
+        }
+        paragraphStart = paragraphEnd + 1U;
+    }
+
+    return lines;
+}
+
+static void drawWrappedText(
+    RC2D_Font* font,
+    const std::string& text,
+    const SDL_FRect& rect,
+    RC2D_Color color,
+    float lineGap)
+{
+    if (font == nullptr || font->sdl_font == nullptr || text.empty() || rect.w <= 0.0f || rect.h <= 0.0f)
+    {
+        return;
+    }
+
+    const std::vector<std::string> lines = wrapTextLines(font, text, rect.w);
+    const float lineHeight = (std::max)(measureTextHeight(font, "Ag"), 14.0f) + lineGap;
+    float drawY = rect.y;
+    for (const std::string& line : lines)
+    {
+        if (drawY + lineHeight > rect.y + rect.h + 0.5f)
+        {
+            break;
+        }
+        drawTextAt(font, line.c_str(), rect.x, drawY, color);
+        drawY += lineHeight;
+    }
+}
+
+static std::string getFolderLeafLabel(const std::string& path)
+{
+    if (path.empty())
+    {
+        return {};
+    }
+
+    const std::filesystem::path folderPath(path);
+    const std::filesystem::path leaf = folderPath.filename();
+    if (!leaf.empty())
+    {
+        return leaf.generic_string();
+    }
+    return folderPath.generic_string();
+}
+
+static IlluminatedProjectileDebugPanelLayout buildLayout(
+    const SDL_FPoint& panelOffset,
+    float trailScrollOffsetY)
 {
     IlluminatedProjectileDebugPanelLayout layout{};
     const SDL_FRect screenRect = getPanelScreenRect();
@@ -579,6 +892,176 @@ static IlluminatedProjectileDebugPanelLayout buildLayout(const SDL_FPoint& panel
         layout.trajectoryResetAllButtonRect.x + layout.trajectoryResetAllButtonRect.w + 10.0f,
         layout.trajectoryExportButtonRect.y,
         118.0f,
+        kButtonHeight
+    };
+
+    float trailPreviewWidth =
+        (std::clamp)(layout.panelRect.w * 0.31f, 220.0f, 336.0f);
+    const float trailColumnGap = 16.0f;
+    float trailControlsWidth = rowWidth - trailPreviewWidth - trailColumnGap;
+    if (trailControlsWidth < 348.0f)
+    {
+        trailControlsWidth = (std::min)(348.0f, rowWidth);
+        trailPreviewWidth = (std::max)(180.0f, rowWidth - trailControlsWidth - trailColumnGap);
+    }
+    const float trailPreviewX = contentX + trailControlsWidth + trailColumnGap;
+    const float trailRowsStartY = layout.panelRect.y + 168.0f;
+    const float trailVisibleBottomY = layout.panelRect.y + layout.panelRect.h - kButtonHeight - 52.0f;
+    layout.trailControlsViewportRect = SDL_FRect{
+        contentX,
+        trailRowsStartY,
+        trailControlsWidth - kScrollBarWidth - 8.0f,
+        (std::max)(96.0f, trailVisibleBottomY - trailRowsStartY)
+    };
+    const float trailContentHeight =
+        (static_cast<float>(kTrailSliderCount) * kSliderRowHeight) +
+        (static_cast<float>((std::max)(0, kTrailSliderCount - 1)) * kSliderRowGap);
+    layout.trailScrollMaxOffset =
+        (std::max)(0.0f, trailContentHeight - layout.trailControlsViewportRect.h);
+    const float clampedTrailScrollOffset =
+        std::clamp(trailScrollOffsetY, 0.0f, layout.trailScrollMaxOffset);
+    layout.trailScrollTrackRect = SDL_FRect{
+        layout.trailControlsViewportRect.x + layout.trailControlsViewportRect.w + 8.0f,
+        layout.trailControlsViewportRect.y,
+        kScrollBarWidth,
+        layout.trailControlsViewportRect.h
+    };
+    if (layout.trailScrollMaxOffset > 1.0e-4f)
+    {
+        const float visibleRatio =
+            std::clamp(layout.trailControlsViewportRect.h / trailContentHeight, 0.0f, 1.0f);
+        const float thumbHeight =
+            (std::max)(30.0f, layout.trailScrollTrackRect.h * visibleRatio);
+        const float thumbTravel = (std::max)(0.0f, layout.trailScrollTrackRect.h - thumbHeight);
+        const float thumbT =
+            (layout.trailScrollMaxOffset > 1.0e-4f) ? (clampedTrailScrollOffset / layout.trailScrollMaxOffset) : 0.0f;
+        layout.trailScrollThumbRect = SDL_FRect{
+            layout.trailScrollTrackRect.x,
+            layout.trailScrollTrackRect.y + (thumbTravel * thumbT),
+            layout.trailScrollTrackRect.w,
+            thumbHeight
+        };
+    }
+    else
+    {
+        layout.trailScrollThumbRect = layout.trailScrollTrackRect;
+    }
+    const float trailTrackWidth =
+        (std::min)(
+            kSliderTrackWidth,
+            (std::max)(
+                60.0f,
+                layout.trailControlsViewportRect.w - 208.0f - 70.0f));
+    for (int index = 0; index < kTrailSliderCount; ++index)
+    {
+        layout.trailRowRects[static_cast<size_t>(index)] = SDL_FRect{
+            contentX,
+            trailRowsStartY + (static_cast<float>(index) * (kSliderRowHeight + kSliderRowGap)) - clampedTrailScrollOffset,
+            layout.trailControlsViewportRect.w,
+            kSliderRowHeight
+        };
+        layout.trailTrackRects[static_cast<size_t>(index)] = SDL_FRect{
+            trackX,
+            layout.trailRowRects[static_cast<size_t>(index)].y + ((kSliderRowHeight - kSliderTrackHeight) * 0.5f),
+            trailTrackWidth,
+            kSliderTrackHeight
+        };
+    }
+
+    const float trailButtonsY = layout.panelRect.y + 116.0f;
+    layout.trailEnableButtonRect = SDL_FRect{contentX, trailButtonsY, 138.0f, kButtonHeight};
+    layout.trailMeshToggleButtonRect = SDL_FRect{contentX + 148.0f, trailButtonsY, 138.0f, kButtonHeight};
+    layout.trailStampsToggleButtonRect = SDL_FRect{contentX + 296.0f, trailButtonsY, 138.0f, kButtonHeight};
+    layout.trailBlendToggleButtonRect = SDL_FRect{contentX + 444.0f, trailButtonsY, 138.0f, kButtonHeight};
+    const float trailInfoBottomY = layout.panelRect.y + layout.panelRect.h - kButtonHeight - 28.0f;
+    const float trailPreviewHeight = 178.0f;
+    layout.trailPreviewRect = SDL_FRect{
+        trailPreviewX,
+        trailButtonsY,
+        layout.panelRect.x + layout.panelRect.w - trailPreviewX - 16.0f,
+        trailPreviewHeight
+    };
+    const float manualButtonsY = layout.trailPreviewRect.y + layout.trailPreviewRect.h + 10.0f;
+    const float manualButtonGap = 8.0f;
+    const float manualButtonsTotalGap = manualButtonGap * 4.0f;
+    const float manualButtonsWidth = (std::max)(220.0f, layout.trailPreviewRect.w);
+    const float manualCompactButtonWidth =
+        (std::clamp)((manualButtonsWidth - 126.0f - manualButtonsTotalGap) / 4.0f, 52.0f, 92.0f);
+    layout.trailManualModeButtonRect = SDL_FRect{trailPreviewX, manualButtonsY, 126.0f, kButtonHeight};
+    const float manualButtonsStartX = layout.trailManualModeButtonRect.x + layout.trailManualModeButtonRect.w + manualButtonGap;
+    layout.trailManualAddButtonRect = SDL_FRect{manualButtonsStartX, manualButtonsY, manualCompactButtonWidth, kButtonHeight};
+    layout.trailManualDuplicateButtonRect = SDL_FRect{
+        layout.trailManualAddButtonRect.x + layout.trailManualAddButtonRect.w + manualButtonGap,
+        manualButtonsY,
+        manualCompactButtonWidth,
+        kButtonHeight
+    };
+    layout.trailManualDeleteButtonRect = SDL_FRect{
+        layout.trailManualDuplicateButtonRect.x + layout.trailManualDuplicateButtonRect.w + manualButtonGap,
+        manualButtonsY,
+        manualCompactButtonWidth,
+        kButtonHeight
+    };
+    layout.trailManualClearButtonRect = SDL_FRect{
+        layout.trailManualDeleteButtonRect.x + layout.trailManualDeleteButtonRect.w + manualButtonGap,
+        manualButtonsY,
+        manualCompactButtonWidth,
+        kButtonHeight
+    };
+    const float manualPreviewY = manualButtonsY + kButtonHeight + 10.0f;
+    layout.trailManualPreviewRect = SDL_FRect{
+        trailPreviewX,
+        manualPreviewY,
+        layout.trailPreviewRect.w,
+        168.0f
+    };
+    const float manualSliderTrackWidth =
+        (std::min)(190.0f, (std::max)(80.0f, layout.trailManualPreviewRect.w - 154.0f));
+    for (int index = 0; index < kManualTrailSliderCount; ++index)
+    {
+        layout.trailManualSliderRowRects[static_cast<size_t>(index)] = SDL_FRect{
+            trailPreviewX,
+            layout.trailManualPreviewRect.y + layout.trailManualPreviewRect.h + 10.0f +
+                (static_cast<float>(index) * (kSliderRowHeight + 6.0f)),
+            layout.trailManualPreviewRect.w,
+            kSliderRowHeight
+        };
+        layout.trailManualSliderTrackRects[static_cast<size_t>(index)] = SDL_FRect{
+            trailPreviewX + 132.0f,
+            layout.trailManualSliderRowRects[static_cast<size_t>(index)].y + ((kSliderRowHeight - kSliderTrackHeight) * 0.5f),
+            manualSliderTrackWidth,
+            kSliderTrackHeight
+        };
+    }
+    layout.trailHelpRect = SDL_FRect{
+        trailPreviewX,
+        layout.trailManualSliderRowRects.back().y + layout.trailManualSliderRowRects.back().h + 10.0f,
+        layout.trailPreviewRect.w,
+        trailInfoBottomY -
+            (layout.trailManualSliderRowRects.back().y + layout.trailManualSliderRowRects.back().h + 10.0f)
+    };
+    layout.trailImportButtonRect = SDL_FRect{
+        contentX,
+        layout.panelRect.y + layout.panelRect.h - kButtonHeight - 16.0f,
+        158.0f,
+        kButtonHeight
+    };
+    layout.trailExportButtonRect = SDL_FRect{
+        layout.trailImportButtonRect.x + layout.trailImportButtonRect.w + 10.0f,
+        layout.trailImportButtonRect.y,
+        158.0f,
+        kButtonHeight
+    };
+    layout.trailResetButtonRect = SDL_FRect{
+        layout.trailExportButtonRect.x + layout.trailExportButtonRect.w + 10.0f,
+        layout.trailExportButtonRect.y,
+        152.0f,
+        kButtonHeight
+    };
+    layout.trailFooterHideButtonRect = SDL_FRect{
+        layout.panelRect.x + layout.panelRect.w - kHideButtonWidth - 16.0f,
+        layout.trailResetButtonRect.y,
+        kHideButtonWidth,
         kButtonHeight
     };
 
@@ -871,6 +1354,192 @@ static void setTrajectorySliderValue(
     }
 }
 
+static float getTrailSliderValue(
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config,
+    int sliderIndex)
+{
+    switch (sliderIndex)
+    {
+        case 0:
+            return config.maxLengthTiles;
+        case 1:
+            return config.headWidthPixels;
+        case 2:
+            return config.tailWidthPixels;
+        case 3:
+            return config.widthExponent;
+        case 4:
+            return config.headOpacity;
+        case 5:
+            return config.tailOpacity;
+        case 6:
+            return config.opacityExponent;
+        case 7:
+            return config.headColorR;
+        case 8:
+            return config.headColorG;
+        case 9:
+            return config.headColorB;
+        case 10:
+            return config.tailColorR;
+        case 11:
+            return config.tailColorG;
+        case 12:
+            return config.tailColorB;
+        case 13:
+            return config.hideNearTargetTiles;
+        case 14:
+            return config.headCoverTiles;
+        case 15:
+            return config.stampSpacingTiles;
+        case 16:
+            return config.stampPhaseOffsetSeconds;
+        case 17:
+            return config.stampScale;
+        case 18:
+            return config.stampHeadOpacity;
+        case 19:
+            return config.stampTailOpacity;
+        case 20:
+            return config.stampTintStrength;
+        default:
+            return 0.0f;
+    }
+}
+
+static void setTrailSliderValue(
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig* config,
+    int sliderIndex,
+    float value)
+{
+    if (config == nullptr)
+    {
+        return;
+    }
+
+    switch (sliderIndex)
+    {
+        case 0:
+            config->maxLengthTiles = value;
+            break;
+        case 1:
+            config->headWidthPixels = value;
+            break;
+        case 2:
+            config->tailWidthPixels = value;
+            break;
+        case 3:
+            config->widthExponent = value;
+            break;
+        case 4:
+            config->headOpacity = value;
+            break;
+        case 5:
+            config->tailOpacity = value;
+            break;
+        case 6:
+            config->opacityExponent = value;
+            break;
+        case 7:
+            config->headColorR = value;
+            break;
+        case 8:
+            config->headColorG = value;
+            break;
+        case 9:
+            config->headColorB = value;
+            break;
+        case 10:
+            config->tailColorR = value;
+            break;
+        case 11:
+            config->tailColorG = value;
+            break;
+        case 12:
+            config->tailColorB = value;
+            break;
+        case 13:
+            config->hideNearTargetTiles = value;
+            break;
+        case 14:
+            config->headCoverTiles = value;
+            break;
+        case 15:
+            config->stampSpacingTiles = value;
+            break;
+        case 16:
+            config->stampPhaseOffsetSeconds = value;
+            break;
+        case 17:
+            config->stampScale = value;
+            break;
+        case 18:
+            config->stampHeadOpacity = value;
+            break;
+        case 19:
+            config->stampTailOpacity = value;
+            break;
+        case 20:
+            config->stampTintStrength = value;
+            break;
+        default:
+            break;
+    }
+}
+
+static float getManualTrailSliderValue(
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement& stamp,
+    int sliderIndex)
+{
+    switch (sliderIndex)
+    {
+        case 0:
+            return stamp.distanceFromHeadTiles;
+        case 1:
+            return stamp.lateralOffsetPixels;
+        case 2:
+            return stamp.scale;
+        case 3:
+            return stamp.opacity;
+        case 4:
+            return stamp.rotationOffsetDeg;
+        default:
+            return 0.0f;
+    }
+}
+
+static void setManualTrailSliderValue(
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement* stamp,
+    int sliderIndex,
+    float value)
+{
+    if (stamp == nullptr)
+    {
+        return;
+    }
+
+    switch (sliderIndex)
+    {
+        case 0:
+            stamp->distanceFromHeadTiles = value;
+            break;
+        case 1:
+            stamp->lateralOffsetPixels = value;
+            break;
+        case 2:
+            stamp->scale = value;
+            break;
+        case 3:
+            stamp->opacity = value;
+            break;
+        case 4:
+            stamp->rotationOffsetDeg = value;
+            break;
+        default:
+            break;
+    }
+}
+
 static float sliderValueFromTrackPosition(int sliderIndex, float mouseX, const SDL_FRect& trackRect)
 {
     if (sliderIndex < 0 || sliderIndex >= kSliderCount)
@@ -896,6 +1565,23 @@ static float trajectorySliderValueFromTrackPosition(int sliderIndex, float mouse
     }
 
     const SliderSpec& spec = kTrajectorySliderSpecs[static_cast<size_t>(sliderIndex)];
+    if (trackRect.w <= 0.0f)
+    {
+        return spec.minValue;
+    }
+
+    const float normalized = std::clamp((mouseX - trackRect.x) / trackRect.w, 0.0f, 1.0f);
+    return spec.minValue + ((spec.maxValue - spec.minValue) * normalized);
+}
+
+static float trailSliderValueFromTrackPosition(int sliderIndex, float mouseX, const SDL_FRect& trackRect)
+{
+    if (sliderIndex < 0 || sliderIndex >= kTrailSliderCount)
+    {
+        return 0.0f;
+    }
+
+    const SliderSpec& spec = kTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
     if (trackRect.w <= 0.0f)
     {
         return spec.minValue;
@@ -932,6 +1618,64 @@ static SDL_FRect buildSliderKnobRect(int sliderIndex, float value, const SDL_FRe
     return SDL_FRect{
         knobCenterX - (kSliderKnobWidth * 0.5f),
         trackRect.y - ((kSliderKnobHeight - trackRect.h) * 0.5f),
+        kSliderKnobWidth,
+        kSliderKnobHeight
+    };
+}
+
+static SDL_FRect buildTrailSliderKnobRect(int sliderIndex, float value, const SDL_FRect& trackRect)
+{
+    if (sliderIndex < 0 || sliderIndex >= kTrailSliderCount)
+    {
+        return SDL_FRect{};
+    }
+
+    const SliderSpec& spec = kTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
+    const float range = spec.maxValue - spec.minValue;
+    const float normalized =
+        (range > 0.0f) ? std::clamp((value - spec.minValue) / range, 0.0f, 1.0f) : 0.0f;
+    const float knobCenterX = trackRect.x + (trackRect.w * normalized);
+    return SDL_FRect{
+        knobCenterX - (kSliderKnobWidth * 0.5f),
+        trackRect.y - ((kSliderKnobHeight - trackRect.h) * 0.5f),
+        kSliderKnobWidth,
+        kSliderKnobHeight
+    };
+}
+
+static float manualTrailSliderValueFromTrackPosition(int sliderIndex, float mouseX, const SDL_FRect& trackRect)
+{
+    if (sliderIndex < 0 || sliderIndex >= kManualTrailSliderCount)
+    {
+        return 0.0f;
+    }
+
+    const SliderSpec& spec = kManualTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
+    if (trackRect.w <= 0.0f)
+    {
+        return spec.minValue;
+    }
+
+    const float t = std::clamp((mouseX - trackRect.x) / trackRect.w, 0.0f, 1.0f);
+    return spec.minValue + ((spec.maxValue - spec.minValue) * t);
+}
+
+static SDL_FRect buildManualTrailSliderKnobRect(int sliderIndex, float value, const SDL_FRect& trackRect)
+{
+    if (sliderIndex < 0 || sliderIndex >= kManualTrailSliderCount)
+    {
+        return SDL_FRect{};
+    }
+
+    const SliderSpec& spec = kManualTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
+    const float range = spec.maxValue - spec.minValue;
+    const float t =
+        (range > 1.0e-5f)
+            ? std::clamp((value - spec.minValue) / range, 0.0f, 1.0f)
+            : 0.0f;
+    return SDL_FRect{
+        trackRect.x + (trackRect.w * t) - (kSliderKnobWidth * 0.5f),
+        trackRect.y + ((trackRect.h - kSliderKnobHeight) * 0.5f),
         kSliderKnobWidth,
         kSliderKnobHeight
     };
@@ -1817,6 +2561,593 @@ static void drawTrajectoryDebugOverlay(
         drawDebugLabel(font, buffer, debugCurveSampleScreen(map, geometry, tuning, 0.5f, useLobForSamples), easeColor);
     }
 }
+
+struct TrailPreviewPoint
+{
+    SDL_FPoint screen{};
+    float distanceFromHeadTiles = 0.0f;
+    float widthPixels = 0.0f;
+    RC2D_Color color{};
+};
+
+struct TrailPreviewSample
+{
+    SDL_FPoint position{};
+    SDL_FPoint tangent{1.0f, 0.0f};
+    float trailT = 0.0f;
+    float widthRatio = 1.0f;
+    float opacity = 1.0f;
+    std::uint8_t tint[3]{255, 255, 255};
+};
+
+static std::vector<TrailPreviewPoint> buildTrailPreviewPoints(
+    const SDL_FRect& viewport,
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config,
+    float animTimeSec,
+    bool fullLength)
+{
+    std::vector<TrailPreviewPoint> points;
+    if (viewport.w <= 8.0f || viewport.h <= 8.0f)
+    {
+        return points;
+    }
+
+    const float clampedMaxLength = (std::max)(config.maxLengthTiles, 0.15f);
+    const float animWave = 0.5f + (0.5f * std::sin(animTimeSec * 1.25f));
+    const float visibleLengthTiles =
+        fullLength
+            ? clampedMaxLength
+            : std::clamp(clampedMaxLength * (0.34f + (0.66f * animWave)), 0.15f, clampedMaxLength);
+    const float headX = viewport.x + (viewport.w * 0.82f);
+    const float headY = viewport.y + (viewport.h * 0.55f) +
+        (fullLength ? 0.0f : (std::sin(animTimeSec * 1.8f) * viewport.h * 0.03f));
+    constexpr int sampleCount = 42;
+    points.reserve(static_cast<std::size_t>(sampleCount));
+    for (int index = 0; index < sampleCount; ++index)
+    {
+        const float t =
+            (sampleCount > 1) ? (static_cast<float>(index) / static_cast<float>(sampleCount - 1)) : 0.0f;
+        const float distanceFromHeadTiles = visibleLengthTiles * t;
+        const float x = headX - (viewport.w * 0.72f * t);
+        const float baseCurve = std::sin(t * kPi) * viewport.h * (fullLength ? 0.12f : 0.16f);
+        const float waveCurve =
+            fullLength
+                ? 0.0f
+                : (std::sin((t * 4.0f) + (animTimeSec * 1.6f)) * viewport.h * 0.02f);
+        const float y = headY - (baseCurve + waveCurve) + (t * t * viewport.h * 0.05f);
+
+        const float trailT =
+            (clampedMaxLength > 1.0e-5f)
+                ? std::clamp(distanceFromHeadTiles / clampedMaxLength, 0.0f, 1.0f)
+                : 1.0f;
+        const float widthT = std::pow(trailT, config.widthExponent);
+        const float alphaT = std::pow(trailT, config.opacityExponent);
+        const float widthPixels =
+            config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT);
+        const float opacity =
+            config.headOpacity + ((config.tailOpacity - config.headOpacity) * alphaT);
+        const auto mixChannel = [&](float headChannel, float tailChannel) -> std::uint8_t {
+            const float mixed = std::clamp(headChannel + ((tailChannel - headChannel) * trailT), 0.0f, 255.0f);
+            return static_cast<std::uint8_t>(std::lround(mixed));
+        };
+
+        TrailPreviewPoint point{};
+        point.screen = SDL_FPoint{x, y};
+        point.distanceFromHeadTiles = distanceFromHeadTiles;
+        point.widthPixels = (std::max)(1.0f, widthPixels * 0.56f);
+        point.color = RC2D_Color{
+            mixChannel(config.headColorR, config.tailColorR),
+            mixChannel(config.headColorG, config.tailColorG),
+            mixChannel(config.headColorB, config.tailColorB),
+            static_cast<std::uint8_t>(std::lround(std::clamp(opacity * 255.0f, 0.0f, 255.0f)))
+        };
+        points.push_back(point);
+    }
+
+    if (config.headCoverTiles > 1.0e-4f && points.size() >= 2U)
+    {
+        const float screenDx = points[0U].screen.x - points[1U].screen.x;
+        const float screenDy = points[0U].screen.y - points[1U].screen.y;
+        const float screenLen = std::sqrt(screenDx * screenDx + screenDy * screenDy);
+        const float tileDx = points[0U].distanceFromHeadTiles - points[1U].distanceFromHeadTiles;
+        const float tileLen = std::fabs(tileDx);
+        if (screenLen > 1.0e-5f && tileLen > 1.0e-5f)
+        {
+            const float forwardX = screenDx / screenLen;
+            const float forwardY = screenDy / screenLen;
+            const float pixelsPerTile = screenLen / tileLen;
+            TrailPreviewPoint coverPoint = points[0U];
+            coverPoint.screen.x += forwardX * config.headCoverTiles * pixelsPerTile;
+            coverPoint.screen.y += forwardY * config.headCoverTiles * pixelsPerTile;
+            coverPoint.distanceFromHeadTiles = -config.headCoverTiles;
+            points.insert(points.begin(), coverPoint);
+        }
+    }
+
+    return points;
+}
+
+static bool sampleTrailPreviewAtDistance(
+    const std::vector<TrailPreviewPoint>& points,
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config,
+    float sampleDist,
+    TrailPreviewSample* outSample)
+{
+    if (outSample == nullptr || points.size() < 2U)
+    {
+        return false;
+    }
+
+    std::size_t segmentIndex = 0U;
+    while (segmentIndex + 1U < points.size() &&
+           points[segmentIndex + 1U].distanceFromHeadTiles < sampleDist)
+    {
+        ++segmentIndex;
+    }
+    if (segmentIndex + 1U >= points.size())
+    {
+        return false;
+    }
+
+    const TrailPreviewPoint& a = points[segmentIndex];
+    const TrailPreviewPoint& b = points[segmentIndex + 1U];
+    const float segSpan = b.distanceFromHeadTiles - a.distanceFromHeadTiles;
+    const float segT =
+        (segSpan > 1.0e-5f)
+            ? std::clamp((sampleDist - a.distanceFromHeadTiles) / segSpan, 0.0f, 1.0f)
+            : 0.0f;
+    const float posX = a.screen.x + ((b.screen.x - a.screen.x) * segT);
+    const float posY = a.screen.y + ((b.screen.y - a.screen.y) * segT);
+    SDL_FPoint tangent{b.screen.x - a.screen.x, b.screen.y - a.screen.y};
+    const float tangentLen = std::sqrt((tangent.x * tangent.x) + (tangent.y * tangent.y));
+    if (tangentLen > 1.0e-5f)
+    {
+        tangent.x /= tangentLen;
+        tangent.y /= tangentLen;
+    }
+    else
+    {
+        tangent = SDL_FPoint{1.0f, 0.0f};
+    }
+
+    const float maxLength = (std::max)(config.maxLengthTiles, 0.15f);
+    const float trailT =
+        (maxLength > 1.0e-5f)
+            ? std::clamp(sampleDist / maxLength, 0.0f, 1.0f)
+            : 1.0f;
+    const float widthT = std::pow(trailT, config.widthExponent);
+    const float widthRatio =
+        (config.headWidthPixels > 1.0e-5f)
+            ? ((config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) /
+                config.headWidthPixels)
+            : 1.0f;
+    const float opacity =
+        config.stampHeadOpacity + ((config.stampTailOpacity - config.stampHeadOpacity) * trailT);
+    const auto mixTrailChannel = [&](float headChannel, float tailChannel) -> std::uint8_t {
+        const float mixed = std::clamp(headChannel + ((tailChannel - headChannel) * trailT), 0.0f, 255.0f);
+        return static_cast<std::uint8_t>(std::lround(mixed));
+    };
+    const std::uint8_t trailR = mixTrailChannel(config.headColorR, config.tailColorR);
+    const std::uint8_t trailG = mixTrailChannel(config.headColorG, config.tailColorG);
+    const std::uint8_t trailB = mixTrailChannel(config.headColorB, config.tailColorB);
+    const auto mixTint = [&](std::uint8_t trailChannel) -> std::uint8_t {
+        const float mixed = 255.0f + ((static_cast<float>(trailChannel) - 255.0f) * config.stampTintStrength);
+        return static_cast<std::uint8_t>(std::lround(std::clamp(mixed, 0.0f, 255.0f)));
+    };
+
+    outSample->position = SDL_FPoint{posX, posY};
+    outSample->tangent = tangent;
+    outSample->trailT = trailT;
+    outSample->widthRatio = widthRatio;
+    outSample->opacity = opacity;
+    outSample->tint[0] = mixTint(trailR);
+    outSample->tint[1] = mixTint(trailG);
+    outSample->tint[2] = mixTint(trailB);
+    return true;
+}
+
+static void drawTrailPreviewPanel(
+    const SDL_FRect& rect,
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config,
+    const VFXClassic* projectileVfx,
+    const VFXClassic* trailVfx,
+    bool projectileIlluminated,
+    bool trailEnabled,
+    float animTimeSec,
+    RC2D_Font* font,
+    const std::string& projectileLabel,
+    const std::string& trailLabel,
+    const SDL_FRect* manualRect,
+    int selectedManualStampIndex)
+{
+    fillAndOutlineRect(rect, kPreviewFill, kPreviewBorder);
+
+    drawTextAt(font, "Preview live", rect.x + 12.0f, rect.y + 10.0f, kHelpAccent);
+    drawTextAt(
+        font,
+        trailEnabled ? "Boulet + ribbon trail en direct" : "Boulet seul : trail desactive",
+        rect.x + 12.0f,
+        rect.y + 28.0f,
+        kTextMuted);
+
+    const SDL_FRect viewport = SDL_FRect{
+        rect.x + 10.0f,
+        rect.y + 50.0f,
+        rect.w - 20.0f,
+        rect.h - 84.0f
+    };
+    if (viewport.w <= 8.0f || viewport.h <= 8.0f)
+    {
+        return;
+    }
+
+    SDL_Renderer* renderer = SDL_GetRenderer(rc2d_window_getWindow());
+    if (renderer != nullptr)
+    {
+        const SDL_Rect clipRect = toClipRect(viewport);
+        SDL_SetRenderClipRect(renderer, &clipRect);
+    }
+
+    for (int gridIndex = 1; gridIndex < 4; ++gridIndex)
+    {
+        const float y = viewport.y + (viewport.h * (static_cast<float>(gridIndex) / 4.0f));
+        rc2d_graphics_setColor(kPreviewGrid);
+        rc2d_graphics_line(viewport.x, y, viewport.x + viewport.w, y);
+    }
+    for (int gridIndex = 1; gridIndex < 5; ++gridIndex)
+    {
+        const float x = viewport.x + (viewport.w * (static_cast<float>(gridIndex) / 5.0f));
+        rc2d_graphics_setColor(kPreviewGrid);
+        rc2d_graphics_line(x, viewport.y, x, viewport.y + viewport.h);
+    }
+
+    const float simulatedShotDistanceTiles =
+        2.0f + (18.0f * (0.5f + (0.5f * std::sin(animTimeSec * 0.8f))));
+    const bool trailAllowedByShotDistance =
+        config.hideNearTargetTiles <= 1.0e-4f ||
+        simulatedShotDistanceTiles > config.hideNearTargetTiles;
+    std::vector<TrailPreviewPoint> points = buildTrailPreviewPoints(viewport, config, animTimeSec, false);
+    const float headX = viewport.x + (viewport.w * 0.82f);
+    const float headY = viewport.y + (viewport.h * 0.55f) +
+        (std::sin(animTimeSec * 1.8f) * viewport.h * 0.03f);
+
+    if (trailEnabled && trailAllowedByShotDistance && config.meshEnabled && points.size() >= 2U)
+    {
+        std::vector<SDL_Vertex> vertices;
+        std::vector<int> indices;
+        vertices.reserve(points.size() * 2U);
+        indices.reserve((points.size() - 1U) * 6U);
+        for (std::size_t index = 0U; index < points.size(); ++index)
+        {
+            SDL_FPoint tangent{};
+            if (index == 0U)
+            {
+                tangent.x = points[1U].screen.x - points[0U].screen.x;
+                tangent.y = points[1U].screen.y - points[0U].screen.y;
+            }
+            else if (index + 1U >= points.size())
+            {
+                tangent.x = points[index].screen.x - points[index - 1U].screen.x;
+                tangent.y = points[index].screen.y - points[index - 1U].screen.y;
+            }
+            else
+            {
+                tangent.x = points[index + 1U].screen.x - points[index - 1U].screen.x;
+                tangent.y = points[index + 1U].screen.y - points[index - 1U].screen.y;
+            }
+
+            const float tangentLen = std::sqrt((tangent.x * tangent.x) + (tangent.y * tangent.y));
+            if (tangentLen > 1.0e-5f)
+            {
+                tangent.x /= tangentLen;
+                tangent.y /= tangentLen;
+            }
+            else
+            {
+                tangent = SDL_FPoint{1.0f, 0.0f};
+            }
+
+            const SDL_FPoint normal{-tangent.y, tangent.x};
+            const float halfWidth = points[index].widthPixels * 0.5f;
+            SDL_Vertex left{};
+            left.position.x = points[index].screen.x + (normal.x * halfWidth);
+            left.position.y = points[index].screen.y + (normal.y * halfWidth);
+            left.color = SDL_FColor{
+                static_cast<float>(points[index].color.r) / 255.0f,
+                static_cast<float>(points[index].color.g) / 255.0f,
+                static_cast<float>(points[index].color.b) / 255.0f,
+                static_cast<float>(points[index].color.a) / 255.0f
+            };
+            left.tex_coord = SDL_FPoint{0.0f, 0.0f};
+
+            SDL_Vertex right = left;
+            right.position.x = points[index].screen.x - (normal.x * halfWidth);
+            right.position.y = points[index].screen.y - (normal.y * halfWidth);
+            right.tex_coord = SDL_FPoint{1.0f, 0.0f};
+
+            vertices.push_back(left);
+            vertices.push_back(right);
+
+            if (index > 0U)
+            {
+                const int base = static_cast<int>((index - 1U) * 2U);
+                indices.push_back(base + 0);
+                indices.push_back(base + 1);
+                indices.push_back(base + 2);
+                indices.push_back(base + 1);
+                indices.push_back(base + 3);
+                indices.push_back(base + 2);
+            }
+        }
+
+        if (!vertices.empty() && !indices.empty())
+        {
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            (void)rc2d_graphics_renderGeometry(
+                nullptr,
+                vertices.data(),
+                static_cast<int>(vertices.size()),
+                indices.data(),
+                static_cast<int>(indices.size()));
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        }
+    }
+
+    if (trailEnabled &&
+        trailAllowedByShotDistance &&
+        config.stampsEnabled &&
+        trailVfx != nullptr &&
+        trailVfx->isLoaded() &&
+        !trailVfx->isFinished() &&
+        points.size() >= 2U)
+    {
+        auto drawPreviewStampAt = [&](float sampleDist, int stampIndex, const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement* customStamp) {
+            TrailPreviewSample sample{};
+            if (!sampleTrailPreviewAtDistance(points, config, sampleDist, &sample))
+            {
+                return;
+            }
+
+            const SDL_FPoint normal{-sample.tangent.y, sample.tangent.x};
+            float posX = sample.position.x;
+            float posY = sample.position.y;
+            float rotDeg = std::atan2(sample.tangent.y, sample.tangent.x) * (180.0f / kPi);
+            float scaleMul = 1.0f;
+            float opacityMul = 1.0f;
+            if (customStamp != nullptr)
+            {
+                posX += normal.x * customStamp->lateralOffsetPixels;
+                posY += normal.y * customStamp->lateralOffsetPixels;
+                rotDeg += customStamp->rotationOffsetDeg;
+                scaleMul = customStamp->scale;
+                opacityMul = customStamp->opacity;
+            }
+
+            const std::uint8_t alpha = static_cast<std::uint8_t>(
+                std::lround(std::clamp(sample.opacity * opacityMul * 255.0f, 0.0f, 255.0f)));
+            const float phaseOffsetSec =
+                config.stampPhaseOffsetSeconds * static_cast<float>(stampIndex);
+            trailVfx->drawWithTintAlphaBlendPhaseOffset(
+                posX,
+                posY,
+                config.stampScale * scaleMul * (std::max)(0.20f, sample.widthRatio) * 0.74f,
+                rotDeg,
+                false,
+                false,
+                sample.tint,
+                alpha,
+                config.additiveStampBlend ? static_cast<int>(SDL_BLENDMODE_ADD) : 0,
+                phaseOffsetSec);
+        };
+
+        if (config.manualStampsEnabled && !config.customStamps.empty())
+        {
+            for (std::size_t index = 0U; index < config.customStamps.size(); ++index)
+            {
+                const auto& stamp = config.customStamps[index];
+                drawPreviewStampAt(stamp.distanceFromHeadTiles, static_cast<int>(index), &stamp);
+            }
+        }
+        else
+        {
+            const float spacing = (std::max)(config.stampSpacingTiles, 0.05f);
+            const float startDistance =
+                (std::max)(-config.headCoverTiles, (std::min)(spacing * 0.45f, points.back().distanceFromHeadTiles));
+            int stampIndex = 0;
+            for (float sampleDist = startDistance;
+                 sampleDist <= points.back().distanceFromHeadTiles + 0.0001f;
+                 sampleDist += spacing, ++stampIndex)
+            {
+                drawPreviewStampAt(sampleDist, stampIndex, nullptr);
+            }
+        }
+    }
+
+    if (projectileVfx != nullptr && projectileVfx->isLoaded() && !projectileVfx->isFinished())
+    {
+        const std::uint8_t headR = static_cast<std::uint8_t>(
+            std::lround(std::clamp(config.headColorR, 0.0f, 255.0f)));
+        const std::uint8_t headG = static_cast<std::uint8_t>(
+            std::lround(std::clamp(config.headColorG, 0.0f, 255.0f)));
+        const std::uint8_t headB = static_cast<std::uint8_t>(
+            std::lround(std::clamp(config.headColorB, 0.0f, 255.0f)));
+        if (projectileIlluminated)
+        {
+            projectileVfx->drawIlluminatedProjectile(
+                headX,
+                headY,
+                0.90f,
+                0.0f,
+                false,
+                false,
+                headR,
+                headG,
+                headB,
+                nullptr,
+                true);
+        }
+        else
+        {
+            projectileVfx->draw(headX, headY, 0.90f, 0.0f, false, false);
+        }
+    }
+
+    if (renderer != nullptr)
+    {
+        SDL_SetRenderClipRect(renderer, nullptr);
+    }
+
+    drawTextAt(
+        font,
+        ("Boulet: " + (projectileLabel.empty() ? std::string("aucun") : projectileLabel)).c_str(),
+        rect.x + 12.0f,
+        rect.y + rect.h - 28.0f,
+        kTextPrimary);
+    drawTextAt(
+        font,
+        ("Trail: " + (trailLabel.empty() ? std::string("aucun") : trailLabel)).c_str(),
+        rect.x + 12.0f,
+        rect.y + rect.h - 12.0f,
+        trailEnabled ? kTextMuted : kHelpAccent);
+    if (config.hideNearTargetTiles > 1.0e-4f)
+    {
+        char thresholdBuffer[96] = {};
+        SDL_snprintf(
+            thresholdBuffer,
+            sizeof(thresholdBuffer),
+            "Distance tir simulee %.1f tuiles | seuil %.1f",
+            simulatedShotDistanceTiles,
+            config.hideNearTargetTiles);
+        drawTextAt(
+            font,
+            thresholdBuffer,
+            rect.x + 12.0f,
+            rect.y + rect.h - 44.0f,
+            trailAllowedByShotDistance ? kTextMuted : kHelpAccent);
+    }
+
+    if (manualRect != nullptr)
+    {
+        fillAndOutlineRect(*manualRect, kPreviewFill, kPreviewBorder);
+        drawTextAt(font, "Preview placement manuel", manualRect->x + 12.0f, manualRect->y + 10.0f, kHelpAccent);
+        drawTextAt(
+            font,
+            config.manualStampsEnabled ? "Longueur max + positions custom actives" : "Longueur max pour poser / regler les stamps",
+            manualRect->x + 12.0f,
+            manualRect->y + 28.0f,
+            kTextMuted);
+
+        const SDL_FRect manualViewport = SDL_FRect{
+            manualRect->x + 10.0f,
+            manualRect->y + 50.0f,
+            manualRect->w - 20.0f,
+            manualRect->h - 60.0f
+        };
+        if (manualViewport.w > 8.0f && manualViewport.h > 8.0f)
+        {
+            if (renderer != nullptr)
+            {
+                const SDL_Rect clipRect = toClipRect(manualViewport);
+                SDL_SetRenderClipRect(renderer, &clipRect);
+            }
+
+            for (int gridIndex = 1; gridIndex < 5; ++gridIndex)
+            {
+                const float x = manualViewport.x + (manualViewport.w * (static_cast<float>(gridIndex) / 5.0f));
+                rc2d_graphics_setColor(kPreviewGrid);
+                rc2d_graphics_line(x, manualViewport.y, x, manualViewport.y + manualViewport.h);
+            }
+            const float centerY = manualViewport.y + (manualViewport.h * 0.5f);
+            rc2d_graphics_setColor(kPreviewGrid);
+            rc2d_graphics_line(manualViewport.x, centerY, manualViewport.x + manualViewport.w, centerY);
+
+            const std::vector<TrailPreviewPoint> manualPoints =
+                buildTrailPreviewPoints(manualViewport, config, animTimeSec, true);
+            if (config.meshEnabled && manualPoints.size() >= 2U)
+            {
+                for (std::size_t index = 1U; index < manualPoints.size(); ++index)
+                {
+                    rc2d_graphics_setColor(manualPoints[index].color);
+                    rc2d_graphics_line(
+                        manualPoints[index - 1U].screen.x,
+                        manualPoints[index - 1U].screen.y,
+                        manualPoints[index].screen.x,
+                        manualPoints[index].screen.y);
+                }
+            }
+
+            if (trailVfx != nullptr && trailVfx->isLoaded() && !trailVfx->isFinished())
+            {
+                for (std::size_t index = 0U; index < config.customStamps.size(); ++index)
+                {
+                    const auto& stamp = config.customStamps[index];
+                    TrailPreviewSample sample{};
+                    if (!sampleTrailPreviewAtDistance(manualPoints, config, stamp.distanceFromHeadTiles, &sample))
+                    {
+                        continue;
+                    }
+
+                    const SDL_FPoint normal{-sample.tangent.y, sample.tangent.x};
+                    const float posX = sample.position.x + (normal.x * stamp.lateralOffsetPixels);
+                    const float posY = sample.position.y + (normal.y * stamp.lateralOffsetPixels);
+                    const float rotDeg =
+                        (std::atan2(sample.tangent.y, sample.tangent.x) * (180.0f / kPi)) + stamp.rotationOffsetDeg;
+                    const std::uint8_t alpha = static_cast<std::uint8_t>(
+                        std::lround(std::clamp(sample.opacity * stamp.opacity * 255.0f, 0.0f, 255.0f)));
+                    trailVfx->drawWithTintAlphaBlendPhaseOffset(
+                        posX,
+                        posY,
+                        config.stampScale * stamp.scale * (std::max)(0.20f, sample.widthRatio) * 0.74f,
+                        rotDeg,
+                        false,
+                        false,
+                        sample.tint,
+                        alpha,
+                        config.additiveStampBlend ? static_cast<int>(SDL_BLENDMODE_ADD) : 0,
+                        config.stampPhaseOffsetSeconds * static_cast<float>(index));
+
+                    const RC2D_Color markerColor =
+                        (static_cast<int>(index) == selectedManualStampIndex)
+                            ? kTextStrong
+                            : RC2D_Color{160, 196, 235, 220};
+                    rc2d_graphics_setColor(markerColor);
+                    const SDL_FRect markerRect{posX - 4.0f, posY - 4.0f, 8.0f, 8.0f};
+                    rc2d_graphics_rectangle("line", &markerRect);
+                }
+            }
+
+            if (projectileVfx != nullptr && projectileVfx->isLoaded() && !projectileVfx->isFinished())
+            {
+                const float manualHeadX = manualViewport.x + (manualViewport.w * 0.82f);
+                const float manualHeadY = manualViewport.y + (manualViewport.h * 0.55f);
+                if (projectileIlluminated)
+                {
+                    projectileVfx->drawIlluminatedProjectile(
+                        manualHeadX,
+                        manualHeadY,
+                        0.90f,
+                        0.0f,
+                        false,
+                        false,
+                        static_cast<std::uint8_t>(std::lround(std::clamp(config.headColorR, 0.0f, 255.0f))),
+                        static_cast<std::uint8_t>(std::lround(std::clamp(config.headColorG, 0.0f, 255.0f))),
+                        static_cast<std::uint8_t>(std::lround(std::clamp(config.headColorB, 0.0f, 255.0f))),
+                        nullptr,
+                        true);
+                }
+                else
+                {
+                    projectileVfx->draw(manualHeadX, manualHeadY, 0.90f, 0.0f, false, false);
+                }
+            }
+
+            if (renderer != nullptr)
+            {
+                SDL_SetRenderClipRect(renderer, nullptr);
+            }
+        }
+    }
+}
 } // namespace
 
 IlluminatedProjectileDebugPanel::IlluminatedProjectileDebugPanel(void)
@@ -1830,14 +3161,30 @@ IlluminatedProjectileDebugPanel::IlluminatedProjectileDebugPanel(void)
       selectedAngleSectorIndex(0),
       trajectoryDebugMask(0U),
       trajectoryCircleVisible(true),
+      trailScrollDragging(false),
       sliderDragGrabOffsetX(0.0f),
       panelDragGrabOffsetX(0.0f),
       panelDragGrabOffsetY(0.0f),
+      trailScrollOffsetY(0.0f),
+      trailScrollDragGrabOffsetY(0.0f),
       statusMessageTimerSec(0.0f),
       panelOffset{0.0f, 0.0f},
       statusMessage{},
       titleFont{},
-      bodyFont{}
+      bodyFont{},
+      previewProjectileVfx{},
+      previewTrailVfx{},
+      previewProjectileFolderPath{},
+      previewTrailFolderPath{},
+      loadedPreviewProjectileFolderPath{},
+      loadedPreviewTrailFolderPath{},
+      previewProjectileIlluminated(false),
+      previewTrailEnabled(false),
+      previewAssetsDirty(true),
+      previewAnimTimerSec(0.0f),
+      selectedManualTrailStampIndex(-1),
+      manualTrailStampDragActive(false),
+      pendingDialogRequest(DialogRequest::NONE)
 {
 }
 
@@ -1861,48 +3208,115 @@ void IlluminatedProjectileDebugPanel::load(void)
     this->visible = true;
     this->panelDragging = false;
     this->sliderDragging = false;
+    this->trailScrollDragging = false;
     this->activeSliderIndex = -1;
     this->activePageIndex = 0;
     this->selectedDistanceBandIndex = 0;
     this->selectedAngleSectorIndex = 0;
     this->trajectoryDebugMask = 0U;
     this->trajectoryCircleVisible = true;
+    this->trailScrollDragging = false;
     this->sliderDragGrabOffsetX = 0.0f;
     this->panelDragGrabOffsetX = 0.0f;
     this->panelDragGrabOffsetY = 0.0f;
+    this->trailScrollOffsetY = 0.0f;
+    this->trailScrollDragGrabOffsetY = 0.0f;
     this->statusMessageTimerSec = 0.0f;
     this->statusMessage.clear();
     this->panelOffset = SDL_FPoint{0.0f, 0.0f};
+    this->previewProjectileVfx.unload();
+    this->previewTrailVfx.unload();
+    this->loadedPreviewProjectileFolderPath.clear();
+    this->loadedPreviewTrailFolderPath.clear();
+    this->previewAssetsDirty = true;
+    this->previewAnimTimerSec = 0.0f;
+    this->selectedManualTrailStampIndex = -1;
+    this->manualTrailStampDragActive = false;
+    this->pendingDialogRequest = DialogRequest::NONE;
 }
 
 void IlluminatedProjectileDebugPanel::unload(void)
 {
     ResetStorageFontRef(&this->bodyFont);
     ResetStorageFontRef(&this->titleFont);
+    this->previewProjectileVfx.unload();
+    this->previewTrailVfx.unload();
     this->loaded = false;
     this->panelDragging = false;
     this->sliderDragging = false;
+    this->trailScrollDragging = false;
     this->activeSliderIndex = -1;
+    this->selectedManualTrailStampIndex = -1;
+    this->manualTrailStampDragActive = false;
     this->trajectoryDebugMask = 0U;
+    this->trailScrollOffsetY = 0.0f;
+    this->trailScrollDragGrabOffsetY = 0.0f;
     this->statusMessageTimerSec = 0.0f;
     this->statusMessage.clear();
+    this->loadedPreviewProjectileFolderPath.clear();
+    this->loadedPreviewTrailFolderPath.clear();
+    this->previewAssetsDirty = true;
+    this->previewAnimTimerSec = 0.0f;
+    this->pendingDialogRequest = DialogRequest::NONE;
 }
 
 void IlluminatedProjectileDebugPanel::update(double dt)
 {
-    (void)dt;
-
     if (!this->loaded || !this->visible)
     {
         this->panelDragging = false;
         this->sliderDragging = false;
+        this->trailScrollDragging = false;
         this->activeSliderIndex = -1;
         return;
     }
 
+    const float dtf = (std::isfinite(dt) && dt > 0.0) ? static_cast<float>(dt) : 0.0f;
+    this->previewAnimTimerSec += dtf;
+
+    if (this->previewAssetsDirty ||
+        this->loadedPreviewProjectileFolderPath != this->previewProjectileFolderPath)
+    {
+        this->previewProjectileVfx.unload();
+        this->loadedPreviewProjectileFolderPath.clear();
+        if (!this->previewProjectileFolderPath.empty() &&
+            this->previewProjectileVfx.loadFromFolder(this->previewProjectileFolderPath.c_str()))
+        {
+            this->loadedPreviewProjectileFolderPath = this->previewProjectileFolderPath;
+        }
+    }
+    if (this->previewAssetsDirty ||
+        this->loadedPreviewTrailFolderPath != this->previewTrailFolderPath)
+    {
+        this->previewTrailVfx.unload();
+        this->loadedPreviewTrailFolderPath.clear();
+        if (!this->previewTrailFolderPath.empty() &&
+            this->previewTrailVfx.loadFromFolder(this->previewTrailFolderPath.c_str()))
+        {
+            this->loadedPreviewTrailFolderPath = this->previewTrailFolderPath;
+        }
+    }
+    this->previewAssetsDirty = false;
+
+    if (this->previewProjectileVfx.isLoaded())
+    {
+        if (this->previewProjectileVfx.isFinished())
+        {
+            this->previewProjectileVfx.resetPlayback();
+        }
+        this->previewProjectileVfx.update(dtf);
+    }
+    if (this->previewTrailVfx.isLoaded())
+    {
+        if (this->previewTrailVfx.isFinished())
+        {
+            this->previewTrailVfx.resetPlayback();
+        }
+        this->previewTrailVfx.update(dtf);
+    }
+
     if (this->statusMessageTimerSec > 0.0f)
     {
-        const float dtf = (std::isfinite(dt) && dt > 0.0) ? static_cast<float>(dt) : 0.0f;
         this->statusMessageTimerSec = (std::max)(0.0f, this->statusMessageTimerSec - dtf);
         if (this->statusMessageTimerSec <= 0.0f)
         {
@@ -1943,6 +3357,95 @@ void IlluminatedProjectileDebugPanel::update(double dt)
         }
     }
 
+    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset, this->trailScrollOffsetY);
+    this->trailScrollOffsetY = std::clamp(this->trailScrollOffsetY, 0.0f, layout.trailScrollMaxOffset);
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig trailConfig =
+        MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+    if (this->selectedManualTrailStampIndex >= static_cast<int>(trailConfig.customStamps.size()))
+    {
+        this->selectedManualTrailStampIndex =
+            trailConfig.customStamps.empty() ? -1 : (static_cast<int>(trailConfig.customStamps.size()) - 1);
+    }
+
+    if (this->trailScrollDragging)
+    {
+        if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+        {
+            this->trailScrollDragging = false;
+        }
+        else if (layout.trailScrollMaxOffset > 1.0e-4f)
+        {
+            const float thumbTravel = (std::max)(0.0f, layout.trailScrollTrackRect.h - layout.trailScrollThumbRect.h);
+            if (thumbTravel <= 1.0e-4f)
+            {
+                this->trailScrollOffsetY = 0.0f;
+            }
+            else
+            {
+                const float thumbY = std::clamp(
+                    mouseY - this->trailScrollDragGrabOffsetY,
+                    layout.trailScrollTrackRect.y,
+                    layout.trailScrollTrackRect.y + thumbTravel);
+                const float scrollT = (thumbY - layout.trailScrollTrackRect.y) / thumbTravel;
+                this->trailScrollOffsetY = scrollT * layout.trailScrollMaxOffset;
+            }
+        }
+    }
+
+    if (this->manualTrailStampDragActive)
+    {
+        if (!rc2d_mouse_isDown(RC2D_MOUSE_BUTTON_LEFT))
+        {
+            this->manualTrailStampDragActive = false;
+        }
+        else if (this->activePageIndex == 2 &&
+                 this->selectedManualTrailStampIndex >= 0 &&
+                 this->selectedManualTrailStampIndex < static_cast<int>(trailConfig.customStamps.size()))
+        {
+            const SDL_FRect viewport = SDL_FRect{
+                layout.trailManualPreviewRect.x + 10.0f,
+                layout.trailManualPreviewRect.y + 50.0f,
+                layout.trailManualPreviewRect.w - 20.0f,
+                layout.trailManualPreviewRect.h - 60.0f
+            };
+            const std::vector<TrailPreviewPoint> manualPoints =
+                buildTrailPreviewPoints(viewport, trailConfig, this->previewAnimTimerSec, true);
+            auto& stamp = trailConfig.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)];
+            float bestDist = stamp.distanceFromHeadTiles;
+            float bestDist2 = (std::numeric_limits<float>::max)();
+            TrailPreviewSample bestSample{};
+            bool bestValid = false;
+            for (int step = 0; step <= 160; ++step)
+            {
+                const float d = -trailConfig.headCoverTiles +
+                    (((trailConfig.maxLengthTiles + trailConfig.headCoverTiles) * static_cast<float>(step)) / 160.0f);
+                TrailPreviewSample sample{};
+                if (!sampleTrailPreviewAtDistance(manualPoints, trailConfig, d, &sample))
+                {
+                    continue;
+                }
+                const float dx = mouseX - sample.position.x;
+                const float dy = mouseY - sample.position.y;
+                const float dist2 = (dx * dx) + (dy * dy);
+                if (dist2 < bestDist2)
+                {
+                    bestDist2 = dist2;
+                    bestDist = d;
+                    bestSample = sample;
+                    bestValid = true;
+                }
+            }
+            if (bestValid)
+            {
+                const SDL_FPoint normal{-bestSample.tangent.y, bestSample.tangent.x};
+                stamp.distanceFromHeadTiles = bestDist;
+                stamp.lateralOffsetPixels =
+                    ((mouseX - bestSample.position.x) * normal.x) + ((mouseY - bestSample.position.y) * normal.y);
+                MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(trailConfig);
+            }
+        }
+    }
+
     if (!this->sliderDragging)
     {
         return;
@@ -1955,9 +3458,10 @@ void IlluminatedProjectileDebugPanel::update(double dt)
         return;
     }
 
-    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset);
     const int activeSliderCount =
-        (this->activePageIndex == 1) ? kTrajectorySliderCount : kSliderCount;
+        (this->activePageIndex == 1)
+            ? kTrajectorySliderCount
+            : ((this->activePageIndex == 2) ? (kManualTrailSliderIndexOffset + kManualTrailSliderCount) : kSliderCount);
     const bool activeShipSpeedSlider =
         this->activePageIndex == 1 &&
         this->activeSliderIndex == kShipSpeedActiveSliderIndex;
@@ -1994,6 +3498,43 @@ void IlluminatedProjectileDebugPanel::update(double dt)
             this->selectedAngleSectorIndex,
             tuning);
     }
+    else if (this->activePageIndex == 2)
+    {
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig config =
+            MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+        if (this->activeSliderIndex >= kManualTrailSliderIndexOffset)
+        {
+            const int manualSliderIndex = this->activeSliderIndex - kManualTrailSliderIndexOffset;
+            if (this->selectedManualTrailStampIndex >= 0 &&
+                this->selectedManualTrailStampIndex < static_cast<int>(config.customStamps.size()) &&
+                manualSliderIndex >= 0 &&
+                manualSliderIndex < kManualTrailSliderCount)
+            {
+                const SDL_FRect& trackRect =
+                    layout.trailManualSliderTrackRects[static_cast<size_t>(manualSliderIndex)];
+                const float nextValue = manualTrailSliderValueFromTrackPosition(
+                    manualSliderIndex,
+                    mouseX - this->sliderDragGrabOffsetX,
+                    trackRect);
+                setManualTrailSliderValue(
+                    &config.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)],
+                    manualSliderIndex,
+                    nextValue);
+                MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            }
+        }
+        else
+        {
+            const SDL_FRect& trackRect =
+                layout.trailTrackRects[static_cast<size_t>(this->activeSliderIndex)];
+            const float nextValue = trailSliderValueFromTrackPosition(
+                this->activeSliderIndex,
+                mouseX - this->sliderDragGrabOffsetX,
+                trackRect);
+            setTrailSliderValue(&config, this->activeSliderIndex, nextValue);
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+        }
+    }
     else
     {
         VFXClassic::IlluminatedProjectileGlowConfig config =
@@ -2015,7 +3556,7 @@ void IlluminatedProjectileDebugPanel::draw(void) const
         return;
     }
 
-    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset);
+    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset, this->trailScrollOffsetY);
     const VFXClassic::IlluminatedProjectileGlowConfig& config =
         VFXClassic::getIlluminatedProjectileGlowConfig();
 
@@ -2053,7 +3594,7 @@ void IlluminatedProjectileDebugPanel::draw(void) const
 
     drawTextAt(
         const_cast<RC2D_Font*>(&this->titleFont),
-        "Bullet Glow Debug",
+        "Bullet FX Debug",
         layout.headerRect.x + 12.0f,
         layout.headerRect.y + 8.0f,
         kTextStrong);
@@ -2377,6 +3918,360 @@ void IlluminatedProjectileDebugPanel::draw(void) const
         return;
     }
 
+    if (this->activePageIndex == 2)
+    {
+        const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig trailConfig =
+            MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+        const HelpEntry* hoveredTrailHelp = &kTrailHelpDefault;
+        const std::string projectilePreviewLabel =
+            getFolderLeafLabel(this->previewProjectileFolderPath);
+        const std::string trailPreviewLabel =
+            getFolderLeafLabel(this->previewTrailFolderPath);
+
+        drawTextAt(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "Ribbon trail exportable pour les boulets de salve",
+            layout.panelRect.x + 16.0f,
+            layout.panelRect.y + 92.0f,
+            kTextPrimary);
+        drawTextAt(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "La spritesheet trail se choisit dans la liste Trail VFX a droite.",
+            layout.panelRect.x + 16.0f,
+            layout.panelRect.y + 144.0f,
+            kTextMuted);
+
+        const bool trailEnabled = trailConfig.meshEnabled || trailConfig.stampsEnabled;
+        const bool trailMeshEnabled = trailConfig.meshEnabled;
+        const bool trailStampsEnabled = trailConfig.stampsEnabled;
+        const bool trailBlendAdditive = trailConfig.additiveStampBlend;
+        const auto drawTrailToggle = [&](const SDL_FRect& rect, const char* label, bool enabled) {
+            const bool hovered = pointInRect(mouseX, mouseY, rect);
+            fillAndOutlineRect(
+                rect,
+                enabled
+                    ? (hovered ? kButtonFillHover : kButtonActiveFill)
+                    : (hovered ? kButtonFillHover : kButtonFillSecondary),
+                enabled ? kButtonActiveBorder : (hovered ? kPanelBorder : kButtonBorderMuted));
+            drawCenteredText(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                label,
+                rect,
+                enabled ? kTextStrong : kTextPrimary);
+        };
+
+        drawTrailToggle(layout.trailEnableButtonRect, trailEnabled ? "Trail ON" : "Trail OFF", trailEnabled);
+        drawTrailToggle(layout.trailMeshToggleButtonRect, trailMeshEnabled ? "Mesh ON" : "Mesh OFF", trailMeshEnabled);
+        drawTrailToggle(layout.trailStampsToggleButtonRect, trailStampsEnabled ? "Sprites ON" : "Sprites OFF", trailStampsEnabled);
+        drawTrailToggle(layout.trailBlendToggleButtonRect, trailBlendAdditive ? "Blend ADD" : "Blend ALPHA", trailBlendAdditive);
+        if (pointInRect(mouseX, mouseY, layout.trailEnableButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpTrailToggle;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailMeshToggleButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpMeshToggle;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailStampsToggleButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpSpritesToggle;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailBlendToggleButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpBlendToggle;
+        }
+
+        drawTrailToggle(
+            layout.trailManualModeButtonRect,
+            trailConfig.manualStampsEnabled ? "Manual ON" : "Manual OFF",
+            trailConfig.manualStampsEnabled);
+        drawTrailToggle(
+            layout.trailManualAddButtonRect,
+            "+ Stamp",
+            false);
+        drawTrailToggle(
+            layout.trailManualDuplicateButtonRect,
+            "Dupli",
+            false);
+        drawTrailToggle(
+            layout.trailManualDeleteButtonRect,
+            "- Stamp",
+            false);
+        drawTrailToggle(
+            layout.trailManualClearButtonRect,
+            "Clear",
+            false);
+        if (pointInRect(mouseX, mouseY, layout.trailManualModeButtonRect) ||
+            pointInRect(mouseX, mouseY, layout.trailManualPreviewRect))
+        {
+            hoveredTrailHelp =
+                pointInRect(mouseX, mouseY, layout.trailManualModeButtonRect)
+                    ? &kTrailHelpManualMode
+                    : &kTrailHelpManualPreview;
+        }
+
+        SDL_Renderer* trailRenderer = SDL_GetRenderer(rc2d_window_getWindow());
+        if (trailRenderer != nullptr)
+        {
+            const SDL_Rect clipRect = toClipRect(layout.trailControlsViewportRect);
+            SDL_SetRenderClipRect(trailRenderer, &clipRect);
+        }
+        for (int index = 0; index < kTrailSliderCount; ++index)
+        {
+            const SDL_FRect& rowRect = layout.trailRowRects[static_cast<size_t>(index)];
+            const SDL_FRect& trackRect = layout.trailTrackRects[static_cast<size_t>(index)];
+            if (!rectsIntersect(rowRect, layout.trailControlsViewportRect))
+            {
+                continue;
+            }
+
+            const bool rowHovered =
+                pointInRect(mouseX, mouseY, rowRect) &&
+                pointInRect(mouseX, mouseY, layout.trailControlsViewportRect);
+            const bool active =
+                this->sliderDragging &&
+                this->activePageIndex == 2 &&
+                this->activeSliderIndex == index;
+            const float sliderValue = getTrailSliderValue(trailConfig, index);
+            if (rowHovered)
+            {
+                hoveredTrailHelp = &getTrailSliderHelpEntry(index);
+            }
+            const SDL_FRect knobRect = buildTrailSliderKnobRect(index, sliderValue, trackRect);
+            const float knobCenterX = knobRect.x + (knobRect.w * 0.5f);
+            const SDL_FRect valueFillRect = SDL_FRect{
+                trackRect.x,
+                trackRect.y,
+                (std::max)(0.0f, knobCenterX - trackRect.x),
+                trackRect.h
+            };
+
+            fillAndOutlineRect(rowRect, kRowFill, rowHovered ? kPanelBorder : kButtonBorderMuted);
+            fillAndOutlineRect(
+                trackRect,
+                active ? kTrackFillActive : (rowHovered ? kTrackFillHover : kTrackFill),
+                rowHovered ? kPanelBorder : kTrackBorder);
+            if (valueFillRect.w > 0.0f)
+            {
+                rc2d_graphics_setColor(kTrackValueFill);
+                rc2d_graphics_rectangle("fill", &valueFillRect);
+            }
+            fillAndOutlineRect(knobRect, kKnobFill, kKnobBorder);
+
+            drawTextAt(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                kTrailSliderSpecs[static_cast<size_t>(index)].label,
+                rowRect.x + 10.0f,
+                rowRect.y + 6.0f,
+                kTextPrimary);
+
+            const std::string valueText = formatSliderValue(sliderValue);
+            const SDL_FRect valueRect = SDL_FRect{
+                trackRect.x + trackRect.w + 12.0f,
+                rowRect.y,
+                rowRect.x + rowRect.w - (trackRect.x + trackRect.w + 12.0f),
+                rowRect.h
+            };
+            drawRightAlignedText(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                valueText.c_str(),
+                valueRect,
+                active ? kTextStrong : kTextMuted);
+        }
+        if (trailRenderer != nullptr)
+        {
+            SDL_SetRenderClipRect(trailRenderer, nullptr);
+        }
+        fillAndOutlineRect(layout.trailScrollTrackRect, kTrackFill, kTrackBorder);
+        fillAndOutlineRect(
+            layout.trailScrollThumbRect,
+            (layout.trailScrollMaxOffset > 1.0e-4f)
+                ? (pointInRect(mouseX, mouseY, layout.trailScrollThumbRect) || this->trailScrollDragging ? kButtonFillHover : kKnobFill)
+                : kButtonFillSecondary,
+            (layout.trailScrollMaxOffset > 1.0e-4f) ? kKnobBorder : kButtonBorderMuted);
+
+        fillAndOutlineRect(
+            layout.trailImportButtonRect,
+            pointInRect(mouseX, mouseY, layout.trailImportButtonRect) ? kButtonFillHover : kButtonFill,
+            pointInRect(mouseX, mouseY, layout.trailImportButtonRect) ? kPanelBorder : kPanelBorder);
+        fillAndOutlineRect(
+            layout.trailExportButtonRect,
+            pointInRect(mouseX, mouseY, layout.trailExportButtonRect) ? kButtonFillHover : kButtonFill,
+            pointInRect(mouseX, mouseY, layout.trailExportButtonRect) ? kPanelBorder : kPanelBorder);
+        fillAndOutlineRect(
+            layout.trailResetButtonRect,
+            pointInRect(mouseX, mouseY, layout.trailResetButtonRect) ? kButtonFillHover : kButtonFill,
+            pointInRect(mouseX, mouseY, layout.trailResetButtonRect) ? kPanelBorder : kPanelBorder);
+        fillAndOutlineRect(
+            layout.trailFooterHideButtonRect,
+            pointInRect(mouseX, mouseY, layout.trailFooterHideButtonRect) ? kButtonFillHover : kButtonFillSecondary,
+            pointInRect(mouseX, mouseY, layout.trailFooterHideButtonRect) ? kPanelBorder : kButtonBorderMuted);
+        if (pointInRect(mouseX, mouseY, layout.trailImportButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpImport;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailExportButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpExport;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailResetButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpReset;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailFooterHideButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpHide;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailPreviewRect))
+        {
+            hoveredTrailHelp = &kTrailHelpPreview;
+        }
+        else if (pointInRect(mouseX, mouseY, layout.trailManualAddButtonRect) ||
+                 pointInRect(mouseX, mouseY, layout.trailManualDuplicateButtonRect) ||
+                 pointInRect(mouseX, mouseY, layout.trailManualDeleteButtonRect) ||
+                 pointInRect(mouseX, mouseY, layout.trailManualClearButtonRect))
+        {
+            hoveredTrailHelp = &kTrailHelpManualPreview;
+        }
+
+        drawCenteredText(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "Import JSON",
+            layout.trailImportButtonRect,
+            kTextPrimary);
+        drawCenteredText(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "Export JSON",
+            layout.trailExportButtonRect,
+            kTextPrimary);
+        drawCenteredText(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "Reset trail",
+            layout.trailResetButtonRect,
+            kTextPrimary);
+        drawCenteredText(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            "Hide (F2)",
+            layout.trailFooterHideButtonRect,
+            kTextPrimary);
+
+        drawTrailPreviewPanel(
+            layout.trailPreviewRect,
+            trailConfig,
+            this->previewProjectileVfx.isLoaded() ? &this->previewProjectileVfx : nullptr,
+            this->previewTrailVfx.isLoaded() ? &this->previewTrailVfx : nullptr,
+            this->previewProjectileIlluminated,
+            this->previewTrailEnabled,
+            this->previewAnimTimerSec,
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            projectilePreviewLabel,
+            trailPreviewLabel,
+            &layout.trailManualPreviewRect,
+            this->selectedManualTrailStampIndex);
+
+        for (int index = 0; index < kManualTrailSliderCount; ++index)
+        {
+            const SDL_FRect& rowRect = layout.trailManualSliderRowRects[static_cast<size_t>(index)];
+            const SDL_FRect& trackRect = layout.trailManualSliderTrackRects[static_cast<size_t>(index)];
+            const bool rowHovered = pointInRect(mouseX, mouseY, rowRect);
+            const bool active =
+                this->sliderDragging &&
+                this->activePageIndex == 2 &&
+                this->activeSliderIndex == (kManualTrailSliderIndexOffset + index);
+            fillAndOutlineRect(rowRect, kRowFill, rowHovered ? kPanelBorder : kButtonBorderMuted);
+            fillAndOutlineRect(
+                trackRect,
+                active ? kTrackFillActive : (rowHovered ? kTrackFillHover : kTrackFill),
+                rowHovered ? kPanelBorder : kTrackBorder);
+            drawTextAt(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                kManualTrailSliderSpecs[static_cast<size_t>(index)].label,
+                rowRect.x + 10.0f,
+                rowRect.y + 6.0f,
+                this->selectedManualTrailStampIndex >= 0 ? kTextPrimary : kTextMuted);
+
+            if (this->selectedManualTrailStampIndex >= 0 &&
+                this->selectedManualTrailStampIndex < static_cast<int>(trailConfig.customStamps.size()))
+            {
+                const auto& stamp = trailConfig.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)];
+                const float sliderValue = getManualTrailSliderValue(stamp, index);
+                const SDL_FRect knobRect = buildManualTrailSliderKnobRect(index, sliderValue, trackRect);
+                const SDL_FRect valueFillRect = SDL_FRect{
+                    trackRect.x,
+                    trackRect.y,
+                    (std::max)(0.0f, (knobRect.x + (knobRect.w * 0.5f)) - trackRect.x),
+                    trackRect.h
+                };
+                if (valueFillRect.w > 0.0f)
+                {
+                    rc2d_graphics_setColor(kTrackValueFill);
+                    rc2d_graphics_rectangle("fill", &valueFillRect);
+                }
+                fillAndOutlineRect(knobRect, kKnobFill, kKnobBorder);
+                const std::string valueText = formatSliderValue(sliderValue);
+                drawRightAlignedText(
+                    const_cast<RC2D_Font*>(&this->bodyFont),
+                    valueText.c_str(),
+                    SDL_FRect{trackRect.x + trackRect.w + 12.0f, rowRect.y, rowRect.w - (trackRect.x + trackRect.w - rowRect.x) - 12.0f, rowRect.h},
+                    active ? kTextStrong : kTextMuted);
+            }
+            else
+            {
+                drawRightAlignedText(
+                    const_cast<RC2D_Font*>(&this->bodyFont),
+                    "-",
+                    SDL_FRect{trackRect.x + trackRect.w + 12.0f, rowRect.y, rowRect.w - (trackRect.x + trackRect.w - rowRect.x) - 12.0f, rowRect.h},
+                    kTextMuted);
+            }
+        }
+
+        fillAndOutlineRect(layout.trailHelpRect, kHelpFill, kHelpBorder);
+        drawTextAt(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            hoveredTrailHelp->title,
+            layout.trailHelpRect.x + 12.0f,
+            layout.trailHelpRect.y + 10.0f,
+            kHelpAccent);
+        drawWrappedText(
+            const_cast<RC2D_Font*>(&this->bodyFont),
+            hoveredTrailHelp->body,
+            SDL_FRect{
+                layout.trailHelpRect.x + 12.0f,
+                layout.trailHelpRect.y + 32.0f,
+                layout.trailHelpRect.w - 24.0f,
+                layout.trailHelpRect.h - 44.0f
+            },
+            kTextPrimary,
+            2.0f);
+
+        if (!this->statusMessage.empty())
+        {
+            drawTextAt(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                this->statusMessage.c_str(),
+                layout.panelRect.x + 16.0f,
+                layout.trailExportButtonRect.y - 22.0f,
+                kTextStrong);
+        }
+        else
+        {
+            std::string trailSourceText = "mode trail local (config locale)";
+            if (!gEditorTrailSourcePath.empty())
+            {
+                trailSourceText = gEditorTrailSourcePath;
+            }
+            drawTextAt(
+                const_cast<RC2D_Font*>(&this->bodyFont),
+                trailSourceText.c_str(),
+                layout.panelRect.x + 16.0f,
+                layout.trailExportButtonRect.y - 22.0f,
+                kTextMuted);
+        }
+
+        rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        return;
+    }
+
     drawTextAt(
         const_cast<RC2D_Font*>(&this->bodyFont),
         "TEMP DEBUG TOOL - live tuning des boulets illumines",
@@ -2407,9 +4302,18 @@ void IlluminatedProjectileDebugPanel::draw(void) const
     }
     else
     {
+        std::string glowSourceText = "mode glow live (config locale)";
+        if (gEditorGlowModeDefault)
+        {
+            glowSourceText = "assets/data/ammo-illu-default.json";
+        }
+        else if (!gEditorGlowLiveSourcePath.empty())
+        {
+            glowSourceText = gEditorGlowLiveSourcePath;
+        }
         drawTextAt(
             const_cast<RC2D_Font*>(&this->bodyFont),
-            VFXClassic::getIlluminatedProjectileGlowConfigPath(),
+            glowSourceText.c_str(),
             layout.panelRect.x + 16.0f,
             layout.glowExportButtonRect.y - 22.0f,
             kTextMuted);
@@ -2543,7 +4447,7 @@ void IlluminatedProjectileDebugPanel::draw(void) const
         kTextPrimary);
     drawCenteredText(
         const_cast<RC2D_Font*>(&this->bodyFont),
-        "Reset defaults",
+        "Reset glow default",
         layout.resetButtonRect,
         kTextPrimary);
     drawCenteredText(
@@ -2562,7 +4466,7 @@ bool IlluminatedProjectileDebugPanel::mousepressed(float x, float y, RC2D_MouseB
         return false;
     }
 
-    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset);
+    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset, this->trailScrollOffsetY);
     if (!pointInRect(x, y, layout.panelRect))
     {
         return false;
@@ -2575,10 +4479,12 @@ bool IlluminatedProjectileDebugPanel::mousepressed(float x, float y, RC2D_MouseB
 
     this->panelDragging = false;
     this->sliderDragging = false;
+    this->manualTrailStampDragActive = false;
     this->activeSliderIndex = -1;
 
     if (pointInRect(x, y, layout.hideButtonRect) ||
-        (this->activePageIndex == 0 && pointInRect(x, y, layout.footerHideButtonRect)))
+        (this->activePageIndex == 0 && pointInRect(x, y, layout.footerHideButtonRect)) ||
+        (this->activePageIndex == 2 && pointInRect(x, y, layout.trailFooterHideButtonRect)))
     {
         this->setVisible(false);
         return true;
@@ -2764,34 +4670,302 @@ bool IlluminatedProjectileDebugPanel::mousepressed(float x, float y, RC2D_MouseB
         return true;
     }
 
+    if (this->activePageIndex == 2)
+    {
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig config =
+            MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+
+        if (layout.trailScrollMaxOffset > 1.0e-4f && pointInRect(x, y, layout.trailScrollThumbRect))
+        {
+            this->trailScrollDragging = true;
+            this->trailScrollDragGrabOffsetY = y - layout.trailScrollThumbRect.y;
+            return true;
+        }
+        if (layout.trailScrollMaxOffset > 1.0e-4f && pointInRect(x, y, layout.trailScrollTrackRect))
+        {
+            const float thumbTravel = (std::max)(0.0f, layout.trailScrollTrackRect.h - layout.trailScrollThumbRect.h);
+            if (thumbTravel > 1.0e-4f)
+            {
+                const float targetThumbY = std::clamp(
+                    y - (layout.trailScrollThumbRect.h * 0.5f),
+                    layout.trailScrollTrackRect.y,
+                    layout.trailScrollTrackRect.y + thumbTravel);
+                const float scrollT = (targetThumbY - layout.trailScrollTrackRect.y) / thumbTravel;
+                this->trailScrollOffsetY = scrollT * layout.trailScrollMaxOffset;
+                this->trailScrollDragging = true;
+                this->trailScrollDragGrabOffsetY = y - targetThumbY;
+            }
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailEnableButtonRect))
+        {
+            const bool enable = !(config.meshEnabled || config.stampsEnabled);
+            config.meshEnabled = enable;
+            config.stampsEnabled = enable;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailMeshToggleButtonRect))
+        {
+            config.meshEnabled = !config.meshEnabled;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailStampsToggleButtonRect))
+        {
+            config.stampsEnabled = !config.stampsEnabled;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailBlendToggleButtonRect))
+        {
+            config.additiveStampBlend = !config.additiveStampBlend;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailManualModeButtonRect))
+        {
+            config.manualStampsEnabled = !config.manualStampsEnabled;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailManualAddButtonRect))
+        {
+            MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement stamp{};
+            stamp.distanceFromHeadTiles = 0.0f;
+            stamp.scale = 1.0f;
+            stamp.opacity = 1.0f;
+            config.customStamps.push_back(stamp);
+            this->selectedManualTrailStampIndex = static_cast<int>(config.customStamps.size()) - 1;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailManualDuplicateButtonRect) &&
+            this->selectedManualTrailStampIndex >= 0 &&
+            this->selectedManualTrailStampIndex < static_cast<int>(config.customStamps.size()))
+        {
+            config.customStamps.push_back(config.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)]);
+            this->selectedManualTrailStampIndex = static_cast<int>(config.customStamps.size()) - 1;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailManualDeleteButtonRect) &&
+            this->selectedManualTrailStampIndex >= 0 &&
+            this->selectedManualTrailStampIndex < static_cast<int>(config.customStamps.size()))
+        {
+            config.customStamps.erase(
+                config.customStamps.begin() + static_cast<std::ptrdiff_t>(this->selectedManualTrailStampIndex));
+            if (config.customStamps.empty())
+            {
+                this->selectedManualTrailStampIndex = -1;
+            }
+            else
+            {
+                this->selectedManualTrailStampIndex =
+                    (std::min)(this->selectedManualTrailStampIndex, static_cast<int>(config.customStamps.size()) - 1);
+            }
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailManualClearButtonRect))
+        {
+            config.customStamps.clear();
+            this->selectedManualTrailStampIndex = -1;
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailResetButtonRect))
+        {
+            MaritimeCannonSalvoSystem::resetProjectileRibbonTrailConfig();
+            this->statusMessage = "Ribbon trail remis par defaut.";
+            this->statusMessageTimerSec = 2.0f;
+            this->selectedManualTrailStampIndex = -1;
+            gEditorTrailClearSourceRequested = true;
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailImportButtonRect))
+        {
+            this->pendingDialogRequest = DialogRequest::TRAIL_IMPORT_JSON;
+            return true;
+        }
+        if (pointInRect(x, y, layout.trailExportButtonRect))
+        {
+            this->pendingDialogRequest = DialogRequest::TRAIL_EXPORT_JSON;
+            return true;
+        }
+
+        for (int sliderIndex = 0; sliderIndex < kTrailSliderCount; ++sliderIndex)
+        {
+            if (!pointInRect(x, y, layout.trailControlsViewportRect) ||
+                !rectsIntersect(layout.trailRowRects[static_cast<size_t>(sliderIndex)], layout.trailControlsViewportRect) ||
+                !pointInRect(x, y, layout.trailRowRects[static_cast<size_t>(sliderIndex)]))
+            {
+                continue;
+            }
+
+            this->sliderDragging = true;
+            this->activeSliderIndex = sliderIndex;
+            this->sliderDragGrabOffsetX = 0.0f;
+
+            const float nextValue =
+                trailSliderValueFromTrackPosition(
+                    sliderIndex,
+                    x,
+                    layout.trailTrackRects[static_cast<size_t>(sliderIndex)]);
+            setTrailSliderValue(&config, sliderIndex, nextValue);
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+
+        for (int sliderIndex = 0; sliderIndex < kManualTrailSliderCount; ++sliderIndex)
+        {
+            if (!pointInRect(x, y, layout.trailManualSliderRowRects[static_cast<size_t>(sliderIndex)]))
+            {
+                continue;
+            }
+            if (this->selectedManualTrailStampIndex < 0 ||
+                this->selectedManualTrailStampIndex >= static_cast<int>(config.customStamps.size()))
+            {
+                return true;
+            }
+
+            this->sliderDragging = true;
+            this->activeSliderIndex = kManualTrailSliderIndexOffset + sliderIndex;
+            this->sliderDragGrabOffsetX = 0.0f;
+            const float nextValue = manualTrailSliderValueFromTrackPosition(
+                sliderIndex,
+                x,
+                layout.trailManualSliderTrackRects[static_cast<size_t>(sliderIndex)]);
+            setManualTrailSliderValue(
+                &config.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)],
+                sliderIndex,
+                nextValue);
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+
+        if (pointInRect(x, y, layout.trailManualPreviewRect))
+        {
+            const SDL_FRect viewport = SDL_FRect{
+                layout.trailManualPreviewRect.x + 10.0f,
+                layout.trailManualPreviewRect.y + 50.0f,
+                layout.trailManualPreviewRect.w - 20.0f,
+                layout.trailManualPreviewRect.h - 60.0f
+            };
+            const std::vector<TrailPreviewPoint> manualPoints =
+                buildTrailPreviewPoints(viewport, config, this->previewAnimTimerSec, true);
+            int nearestIndex = -1;
+            float nearestDist2 = kManualStampSelectRadiusPx * kManualStampSelectRadiusPx;
+            for (std::size_t index = 0U; index < config.customStamps.size(); ++index)
+            {
+                TrailPreviewSample sample{};
+                if (!sampleTrailPreviewAtDistance(manualPoints, config, config.customStamps[index].distanceFromHeadTiles, &sample))
+                {
+                    continue;
+                }
+                const SDL_FPoint normal{-sample.tangent.y, sample.tangent.x};
+                const float px = sample.position.x + (normal.x * config.customStamps[index].lateralOffsetPixels);
+                const float py = sample.position.y + (normal.y * config.customStamps[index].lateralOffsetPixels);
+                const float dx = x - px;
+                const float dy = y - py;
+                const float dist2 = (dx * dx) + (dy * dy);
+                if (dist2 <= nearestDist2)
+                {
+                    nearestDist2 = dist2;
+                    nearestIndex = static_cast<int>(index);
+                }
+            }
+
+            if (nearestIndex >= 0)
+            {
+                this->selectedManualTrailStampIndex = nearestIndex;
+                this->manualTrailStampDragActive = true;
+                return true;
+            }
+
+            float bestDist = 0.0f;
+            float bestDist2 = (std::numeric_limits<float>::max)();
+            TrailPreviewSample bestSample{};
+            bool bestValid = false;
+            for (int step = 0; step <= 160; ++step)
+            {
+                const float d = -config.headCoverTiles +
+                    (((config.maxLengthTiles + config.headCoverTiles) * static_cast<float>(step)) / 160.0f);
+                TrailPreviewSample sample{};
+                if (!sampleTrailPreviewAtDistance(manualPoints, config, d, &sample))
+                {
+                    continue;
+                }
+                const float dx = x - sample.position.x;
+                const float dy = y - sample.position.y;
+                const float dist2 = (dx * dx) + (dy * dy);
+                if (dist2 < bestDist2)
+                {
+                    bestDist2 = dist2;
+                    bestDist = d;
+                    bestSample = sample;
+                    bestValid = true;
+                }
+            }
+            if (bestValid)
+            {
+                const SDL_FPoint normal{-bestSample.tangent.y, bestSample.tangent.x};
+                MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement stamp{};
+                stamp.distanceFromHeadTiles = bestDist;
+                stamp.lateralOffsetPixels =
+                    ((x - bestSample.position.x) * normal.x) + ((y - bestSample.position.y) * normal.y);
+                stamp.scale = 1.0f;
+                stamp.opacity = 1.0f;
+                config.customStamps.push_back(stamp);
+                this->selectedManualTrailStampIndex = static_cast<int>(config.customStamps.size()) - 1;
+                this->manualTrailStampDragActive = true;
+                MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            }
+            return true;
+        }
+
+        if (pointInRect(x, y, layout.headerRect))
+        {
+            this->panelDragging = true;
+            this->panelDragGrabOffsetX = x - layout.panelRect.x;
+            this->panelDragGrabOffsetY = y - layout.panelRect.y;
+            return true;
+        }
+
+        return true;
+    }
+
     if (pointInRect(x, y, layout.resetButtonRect))
     {
-        VFXClassic::resetIlluminatedProjectileGlowConfig();
-        this->statusMessage = "Glow local remis par defaut.";
+        VFXClassic::IlluminatedProjectileGlowConfig defaultGlowConfig{};
+        const bool loadedDefaultGlow = VFXClassic::readIlluminatedProjectileGlowConfigFromFile(
+            "assets/data/ammo-illu-default.json",
+            &defaultGlowConfig);
+        if (loadedDefaultGlow)
+        {
+            VFXClassic::setIlluminatedProjectileGlowConfig(defaultGlowConfig);
+            this->statusMessage = "Glow remis depuis ammo-illu-default.json.";
+            gEditorGlowLiveClearSourceRequested = true;
+        }
+        else
+        {
+            VFXClassic::resetIlluminatedProjectileGlowConfig();
+            this->statusMessage = "Glow remis par defaut interne (json introuvable).";
+            gEditorGlowLiveClearSourceRequested = true;
+        }
         this->statusMessageTimerSec = 2.0f;
         return true;
     }
 
     if (pointInRect(x, y, layout.glowImportButtonRect))
     {
-        VFXClassic::invalidateIlluminatedProjectileGlowConfigFileLoadState();
-        const bool imported = VFXClassic::loadIlluminatedProjectileGlowConfigFromFile();
-        this->statusMessage =
-            imported
-                ? (std::string("Import OK: ") + VFXClassic::getIlluminatedProjectileGlowConfigPath())
-                : "Import glow impossible.";
-        this->statusMessageTimerSec = 4.0f;
+        this->pendingDialogRequest = DialogRequest::GLOW_IMPORT_JSON;
         return true;
     }
 
     if (pointInRect(x, y, layout.glowExportButtonRect))
     {
-        const bool exported = VFXClassic::exportIlluminatedProjectileGlowConfigToFile();
-        this->statusMessage =
-            exported
-                ? (std::string("Export OK: ") + VFXClassic::getIlluminatedProjectileGlowConfigPath())
-                : "Export glow impossible.";
-        this->statusMessageTimerSec = 4.0f;
+        this->pendingDialogRequest = DialogRequest::GLOW_EXPORT_JSON;
         return true;
     }
 
@@ -2865,7 +5039,7 @@ bool IlluminatedProjectileDebugPanel::mousewheelmoved(
         return false;
     }
 
-    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset);
+    const IlluminatedProjectileDebugPanelLayout layout = buildLayout(this->panelOffset, this->trailScrollOffsetY);
     if (!pointInRect(mouse_x, mouse_y, layout.panelRect))
     {
         return false;
@@ -2926,6 +5100,68 @@ bool IlluminatedProjectileDebugPanel::mousewheelmoved(
         return true;
     }
 
+    if (this->activePageIndex == 2)
+    {
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig config =
+            MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+        for (int sliderIndex = 0; sliderIndex < kTrailSliderCount; ++sliderIndex)
+        {
+            if (!pointInRect(mouse_x, mouse_y, layout.trailControlsViewportRect) ||
+                !rectsIntersect(layout.trailRowRects[static_cast<size_t>(sliderIndex)], layout.trailControlsViewportRect) ||
+                !pointInRect(mouse_x, mouse_y, layout.trailRowRects[static_cast<size_t>(sliderIndex)]))
+            {
+                continue;
+            }
+
+            const SliderSpec& spec = kTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
+            const float currentValue = getTrailSliderValue(config, sliderIndex);
+            const float nextValue =
+                std::clamp(currentValue + (static_cast<float>(delta) * spec.wheelStep), spec.minValue, spec.maxValue);
+            setTrailSliderValue(&config, sliderIndex, nextValue);
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+
+        for (int sliderIndex = 0; sliderIndex < kManualTrailSliderCount; ++sliderIndex)
+        {
+            if (!pointInRect(mouse_x, mouse_y, layout.trailManualSliderRowRects[static_cast<size_t>(sliderIndex)]))
+            {
+                continue;
+            }
+            if (this->selectedManualTrailStampIndex < 0 ||
+                this->selectedManualTrailStampIndex >= static_cast<int>(config.customStamps.size()))
+            {
+                return true;
+            }
+
+            const SliderSpec& spec = kManualTrailSliderSpecs[static_cast<size_t>(sliderIndex)];
+            const float currentValue = getManualTrailSliderValue(
+                config.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)],
+                sliderIndex);
+            const float nextValue =
+                std::clamp(currentValue + (static_cast<float>(delta) * spec.wheelStep), spec.minValue, spec.maxValue);
+            setManualTrailSliderValue(
+                &config.customStamps[static_cast<size_t>(this->selectedManualTrailStampIndex)],
+                sliderIndex,
+                nextValue);
+            MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(config);
+            return true;
+        }
+
+        if (pointInRect(mouse_x, mouse_y, layout.panelRect) &&
+            mouse_x < layout.trailPreviewRect.x)
+        {
+            const float scrollStep = (kSliderRowHeight + kSliderRowGap) * 0.8f;
+            this->trailScrollOffsetY = std::clamp(
+                this->trailScrollOffsetY - (static_cast<float>(delta) * scrollStep),
+                0.0f,
+                layout.trailScrollMaxOffset);
+            return true;
+        }
+
+        return true;
+    }
+
     for (int sliderIndex = 0; sliderIndex < kSliderCount; ++sliderIndex)
     {
         if (!pointInRect(mouse_x, mouse_y, layout.rowRects[static_cast<size_t>(sliderIndex)]))
@@ -2959,6 +5195,7 @@ void IlluminatedProjectileDebugPanel::setVisible(bool visibleState)
     {
         this->panelDragging = false;
         this->sliderDragging = false;
+        this->trailScrollDragging = false;
         this->activeSliderIndex = -1;
     }
 }
@@ -2966,6 +5203,13 @@ void IlluminatedProjectileDebugPanel::setVisible(bool visibleState)
 bool IlluminatedProjectileDebugPanel::isVisible(void) const
 {
     return this->visible;
+}
+
+IlluminatedProjectileDebugPanel::DialogRequest IlluminatedProjectileDebugPanel::consumeDialogRequest(void)
+{
+    const DialogRequest request = this->pendingDialogRequest;
+    this->pendingDialogRequest = DialogRequest::NONE;
+    return request;
 }
 
 
@@ -3046,6 +5290,11 @@ constexpr std::array<RC2D_FileDialogFilter, 1> kJsonFileFilters = {{
 
 Ship* gActiveCannonSalvoAttackerShip = nullptr;
 Ship* gActiveCannonSalvoTargetShip = nullptr;
+bool gEditorGlowModeDefault = false;
+std::string gEditorGlowLiveSourcePath{};
+bool gEditorGlowLiveClearSourceRequested = false;
+std::string gEditorTrailSourcePath{};
+bool gEditorTrailClearSourceRequested = false;
 
 static std::string normalizePathSlashes(std::string path)
 {
@@ -3267,8 +5516,6 @@ static const char* projectileGlowModeLabel(EditorMapCannonSalvoScene::Projectile
     {
         case EditorMapCannonSalvoScene::ProjectileGlowMode::DEFAULT_JSON:
             return "MODE GLOW DEFAULT";
-        case EditorMapCannonSalvoScene::ProjectileGlowMode::JSON_FILE:
-            return "MODE GLOW JSON";
         case EditorMapCannonSalvoScene::ProjectileGlowMode::LIVE:
         default:
             return "MODE GLOW LIVE";
@@ -3315,22 +5562,27 @@ EditorMapCannonSalvoScene::EditorMapCannonSalvoScene(void)
       localVfxShips{},
       shipOptions{},
       projectileOptions{},
+      trailOptions{},
       startVfxOptions{},
       endVfxOptions{},
       selectedShipIndex(-1),
       selectedProjectileIndex(-1),
+      selectedTrailIndex(-1),
       selectedStartVfxIndex(-1),
       focusedEndVfxIndex(-1),
       shipListScrollOffset(0),
       projectileListScrollOffset(0),
+      trailListScrollOffset(0),
       startVfxListScrollOffset(0),
       endVfxListScrollOffset(0),
       shipListScrollDragActive(false),
       projectileListScrollDragActive(false),
+      trailListScrollDragActive(false),
       startVfxListScrollDragActive(false),
       endVfxListScrollDragActive(false),
       shipListScrollDragGrabOffsetY(0.0f),
       projectileListScrollDragGrabOffsetY(0.0f),
+      trailListScrollDragGrabOffsetY(0.0f),
       startVfxListScrollDragGrabOffsetY(0.0f),
       endVfxListScrollDragGrabOffsetY(0.0f),
       selectedOceanColorIndex(24),
@@ -3345,6 +5597,8 @@ EditorMapCannonSalvoScene::EditorMapCannonSalvoScene(void)
       endDelayInputFocused(false),
       endDelayInputBuffer("0"),
       statusMessage("Editeur salves maritime pret."),
+      blockingPopupVisible(false),
+      blockingPopupMessage{},
       buttonDebugPanelRect{},
       buttonListsVisibilityRect{},
       buttonOceanPrevRect{},
@@ -3360,15 +5614,18 @@ EditorMapCannonSalvoScene::EditorMapCannonSalvoScene(void)
       buttonCadenceDownRect{},
       buttonCadenceUpRect{},
       buttonProjectileIlluminatedRect{},
+      buttonProjectileTrailRect{},
       buttonProjectileGlowModeRect{},
       buttonProjectileGlowImportRect{},
       buttonProjectileGlowExportRect{},
       endDelayInputRect{},
       shipListRect{},
       projectileListRect{},
+      trailListRect{},
       startVfxListRect{},
       endVfxListRect{},
       projectileImportButtonRect{},
+      trailImportButtonRect{},
       startVfxImportButtonRect{},
       endVfxImportButtonRect{},
       miniMapRect{},
@@ -3391,18 +5648,22 @@ void EditorMapCannonSalvoScene::resetEditorState(void)
 {
     this->selectedShipIndex = -1;
     this->selectedProjectileIndex = -1;
+    this->selectedTrailIndex = -1;
     this->selectedStartVfxIndex = -1;
     this->focusedEndVfxIndex = -1;
     this->shipListScrollOffset = 0;
     this->projectileListScrollOffset = 0;
+    this->trailListScrollOffset = 0;
     this->startVfxListScrollOffset = 0;
     this->endVfxListScrollOffset = 0;
     this->shipListScrollDragActive = false;
     this->projectileListScrollDragActive = false;
+    this->trailListScrollDragActive = false;
     this->startVfxListScrollDragActive = false;
     this->endVfxListScrollDragActive = false;
     this->shipListScrollDragGrabOffsetY = 0.0f;
     this->projectileListScrollDragGrabOffsetY = 0.0f;
+    this->trailListScrollDragGrabOffsetY = 0.0f;
     this->startVfxListScrollDragGrabOffsetY = 0.0f;
     this->endVfxListScrollDragGrabOffsetY = 0.0f;
     this->selectedOceanColorIndex = 24;
@@ -3416,6 +5677,8 @@ void EditorMapCannonSalvoScene::resetEditorState(void)
     this->endDelayInputFocused = false;
     this->endDelayInputBuffer = "0";
     this->statusMessage = "Editeur salves maritime pret.";
+    this->blockingPopupVisible = false;
+    this->blockingPopupMessage.clear();
     this->buttonDebugPanelRect = SDL_FRect{};
     this->buttonListsVisibilityRect = SDL_FRect{};
     this->buttonOceanPrevRect = SDL_FRect{};
@@ -3431,15 +5694,18 @@ void EditorMapCannonSalvoScene::resetEditorState(void)
     this->buttonCadenceDownRect = SDL_FRect{};
     this->buttonCadenceUpRect = SDL_FRect{};
     this->buttonProjectileIlluminatedRect = SDL_FRect{};
+    this->buttonProjectileTrailRect = SDL_FRect{};
     this->buttonProjectileGlowModeRect = SDL_FRect{};
     this->buttonProjectileGlowImportRect = SDL_FRect{};
     this->buttonProjectileGlowExportRect = SDL_FRect{};
     this->endDelayInputRect = SDL_FRect{};
     this->shipListRect = SDL_FRect{};
     this->projectileListRect = SDL_FRect{};
+    this->trailListRect = SDL_FRect{};
     this->startVfxListRect = SDL_FRect{};
     this->endVfxListRect = SDL_FRect{};
     this->projectileImportButtonRect = SDL_FRect{};
+    this->trailImportButtonRect = SDL_FRect{};
     this->startVfxImportButtonRect = SDL_FRect{};
     this->endVfxImportButtonRect = SDL_FRect{};
     this->miniMapRect = SDL_FRect{};
@@ -3466,11 +5732,13 @@ void EditorMapCannonSalvoScene::collectAssetLists(void)
 {
     this->shipOptions.clear();
     this->projectileOptions.clear();
+    this->trailOptions.clear();
     this->startVfxOptions.clear();
     this->endVfxOptions.clear();
 
     this->collectShipFolders();
     this->collectProjectileFolders();
+    this->collectTrailFolders();
     this->collectShipVfxFolders();
 
     auto selectByFolderName = [](const std::vector<ListItem>& items, const char* folderName) -> int {
@@ -3494,6 +5762,16 @@ void EditorMapCannonSalvoScene::collectAssetLists(void)
     if (this->selectedProjectileIndex < 0 && !this->projectileOptions.empty())
     {
         this->selectedProjectileIndex = 0;
+    }
+
+    this->selectedTrailIndex = selectByFolderName(this->trailOptions, "vfx-ammo-rep");
+    if (this->selectedTrailIndex < 0)
+    {
+        this->selectedTrailIndex = selectByFolderName(this->trailOptions, "vfx-ammo-illu");
+    }
+    if (this->selectedTrailIndex < 0 && !this->trailOptions.empty())
+    {
+        this->selectedTrailIndex = 0;
     }
 
     this->selectedStartVfxIndex = selectByFolderName(this->startVfxOptions, "vfx-cannon");
@@ -3543,6 +5821,40 @@ void EditorMapCannonSalvoScene::collectProjectileFolders(void)
             continue;
         }
         pushUniqueFolder(&this->projectileOptions, entry.path().generic_string());
+    }
+}
+
+void IlluminatedProjectileDebugPanel::setTrailPreviewSelection(
+    const char* projectileFolderPath,
+    const char* trailFolderPath,
+    bool projectileIlluminated,
+    bool trailEnabled)
+{
+    this->previewProjectileFolderPath =
+        (projectileFolderPath != nullptr) ? projectileFolderPath : "";
+    this->previewTrailFolderPath =
+        (trailFolderPath != nullptr) ? trailFolderPath : "";
+    this->previewProjectileIlluminated = projectileIlluminated;
+    this->previewTrailEnabled = trailEnabled;
+    this->previewAssetsDirty = true;
+}
+
+void EditorMapCannonSalvoScene::collectTrailFolders(void)
+{
+    std::error_code fsError;
+    const std::filesystem::path root("assets/images/vfxclassic");
+    if (!std::filesystem::is_directory(root, fsError))
+    {
+        return;
+    }
+
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(root, fsError))
+    {
+        if (fsError || !entry.is_directory(fsError) || !isLikelyVfxClassicFolder(entry.path()))
+        {
+            continue;
+        }
+        pushUniqueFolder(&this->trailOptions, entry.path().generic_string());
     }
 }
 
@@ -3619,10 +5931,55 @@ bool EditorMapCannonSalvoScene::selectProjectileAtIndex(int index)
     }
 
     (void)this->syncSelectedProjectileGlowConfigFromPanel();
+    (void)this->syncSelectedProjectileRibbonTrailConfigFromPanel();
     this->selectedProjectileIndex = index;
+    ListItem& selectedItem = this->projectileOptions[static_cast<std::size_t>(index)];
+    if (selectedItem.projectileGlowMode == ProjectileGlowMode::LIVE &&
+        !selectedItem.illuminatedGlowConfigInitialized)
+    {
+        VFXClassic::IlluminatedProjectileGlowConfig defaultGlowConfig{};
+        const bool loadedDefaultGlow = VFXClassic::readIlluminatedProjectileGlowConfigFromFile(
+            "assets/data/ammo-illu-default.json",
+            &defaultGlowConfig);
+        selectedItem.illuminatedGlowConfig =
+            loadedDefaultGlow ? defaultGlowConfig : VFXClassic::getDefaultIlluminatedProjectileGlowConfig();
+        selectedItem.illuminatedGlowConfigInitialized = true;
+    }
     (void)this->applySelectedProjectileGlowConfigToPanel(false);
+    (void)this->applySelectedProjectileRibbonTrailConfigToPanel(false);
+    this->refreshDebugPanelTrailPreview();
     this->statusMessage =
         "Boulet actif: " + this->projectileOptions[static_cast<std::size_t>(index)].displayName;
+    if (this->attackerShip.areSpritesLoaded() && this->targetShip.areSpritesLoaded())
+    {
+        GetMaritimeCannonSalvoSystem().clear();
+        this->clearLocalVfxShips();
+        this->fireCurrentSalvo();
+        this->salvoTimerSec = 0.0f;
+    }
+    return true;
+}
+
+bool EditorMapCannonSalvoScene::selectTrailAtIndex(int index)
+{
+    if (index < 0 || index >= static_cast<int>(this->trailOptions.size()))
+    {
+        return false;
+    }
+    if (this->selectedProjectileIndex < 0 ||
+        this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+    {
+        this->statusMessage = "Selectionne d'abord un boulet pour lui affecter un trail.";
+        return false;
+    }
+
+    this->selectedTrailIndex = index;
+    ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    item.ribbonTrailVfxFolderPath = this->trailOptions[static_cast<std::size_t>(index)].folderPath;
+    item.ribbonTrailEnabled = true;
+    this->refreshDebugPanelTrailPreview();
+    this->statusMessage =
+        "Trail actif: " + this->trailOptions[static_cast<std::size_t>(index)].displayName;
     if (this->attackerShip.areSpritesLoaded() && this->targetShip.areSpritesLoaded())
     {
         GetMaritimeCannonSalvoSystem().clear();
@@ -3671,7 +6028,12 @@ bool EditorMapCannonSalvoScene::applySelectedProjectileGlowConfigToPanel(bool sh
     {
         if (!item.illuminatedGlowConfigInitialized)
         {
-            item.illuminatedGlowConfig = VFXClassic::getDefaultIlluminatedProjectileGlowConfig();
+            VFXClassic::IlluminatedProjectileGlowConfig defaultGlowConfig{};
+            const bool loadedDefaultGlow = VFXClassic::readIlluminatedProjectileGlowConfigFromFile(
+                "assets/data/ammo-illu-default.json",
+                &defaultGlowConfig);
+            item.illuminatedGlowConfig =
+                loadedDefaultGlow ? defaultGlowConfig : VFXClassic::getDefaultIlluminatedProjectileGlowConfig();
             item.illuminatedGlowConfigInitialized = true;
         }
         configToApply = item.illuminatedGlowConfig;
@@ -3682,12 +6044,7 @@ bool EditorMapCannonSalvoScene::applySelectedProjectileGlowConfigToPanel(bool sh
         const char* glowConfigPathToLoad = nullptr;
         if (item.projectileGlowMode == ProjectileGlowMode::DEFAULT_JSON)
         {
-            glowConfigPathToLoad = VFXClassic::getIlluminatedProjectileGlowConfigPath();
-        }
-        else if (item.projectileGlowMode == ProjectileGlowMode::JSON_FILE &&
-                 !item.illuminatedGlowConfigPath.empty())
-        {
-            glowConfigPathToLoad = item.illuminatedGlowConfigPath.c_str();
+            glowConfigPathToLoad = "assets/data/ammo-illu-default.json";
         }
 
         if (glowConfigPathToLoad != nullptr)
@@ -3712,6 +6069,11 @@ bool EditorMapCannonSalvoScene::applySelectedProjectileGlowConfigToPanel(bool sh
     if (hasConfigToApply)
     {
         VFXClassic::setIlluminatedProjectileGlowConfig(configToApply);
+        if (item.projectileGlowMode == ProjectileGlowMode::LIVE)
+        {
+            item.illuminatedGlowConfig = configToApply;
+            item.illuminatedGlowConfigInitialized = true;
+        }
     }
     this->lastObservedGlowConfig = configToApply;
     this->lastObservedGlowConfigValid = true;
@@ -3722,17 +6084,7 @@ bool EditorMapCannonSalvoScene::applySelectedProjectileGlowConfigToPanel(bool sh
         {
             this->statusMessage =
                 "Glow default actif: " +
-                shortenMiddle(VFXClassic::getIlluminatedProjectileGlowConfigPath(), 56U);
-        }
-        else if (item.projectileGlowMode == ProjectileGlowMode::JSON_FILE &&
-            !item.illuminatedGlowConfigPath.empty())
-        {
-            this->statusMessage =
-                "Glow JSON actif: " + shortenMiddle(item.illuminatedGlowConfigPath, 56U);
-        }
-        else if (item.projectileGlowMode == ProjectileGlowMode::JSON_FILE)
-        {
-            this->statusMessage = "Mode glow JSON actif, aucun fichier choisi.";
+                shortenMiddle("assets/data/ammo-illu-default.json", 56U);
         }
         else
         {
@@ -3743,6 +6095,90 @@ bool EditorMapCannonSalvoScene::applySelectedProjectileGlowConfigToPanel(bool sh
         }
     }
     return true;
+}
+
+bool EditorMapCannonSalvoScene::syncSelectedProjectileRibbonTrailConfigFromPanel(void)
+{
+    if (this->selectedProjectileIndex < 0 ||
+        this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+    {
+        return false;
+    }
+
+    ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    item.ribbonTrailConfig = MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+    item.ribbonTrailConfigInitialized = true;
+    return true;
+}
+
+bool EditorMapCannonSalvoScene::applySelectedProjectileRibbonTrailConfigToPanel(bool showStatusMessage)
+{
+    if (this->selectedProjectileIndex < 0 ||
+        this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+    {
+        return false;
+    }
+
+    ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    if (!item.ribbonTrailConfigInitialized)
+    {
+        item.ribbonTrailConfig = MaritimeCannonSalvoSystem::getDefaultProjectileRibbonTrailConfig();
+        item.ribbonTrailConfigInitialized = true;
+        if (item.ribbonTrailVfxFolderPath.empty() &&
+            this->selectedTrailIndex >= 0 &&
+            this->selectedTrailIndex < static_cast<int>(this->trailOptions.size()))
+        {
+            item.ribbonTrailVfxFolderPath =
+                this->trailOptions[static_cast<std::size_t>(this->selectedTrailIndex)].folderPath;
+        }
+    }
+
+    MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(item.ribbonTrailConfig);
+
+    this->selectedTrailIndex = -1;
+    for (int i = 0; i < static_cast<int>(this->trailOptions.size()); ++i)
+    {
+        if (this->trailOptions[static_cast<std::size_t>(i)].folderPath == item.ribbonTrailVfxFolderPath)
+        {
+            this->selectedTrailIndex = i;
+            break;
+        }
+    }
+    if (this->selectedTrailIndex < 0 && !this->trailOptions.empty())
+    {
+        this->selectedTrailIndex = 0;
+        if (item.ribbonTrailVfxFolderPath.empty())
+        {
+            item.ribbonTrailVfxFolderPath =
+                this->trailOptions[static_cast<std::size_t>(this->selectedTrailIndex)].folderPath;
+        }
+    }
+
+    if (showStatusMessage)
+    {
+        this->statusMessage = item.ribbonTrailEnabled
+            ? "Ribbon trail actif sur le boulet selectionne."
+            : "Ribbon trail desactive pour ce boulet.";
+    }
+    this->refreshDebugPanelTrailPreview();
+    return true;
+}
+
+void EditorMapCannonSalvoScene::refreshDebugPanelTrailPreview(void)
+{
+    if (this->selectedProjectileIndex < 0 ||
+        this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+    {
+        this->illuminatedProjectileDebugPanel.setTrailPreviewSelection(nullptr, nullptr, false, false);
+        return;
+    }
+
+    const ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    this->illuminatedProjectileDebugPanel.setTrailPreviewSelection(
+        item.folderPath.empty() ? nullptr : item.folderPath.c_str(),
+        item.ribbonTrailVfxFolderPath.empty() ? nullptr : item.ribbonTrailVfxFolderPath.c_str(),
+        item.illuminatedEnabled,
+        item.ribbonTrailEnabled);
 }
 
 bool EditorMapCannonSalvoScene::exportSelectedProjectileGlowConfig(void)
@@ -3791,9 +6227,40 @@ void EditorMapCannonSalvoScene::toggleSelectedProjectileIlluminated(void)
 
     ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
     item.illuminatedEnabled = !item.illuminatedEnabled;
+    if (item.illuminatedEnabled)
+    {
+        // Re-applique immediatement la config glow du mode courant (LIVE/DEFAULT/JSON)
+        // pour que l'activation illuminee prenne effet sans cycle manuel de mode.
+        (void)this->applySelectedProjectileGlowConfigToPanel(false);
+    }
+    this->refreshDebugPanelTrailPreview();
     this->statusMessage = item.illuminatedEnabled
         ? "Mode illumine active pour ce boulet."
         : "Mode illumine desactive pour ce boulet.";
+    this->fireCurrentSalvo();
+    this->salvoTimerSec = 0.0f;
+}
+
+void EditorMapCannonSalvoScene::toggleSelectedProjectileRibbonTrail(void)
+{
+    if (this->selectedProjectileIndex < 0 ||
+        this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+    {
+        this->statusMessage = "Selectionne un boulet pour changer sa trainée ribbon.";
+        return;
+    }
+
+    ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    item.ribbonTrailEnabled = !item.ribbonTrailEnabled;
+    if (!item.ribbonTrailConfigInitialized)
+    {
+        item.ribbonTrailConfig = MaritimeCannonSalvoSystem::getDefaultProjectileRibbonTrailConfig();
+        item.ribbonTrailConfigInitialized = true;
+    }
+    this->refreshDebugPanelTrailPreview();
+    this->statusMessage = item.ribbonTrailEnabled
+        ? "Ribbon trail active pour ce boulet."
+        : "Ribbon trail desactive pour ce boulet.";
     this->fireCurrentSalvo();
     this->salvoTimerSec = 0.0f;
 }
@@ -3808,15 +6275,20 @@ void EditorMapCannonSalvoScene::cycleSelectedProjectileGlowMode(void)
     }
 
     ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+    if (item.projectileGlowMode == ProjectileGlowMode::LIVE)
+    {
+        // Capture la config live courante avant de changer de mode.
+        item.illuminatedGlowConfig = VFXClassic::getIlluminatedProjectileGlowConfig();
+        item.illuminatedGlowConfigInitialized = true;
+    }
     switch (item.projectileGlowMode)
     {
         case ProjectileGlowMode::LIVE:
             item.projectileGlowMode = ProjectileGlowMode::DEFAULT_JSON;
             break;
         case ProjectileGlowMode::DEFAULT_JSON:
-            item.projectileGlowMode = ProjectileGlowMode::JSON_FILE;
+            item.projectileGlowMode = ProjectileGlowMode::LIVE;
             break;
-        case ProjectileGlowMode::JSON_FILE:
         default:
             item.projectileGlowMode = ProjectileGlowMode::LIVE;
             break;
@@ -4061,25 +6533,16 @@ void EditorMapCannonSalvoScene::fireCurrentSalvo(void)
     entry.projectileVfxClassicFolder = projectileItem.folderPath.c_str();
     entry.illuminatedProjectile.enabled = projectileItem.illuminatedEnabled;
     entry.illuminatedProjectile.glowConfigJsonPath = nullptr;
-    if (projectileItem.projectileGlowMode == ProjectileGlowMode::DEFAULT_JSON)
-    {
-        entry.illuminatedProjectile.glowConfigJsonPath =
-            VFXClassic::getIlluminatedProjectileGlowConfigPath();
-    }
-    else if (projectileItem.projectileGlowMode == ProjectileGlowMode::JSON_FILE &&
-             !projectileItem.illuminatedGlowConfigPath.empty())
-    {
-        entry.illuminatedProjectile.glowConfigJsonPath =
-            projectileItem.illuminatedGlowConfigPath.c_str();
-    }
-    else if (projectileItem.projectileGlowMode == ProjectileGlowMode::JSON_FILE)
-    {
-        entry.illuminatedProjectile.enabled = false;
-    }
+    entry.ribbonTrail.enabled = projectileItem.ribbonTrailEnabled;
+    entry.ribbonTrail.trailConfigJsonPath = nullptr;
+    entry.ribbonTrail.vfxClassicFolderPath =
+        projectileItem.ribbonTrailVfxFolderPath.empty()
+            ? nullptr
+            : projectileItem.ribbonTrailVfxFolderPath.c_str();
     if (this->selectedStartVfxIndex >= 0 &&
         this->selectedStartVfxIndex < static_cast<int>(this->startVfxOptions.size()))
     {
-        entry.startActionVfxShipFolderForAttacker =
+        entry.startActionVfxShipFolderPathForAttacker =
             this->startVfxOptions[static_cast<std::size_t>(this->selectedStartVfxIndex)].folderPath.c_str();
     }
 
@@ -4090,10 +6553,10 @@ void EditorMapCannonSalvoScene::fireCurrentSalvo(void)
             continue;
         }
 
-        MaritimeCannonSalvoSystem::SalvoEntry::EndActionVfxShipFolderForTarget endAction{};
+        MaritimeCannonSalvoSystem::SalvoEntry::EndActionVfxShipFolderPathForTarget endAction{};
         endAction.vfxShipFolder = item.folderPath.c_str();
         endAction.delayAfterImpactMs = item.delayAfterImpactMs;
-        entry.endActionVfxShipFoldersForTarget.push_back(endAction);
+        entry.endActionVfxShipFoldersPathForTarget.push_back(endAction);
     }
 
     GetMaritimeCannonSalvoSystem().fireSalvo(
@@ -4233,21 +6696,17 @@ void EditorMapCannonSalvoScene::updateToolbarLayout(void)
         },
         row3Y);
 
-    const std::vector<float> row4Widths = scaledWidths({380.0f, 380.0f});
+    const std::vector<float> row4Widths = scaledWidths({252.0f, 252.0f, 252.0f});
     placeRow(
         {
             {&this->buttonProjectileIlluminatedRect, row4Widths[0]},
-            {&this->buttonProjectileGlowModeRect, row4Widths[1]},
+            {&this->buttonProjectileTrailRect, row4Widths[1]},
+            {&this->buttonProjectileGlowModeRect, row4Widths[2]},
         },
         row4Y);
 
-    const std::vector<float> row5Widths = scaledWidths({380.0f, 380.0f});
-    placeRow(
-        {
-            {&this->buttonProjectileGlowImportRect, row5Widths[0]},
-            {&this->buttonProjectileGlowExportRect, row5Widths[1]},
-        },
-        row5Y);
+    this->buttonProjectileGlowImportRect = SDL_FRect{};
+    this->buttonProjectileGlowExportRect = SDL_FRect{};
 
     const std::vector<float> row6Widths = scaledWidths({252.0f});
     placeRow(
@@ -4260,16 +6719,18 @@ void EditorMapCannonSalvoScene::updateToolbarLayout(void)
     const float listTopLimit = topUiLimit;
     const float listBottomLimit = map.rect.y + map.rect.h - 14.0f;
     const float listAvailableH = (std::max)(160.0f, listBottomLimit - listTopLimit);
-    const float panelH = (std::max)(84.0f, (listAvailableH - (kRightPanelGap * 3.0f)) / 4.0f);
+    const float panelH = (std::max)(72.0f, (listAvailableH - (kRightPanelGap * 4.0f)) / 5.0f);
     const float rightX = (std::min)(
         map.rect.x + map.rect.w - kRightPanelWidth - 14.0f,
         screenRect.x + screenRect.w - kRightPanelWidth - margin);
-    float panelY = listBottomLimit - ((panelH * 4.0f) + (kRightPanelGap * 3.0f));
+    float panelY = listBottomLimit - ((panelH * 5.0f) + (kRightPanelGap * 4.0f));
     panelY = (std::max)(panelY, listTopLimit);
 
     this->shipListRect = SDL_FRect{rightX, panelY, kRightPanelWidth, panelH};
     panelY += panelH + kRightPanelGap;
     this->projectileListRect = SDL_FRect{rightX, panelY, kRightPanelWidth, panelH};
+    panelY += panelH + kRightPanelGap;
+    this->trailListRect = SDL_FRect{rightX, panelY, kRightPanelWidth, panelH};
     panelY += panelH + kRightPanelGap;
     this->startVfxListRect = SDL_FRect{rightX, panelY, kRightPanelWidth, panelH};
     panelY += panelH + kRightPanelGap;
@@ -4283,6 +6744,7 @@ void EditorMapCannonSalvoScene::updateToolbarLayout(void)
             kListImportButtonHeight};
     };
     this->projectileImportButtonRect = placeImportButton(this->projectileListRect, this->projectileListRect.w - (kListPadding * 2.0f));
+    this->trailImportButtonRect = placeImportButton(this->trailListRect, this->trailListRect.w - (kListPadding * 2.0f));
     this->startVfxImportButtonRect = placeImportButton(this->startVfxListRect, this->startVfxListRect.w - (kListPadding * 2.0f));
     this->endVfxImportButtonRect = placeImportButton(this->endVfxListRect, this->endVfxListRect.w - (kListPadding * 2.0f));
 
@@ -4294,6 +6756,7 @@ void EditorMapCannonSalvoScene::updateToolbarLayout(void)
 
     this->clampListScrollOffset(&this->shipListScrollOffset, this->shipListRect, false, static_cast<int>(this->shipOptions.size()));
     this->clampListScrollOffset(&this->projectileListScrollOffset, this->projectileListRect, true, static_cast<int>(this->projectileOptions.size()));
+    this->clampListScrollOffset(&this->trailListScrollOffset, this->trailListRect, true, static_cast<int>(this->trailOptions.size()));
     this->clampListScrollOffset(&this->startVfxListScrollOffset, this->startVfxListRect, true, static_cast<int>(this->startVfxOptions.size()));
     this->clampListScrollOffset(&this->endVfxListScrollOffset, this->endVfxListRect, true, static_cast<int>(this->endVfxOptions.size()));
 }
@@ -4434,10 +6897,6 @@ void EditorMapCannonSalvoScene::drawListPanel(
             else if (item.projectileGlowMode == ProjectileGlowMode::DEFAULT_JSON)
             {
                 label = "[DEFAULT] " + label;
-            }
-            else if (item.projectileGlowMode == ProjectileGlowMode::JSON_FILE)
-            {
-                label = "[JSON] " + label;
             }
             else
             {
@@ -4778,19 +7237,14 @@ bool EditorMapCannonSalvoScene::handleToolbarClick(float x, float y)
         this->toggleSelectedProjectileIlluminated();
         return true;
     }
+    if (this->pointInRect(x, y, this->buttonProjectileTrailRect))
+    {
+        this->toggleSelectedProjectileRibbonTrail();
+        return true;
+    }
     if (this->pointInRect(x, y, this->buttonProjectileGlowModeRect))
     {
         this->cycleSelectedProjectileGlowMode();
-        return true;
-    }
-    if (this->pointInRect(x, y, this->buttonProjectileGlowImportRect))
-    {
-        this->openImportFolderDialog(ImportTarget::PROJECTILE_GLOW_JSON);
-        return true;
-    }
-    if (this->pointInRect(x, y, this->buttonProjectileGlowExportRect))
-    {
-        this->openImportFolderDialog(ImportTarget::PROJECTILE_GLOW_JSON_EXPORT);
         return true;
     }
     if (this->pointInRect(x, y, this->endDelayInputRect))
@@ -4818,6 +7272,11 @@ bool EditorMapCannonSalvoScene::handleAssetListClick(float x, float y)
     if (this->pointInRect(x, y, this->projectileImportButtonRect))
     {
         this->openImportFolderDialog(ImportTarget::PROJECTILE);
+        return true;
+    }
+    if (this->pointInRect(x, y, this->trailImportButtonRect))
+    {
+        this->openImportFolderDialog(ImportTarget::TRAIL);
         return true;
     }
     if (this->pointInRect(x, y, this->startVfxImportButtonRect))
@@ -4863,6 +7322,23 @@ bool EditorMapCannonSalvoScene::handleAssetListClick(float x, float y)
         if (clicked >= 0)
         {
             (void)this->selectProjectileAtIndex(clicked);
+        }
+        return true;
+    }
+    if (this->handleListPanelClick(
+            x,
+            y,
+            this->trailListRect,
+            true,
+            static_cast<int>(this->trailOptions.size()),
+            &this->trailListScrollOffset,
+            &this->trailListScrollDragActive,
+            &this->trailListScrollDragGrabOffsetY,
+            &clicked))
+    {
+        if (clicked >= 0)
+        {
+            (void)this->selectTrailAtIndex(clicked);
         }
         return true;
     }
@@ -4962,6 +7438,10 @@ bool EditorMapCannonSalvoScene::handleListMouseWheel(float mouseX, float mouseY,
         return true;
     }
     if (applyWheel(this->projectileListRect, true, static_cast<int>(this->projectileOptions.size()), &this->projectileListScrollOffset))
+    {
+        return true;
+    }
+    if (applyWheel(this->trailListRect, true, static_cast<int>(this->trailOptions.size()), &this->trailListScrollOffset))
     {
         return true;
     }
@@ -5238,6 +7718,82 @@ void EditorMapCannonSalvoScene::drawMiniMap(void) const
     rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
 }
 
+void EditorMapCannonSalvoScene::showBlockingPopup(const std::string& message)
+{
+    this->blockingPopupVisible = true;
+    this->blockingPopupMessage = message;
+}
+
+bool EditorMapCannonSalvoScene::handleBlockingPopupClick(float x, float y, RC2D_MouseButton button)
+{
+    if (!this->blockingPopupVisible || button != RC2D_MOUSE_BUTTON_LEFT)
+    {
+        return this->blockingPopupVisible;
+    }
+
+    const SDL_FRect screenRect = GetGameScreen().rect;
+    const float popupW = (std::min)(760.0f, screenRect.w - 40.0f);
+    const float popupH = (std::min)(270.0f, screenRect.h - 40.0f);
+    const SDL_FRect popupRect{
+        screenRect.x + ((screenRect.w - popupW) * 0.5f),
+        screenRect.y + ((screenRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+    const SDL_FRect okButtonRect{
+        popupRect.x + popupRect.w - 124.0f,
+        popupRect.y + popupRect.h - 52.0f,
+        104.0f,
+        32.0f};
+    if (this->pointInRect(x, y, okButtonRect))
+    {
+        this->blockingPopupVisible = false;
+        this->blockingPopupMessage.clear();
+    }
+    return true;
+}
+
+void EditorMapCannonSalvoScene::drawBlockingPopup(void) const
+{
+    if (!this->blockingPopupVisible || this->overlayFont.sdl_font == nullptr)
+    {
+        return;
+    }
+
+    const SDL_FRect screenRect = GetGameScreen().rect;
+    const float popupW = (std::min)(760.0f, screenRect.w - 40.0f);
+    const float popupH = (std::min)(270.0f, screenRect.h - 40.0f);
+    const SDL_FRect overlayRect{
+        screenRect.x,
+        screenRect.y,
+        screenRect.w,
+        screenRect.h};
+    const SDL_FRect popupRect{
+        screenRect.x + ((screenRect.w - popupW) * 0.5f),
+        screenRect.y + ((screenRect.h - popupH) * 0.5f),
+        popupW,
+        popupH};
+    const SDL_FRect okButtonRect{
+        popupRect.x + popupRect.w - 124.0f,
+        popupRect.y + popupRect.h - 52.0f,
+        104.0f,
+        32.0f};
+    const SDL_FRect messageRect{
+        popupRect.x + 16.0f,
+        popupRect.y + 56.0f,
+        popupRect.w - 32.0f,
+        popupRect.h - 118.0f};
+
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+    rc2d_graphics_setColor(RC2D_Color{0, 0, 0, 170});
+    rc2d_graphics_rectangle("fill", &overlayRect);
+    fillAndOutlineRect(popupRect, RC2D_Color{20, 28, 40, 248}, RC2D_Color{215, 177, 93, 255});
+    drawTextAt(const_cast<RC2D_Font*>(&this->overlayFont), "Import JSON impossible", popupRect.x + 16.0f, popupRect.y + 16.0f, RC2D_Color{245, 227, 174, 255});
+    drawWrappedText(const_cast<RC2D_Font*>(&this->overlayFont), this->blockingPopupMessage, messageRect, RC2D_Color{220, 227, 236, 255}, 2.0f);
+    fillAndOutlineRect(okButtonRect, RC2D_Color{82, 61, 28, 246}, RC2D_Color{232, 206, 138, 255});
+    drawCenteredText(const_cast<RC2D_Font*>(&this->overlayFont), "OK", okButtonRect, RC2D_Color{255, 247, 220, 255});
+    rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+}
+
 void EditorMapCannonSalvoScene::openImportFolderDialog(ImportTarget target)
 {
     {
@@ -5252,17 +7808,23 @@ void EditorMapCannonSalvoScene::openImportFolderDialog(ImportTarget target)
     options.window = rc2d_window_getWindow();
     const bool jsonFileMode =
         (target == ImportTarget::PROJECTILE_GLOW_JSON ||
-         target == ImportTarget::PROJECTILE_GLOW_JSON_EXPORT);
-    const bool jsonSaveMode = (target == ImportTarget::PROJECTILE_GLOW_JSON_EXPORT);
+         target == ImportTarget::PROJECTILE_GLOW_JSON_EXPORT ||
+         target == ImportTarget::TRAIL_JSON_IMPORT ||
+         target == ImportTarget::TRAIL_JSON_EXPORT);
+    const bool jsonSaveMode =
+        (target == ImportTarget::PROJECTILE_GLOW_JSON_EXPORT ||
+         target == ImportTarget::TRAIL_JSON_EXPORT);
     options.filters = jsonFileMode ? kJsonFileFilters.data() : kFolderFilters.data();
     options.num_filters = jsonFileMode ? static_cast<int>(kJsonFileFilters.size()) : static_cast<int>(kFolderFilters.size());
     std::string defaultJsonLocation{};
     if (jsonSaveMode)
     {
         std::error_code fsError;
-        defaultJsonLocation = std::filesystem::absolute(
-            std::filesystem::path(VFXClassic::getIlluminatedProjectileGlowConfigPath()),
-            fsError).string();
+        const std::filesystem::path defaultSavePath =
+            (target == ImportTarget::TRAIL_JSON_EXPORT)
+                ? std::filesystem::path("assets/data/ammo-trail-.json")
+                : std::filesystem::path("assets/data/ammo-illu-.json");
+        defaultJsonLocation = std::filesystem::absolute(defaultSavePath, fsError).string();
         if (fsError)
         {
             defaultJsonLocation.clear();
@@ -5273,9 +7835,13 @@ void EditorMapCannonSalvoScene::openImportFolderDialog(ImportTarget target)
         (!defaultJsonLocation.empty()) ? defaultJsonLocation.c_str() : nullptr;
     options.allow_many = false;
     options.title = jsonSaveMode
-        ? "Exporter la configuration glow projectile en JSON"
+        ? ((target == ImportTarget::TRAIL_JSON_EXPORT)
+               ? "Exporter la configuration trail projectile en JSON"
+               : "Exporter la configuration glow projectile en JSON")
         : (jsonFileMode
-            ? "Selectionner un JSON glow projectile dans assets/data"
+            ? ((target == ImportTarget::TRAIL_JSON_IMPORT)
+                   ? "Selectionner un JSON trail projectile dans assets/data"
+                   : "Selectionner un JSON glow projectile dans assets/data")
             : "Importer un dossier asset pour la salve");
     options.accept_label = jsonSaveMode ? "Enregistrer" : (jsonFileMode ? "Choisir" : "Importer");
     options.cancel_label = "Annuler";
@@ -5326,7 +7892,22 @@ void EditorMapCannonSalvoScene::processPendingFolderRequest(void)
 
     if (!this->appendImportedFolder(target, selectedFolder))
     {
-        this->statusMessage = "JSON glow/fichier invalide ou hors assets: " + selectedFolder;
+        if (target == ImportTarget::PROJECTILE_GLOW_JSON ||
+            target == ImportTarget::TRAIL_JSON_IMPORT)
+        {
+            const std::string popupText =
+                "Le fichier n'a pas pu etre charge.\n\n"
+                "Verifie que le JSON est dans le dossier assets runtime (a cote de l'executable), "
+                "et qu'il est valide pour ce type d'import.\n\n"
+                "Chemin selectionne:\n" + shortenMiddle(selectedFolder, 96U);
+            this->showBlockingPopup(popupText);
+            this->statusMessage =
+                "Import JSON refuse: hors assets runtime ou JSON invalide.";
+        }
+        else
+        {
+            this->statusMessage = "Fichier invalide ou hors assets: " + selectedFolder;
+        }
     }
 }
 
@@ -5361,13 +7942,64 @@ bool EditorMapCannonSalvoScene::appendImportedFolder(ImportTarget target, const 
         {
             ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
             item.illuminatedGlowConfigPath = normalizePathSlashes(relativeIfInsideAssets);
-            item.projectileGlowMode = ProjectileGlowMode::JSON_FILE;
-            MaritimeCannonSalvoSystem::invalidateIlluminatedProjectileGlowConfigFileCache(
-                item.illuminatedGlowConfigPath.c_str());
         }
 
         this->statusMessage =
             "Glow exporte: " + shortenMiddle(exportPath, 58U);
+        return true;
+    }
+    if (target == ImportTarget::TRAIL_JSON_EXPORT)
+    {
+        std::string exportPath = normalizePathSlashes(folderAbsolutePath);
+        if (std::filesystem::path(exportPath).extension().generic_string() != ".json")
+        {
+            exportPath += ".json";
+        }
+
+        const bool exported =
+            MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(exportPath.c_str());
+        if (!exported)
+        {
+            return false;
+        }
+
+        this->statusMessage =
+            "Trail exporte: " + shortenMiddle(exportPath, 58U);
+        return true;
+    }
+    if (target == ImportTarget::TRAIL_JSON_IMPORT)
+    {
+        if (this->selectedProjectileIndex < 0 ||
+            this->selectedProjectileIndex >= static_cast<int>(this->projectileOptions.size()))
+        {
+            return false;
+        }
+
+        const std::string relative = makeRelativeProjectPath(folderAbsolutePath);
+        if (relative.rfind("assets/", 0U) != 0U)
+        {
+            return false;
+        }
+        if (std::filesystem::path(relative).extension().generic_string() != ".json")
+        {
+            return false;
+        }
+
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig loadedConfig{};
+        const bool loaded = MaritimeCannonSalvoSystem::readProjectileRibbonTrailConfigFromFile(
+            relative.c_str(),
+            &loadedConfig);
+        if (!loaded)
+        {
+            return false;
+        }
+
+        MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(loadedConfig);
+        ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+        item.ribbonTrailConfig = loadedConfig;
+        item.ribbonTrailConfigInitialized = true;
+        item.ribbonTrailConfigPath = normalizePathSlashes(relative);
+        this->statusMessage = "JSON trail importe: " + shortenMiddle(relative, 58U);
         return true;
     }
 
@@ -5389,9 +8021,20 @@ bool EditorMapCannonSalvoScene::appendImportedFolder(ImportTarget target, const 
         }
 
         ListItem& item = this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+        VFXClassic::IlluminatedProjectileGlowConfig loadedConfig{};
+        const bool loaded = VFXClassic::readIlluminatedProjectileGlowConfigFromFile(
+            relative.c_str(),
+            &loadedConfig);
+        if (!loaded)
+        {
+            return false;
+        }
+
         item.illuminatedGlowConfigPath = normalizePathSlashes(relative);
-        item.projectileGlowMode = ProjectileGlowMode::JSON_FILE;
-        (void)this->applySelectedProjectileGlowConfigToPanel(false);
+        item.projectileGlowMode = ProjectileGlowMode::LIVE;
+        item.illuminatedGlowConfig = loadedConfig;
+        item.illuminatedGlowConfigInitialized = true;
+        VFXClassic::setIlluminatedProjectileGlowConfig(loadedConfig);
         if (this->attackerShip.areSpritesLoaded() && this->targetShip.areSpritesLoaded())
         {
             GetMaritimeCannonSalvoSystem().clear();
@@ -5399,7 +8042,7 @@ bool EditorMapCannonSalvoScene::appendImportedFolder(ImportTarget target, const 
             this->fireCurrentSalvo();
             this->salvoTimerSec = 0.0f;
         }
-        this->statusMessage = "JSON glow choisi: " + shortenMiddle(relative, 58U);
+        this->statusMessage = "JSON glow importe (mode live): " + shortenMiddle(relative, 58U);
         return true;
     }
 
@@ -5416,6 +8059,15 @@ bool EditorMapCannonSalvoScene::appendImportedFolder(ImportTarget target, const 
             pushUniqueFolder(&this->projectileOptions, relative);
             (void)this->selectProjectileAtIndex(static_cast<int>(this->projectileOptions.size()) - 1);
             this->statusMessage = "Spritesheet boulet importee: " + relative;
+            return true;
+        case ImportTarget::TRAIL:
+            if (!isLikelyVfxClassicFolder(fsPath))
+            {
+                return false;
+            }
+            pushUniqueFolder(&this->trailOptions, relative);
+            (void)this->selectTrailAtIndex(static_cast<int>(this->trailOptions.size()) - 1);
+            this->statusMessage = "Spritesheet trail importee: " + relative;
             return true;
         case ImportTarget::START_VFX:
             if (startsWith(folderName, "vfx-ammo-") || !isLikelyVfxShipFolder(fsPath))
@@ -5480,14 +8132,18 @@ void EditorMapCannonSalvoScene::drawHud(void) const
             : "BOULET ILLUMINE INACTIF",
         selectedProjectile != nullptr && selectedProjectile->illuminatedEnabled);
     this->drawToolbarButton(
+        this->buttonProjectileTrailRect,
+        (selectedProjectile != nullptr && selectedProjectile->ribbonTrailEnabled)
+            ? "RIBBON TRAIL ACTIVE"
+            : "RIBBON TRAIL INACTIF",
+        selectedProjectile != nullptr && selectedProjectile->ribbonTrailEnabled);
+    this->drawToolbarButton(
         this->buttonProjectileGlowModeRect,
         (selectedProjectile != nullptr)
             ? projectileGlowModeLabel(selectedProjectile->projectileGlowMode)
             : "MODE GLOW LIVE",
         selectedProjectile != nullptr &&
             selectedProjectile->projectileGlowMode != ProjectileGlowMode::LIVE);
-    this->drawToolbarButton(this->buttonProjectileGlowImportRect, "CHOISIR FICHIER JSON GLOW", false);
-    this->drawToolbarButton(this->buttonProjectileGlowExportRect, "EXPORTER FICHIER JSON GLOW", false);
     this->drawDelayInput();
 
     if (this->showLists)
@@ -5515,8 +8171,19 @@ void EditorMapCannonSalvoScene::drawHud(void) const
             &this->projectileImportButtonRect,
             "IMPORTER SPRITESHEET BOULETS");
         this->drawListPanel(
+            this->trailListRect,
+            "Trail VFX assets/images/vfxclassic",
+            this->trailOptions,
+            this->selectedTrailIndex,
+            this->trailListScrollOffset,
+            this->trailListScrollDragActive,
+            false,
+            false,
+            &this->trailImportButtonRect,
+            "IMPORTER SPRITESHEET TRAIL");
+        this->drawListPanel(
             this->startVfxListRect,
-            "startActionVfxShipFolderForAttacker",
+            "startActionVfxShipFolderPathForAttacker",
             this->startVfxOptions,
             this->selectedStartVfxIndex,
             this->startVfxListScrollOffset,
@@ -5527,7 +8194,7 @@ void EditorMapCannonSalvoScene::drawHud(void) const
             "IMPORTER VFX DEPART");
         this->drawListPanel(
             this->endVfxListRect,
-            "endActionVfxShipFoldersForTarget",
+            "endActionVfxShipFoldersPathForTarget",
             this->endVfxOptions,
             -1,
             this->endVfxListScrollOffset,
@@ -5556,14 +8223,19 @@ void EditorMapCannonSalvoScene::drawHud(void) const
             : (selectedProjectile != nullptr && !selectedProjectile->illuminatedGlowConfigPath.empty())
             ? shortenMiddle(selectedProjectile->illuminatedGlowConfigPath, 48U)
             : std::string("aucun json glow");
+    const std::string trailPathShort =
+        (selectedProjectile != nullptr && !selectedProjectile->ribbonTrailVfxFolderPath.empty())
+            ? shortenMiddle(selectedProjectile->ribbonTrailVfxFolderPath, 44U)
+            : std::string("aucun trail vfx");
     SDL_snprintf(
         info,
         sizeof(info),
-        "F7 editeur salves | gauche=attaquant, droite=cible | salve %d boulet(s) | cadence %.2fs | ocean %s | glow %s | %s",
+        "F7 editeur salves | gauche=attaquant, droite=cible | salve %d boulet(s) | cadence %.2fs | ocean %s | glow %s | trail %s | %s",
         this->selectedSalvoBallCount,
         this->salvoIntervalSec,
         oceanLabel,
         projectileGlowPathShort.c_str(),
+        trailPathShort.c_str(),
         statusShort.c_str());
     const SDL_FRect screenRect = GetGameScreen().rect;
     const float textX = screenRect.x + 10.0f;
@@ -5674,6 +8346,13 @@ void EditorMapCannonSalvoScene::update(double dt)
             &this->projectileListScrollDragActive,
             &this->projectileListScrollDragGrabOffsetY);
         this->handleListPanelScrollDragFromMouse(
+            this->trailListRect,
+            true,
+            static_cast<int>(this->trailOptions.size()),
+            &this->trailListScrollOffset,
+            &this->trailListScrollDragActive,
+            &this->trailListScrollDragGrabOffsetY);
+        this->handleListPanelScrollDragFromMouse(
             this->startVfxListRect,
             true,
             static_cast<int>(this->startVfxOptions.size()),
@@ -5692,6 +8371,7 @@ void EditorMapCannonSalvoScene::update(double dt)
     {
         this->shipListScrollDragActive = false;
         this->projectileListScrollDragActive = false;
+        this->trailListScrollDragActive = false;
         this->startVfxListScrollDragActive = false;
         this->endVfxListScrollDragActive = false;
     }
@@ -5710,6 +8390,56 @@ void EditorMapCannonSalvoScene::update(double dt)
     }
 
     this->illuminatedProjectileDebugPanel.update(dt);
+    if (this->selectedProjectileIndex >= 0 &&
+        this->selectedProjectileIndex < static_cast<int>(this->projectileOptions.size()))
+    {
+        ListItem& selectedProjectile =
+            this->projectileOptions[static_cast<std::size_t>(this->selectedProjectileIndex)];
+        if (gEditorGlowLiveClearSourceRequested &&
+            selectedProjectile.projectileGlowMode == ProjectileGlowMode::LIVE)
+        {
+            selectedProjectile.illuminatedGlowConfigPath.clear();
+            gEditorGlowLiveClearSourceRequested = false;
+        }
+        if (gEditorTrailClearSourceRequested)
+        {
+            selectedProjectile.ribbonTrailConfigPath.clear();
+            gEditorTrailClearSourceRequested = false;
+        }
+        gEditorGlowModeDefault =
+            (selectedProjectile.projectileGlowMode == ProjectileGlowMode::DEFAULT_JSON);
+        gEditorGlowLiveSourcePath =
+            (!gEditorGlowModeDefault && !selectedProjectile.illuminatedGlowConfigPath.empty())
+                ? selectedProjectile.illuminatedGlowConfigPath
+                : std::string{};
+        gEditorTrailSourcePath = !selectedProjectile.ribbonTrailConfigPath.empty()
+            ? selectedProjectile.ribbonTrailConfigPath
+            : std::string{};
+    }
+    else
+    {
+        gEditorGlowModeDefault = false;
+        gEditorGlowLiveSourcePath.clear();
+        gEditorTrailSourcePath.clear();
+    }
+    const IlluminatedProjectileDebugPanel::DialogRequest panelDialogRequest =
+        this->illuminatedProjectileDebugPanel.consumeDialogRequest();
+    if (panelDialogRequest == IlluminatedProjectileDebugPanel::DialogRequest::GLOW_IMPORT_JSON)
+    {
+        this->openImportFolderDialog(ImportTarget::PROJECTILE_GLOW_JSON);
+    }
+    else if (panelDialogRequest == IlluminatedProjectileDebugPanel::DialogRequest::GLOW_EXPORT_JSON)
+    {
+        this->openImportFolderDialog(ImportTarget::PROJECTILE_GLOW_JSON_EXPORT);
+    }
+    else if (panelDialogRequest == IlluminatedProjectileDebugPanel::DialogRequest::TRAIL_IMPORT_JSON)
+    {
+        this->openImportFolderDialog(ImportTarget::TRAIL_JSON_IMPORT);
+    }
+    else if (panelDialogRequest == IlluminatedProjectileDebugPanel::DialogRequest::TRAIL_EXPORT_JSON)
+    {
+        this->openImportFolderDialog(ImportTarget::TRAIL_JSON_EXPORT);
+    }
     (void)this->syncSelectedProjectileGlowConfigFromPanel();
     camera.update(map, map.rect);
     this->syncEditorTextInputState();
@@ -5739,6 +8469,7 @@ void EditorMapCannonSalvoScene::draw(void)
     this->drawMiniMap();
     this->drawHud();
     this->illuminatedProjectileDebugPanel.draw();
+    this->drawBlockingPopup();
 }
 
 void EditorMapCannonSalvoScene::textinput(const RC2D_TextInputEventInfo* info)
@@ -5781,6 +8512,16 @@ void EditorMapCannonSalvoScene::keypressed(
     (void)mod;
     (void)keyboardID;
 
+    if (this->blockingPopupVisible)
+    {
+        if (!isrepeat && (scancode == SDL_SCANCODE_ESCAPE || scancode == SDL_SCANCODE_RETURN))
+        {
+            this->blockingPopupVisible = false;
+            this->blockingPopupMessage.clear();
+        }
+        return;
+    }
+
     if (this->handleEndDelayInputKey(key, scancode, keycode, isrepeat))
     {
         return;
@@ -5813,6 +8554,10 @@ void EditorMapCannonSalvoScene::mousepressed(float x, float y, RC2D_MouseButton 
     (void)clicks;
     (void)mouseID;
 
+    if (this->handleBlockingPopupClick(x, y, button))
+    {
+        return;
+    }
     if (this->illuminatedProjectileDebugPanel.mousepressed(x, y, button))
     {
         return;
@@ -5858,6 +8603,11 @@ void EditorMapCannonSalvoScene::mousewheelmoved(
     (void)y;
     (void)integer_x;
     (void)mouseID;
+
+    if (this->blockingPopupVisible)
+    {
+        return;
+    }
 
     if (this->illuminatedProjectileDebugPanel.mousewheelmoved(
             direction,

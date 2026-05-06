@@ -248,6 +248,10 @@ std::string normalizePathSlashesSalvo(const std::string& path)
     return normalized;
 }
 
+bool readProjectileRibbonTrailConfigFromFile(
+    const char* path,
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig* outConfig);
+
 bool tryResolveSalvoIlluminatedGlowConfig(
     const MaritimeCannonSalvoSystem::SalvoEntry::IlluminatedProjectileSettings& settings,
     VFXClassic::IlluminatedProjectileGlowConfig* outConfig)
@@ -283,6 +287,29 @@ bool tryResolveSalvoIlluminatedGlowConfig(
     {
         *outConfig = cacheEntry.config;
     }
+    return true;
+}
+
+bool tryResolveSalvoRibbonTrailConfig(
+    const MaritimeCannonSalvoSystem::SalvoEntry::RibbonTrailSettings& settings,
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig* outConfig)
+{
+    if (!settings.enabled || outConfig == nullptr)
+    {
+        return false;
+    }
+
+    if (settings.trailConfigJsonPath != nullptr && settings.trailConfigJsonPath[0] != '\0')
+    {
+        MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig loadedConfig{};
+        if (readProjectileRibbonTrailConfigFromFile(settings.trailConfigJsonPath, &loadedConfig))
+        {
+            *outConfig = loadedConfig;
+            return true;
+        }
+    }
+
+    *outConfig = MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
     return true;
 }
 
@@ -578,6 +605,14 @@ std::array<std::array<ProjectileTrajectoryTuning, MaritimeCannonSalvoSystem::kPr
            MaritimeCannonSalvoSystem::kProjectileTrajectoryDistanceBandCount>
     gProjectileTrajectoryTunings = buildDefaultProjectileTrajectoryTunings();
 
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig buildDefaultProjectileRibbonTrailConfig(void)
+{
+    return MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig{};
+}
+
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig gProjectileRibbonTrailConfig =
+    buildDefaultProjectileRibbonTrailConfig();
+
 bool readTextFileFromTitleStorage(const char* path, std::string* outText)
 {
     if (path == nullptr || path[0] == '\0' || outText == nullptr)
@@ -620,6 +655,244 @@ int readJsonInt(const cJSON* object, const char* key, int fallback)
         return fallback;
     }
     return static_cast<int>(std::lround(node->valuedouble));
+}
+
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig clampProjectileRibbonTrailConfig(
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config)
+{
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig clamped = config;
+    clamped.sampleStepTiles =
+        (std::clamp)((std::isfinite(clamped.sampleStepTiles) ? clamped.sampleStepTiles : 0.22f), 0.02f, 2.0f);
+    clamped.maxLengthTiles =
+        (std::clamp)((std::isfinite(clamped.maxLengthTiles) ? clamped.maxLengthTiles : 6.5f), 0.15f, 32.0f);
+    clamped.headWidthPixels =
+        (std::clamp)((std::isfinite(clamped.headWidthPixels) ? clamped.headWidthPixels : 24.0f), 1.0f, 256.0f);
+    clamped.tailWidthPixels =
+        (std::clamp)((std::isfinite(clamped.tailWidthPixels) ? clamped.tailWidthPixels : 6.0f), 0.0f, 256.0f);
+    clamped.widthExponent =
+        (std::clamp)((std::isfinite(clamped.widthExponent) ? clamped.widthExponent : 0.95f), 0.2f, 4.0f);
+    clamped.headOpacity =
+        (std::clamp)((std::isfinite(clamped.headOpacity) ? clamped.headOpacity : 0.42f), 0.0f, 1.0f);
+    clamped.tailOpacity =
+        (std::clamp)((std::isfinite(clamped.tailOpacity) ? clamped.tailOpacity : 0.18f), 0.0f, 1.0f);
+    clamped.opacityExponent =
+        (std::clamp)((std::isfinite(clamped.opacityExponent) ? clamped.opacityExponent : 1.0f), 0.2f, 4.0f);
+
+    auto clampColor = [](float value, float fallback) {
+        return static_cast<float>((std::clamp)(
+            (std::isfinite(value) ? value : fallback),
+            0.0f,
+            255.0f));
+    };
+    clamped.headColorR = clampColor(clamped.headColorR, 118.0f);
+    clamped.headColorG = clampColor(clamped.headColorG, 96.0f);
+    clamped.headColorB = clampColor(clamped.headColorB, 82.0f);
+    clamped.tailColorR = clampColor(clamped.tailColorR, 228.0f);
+    clamped.tailColorG = clampColor(clamped.tailColorG, 214.0f);
+    clamped.tailColorB = clampColor(clamped.tailColorB, 180.0f);
+    clamped.hideNearTargetTiles =
+        (std::clamp)((std::isfinite(clamped.hideNearTargetTiles) ? clamped.hideNearTargetTiles : 0.0f), 0.0f, 32.0f);
+    clamped.headCoverTiles =
+        (std::clamp)((std::isfinite(clamped.headCoverTiles) ? clamped.headCoverTiles : 0.0f), 0.0f, 4.0f);
+    clamped.stampSpacingTiles =
+        (std::clamp)((std::isfinite(clamped.stampSpacingTiles) ? clamped.stampSpacingTiles : 0.68f), 0.05f, 4.0f);
+    clamped.stampPhaseOffsetSeconds =
+        (std::clamp)(
+            (std::isfinite(clamped.stampPhaseOffsetSeconds) ? clamped.stampPhaseOffsetSeconds : 0.0f),
+            0.0f,
+            2.0f);
+    clamped.stampScale =
+        (std::clamp)((std::isfinite(clamped.stampScale) ? clamped.stampScale : 0.72f), 0.05f, 6.0f);
+    clamped.stampHeadOpacity =
+        (std::clamp)((std::isfinite(clamped.stampHeadOpacity) ? clamped.stampHeadOpacity : 0.52f), 0.0f, 1.0f);
+    clamped.stampTailOpacity =
+        (std::clamp)((std::isfinite(clamped.stampTailOpacity) ? clamped.stampTailOpacity : 0.16f), 0.0f, 1.0f);
+    clamped.stampTintStrength =
+        (std::clamp)((std::isfinite(clamped.stampTintStrength) ? clamped.stampTintStrength : 0.72f), 0.0f, 1.0f);
+    if (clamped.customStamps.size() > 64U)
+    {
+        clamped.customStamps.resize(64U);
+    }
+    for (auto& stamp : clamped.customStamps)
+    {
+        stamp.distanceFromHeadTiles =
+            (std::clamp)((std::isfinite(stamp.distanceFromHeadTiles) ? stamp.distanceFromHeadTiles : 0.0f), -4.0f, 32.0f);
+        stamp.lateralOffsetPixels =
+            (std::clamp)((std::isfinite(stamp.lateralOffsetPixels) ? stamp.lateralOffsetPixels : 0.0f), -256.0f, 256.0f);
+        stamp.scale =
+            (std::clamp)((std::isfinite(stamp.scale) ? stamp.scale : 1.0f), 0.05f, 6.0f);
+        stamp.opacity =
+            (std::clamp)((std::isfinite(stamp.opacity) ? stamp.opacity : 1.0f), 0.0f, 1.0f);
+        stamp.rotationOffsetDeg =
+            (std::clamp)((std::isfinite(stamp.rotationOffsetDeg) ? stamp.rotationOffsetDeg : 0.0f), -180.0f, 180.0f);
+    }
+    return clamped;
+}
+
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig readProjectileRibbonTrailConfigJson(
+    const cJSON* object,
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& fallback)
+{
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig config = fallback;
+    config.sampleStepTiles = readJsonFloat(object, "sampleStepTiles", config.sampleStepTiles);
+    config.maxLengthTiles = readJsonFloat(object, "maxLengthTiles", config.maxLengthTiles);
+    config.headWidthPixels = readJsonFloat(object, "headWidthPixels", config.headWidthPixels);
+    config.tailWidthPixels = readJsonFloat(object, "tailWidthPixels", config.tailWidthPixels);
+    config.widthExponent = readJsonFloat(object, "widthExponent", config.widthExponent);
+    config.headOpacity = readJsonFloat(object, "headOpacity", config.headOpacity);
+    config.tailOpacity = readJsonFloat(object, "tailOpacity", config.tailOpacity);
+    config.opacityExponent = readJsonFloat(object, "opacityExponent", config.opacityExponent);
+    config.headColorR = readJsonFloat(object, "headColorR", config.headColorR);
+    config.headColorG = readJsonFloat(object, "headColorG", config.headColorG);
+    config.headColorB = readJsonFloat(object, "headColorB", config.headColorB);
+    config.tailColorR = readJsonFloat(object, "tailColorR", config.tailColorR);
+    config.tailColorG = readJsonFloat(object, "tailColorG", config.tailColorG);
+    config.tailColorB = readJsonFloat(object, "tailColorB", config.tailColorB);
+    config.hideNearTargetTiles = readJsonFloat(object, "hideNearTargetTiles", config.hideNearTargetTiles);
+    config.headCoverTiles = readJsonFloat(object, "headCoverTiles", config.headCoverTiles);
+    config.stampSpacingTiles = readJsonFloat(object, "stampSpacingTiles", config.stampSpacingTiles);
+    config.stampPhaseOffsetSeconds = readJsonFloat(object, "stampPhaseOffsetSeconds", config.stampPhaseOffsetSeconds);
+    config.stampScale = readJsonFloat(object, "stampScale", config.stampScale);
+    config.stampHeadOpacity = readJsonFloat(object, "stampHeadOpacity", config.stampHeadOpacity);
+    config.stampTailOpacity = readJsonFloat(object, "stampTailOpacity", config.stampTailOpacity);
+    config.stampTintStrength = readJsonFloat(object, "stampTintStrength", config.stampTintStrength);
+
+    const cJSON* meshEnabledNode = cJSON_IsObject(object) ? cJSON_GetObjectItemCaseSensitive(object, "meshEnabled") : nullptr;
+    if (cJSON_IsBool(meshEnabledNode))
+    {
+        config.meshEnabled = cJSON_IsTrue(meshEnabledNode);
+    }
+    const cJSON* stampsEnabledNode = cJSON_IsObject(object) ? cJSON_GetObjectItemCaseSensitive(object, "stampsEnabled") : nullptr;
+    if (cJSON_IsBool(stampsEnabledNode))
+    {
+        config.stampsEnabled = cJSON_IsTrue(stampsEnabledNode);
+    }
+    const cJSON* manualNode = cJSON_IsObject(object) ? cJSON_GetObjectItemCaseSensitive(object, "manualStampsEnabled") : nullptr;
+    if (cJSON_IsBool(manualNode))
+    {
+        config.manualStampsEnabled = cJSON_IsTrue(manualNode);
+    }
+    const cJSON* additiveNode = cJSON_IsObject(object) ? cJSON_GetObjectItemCaseSensitive(object, "additiveStampBlend") : nullptr;
+    if (cJSON_IsBool(additiveNode))
+    {
+        config.additiveStampBlend = cJSON_IsTrue(additiveNode);
+    }
+    const cJSON* customStampsNode = cJSON_IsObject(object) ? cJSON_GetObjectItemCaseSensitive(object, "customStamps") : nullptr;
+    if (cJSON_IsArray(customStampsNode))
+    {
+        config.customStamps.clear();
+        const int customCount = cJSON_GetArraySize(customStampsNode);
+        for (int i = 0; i < customCount; ++i)
+        {
+            const cJSON* stampNode = cJSON_GetArrayItem(customStampsNode, i);
+            if (!cJSON_IsObject(stampNode))
+            {
+                continue;
+            }
+            MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig::CustomStampPlacement stamp{};
+            stamp.distanceFromHeadTiles =
+                readJsonFloat(stampNode, "distanceFromHeadTiles", stamp.distanceFromHeadTiles);
+            stamp.lateralOffsetPixels =
+                readJsonFloat(stampNode, "lateralOffsetPixels", stamp.lateralOffsetPixels);
+            stamp.scale = readJsonFloat(stampNode, "scale", stamp.scale);
+            stamp.opacity = readJsonFloat(stampNode, "opacity", stamp.opacity);
+            stamp.rotationOffsetDeg =
+                readJsonFloat(stampNode, "rotationOffsetDeg", stamp.rotationOffsetDeg);
+            config.customStamps.push_back(stamp);
+        }
+    }
+    return clampProjectileRibbonTrailConfig(config);
+}
+
+void addProjectileRibbonTrailConfigJson(
+    cJSON* object,
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config)
+{
+    if (object == nullptr)
+    {
+        return;
+    }
+
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig clamped =
+        clampProjectileRibbonTrailConfig(config);
+    cJSON_AddNumberToObject(object, "sampleStepTiles", clamped.sampleStepTiles);
+    cJSON_AddNumberToObject(object, "maxLengthTiles", clamped.maxLengthTiles);
+    cJSON_AddNumberToObject(object, "headWidthPixels", clamped.headWidthPixels);
+    cJSON_AddNumberToObject(object, "tailWidthPixels", clamped.tailWidthPixels);
+    cJSON_AddNumberToObject(object, "widthExponent", clamped.widthExponent);
+    cJSON_AddNumberToObject(object, "headOpacity", clamped.headOpacity);
+    cJSON_AddNumberToObject(object, "tailOpacity", clamped.tailOpacity);
+    cJSON_AddNumberToObject(object, "opacityExponent", clamped.opacityExponent);
+    cJSON_AddNumberToObject(object, "headColorR", clamped.headColorR);
+    cJSON_AddNumberToObject(object, "headColorG", clamped.headColorG);
+    cJSON_AddNumberToObject(object, "headColorB", clamped.headColorB);
+    cJSON_AddNumberToObject(object, "tailColorR", clamped.tailColorR);
+    cJSON_AddNumberToObject(object, "tailColorG", clamped.tailColorG);
+    cJSON_AddNumberToObject(object, "tailColorB", clamped.tailColorB);
+    cJSON_AddNumberToObject(object, "hideNearTargetTiles", clamped.hideNearTargetTiles);
+    cJSON_AddNumberToObject(object, "headCoverTiles", clamped.headCoverTiles);
+    cJSON_AddNumberToObject(object, "stampSpacingTiles", clamped.stampSpacingTiles);
+    cJSON_AddNumberToObject(object, "stampPhaseOffsetSeconds", clamped.stampPhaseOffsetSeconds);
+    cJSON_AddNumberToObject(object, "stampScale", clamped.stampScale);
+    cJSON_AddNumberToObject(object, "stampHeadOpacity", clamped.stampHeadOpacity);
+    cJSON_AddNumberToObject(object, "stampTailOpacity", clamped.stampTailOpacity);
+    cJSON_AddNumberToObject(object, "stampTintStrength", clamped.stampTintStrength);
+    cJSON_AddBoolToObject(object, "meshEnabled", clamped.meshEnabled);
+    cJSON_AddBoolToObject(object, "stampsEnabled", clamped.stampsEnabled);
+    cJSON_AddBoolToObject(object, "manualStampsEnabled", clamped.manualStampsEnabled);
+    cJSON_AddBoolToObject(object, "additiveStampBlend", clamped.additiveStampBlend);
+    cJSON* customStampsArray = cJSON_AddArrayToObject(object, "customStamps");
+    if (customStampsArray != nullptr)
+    {
+        for (const auto& stamp : clamped.customStamps)
+        {
+            cJSON* stampObject = cJSON_CreateObject();
+            if (stampObject == nullptr)
+            {
+                continue;
+            }
+            cJSON_AddNumberToObject(stampObject, "distanceFromHeadTiles", stamp.distanceFromHeadTiles);
+            cJSON_AddNumberToObject(stampObject, "lateralOffsetPixels", stamp.lateralOffsetPixels);
+            cJSON_AddNumberToObject(stampObject, "scale", stamp.scale);
+            cJSON_AddNumberToObject(stampObject, "opacity", stamp.opacity);
+            cJSON_AddNumberToObject(stampObject, "rotationOffsetDeg", stamp.rotationOffsetDeg);
+            cJSON_AddItemToArray(customStampsArray, stampObject);
+        }
+    }
+}
+
+bool readProjectileRibbonTrailConfigFromFile(
+    const char* path,
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig* outConfig)
+{
+    if (path == nullptr || path[0] == '\0' || outConfig == nullptr)
+    {
+        return false;
+    }
+
+    std::string jsonText;
+    if (!readTextFileFromTitleStorage(path, &jsonText))
+    {
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(jsonText.c_str());
+    if (root == nullptr)
+    {
+        return false;
+    }
+
+    const cJSON* source =
+        cJSON_GetObjectItemCaseSensitive(root, "projectileRibbonTrail");
+    if (!cJSON_IsObject(source))
+    {
+        source = root;
+    }
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig fallback =
+        MaritimeCannonSalvoSystem::getDefaultProjectileRibbonTrailConfig();
+    *outConfig = readProjectileRibbonTrailConfigJson(source, fallback);
+    cJSON_Delete(root);
+    return true;
 }
 
 ProjectileTrajectoryTuning readProjectileTrajectoryTuningJson(
@@ -678,6 +951,7 @@ MaritimeCannonSalvoSystem::MaritimeCannonSalvoSystem(void)
       pendingTargetImpactBursts{},
       salvoEntries{},
       salvoProjectileVfx{},
+      salvoRibbonTrailStampVfx{},
       rng(std::random_device{}())
 {
 }
@@ -781,23 +1055,46 @@ bool MaritimeCannonSalvoSystem::loadProjectileTrajectoryTuningsFromFile(void)
         ++bandArrayIndex;
     }
 
-    cJSON_Delete(root);
+    const cJSON* ribbonTrailNode = cJSON_GetObjectItemCaseSensitive(root, "projectileRibbonTrail");
     gProjectileTrajectoryTunings = parsedTunings;
+    if (cJSON_IsObject(ribbonTrailNode))
+    {
+        gProjectileRibbonTrailConfig = readProjectileRibbonTrailConfigJson(
+            ribbonTrailNode,
+            buildDefaultProjectileRibbonTrailConfig());
+    }
+    else
+    {
+        gProjectileRibbonTrailConfig = buildDefaultProjectileRibbonTrailConfig();
+    }
+    cJSON_Delete(root);
     gProjectileTrajectoryConfigLoaded = true;
     return true;
 }
 
 bool MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(void)
 {
+    return MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(
+        kProjectileTrajectoryConfigPath);
+}
+
+bool MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(const char* path)
+{
+    if (path == nullptr || path[0] == '\0')
+    {
+        return false;
+    }
+
     cJSON* root = cJSON_CreateObject();
     if (root == nullptr)
     {
         return false;
     }
 
-    cJSON_AddStringToObject(root, "schema", "seatyrants.maritimeProjectileTrajectory.v1");
+    cJSON_AddStringToObject(root, "schema", "seatyrants.maritimeProjectileTrajectory.v2");
     cJSON_AddStringToObject(root, "angleConvention", "0deg=left,90deg=up,sectors=0-69,70-110,111-180,181-250,251-290,291-0");
     cJSON_AddStringToObject(root, "distanceConvention", "0:0-10,1:10-20,2:20-40,3:40+ tiles");
+    cJSON_AddStringToObject(root, "ribbonTrailConvention", "world length in tiles, widths in screen pixels at zoom 1.0");
 
     cJSON* bandsArray = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "distanceBands", bandsArray);
@@ -868,6 +1165,10 @@ bool MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(void)
         cJSON_AddItemToArray(bandsArray, bandObject);
     }
 
+    cJSON* ribbonTrailObject = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "projectileRibbonTrail", ribbonTrailObject);
+    addProjectileRibbonTrailConfigJson(ribbonTrailObject, gProjectileRibbonTrailConfig);
+
     char* jsonText = cJSON_Print(root);
     cJSON_Delete(root);
     if (jsonText == nullptr)
@@ -875,7 +1176,7 @@ bool MaritimeCannonSalvoSystem::exportProjectileTrajectoryTuningsToFile(void)
         return false;
     }
 
-    const std::filesystem::path configPath(kProjectileTrajectoryConfigPath);
+    const std::filesystem::path configPath(path);
     const std::filesystem::path parentPath = configPath.parent_path();
     std::error_code fsError;
     if (!parentPath.empty())
@@ -910,6 +1211,36 @@ const char* MaritimeCannonSalvoSystem::getProjectileTrajectoryConfigPath(void)
 void MaritimeCannonSalvoSystem::resetProjectileTrajectoryTunings(void)
 {
     gProjectileTrajectoryTunings = buildDefaultProjectileTrajectoryTunings();
+}
+
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig
+MaritimeCannonSalvoSystem::getDefaultProjectileRibbonTrailConfig(void)
+{
+    return buildDefaultProjectileRibbonTrailConfig();
+}
+
+MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig
+MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig(void)
+{
+    return gProjectileRibbonTrailConfig;
+}
+
+bool MaritimeCannonSalvoSystem::readProjectileRibbonTrailConfigFromFile(
+    const char* path,
+    MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig* outConfig)
+{
+    return ::readProjectileRibbonTrailConfigFromFile(path, outConfig);
+}
+
+void MaritimeCannonSalvoSystem::setProjectileRibbonTrailConfig(
+    const MaritimeCannonSalvoSystem::ProjectileRibbonTrailConfig& config)
+{
+    gProjectileRibbonTrailConfig = clampProjectileRibbonTrailConfig(config);
+}
+
+void MaritimeCannonSalvoSystem::resetProjectileRibbonTrailConfig(void)
+{
+    gProjectileRibbonTrailConfig = buildDefaultProjectileRibbonTrailConfig();
 }
 
 void MaritimeCannonSalvoSystem::invalidateProjectileTrajectoryConfigFileLoadState(void)
@@ -998,15 +1329,23 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
     std::vector<GameplayVfxShipSlot>* localVfxShipSlots)
 {
     const char* projectileVfxClassicFolder = entry.projectileVfxClassicFolder;
-    const char* startActionVfxShipFolder = entry.startActionVfxShipFolderForAttacker;
+    const char* startActionVfxShipFolder = entry.startActionVfxShipFolderPathForAttacker;
     const MaritimeCannonSalvoSystem::SalvoEntry::IlluminatedProjectileSettings&
         illuminatedProjectile = entry.illuminatedProjectile;
+    const MaritimeCannonSalvoSystem::SalvoEntry::RibbonTrailSettings&
+        ribbonTrailSettings = entry.ribbonTrail;
     const bool useIlluminatedProjectileTint = illuminatedProjectile.enabled;
     VFXClassic::IlluminatedProjectileGlowConfig resolvedIlluminatedGlowConfig{};
     const bool hasResolvedIlluminatedGlowConfig =
         tryResolveSalvoIlluminatedGlowConfig(
             illuminatedProjectile,
             &resolvedIlluminatedGlowConfig);
+    ProjectileRibbonTrailConfig resolvedRibbonTrailConfig =
+        MaritimeCannonSalvoSystem::getProjectileRibbonTrailConfig();
+    const bool useRibbonTrail =
+        tryResolveSalvoRibbonTrailConfig(
+            ribbonTrailSettings,
+            &resolvedRibbonTrailConfig);
 
     if (projectileVfxClassicFolder == nullptr || projectileVfxClassicFolder[0] == '\0')
     {
@@ -1263,9 +1602,9 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
         ball.target = &shipTarget;
         ball.attacker = &shipAttack;
         ball.vfxShipSlots = vfxShipSlots;
-        ball.endImpactVfxRequests.reserve(entry.endActionVfxShipFoldersForTarget.size());
-        for (const SalvoEntry::EndActionVfxShipFolderForTarget& endAction :
-             entry.endActionVfxShipFoldersForTarget)
+        ball.endImpactVfxRequests.reserve(entry.endActionVfxShipFoldersPathForTarget.size());
+        for (const SalvoEntry::EndActionVfxShipFolderPathForTarget& endAction :
+             entry.endActionVfxShipFoldersPathForTarget)
         {
             if (endAction.vfxShipFolder != nullptr && endAction.vfxShipFolder[0] != '\0')
             {
@@ -1281,6 +1620,8 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
         {
             ball.illuminatedGlowConfigOverride = resolvedIlluminatedGlowConfig;
         }
+        ball.ribbonTrailEnabled = useRibbonTrail;
+        ball.ribbonTrailConfig = resolvedRibbonTrailConfig;
         ball.illuminatedColorIndex = 0;
         ball.ageSec = 0.0f;
         const float spreadIndex = (ballCount > 1) ? static_cast<float>(i) / static_cast<float>(ballCount - 1) : 0.0f;
@@ -1314,7 +1655,8 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
         const float chordLen = std::sqrt(chordDx * chordDx + chordDy * chordDy);
 
         ball.flightDurationSec =
-            static_cast<float>(MaritimeCannonSalvoSystem::kProjectileFlightDurationMs) / 1000.0f;
+            (static_cast<float>(MaritimeCannonSalvoSystem::kProjectileFlightDurationMs) / 1000.0f) *
+            (std::max)(0.05f, ballTuning.flightDurationScale);
 
         ball.bezierBowChordFraction = ballTuning.bezierBowChordFraction;
         ball.arcSide = ballTuning.arcSide;
@@ -1412,6 +1754,23 @@ void MaritimeCannonSalvoSystem::fireSalvoInternal(
 
         this->salvoProjectileVfx.push_back(std::move(projectile));
         ball.projectileVfxIndex = this->salvoProjectileVfx.size() - 1U;
+
+        if (ball.ribbonTrailEnabled &&
+            ball.ribbonTrailConfig.stampsEnabled &&
+            ribbonTrailSettings.vfxClassicFolderPath != nullptr &&
+            ribbonTrailSettings.vfxClassicFolderPath[0] != '\0')
+        {
+            VFXClassic trailStamp{};
+            if (trailStamp.loadFromFolder(ribbonTrailSettings.vfxClassicFolderPath))
+            {
+                trailStamp.resetPlayback();
+                trailStamp.setFramePhaseOffsetSeconds(phaseOff * 0.85f);
+                this->salvoRibbonTrailStampVfx.push_back(std::move(trailStamp));
+                ball.hasRibbonTrailStampVfx = true;
+                ball.ribbonTrailStampVfxIndex = this->salvoRibbonTrailStampVfx.size() - 1U;
+            }
+        }
+
         this->cannonballs.push_back(ball);
     }
 
@@ -1685,6 +2044,42 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
             }
         }
     };
+    auto remapRibbonTrailStampVfxIndexAfterSwap = [&](std::size_t oldIndex, std::size_t newIndex) {
+        for (Cannonball& b : this->cannonballs)
+        {
+            if (b.hasRibbonTrailStampVfx && b.ribbonTrailStampVfxIndex == oldIndex)
+            {
+                b.ribbonTrailStampVfxIndex = newIndex;
+            }
+        }
+    };
+    auto removeRibbonTrailStampVfxForBall = [&](Cannonball& b) {
+        if (!b.hasRibbonTrailStampVfx || this->salvoRibbonTrailStampVfx.empty())
+        {
+            b.hasRibbonTrailStampVfx = false;
+            b.ribbonTrailStampVfxIndex = 0U;
+            return;
+        }
+        if (b.ribbonTrailStampVfxIndex >= this->salvoRibbonTrailStampVfx.size())
+        {
+            b.hasRibbonTrailStampVfx = false;
+            b.ribbonTrailStampVfxIndex = 0U;
+            return;
+        }
+
+        this->salvoRibbonTrailStampVfx[b.ribbonTrailStampVfxIndex].unload();
+        const std::size_t removedIndex = b.ribbonTrailStampVfxIndex;
+        const std::size_t lastIndex = this->salvoRibbonTrailStampVfx.size() - 1U;
+        if (removedIndex != lastIndex)
+        {
+            this->salvoRibbonTrailStampVfx[removedIndex] =
+                std::move(this->salvoRibbonTrailStampVfx[lastIndex]);
+            remapRibbonTrailStampVfxIndexAfterSwap(lastIndex, removedIndex);
+        }
+        this->salvoRibbonTrailStampVfx.pop_back();
+        b.hasRibbonTrailStampVfx = false;
+        b.ribbonTrailStampVfxIndex = 0U;
+    };
 
     const float dtf =
         (std::isfinite(dt) && dt > 0.0) ? static_cast<float>(dt) : 0.0f;
@@ -1723,6 +2118,7 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         Cannonball& b = this->cannonballs[i];
         if (b.projectileVfxIndex >= this->salvoProjectileVfx.size() || b.target == nullptr)
         {
+            removeRibbonTrailStampVfxForBall(b);
             this->cannonballs[i] = std::move(this->cannonballs.back());
             this->cannonballs.pop_back();
             continue;
@@ -1731,6 +2127,7 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         VFXClassic& vfx = this->salvoProjectileVfx[b.projectileVfxIndex];
         if (!vfx.isLoaded())
         {
+            removeRibbonTrailStampVfxForBall(b);
             const std::size_t removedIndex = b.projectileVfxIndex;
             const std::size_t lastIndex = this->salvoProjectileVfx.size() - 1U;
             if (removedIndex != lastIndex)
@@ -1818,9 +2215,10 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
             }
         }
 
-        if (b.ageSec >= b.launchDelaySec + b.flightDurationSec)
+        if (b.pendingRemovalAfterImpactFrame)
         {
             this->scheduleTargetImpactVfxFromCannonball(b);
+            removeRibbonTrailStampVfxForBall(b);
 
             vfx.unload();
 
@@ -1836,6 +2234,13 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
             this->cannonballs[i] = std::move(this->cannonballs.back());
             this->cannonballs.pop_back();
             continue;
+        }
+
+        const float impactAgeSec = b.launchDelaySec + b.flightDurationSec;
+        const bool reachedImpactThisTick = b.ageSec >= impactAgeSec;
+        if (reachedImpactThisTick)
+        {
+            b.ageSec = impactAgeSec;
         }
 
         const SDL_FPoint tgt = b.target->getPositionTile();
@@ -1889,25 +2294,606 @@ void MaritimeCannonSalvoSystem::updateInternal(double dt)
         quadBezierEval(p0x, p0y, p1x, p1y, p2x, p2y, motionU, &baseX, &baseY);
         if (std::fabs(b.flightLaneOffsetTiles) > 0.001f)
         {
-            const float chordDx = p2x - p0x;
-            const float chordDy = p2y - p0y;
-            const float chordLen = std::sqrt(chordDx * chordDx + chordDy * chordDy);
-            if (chordLen > 1.0e-5f)
+            const float laneChordDx = p2x - p0x;
+            const float laneChordDy = p2y - p0y;
+            const float laneChordLen =
+                std::sqrt(laneChordDx * laneChordDx + laneChordDy * laneChordDy);
+            if (laneChordLen > 1.0e-5f)
             {
                 const float laneCurve = std::sin(motionU * kPi);
-                baseX += (-chordDy / chordLen) * b.flightLaneOffsetTiles * laneCurve;
-                baseY += (chordDx / chordLen) * b.flightLaneOffsetTiles * laneCurve;
+                baseX += (-laneChordDy / laneChordLen) * b.flightLaneOffsetTiles * laneCurve;
+                baseY += (laneChordDx / laneChordLen) * b.flightLaneOffsetTiles * laneCurve;
             }
         }
         b.tileX = baseX;
         b.tileY = baseY;
 
         vfx.update(static_cast<double>(dtf));
+        if (b.hasRibbonTrailStampVfx &&
+            b.ribbonTrailStampVfxIndex < this->salvoRibbonTrailStampVfx.size())
+        {
+            VFXClassic& trailStampVfx =
+                this->salvoRibbonTrailStampVfx[b.ribbonTrailStampVfxIndex];
+            trailStampVfx.update(static_cast<double>(dtf));
+            if (trailStampVfx.isFinished())
+            {
+                trailStampVfx.resetPlayback();
+            }
+        }
+        if (b.ribbonTrailEnabled)
+        {
+            const float lobFactor = std::sin(motionU * kPi);
+            this->appendRibbonTrailSample(b, lobFactor);
+        }
+        if (reachedImpactThisTick)
+        {
+            b.pendingRemovalAfterImpactFrame = true;
+        }
 
         ++i;
     }
 
     (void)map;
+}
+
+void MaritimeCannonSalvoSystem::appendRibbonTrailSample(Cannonball& b, float lobFactor)
+{
+    constexpr float kStableTrailSampleStepTiles = 0.22f;
+    constexpr float kMinimumVisibleTrailSpanTiles = 0.55f;
+    if (!b.ribbonTrailEnabled)
+    {
+        b.ribbonTrailNodes.clear();
+        return;
+    }
+
+    const ProjectileRibbonTrailConfig config =
+        clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
+    RibbonTrailNode sample{};
+    sample.tileX = b.tileX;
+    sample.tileY = b.tileY;
+    sample.lobFactor = (std::isfinite(lobFactor) ? lobFactor : 0.0f);
+
+    const auto ensureMinimumVisibleTrail = [&]() {
+        if (b.ribbonTrailNodes.size() >= 2U)
+        {
+            return;
+        }
+
+        RibbonTrailNode head = sample;
+        if (!b.ribbonTrailNodes.empty())
+        {
+            head = b.ribbonTrailNodes.back();
+        }
+
+        const float fallbackSpan = (std::min)(
+            (std::max)(kStableTrailSampleStepTiles, 0.08f),
+            (std::max)(config.maxLengthTiles * 0.18f, 0.08f));
+
+        float dirX = 1.0f;
+        float dirY = 0.0f;
+        if (b.launchAxisResolved)
+        {
+            dirX = b.launchAxisDirX;
+            dirY = b.launchAxisDirY;
+        }
+        else
+        {
+            const float startDx = head.tileX - b.startTileX;
+            const float startDy = head.tileY - b.startTileY;
+            const float startLen = std::sqrt(startDx * startDx + startDy * startDy);
+            if (startLen > 1.0e-5f)
+            {
+                dirX = startDx / startLen;
+                dirY = startDy / startLen;
+            }
+        }
+
+        RibbonTrailNode tail = head;
+        tail.tileX -= dirX * fallbackSpan;
+        tail.tileY -= dirY * fallbackSpan;
+        if (b.ribbonTrailNodes.empty())
+        {
+            b.ribbonTrailNodes.push_back(tail);
+            b.ribbonTrailNodes.push_back(head);
+        }
+        else
+        {
+            b.ribbonTrailNodes.insert(b.ribbonTrailNodes.begin(), tail);
+        }
+    };
+
+    if (b.ribbonTrailNodes.empty())
+    {
+        b.ribbonTrailNodes.push_back(sample);
+        ensureMinimumVisibleTrail();
+        this->trimRibbonTrailSamples(b);
+        ensureMinimumVisibleTrail();
+        return;
+    }
+
+    RibbonTrailNode& last = b.ribbonTrailNodes.back();
+    const float dx = sample.tileX - last.tileX;
+    const float dy = sample.tileY - last.tileY;
+    const float dist = std::sqrt(dx * dx + dy * dy);
+    if (dist >= kStableTrailSampleStepTiles)
+    {
+        b.ribbonTrailNodes.push_back(sample);
+    }
+    else
+    {
+        last = sample;
+    }
+
+    this->trimRibbonTrailSamples(b);
+    ensureMinimumVisibleTrail();
+
+    if (b.ribbonTrailNodes.size() >= 2U)
+    {
+        const RibbonTrailNode& head = b.ribbonTrailNodes.back();
+        RibbonTrailNode& tail = b.ribbonTrailNodes.front();
+        const float spanDx = head.tileX - tail.tileX;
+        const float spanDy = head.tileY - tail.tileY;
+        const float spanLen = std::sqrt(spanDx * spanDx + spanDy * spanDy);
+        if (spanLen < kMinimumVisibleTrailSpanTiles)
+        {
+            float dirX = 1.0f;
+            float dirY = 0.0f;
+            if (b.launchAxisResolved)
+            {
+                dirX = b.launchAxisDirX;
+                dirY = b.launchAxisDirY;
+            }
+            else if (spanLen > 1.0e-5f)
+            {
+                dirX = spanDx / spanLen;
+                dirY = spanDy / spanLen;
+            }
+
+            tail = head;
+            tail.tileX -= dirX * kMinimumVisibleTrailSpanTiles;
+            tail.tileY -= dirY * kMinimumVisibleTrailSpanTiles;
+        }
+    }
+}
+
+void MaritimeCannonSalvoSystem::trimRibbonTrailSamples(Cannonball& b)
+{
+    if (b.ribbonTrailNodes.size() <= 1U)
+    {
+        return;
+    }
+
+    const ProjectileRibbonTrailConfig config =
+        clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
+    const float maxLengthTiles = config.maxLengthTiles;
+    if (maxLengthTiles <= 0.01f)
+    {
+        const RibbonTrailNode head = b.ribbonTrailNodes.back();
+        b.ribbonTrailNodes.clear();
+        b.ribbonTrailNodes.push_back(head);
+        return;
+    }
+
+    float accumulated = 0.0f;
+    for (std::size_t idx = b.ribbonTrailNodes.size() - 1U; idx > 0U; --idx)
+    {
+        const RibbonTrailNode& newer = b.ribbonTrailNodes[idx];
+        const RibbonTrailNode& older = b.ribbonTrailNodes[idx - 1U];
+        const float dx = newer.tileX - older.tileX;
+        const float dy = newer.tileY - older.tileY;
+        const float segLen = std::sqrt(dx * dx + dy * dy);
+        if (accumulated + segLen > maxLengthTiles)
+        {
+            const float remainingOnSegment = (std::max)(0.0f, maxLengthTiles - accumulated);
+            if (segLen > 1.0e-5f)
+            {
+                const float along = 1.0f - (remainingOnSegment / segLen);
+                RibbonTrailNode trimmedHead{};
+                trimmedHead.tileX = older.tileX + ((newer.tileX - older.tileX) * along);
+                trimmedHead.tileY = older.tileY + ((newer.tileY - older.tileY) * along);
+                trimmedHead.lobFactor = older.lobFactor + ((newer.lobFactor - older.lobFactor) * along);
+                b.ribbonTrailNodes.erase(
+                    b.ribbonTrailNodes.begin(),
+                    b.ribbonTrailNodes.begin() + static_cast<std::ptrdiff_t>(idx));
+                b.ribbonTrailNodes.front() = trimmedHead;
+            }
+            else
+            {
+                b.ribbonTrailNodes.erase(
+                    b.ribbonTrailNodes.begin(),
+                    b.ribbonTrailNodes.begin() + static_cast<std::ptrdiff_t>(idx));
+            }
+            return;
+        }
+        accumulated += segLen;
+    }
+}
+
+void MaritimeCannonSalvoSystem::drawRibbonTrailForCannonball(
+    const Cannonball& b,
+    const Map& map,
+    float zoomFactor) const
+{
+    if (!b.ribbonTrailEnabled || b.ribbonTrailNodes.size() < 2U)
+    {
+        return;
+    }
+
+    const ProjectileRibbonTrailConfig config =
+        clampProjectileRibbonTrailConfig(b.ribbonTrailConfig);
+    if (config.hideNearTargetTiles > 1.0e-4f && b.target != nullptr)
+    {
+        const SDL_FPoint targetTile = b.target->getPositionTile();
+        const float aimX = targetTile.x + b.impactTileOffX;
+        const float aimY = targetTile.y + b.impactTileOffY;
+        const float shotDx = aimX - b.startTileX;
+        const float shotDy = aimY - b.startTileY;
+        const float launchDistanceTiles = std::sqrt((shotDx * shotDx) + (shotDy * shotDy));
+        if (launchDistanceTiles <= config.hideNearTargetTiles)
+        {
+            return;
+        }
+    }
+    struct TrailDrawPoint {
+        SDL_FPoint screen{};
+        float distanceFromHeadTiles = 0.0f;
+        float widthPixels = 0.0f;
+        RC2D_Color color{};
+    };
+
+    std::vector<TrailDrawPoint> points;
+    points.reserve(b.ribbonTrailNodes.size());
+    float accumulated = 0.0f;
+    for (std::size_t idx = b.ribbonTrailNodes.size(); idx-- > 0U;)
+    {
+        const RibbonTrailNode& node = b.ribbonTrailNodes[idx];
+        SDL_FPoint screen = map.tileToScreenCenterFloat(node.tileX, node.tileY);
+        screen.y -= node.lobFactor * b.screenLobPixels * zoomFactor;
+
+        if (!points.empty())
+        {
+            const RibbonTrailNode& prevNode = b.ribbonTrailNodes[idx + 1U];
+            const float dx = prevNode.tileX - node.tileX;
+            const float dy = prevNode.tileY - node.tileY;
+            accumulated += std::sqrt(dx * dx + dy * dy);
+        }
+
+        const float trailT =
+            (config.maxLengthTiles > 1.0e-5f)
+                ? (std::clamp)(accumulated / config.maxLengthTiles, 0.0f, 1.0f)
+                : 1.0f;
+        const float widthT = std::pow(trailT, config.widthExponent);
+        const float alphaT = std::pow(trailT, config.opacityExponent);
+        const float widthPixels =
+            (config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) * zoomFactor;
+        const float alpha =
+            config.headOpacity + ((config.tailOpacity - config.headOpacity) * alphaT);
+        const auto mixColor = [&](float head, float tail) -> std::uint8_t {
+            return static_cast<std::uint8_t>(std::lround((std::clamp)(
+                head + ((tail - head) * trailT),
+                0.0f,
+                255.0f)));
+        };
+        TrailDrawPoint point{};
+        point.screen = screen;
+        point.distanceFromHeadTiles = accumulated;
+        point.widthPixels = (std::max)(0.0f, widthPixels);
+        point.color = RC2D_Color{
+            mixColor(config.headColorR, config.tailColorR),
+            mixColor(config.headColorG, config.tailColorG),
+            mixColor(config.headColorB, config.tailColorB),
+            static_cast<std::uint8_t>(std::lround((std::clamp)(alpha * 255.0f, 0.0f, 255.0f)))};
+        points.push_back(point);
+    }
+
+    if (points.size() < 2U)
+    {
+        return;
+    }
+
+    if (config.headCoverTiles > 1.0e-4f && b.ribbonTrailNodes.size() >= 2U)
+    {
+        const RibbonTrailNode& newestNode = b.ribbonTrailNodes.back();
+        const RibbonTrailNode& previousNode = b.ribbonTrailNodes[b.ribbonTrailNodes.size() - 2U];
+        const float tileDx = newestNode.tileX - previousNode.tileX;
+        const float tileDy = newestNode.tileY - previousNode.tileY;
+        const float tileLen = std::sqrt(tileDx * tileDx + tileDy * tileDy);
+        const float screenDx = points[0U].screen.x - points[1U].screen.x;
+        const float screenDy = points[0U].screen.y - points[1U].screen.y;
+        const float screenLen = std::sqrt(screenDx * screenDx + screenDy * screenDy);
+        if (tileLen > 1.0e-5f && screenLen > 1.0e-5f)
+        {
+            const float forwardX = screenDx / screenLen;
+            const float forwardY = screenDy / screenLen;
+            const float pixelsPerTile = screenLen / tileLen;
+            TrailDrawPoint coverPoint = points[0U];
+            coverPoint.screen.x += forwardX * config.headCoverTiles * pixelsPerTile;
+            coverPoint.screen.y += forwardY * config.headCoverTiles * pixelsPerTile;
+            coverPoint.distanceFromHeadTiles = -config.headCoverTiles;
+            points.insert(points.begin(), coverPoint);
+        }
+    }
+
+    if (config.meshEnabled)
+    {
+        std::vector<SDL_Vertex> vertices;
+        std::vector<int> indices;
+        vertices.reserve(points.size() * 2U);
+        indices.reserve((points.size() - 1U) * 6U);
+        for (std::size_t i = 0; i < points.size(); ++i)
+        {
+            SDL_FPoint tangent{};
+            if (i == 0U)
+            {
+                tangent.x = points[1U].screen.x - points[0U].screen.x;
+                tangent.y = points[1U].screen.y - points[0U].screen.y;
+            }
+            else if (i + 1U >= points.size())
+            {
+                tangent.x = points[i].screen.x - points[i - 1U].screen.x;
+                tangent.y = points[i].screen.y - points[i - 1U].screen.y;
+            }
+            else
+            {
+                tangent.x = points[i + 1U].screen.x - points[i - 1U].screen.x;
+                tangent.y = points[i + 1U].screen.y - points[i - 1U].screen.y;
+            }
+
+            const float tangentLen = std::sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+            if (tangentLen <= 1.0e-5f)
+            {
+                tangent = SDL_FPoint{1.0f, 0.0f};
+            }
+            else
+            {
+                tangent.x /= tangentLen;
+                tangent.y /= tangentLen;
+            }
+            const SDL_FPoint normal{
+                -tangent.y,
+                tangent.x};
+            const float halfWidth = points[i].widthPixels * 0.5f;
+
+            SDL_Vertex left{};
+            left.position.x = points[i].screen.x + (normal.x * halfWidth);
+            left.position.y = points[i].screen.y + (normal.y * halfWidth);
+            left.color = SDL_FColor{
+                static_cast<float>(points[i].color.r) / 255.0f,
+                static_cast<float>(points[i].color.g) / 255.0f,
+                static_cast<float>(points[i].color.b) / 255.0f,
+                static_cast<float>(points[i].color.a) / 255.0f};
+            left.tex_coord = SDL_FPoint{0.0f, 0.0f};
+
+            SDL_Vertex right{};
+            right.position.x = points[i].screen.x - (normal.x * halfWidth);
+            right.position.y = points[i].screen.y - (normal.y * halfWidth);
+            right.color = left.color;
+            right.tex_coord = SDL_FPoint{1.0f, 0.0f};
+
+            vertices.push_back(left);
+            vertices.push_back(right);
+
+            if (i > 0U)
+            {
+                const int base = static_cast<int>((i - 1U) * 2U);
+                indices.push_back(base + 0);
+                indices.push_back(base + 1);
+                indices.push_back(base + 2);
+                indices.push_back(base + 1);
+                indices.push_back(base + 3);
+                indices.push_back(base + 2);
+            }
+        }
+
+        if (!vertices.empty() && !indices.empty())
+        {
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_BLEND);
+            (void)rc2d_graphics_renderGeometry(
+                nullptr,
+                vertices.data(),
+                static_cast<int>(vertices.size()),
+                indices.data(),
+                static_cast<int>(indices.size()));
+            rc2d_graphics_setBlendMode(RC2D_BLENDMODE_NONE);
+        }
+    }
+
+    if (config.stampsEnabled &&
+        b.hasRibbonTrailStampVfx &&
+        b.ribbonTrailStampVfxIndex < this->salvoRibbonTrailStampVfx.size())
+    {
+        const VFXClassic& trailStampVfx =
+            this->salvoRibbonTrailStampVfx[b.ribbonTrailStampVfxIndex];
+        if (!trailStampVfx.isLoaded() || trailStampVfx.isFinished())
+        {
+            return;
+        }
+
+        if (config.manualStampsEnabled && !config.customStamps.empty())
+        {
+            for (std::size_t customIndex = 0U; customIndex < config.customStamps.size(); ++customIndex)
+            {
+                const ProjectileRibbonTrailConfig::CustomStampPlacement& customStamp =
+                    config.customStamps[customIndex];
+                const float sampleDist = customStamp.distanceFromHeadTiles;
+                std::size_t segmentIndex = 0U;
+                while (segmentIndex + 1U < points.size() &&
+                       points[segmentIndex + 1U].distanceFromHeadTiles < sampleDist)
+                {
+                    ++segmentIndex;
+                }
+                if (segmentIndex + 1U >= points.size())
+                {
+                    continue;
+                }
+
+                const TrailDrawPoint& a = points[segmentIndex];
+                const TrailDrawPoint& c = points[segmentIndex + 1U];
+                const float segSpan = c.distanceFromHeadTiles - a.distanceFromHeadTiles;
+                const float segT =
+                    (segSpan > 1.0e-5f)
+                        ? (std::clamp)((sampleDist - a.distanceFromHeadTiles) / segSpan, 0.0f, 1.0f)
+                        : 0.0f;
+                SDL_FPoint tangent{c.screen.x - a.screen.x, c.screen.y - a.screen.y};
+                const float tangentLen = std::sqrt((tangent.x * tangent.x) + (tangent.y * tangent.y));
+                if (tangentLen > 1.0e-5f)
+                {
+                    tangent.x /= tangentLen;
+                    tangent.y /= tangentLen;
+                }
+                else
+                {
+                    tangent = SDL_FPoint{1.0f, 0.0f};
+                }
+                const SDL_FPoint normal{-tangent.y, tangent.x};
+                const float posX =
+                    a.screen.x + ((c.screen.x - a.screen.x) * segT) + (normal.x * customStamp.lateralOffsetPixels);
+                const float posY =
+                    a.screen.y + ((c.screen.y - a.screen.y) * segT) + (normal.y * customStamp.lateralOffsetPixels);
+                const float rotDeg =
+                    (std::atan2(tangent.y, tangent.x) * (180.0f / kPi)) + customStamp.rotationOffsetDeg;
+
+                const float trailT =
+                    (config.maxLengthTiles > 1.0e-5f)
+                        ? (std::clamp)(sampleDist / config.maxLengthTiles, 0.0f, 1.0f)
+                        : 1.0f;
+                const float widthT = std::pow(trailT, config.widthExponent);
+                const float widthRatio =
+                    (config.headWidthPixels > 1.0e-5f)
+                        ? ((config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) /
+                           config.headWidthPixels)
+                        : 1.0f;
+                const float opacity =
+                    (config.stampHeadOpacity + ((config.stampTailOpacity - config.stampHeadOpacity) * trailT)) *
+                    customStamp.opacity;
+                const std::uint8_t trailR = static_cast<std::uint8_t>(
+                    std::lround((std::clamp)(
+                        config.headColorR + ((config.tailColorR - config.headColorR) * trailT),
+                        0.0f,
+                        255.0f)));
+                const std::uint8_t trailG = static_cast<std::uint8_t>(
+                    std::lround((std::clamp)(
+                        config.headColorG + ((config.tailColorG - config.headColorG) * trailT),
+                        0.0f,
+                        255.0f)));
+                const std::uint8_t trailB = static_cast<std::uint8_t>(
+                    std::lround((std::clamp)(
+                        config.headColorB + ((config.tailColorB - config.headColorB) * trailT),
+                        0.0f,
+                        255.0f)));
+                const auto mixTint = [&](std::uint8_t trailChannel) -> std::uint8_t {
+                    const float mixed =
+                        255.0f + ((static_cast<float>(trailChannel) - 255.0f) * config.stampTintStrength);
+                    return static_cast<std::uint8_t>(std::lround((std::clamp)(mixed, 0.0f, 255.0f)));
+                };
+                const std::uint8_t tint[3] = {
+                    mixTint(trailR),
+                    mixTint(trailG),
+                    mixTint(trailB)};
+                const std::uint8_t alpha = static_cast<std::uint8_t>(
+                    std::lround((std::clamp)(opacity * 255.0f, 0.0f, 255.0f)));
+                const float phaseOffsetSec =
+                    config.stampPhaseOffsetSeconds * static_cast<float>(customIndex);
+                trailStampVfx.drawWithTintAlphaBlendPhaseOffset(
+                    posX,
+                    posY,
+                    config.stampScale * customStamp.scale * (std::max)(0.18f, widthRatio),
+                    rotDeg,
+                    false,
+                    false,
+                    tint,
+                    alpha,
+                    config.additiveStampBlend ? static_cast<int>(SDL_BLENDMODE_ADD) : 0,
+                    phaseOffsetSec);
+            }
+            return;
+        }
+
+        const float spacing = (std::max)(config.stampSpacingTiles, 0.05f);
+        const float startDistance =
+            (std::max)(-config.headCoverTiles, (std::min)(spacing * 0.45f, points.back().distanceFromHeadTiles));
+        int stampIndex = 0;
+        for (float sampleDist = startDistance;
+             sampleDist <= points.back().distanceFromHeadTiles + 0.0001f;
+             sampleDist += spacing, ++stampIndex)
+        {
+            std::size_t segmentIndex = 0U;
+            while (segmentIndex + 1U < points.size() &&
+                   points[segmentIndex + 1U].distanceFromHeadTiles < sampleDist)
+            {
+                ++segmentIndex;
+            }
+            if (segmentIndex + 1U >= points.size())
+            {
+                break;
+            }
+
+            const TrailDrawPoint& a = points[segmentIndex];
+            const TrailDrawPoint& c = points[segmentIndex + 1U];
+            const float segSpan = c.distanceFromHeadTiles - a.distanceFromHeadTiles;
+            const float segT =
+                (segSpan > 1.0e-5f)
+                    ? (std::clamp)((sampleDist - a.distanceFromHeadTiles) / segSpan, 0.0f, 1.0f)
+                    : 0.0f;
+            const float posX = a.screen.x + ((c.screen.x - a.screen.x) * segT);
+            const float posY = a.screen.y + ((c.screen.y - a.screen.y) * segT);
+            const float dirX = c.screen.x - a.screen.x;
+            const float dirY = c.screen.y - a.screen.y;
+            const float rotDeg = std::atan2(dirY, dirX) * (180.0f / kPi);
+
+            const float trailT =
+                (config.maxLengthTiles > 1.0e-5f)
+                    ? (std::clamp)(sampleDist / config.maxLengthTiles, 0.0f, 1.0f)
+                    : 1.0f;
+            const float widthT = std::pow(trailT, config.widthExponent);
+            const float widthRatio =
+                (config.headWidthPixels > 1.0e-5f)
+                    ? ((config.headWidthPixels + ((config.tailWidthPixels - config.headWidthPixels) * widthT)) /
+                       config.headWidthPixels)
+                    : 1.0f;
+            const float opacity =
+                config.stampHeadOpacity + ((config.stampTailOpacity - config.stampHeadOpacity) * trailT);
+            const std::uint8_t trailR = static_cast<std::uint8_t>(
+                std::lround((std::clamp)(
+                    config.headColorR + ((config.tailColorR - config.headColorR) * trailT),
+                    0.0f,
+                    255.0f)));
+            const std::uint8_t trailG = static_cast<std::uint8_t>(
+                std::lround((std::clamp)(
+                    config.headColorG + ((config.tailColorG - config.headColorG) * trailT),
+                    0.0f,
+                    255.0f)));
+            const std::uint8_t trailB = static_cast<std::uint8_t>(
+                std::lround((std::clamp)(
+                    config.headColorB + ((config.tailColorB - config.headColorB) * trailT),
+                    0.0f,
+                    255.0f)));
+            const auto mixTint = [&](std::uint8_t trailChannel) -> std::uint8_t {
+                const float mixed =
+                    255.0f + ((static_cast<float>(trailChannel) - 255.0f) * config.stampTintStrength);
+                return static_cast<std::uint8_t>(std::lround((std::clamp)(mixed, 0.0f, 255.0f)));
+            };
+            const std::uint8_t tint[3] = {
+                mixTint(trailR),
+                mixTint(trailG),
+                mixTint(trailB)};
+            const std::uint8_t alpha = static_cast<std::uint8_t>(
+                std::lround((std::clamp)(opacity * 255.0f, 0.0f, 255.0f)));
+            const float phaseOffsetSec =
+                config.stampPhaseOffsetSeconds * static_cast<float>(stampIndex);
+            trailStampVfx.drawWithTintAlphaBlendPhaseOffset(
+                posX,
+                posY,
+                config.stampScale * (std::max)(0.18f, widthRatio),
+                rotDeg,
+                false,
+                false,
+                tint,
+                alpha,
+                config.additiveStampBlend ? static_cast<int>(SDL_BLENDMODE_ADD) : 0,
+                phaseOffsetSec);
+        }
+    }
 }
 
 void MaritimeCannonSalvoSystem::drawSalvoProjectilesInternal(void) const
@@ -1929,6 +2915,10 @@ void MaritimeCannonSalvoSystem::drawSalvoProjectilesInternal(void) const
         if (!vfx.isLoaded() || vfx.isFinished())
         {
             continue;
+        }
+        if (b.ribbonTrailEnabled)
+        {
+            this->drawRibbonTrailForCannonball(b, map, zoomFactor);
         }
         SDL_FPoint screen = map.tileToScreenCenterFloat(b.tileX, b.tileY);
         const float p0x = b.startTileX;
@@ -2003,6 +2993,11 @@ void MaritimeCannonSalvoSystem::clearInternal(void)
         v.unload();
     }
     this->salvoProjectileVfx.clear();
+    for (VFXClassic& v : this->salvoRibbonTrailStampVfx)
+    {
+        v.unload();
+    }
+    this->salvoRibbonTrailStampVfx.clear();
     this->cannonballs.clear();
     this->muzzleBursts.clear();
     this->targetImpactBursts.clear();

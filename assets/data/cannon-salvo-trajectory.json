@@ -1,7 +1,8 @@
 {
-	"schema":	"seatyrants.maritimeProjectileTrajectory.v1",
+	"schema":	"seatyrants.maritimeProjectileTrajectory.v2",
 	"angleConvention":	"0deg=left,90deg=up,sectors=0-69,70-110,111-180,181-250,251-290,291-0",
 	"distanceConvention":	"0:0-10,1:10-20,2:20-40,3:40+ tiles",
+	"ribbonTrailConvention":	"world length in tiles, widths in screen pixels at zoom 1.0",
 	"distanceBands":	[{
 			"index":	0,
 			"label":	"0-10",
@@ -410,5 +411,32 @@
 					"flightDurationScale":	0.93999999761581421,
 					"flightEaseStrength":	0.281862735748291
 				}]
-		}]
+		}],
+	"projectileRibbonTrail":	{
+		"sampleStepTiles":	0.2199999988079071,
+		"maxLengthTiles":	6.5,
+		"headWidthPixels":	24,
+		"tailWidthPixels":	6,
+		"widthExponent":	0.949999988079071,
+		"headOpacity":	0.41999998688697815,
+		"tailOpacity":	0.18000000715255737,
+		"opacityExponent":	1,
+		"headColorR":	118,
+		"headColorG":	96,
+		"headColorB":	82,
+		"tailColorR":	228,
+		"tailColorG":	214,
+		"tailColorB":	180,
+		"hideNearTargetTiles":	0,
+		"headCoverTiles":	0,
+		"stampSpacingTiles":	0.68000000715255737,
+		"stampPhaseOffsetSeconds":	0,
+		"stampScale":	0.72000002861022949,
+		"stampHeadOpacity":	0.51999998092651367,
+		"stampTailOpacity":	0.15999999642372131,
+		"stampTintStrength":	0.72000002861022949,
+		"meshEnabled":	true,
+		"stampsEnabled":	true,
+		"additiveStampBlend":	false
+	}
 }
