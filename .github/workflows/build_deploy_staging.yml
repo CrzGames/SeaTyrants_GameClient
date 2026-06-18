@@ -106,7 +106,7 @@ jobs:
     container: ${{ matrix.config.platform == 'steamrt4' && matrix.config.container || '' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Get dependencies with CMake - All platforms
         run: cmake -P cmake/setup_dependencies.cmake
@@ -590,7 +590,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
